@@ -85,7 +85,8 @@ public class ResourceModule : MonoBehaviour
     // VMA: 0x01914c7d — Source: ResourceModule.c:4001 (Init)
     // gốc body: alloc `<Init>d__0` iterator state machine (gốc class "_root.<>c__DisplayClass0_0").
     // gốc Init MoveNext (separate file): registers various callbacks + warms ResourceCache.
-    [System.Runtime.CompilerServices.IteratorStateMachine(typeof(ResourceModule.<Init>d__0))]
+    // NOTE: gốc has [IteratorStateMachine(typeof(ResourceModule.<Init>d__0))] —
+    //   removed from C# source (compiler generates iterator class auto for `yield`).
     public static IEnumerator Init()
     {
         _OnceLoadResCount = 5;  // Sane default (gốc starts at -1 then SetOnceLoadResCount called later)

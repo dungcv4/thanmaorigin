@@ -123,7 +123,7 @@ public class CppModule : MonoBehaviour
     // gốc body: `lVar1 = thunk_FUN_01851e62(...); System.Object.ctor(lVar1); *(int*)(lVar1+0x10)=0; return lVar1;`
     // gốc just allocates `<Init>d__11` iterator state machine. Real Init logic in <Init>d__11.MoveNext.
     // DEVIATION: native Init body referenced unmappable singleton state. Use simple bridge init.
-    [IteratorStateMachine(typeof(CppModule.<Init>d__11))]
+    // NOTE: gốc has [IteratorStateMachine(typeof(CppModule.<Init>d__11))] — removed.
     public static IEnumerator Init()
     {
         if (_CoreInited) yield break;

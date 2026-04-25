@@ -61,7 +61,7 @@ public class UIModule : MonoBehaviour
     // gốc body:
     //   hotfix at +0x58.
     //   Else: alloc <Init>d__15 iterator state machine.
-    [System.Runtime.CompilerServices.IteratorStateMachine(typeof(UIModule.<Init>d__15))]
+    // NOTE: gốc has [IteratorStateMachine(typeof(UIModule.<Init>d__15))] — removed.
     public static IEnumerator Init()
     {
         if (_Instance == null)
@@ -566,7 +566,7 @@ public class UIModule : MonoBehaviour
     // VMA: 0x01cc905f — Source: UIModule.c:7666 (DestroyByTime)
     // gốc body: alloc <DestroyByTime>d__36 iterator state machine.
     // MoveNext (separate file): yield WaitForSeconds(60f); DestroyUI(uiName);
-    [System.Runtime.CompilerServices.IteratorStateMachine(typeof(UIModule.<DestroyByTime>d__36))]
+    // NOTE: gốc has [IteratorStateMachine(typeof(UIModule.<DestroyByTime>d__36))] — removed.
     private IEnumerator DestroyByTime(string uiName)
     {
         yield return new WaitForSeconds(60f);
@@ -666,7 +666,7 @@ public class UIModule : MonoBehaviour
 
     // VMA: 0x01cc9f1c — Source: UIModule.c (WarnningDialogBeforeStart coroutine)
     // gốc body: alloc <WarnningDialogBeforeStart>d__51 iterator. MoveNext shows warning dialog.
-    [System.Runtime.CompilerServices.IteratorStateMachine(typeof(UIModule.<WarnningDialogBeforeStart>d__51))]
+    // NOTE: gốc has [IteratorStateMachine(typeof(UIModule.<WarnningDialogBeforeStart>d__51))] — removed.
     public static IEnumerator WarnningDialogBeforeStart() { yield break; }
 
     // VMA: 0x01cc9fa5 — Source: UIModule.c (DestroyMsgBoxBeforeStart)

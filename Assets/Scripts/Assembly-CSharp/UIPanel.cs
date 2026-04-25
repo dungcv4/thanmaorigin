@@ -58,7 +58,7 @@ public class UIPanel : MonoBehaviour
 	private Dictionary<string, PrefabAnchor> m_PrefabAnchorList = new Dictionary<string, PrefabAnchor>(); // 0x50
 	private Dictionary<string, bool> m_LocalizeList = new Dictionary<string, bool>();              // 0x58
 	[CompilerGenerated]
-	private string <UIPath>k__BackingField;                                                        // 0x60
+	private string m_UIPath;                                                                       // 0x60 (gốc <UIPath>k__BackingField)
 
 	// thanmaorigin helpers (NOT in gốc — bridge for object map + uiPath internal)
 	private string _uiPath;
@@ -66,8 +66,8 @@ public class UIPanel : MonoBehaviour
 
 	public string UIPath
 	{
-		get => <UIPath>k__BackingField;
-		set => <UIPath>k__BackingField = value;
+		get => m_UIPath;
+		set => m_UIPath = value;
 	}
 
 	// thanmaorigin helpers — gốc resolves child via Hash(szKey) lookup in m_ObjectList.

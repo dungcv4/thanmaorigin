@@ -31,7 +31,7 @@ public class AudioModule : MonoBehaviour
     public static RTPC _MusicVolumeRTPC;                                                // 0x18
     public static RTPC _SoundVolumeRTPC;                                                // 0x20
     [CompilerGenerated]
-    private static Dictionary<string, int> <SoundCfg>k__BackingField;                   // 0x28
+    private static Dictionary<string, int> m_SoundCfg;                   // 0x28 (gốc <SoundCfg>k__BackingField)
     public static Dictionary<string, ResourceCacheData> _ClipSet = new Dictionary<string, ResourceCacheData>();  // 0x30
     private const int StopTargetObjectAllSoundEventID = 1998;                           // 0x7ce
     private static bool _SystemVolumeMute;                                              // 0x38
@@ -46,25 +46,27 @@ public class AudioModule : MonoBehaviour
 
     public static Dictionary<string, int> SoundCfg
     {
-        get => <SoundCfg>k__BackingField;
-        set => <SoundCfg>k__BackingField = value;
+        get => m_SoundCfg;
+        set => m_SoundCfg = value;
     }
 
     // VMA: 0x01c70600 — Source: AudioModule.c:369 (get_SoundCfg)
     // gốc body: `return *(undefined8 *)(_Instance + 0x28);`  — direct field read.
     [CompilerGenerated]
-    public static Dictionary<string, int> get_SoundCfg() => <SoundCfg>k__BackingField;
+    public static Dictionary<string, int> get_SoundCfg() => m_SoundCfg;
 
     // VMA: 0x01c70645 — Source: AudioModule.c:389 (set_SoundCfg)
     // gốc body: `*(undefined8 *)(_Instance + 0x28) = param_1;`  — direct field write.
     [CompilerGenerated]
-    private static void set_SoundCfg(Dictionary<string, int> value) { <SoundCfg>k__BackingField = value; }
+    private static void set_SoundCfg(Dictionary<string, int> value) { m_SoundCfg = value; }
 
     // VMA: 0x01c70696 — Source: AudioModule.c:410 (Init)
     // gốc body: alloc `<Init>d__12` iterator state machine. Real Init logic in MoveNext (separate).
     // Init MoveNext registers AudioEditorManager callbacks + SystemPluginModule listeners.
     // DEVIATION: AudioEditorManager unavailable. Bridge init populates SoundCfg from Sound.tab.
-    [IteratorStateMachine(typeof(AudioModule.<Init>d__12))]
+    // NOTE: gốc has [IteratorStateMachine(typeof(AudioModule.<Init>d__12))] — Cpp2IL extracted
+    //       attribute referencing compiler-generated iterator class. Removed from C# source
+    //       since the C# compiler generates its own iterator class for `yield` blocks.
     public static IEnumerator Init()
     {
         SoundCfg = new Dictionary<string, int>();

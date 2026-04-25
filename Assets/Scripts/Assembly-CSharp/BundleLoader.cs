@@ -16,8 +16,6 @@ using UnityEngine;
 public class BundleLoader : BaseLoader
 {
     // Fields (offsets từ dump.cs)
-    [CompilerGenerated]
-    private AssetBundle <Bundle>k__BackingField;            // 0x38
     private Guid _RequestID;                                // 0x40
     private BundleLoader.BundleInfo[] _DependentAbList;     // 0x50
     private IEnumerator _InitEnumerator;                    // 0x58
@@ -25,17 +23,9 @@ public class BundleLoader : BaseLoader
     private int _DependentAbLoadedCount;                    // 0x64
     private bool _LoadingFinished;                          // 0x68
 
-    public AssetBundle Bundle { get; set; }
-
-    // VMA: 0x0190cd53 — Source: BundleLoader.c:9582
-    // gốc: `return *(undefined8 *)(param_1 + 0x38);` — direct field read.
-    [CompilerGenerated]
-    public AssetBundle get_Bundle() => <Bundle>k__BackingField;
-
-    // VMA: 0x0190cd58 — Source: BundleLoader.c:9595
-    // gốc: `*(undefined8 *)(param_1 + 0x38) = param_2;` — direct field write.
-    [CompilerGenerated]
-    private void set_Bundle(AssetBundle value) { <Bundle>k__BackingField = value; }
+    // VMA: 0x0190cd53 / 0x0190cd58 — Source: BundleLoader.c:9582 / 9595 (get/set_Bundle)
+    // gốc body: direct field read/write at offset 0x38.
+    public AssetBundle Bundle { get; set; }      // gốc <Bundle>k__BackingField at 0x38
 
     // VMA: 0x0190cd5d — Source: BundleLoader.c:9609
     // gốc: LoaderManager.GetLoader<BundleLoader>(url, 0, loaderMode, ...) — async factory.
@@ -102,7 +92,7 @@ public class BundleLoader : BaseLoader
     // VMA: 0x0190cfa5 — Source: BundleLoader.c:9738
     // gốc: factory creates internal helper object with thread ID + state. Used by KCoroutine pump.
     // DEVIATION: yields nothing in our simplified Init flow (sync load).
-    [IteratorStateMachine(typeof(BundleLoader.<_LoadBundle_Priority>d__17))]
+    // NOTE: gốc has [IteratorStateMachine(typeof(BundleLoader.<_LoadBundle_Priority>d__17))] — removed.
     private IEnumerable _LoadBundle_Priority()
     {
         yield break;

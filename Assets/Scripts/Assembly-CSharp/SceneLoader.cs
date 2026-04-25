@@ -82,7 +82,7 @@ public class SceneLoader : BaseLoader
     //   3. while !bundleLoader.LoadingFinished: yield null;
     //   4. SceneManager.LoadSceneAsync(m_sceneName, Additive);
     //   5. OnFinish(scene);
-    [System.Runtime.CompilerServices.IteratorStateMachine(typeof(SceneLoader.<_Init>d__13))]
+    // NOTE: gốc has [IteratorStateMachine(typeof(SceneLoader.<_Init>d__13))] — removed.
     private IEnumerator _Init()
     {
         yield return WaitAllAbInDisk(m_LoaderUrl);
@@ -158,7 +158,7 @@ public class SceneLoader : BaseLoader
     // VMA: 0x0190f12c — Source: SceneLoader.c:11750 (WaitAllAbInDisk coroutine factory)
     // gốc body: alloc <WaitAllAbInDisk>d__12 iterator. MoveNext (separate file):
     //   poll File.Exists for all dependent .ab files until ready.
-    [System.Runtime.CompilerServices.IteratorStateMachine(typeof(SceneLoader.<WaitAllAbInDisk>d__12))]
+    // NOTE: gốc has [IteratorStateMachine(typeof(SceneLoader.<WaitAllAbInDisk>d__12))] — removed.
     private IEnumerator WaitAllAbInDisk(string bundlePath)
     {
         // DEVIATION: assume single bundle, just check streaming + persistent path.
