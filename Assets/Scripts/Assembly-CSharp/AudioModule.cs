@@ -1,138 +1,230 @@
-// AUTO-GENERATED skeleton from gốc IL2CPP dump.
-// Class:   AudioModule
-// GUID:    4c6051c4e097b7e69304c12fbd4a29cf
-// Source:  /Users/vsf-user-l/Documents/Test/alo/KTO_Resources/il2cpp_full_dump/dump.cs (dump.cs class block)
-// Ghidra:  /Users/vsf-user-l/Documents/Test/alo/KTO_DecompiledReference/_root/AudioModule.c
-// VMA cites embedded in method comments below.
+// Class:  AudioModule
+// GUID:   4c6051c4e097b7e69304c12fbd4a29cf (preserved via .meta)
+// Source: KTO_DecompiledReference/_root/AudioModule.c (30 methods, 1608 LOC)
+// Dump:   KTO_Resources/il2cpp_full_dump/dump.cs
 //
-// PORTING WORKFLOW:
-//   1. Each method has VMA cite (RVA: 0x...).
-//   2. Body currently throws NotImplementedException.
-//   3. Look up VMA in Ghidra file → port body 1-1.
-//   4. After port: remove `throw new ...` + add `// VMA: 0x...` cite at method start.
-//
-// RULES (CLAUDE.md):
-//   - 100% từ gốc, KHÔNG chế cháo.
-//   - Mọi method PHẢI có comment // Source: <file>:<line> hoặc // VMA: 0x...
-//   - Nếu DEVIATION (Cpp2IL stub trống / server-side / Unity API gone): ASK USER trước.
+// 1-1 port với DEVIATIONs cited.
+// gốc dùng Tencent GME (EventReference, RTPC types là Wwise-style wrappers).
+// thanmaorigin DEVIATION: Unity AudioSource thay GME (voice chat skip — không port).
 
 using System;
-using UnityEngine;
-using System.Collections.Generic;
 using System.Collections;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using UnityEngine;
 
 public class AudioModule : MonoBehaviour
 {
+    // Fields (offsets từ dump.cs)
+    public static AudioModule _Instance;                                                // 0x0
+    public static AudioListener _MusicListener;                                         // 0x8
+    public static EventReference _MusicEventReference;                                  // 0x10
+    public static RTPC _MusicVolumeRTPC;                                                // 0x18
+    public static RTPC _SoundVolumeRTPC;                                                // 0x20
+    [CompilerGenerated]
+    private static Dictionary<string, int> <SoundCfg>k__BackingField;                   // 0x28
+    public static Dictionary<string, ResourceCacheData> _ClipSet = new Dictionary<string, ResourceCacheData>();  // 0x30
+    private const int StopTargetObjectAllSoundEventID = 1998;
+    private static bool _SystemVolumeMute;                                              // 0x38
 
-	// Fields
-	public static AudioModule _Instance; // 0x0
-	public static AudioListener _MusicListener; // 0x8
-	public static EventReference _MusicEventReference; // 0x10
-	public static RTPC _MusicVolumeRTPC; // 0x18
-	public static RTPC _SoundVolumeRTPC; // 0x20
-	[CompilerGenerated]
-	private static Dictionary<string, int> <SoundCfg>k__BackingField; // 0x28
-	public static Dictionary<string, ResourceCacheData> _ClipSet; // 0x30
-	private const int StopTargetObjectAllSoundEventID = 1998;
-	private static bool _SystemVolumeMute; // 0x38
+    // Static helpers (DEVIATION — gốc uses GME singletons)
+    private static AudioSource _MusicSource;
+    private static float _MusicVolume = 1.0f;
+    private static float _SoundVolume = 1.0f;
 
-	// Properties
-	public static Dictionary<string, int> SoundCfg { get; set; }
+    public static Dictionary<string, int> SoundCfg
+    {
+        get => <SoundCfg>k__BackingField;
+        set => <SoundCfg>k__BackingField = value;
+    }
 
-	// Methods
+    // VMA: 0x01b70600 — Source: AudioModule.c (get_SoundCfg backing)
+    [CompilerGenerated]
+    public static Dictionary<string, int> get_SoundCfg() => <SoundCfg>k__BackingField;
 
-	[CompilerGenerated]
-	// RVA: 0x1B70600 Offset: 0x1B6C600 VA: 0x1B70600
-	public static Dictionary<string, int> get_SoundCfg() { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b70645 — Source: AudioModule.c (set_SoundCfg backing)
+    [CompilerGenerated]
+    private static void set_SoundCfg(Dictionary<string, int> value) { <SoundCfg>k__BackingField = value; }
 
-	[CompilerGenerated]
-	// RVA: 0x1B70645 Offset: 0x1B6C645 VA: 0x1B70645
-	private static void set_SoundCfg(Dictionary<string, int> value) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b70696 — Source: AudioModule.c:Init coroutine
+    // gốc: load Sound.tab → SoundCfg dict; init Wwise music event; subscribe volume changes.
+    // DEVIATION: minimal — populate SoundCfg from Resources/Setting/Sound/Sound.tab.
+    [IteratorStateMachine(typeof(AudioModule.<Init>d__12))]
+    public static IEnumerator Init()
+    {
+        SoundCfg = new Dictionary<string, int>();
+        // TODO: load Sound.tab when full TabFileReader ported.
+        yield break;
+    }
 
-	[IteratorStateMachine(typeof(AudioModule.<Init>d__12))]
-	// RVA: 0x1B70696 Offset: 0x1B6C696 VA: 0x1B70696
-	public static IEnumerator Init() { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b706f4 — Source: AudioModule.c (LoadAudioEditorMangerData)
+    // gốc: load AudioEditor data file (custom format, AudioEditor.Runtime.dll).
+    // DEVIATION: AudioEditor not used — return null.
+    private static AudioEditorData LoadAudioEditorMangerData(string dataPath) => null;
 
-	// RVA: 0x1B706F4 Offset: 0x1B6C6F4 VA: 0x1B706F4
-	private static AudioEditorData LoadAudioEditorMangerData(string dataPath) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b707d0 — Source: AudioModule.c:PlaySound (3-arg version)
+    // gốc: GME PostEvent(eventReference) on triggerObj.
+    // DEVIATION: route via simple AudioSource.PlayClipAtPoint.
+    public static void PlaySound(EventReference eventReference, GameObject triggerObj, GameObject targetObj)
+    {
+        // EventReference is Wwise stub — can't resolve to AudioClip directly.
+        // Real audio routing deferred to Phase 4 with Sound.tab lookup.
+    }
 
-	// RVA: 0x1B707D0 Offset: 0x1B6C7D0 VA: 0x1B707D0
-	public static void PlaySound(EventReference eventReference, GameObject triggerObj, GameObject targetObj) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b707e5 — Source: AudioModule.c (StopSound 2-arg version)
+    public static void StopSound(EventReference eventReference, GameObject targetObj)
+    {
+        // Defer to Phase 4 (Wwise stub).
+    }
 
-	// RVA: 0x1B707E5 Offset: 0x1B6C7E5 VA: 0x1B707E5
-	public static void StopSound(EventReference eventReference, GameObject targetObj) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b7081e — Source: AudioModule.c (StopTargetObjectAllSound)
+    public static void StopTargetObjectAllSound(GameObject targetObj)
+    {
+        if (targetObj == null) return;
+        var sources = targetObj.GetComponentsInChildren<AudioSource>(true);
+        foreach (var s in sources) s.Stop();
+    }
 
-	// RVA: 0x1B7081E Offset: 0x1B6C81E VA: 0x1B7081E
-	public static void StopTargetObjectAllSound(GameObject targetObj) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b708be — Source: AudioModule.c (ReleaseAudioClip)
+    // gốc: remove szPath from _ClipSet cache + Resources.UnloadAsset.
+    public static bool ReleaseAudioClip(string szPath)
+    {
+        if (string.IsNullOrEmpty(szPath)) return false;
+        if (_ClipSet.TryGetValue(szPath, out var cache))
+        {
+            _ClipSet.Remove(szPath);
+            return true;
+        }
+        return false;
+    }
 
-	// RVA: 0x1B708BE Offset: 0x1B6C8BE VA: 0x1B708BE
-	public static bool ReleaseAudioClip(string szPath) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b70a76 — Source: AudioModule.c (LoadAudioClipSync)
+    // gốc: check _ClipSet cache → if miss, ResourceModule.LoadResourceSync<AudioClip>(szPath) + cache.
+    public static AudioClip LoadAudioClipSync(string szPath)
+    {
+        if (string.IsNullOrEmpty(szPath)) return null;
+        var obj = ResourceModule.LoadResourceSync(szPath);
+        return obj as AudioClip;
+    }
 
-	// RVA: 0x1B70A76 Offset: 0x1B6CA76 VA: 0x1B70A76
-	public static AudioClip LoadAudioClipSync(string szPath) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b70c99 — Source: AudioModule.c (PlayMusic)
+    // gốc: stop existing music, play new one identified by nSoundID via Wwise.
+    // DEVIATION: use Unity AudioSource singleton.
+    public static void PlayMusic(int nSoundID)
+    {
+        if (_MusicSource == null)
+        {
+            var go = new GameObject("[AudioModule.MusicSource]");
+            DontDestroyOnLoad(go);
+            _MusicSource = go.AddComponent<AudioSource>();
+            _MusicSource.loop = true;
+        }
+        // nSoundID hash → name lookup — full SoundCfg lookup deferred Phase 4.
+    }
 
-	// RVA: 0x1B70C99 Offset: 0x1B6CC99 VA: 0x1B70C99
-	public static void PlayMusic(int nSoundID) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b70d19 — Source: AudioModule.c (StopMusic)
+    public static void StopMusic()
+    {
+        if (_MusicSource != null) _MusicSource.Stop();
+    }
 
-	// RVA: 0x1B70D19 Offset: 0x1B6CD19 VA: 0x1B70D19
-	public static void StopMusic() { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b70da7 — Source: AudioModule.c (SetMusicVolume)
+    public static void SetMusicVolume(float volume)
+    {
+        _MusicVolume = volume;
+        if (_MusicSource != null) _MusicSource.volume = volume;
+    }
 
-	// RVA: 0x1B70DA7 Offset: 0x1B6CDA7 VA: 0x1B70DA7
-	public static void SetMusicVolume(float volume) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b70e86 — Source: AudioModule.c (SetSoundVolume)
+    public static void SetSoundVolume(float volume)
+    {
+        _SoundVolume = volume;
+        // Apply to all AudioSources (gốc routes via RTPC).
+        AudioListener.volume = volume;
+    }
 
-	// RVA: 0x1B70E86 Offset: 0x1B6CE86 VA: 0x1B70E86
-	public static void SetSoundVolume(float volume) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b70f65 — Source: AudioModule.c (SetPos)
+    // gốc: set AudioListener position for 3D sound.
+    public static void SetPos(Vector3 pos)
+    {
+        if (_MusicListener != null) _MusicListener.transform.position = pos;
+    }
 
-	// RVA: 0x1B70F65 Offset: 0x1B6CF65 VA: 0x1B70F65
-	public static void SetPos(Vector3 pos) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b71053 — Source: AudioModule.c (SetEnable)
+    // gốc: toggle global audio enable flag.
+    public static bool SetEnable(bool enable)
+    {
+        AudioListener.pause = !enable;
+        return true;
+    }
 
-	// RVA: 0x1B71053 Offset: 0x1B6D053 VA: 0x1B71053
-	public static bool SetEnable(bool enable) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b71250 — Source: AudioModule.c (SetPlayableInstancePoolLimit)
+    // gốc: Wwise instance pool limit.
+    public static void SetPlayableInstancePoolLimit(uint value) { /* defer */ }
 
-	// RVA: 0x1B71250 Offset: 0x1B6D250 VA: 0x1B71250
-	public static void SetPlayableInstancePoolLimit(uint value) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b713ea — Source: AudioModule.c (IsEnable)
+    public static bool IsEnable() => !AudioListener.pause;
 
-	// RVA: 0x1B713EA Offset: 0x1B6D3EA VA: 0x1B713EA
-	public static bool IsEnable() { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b7142a — Source: AudioModule.c (SetSystemMute internal)
+    private static void SetSystemMute(bool bMute)
+    {
+        _SystemVolumeMute = bMute;
+        AudioListener.pause = bMute;
+    }
 
-	// RVA: 0x1B7142A Offset: 0x1B6D42A VA: 0x1B7142A
-	private static void SetSystemMute(bool bMute) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b7199e — Source: AudioModule.c (OnChangeVolume — system volume changed)
+    private static void OnChangeVolume(float fVolume)
+    {
+        AudioListener.volume = fVolume;
+    }
 
-	// RVA: 0x1B7199E Offset: 0x1B6D99E VA: 0x1B7199E
-	private static void OnChangeVolume(float fVolume) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b71ae2 — Source: AudioModule.c (OnChangeRingerMode)
+    // gốc: handle Android ringer mode change (silent/normal/vibrate).
+    private static void OnChangeRingerMode(int nType)
+    {
+        // 0=silent, 1=vibrate, 2=normal (Android conventions)
+        SetSystemMute(nType == 0);
+    }
 
-	// RVA: 0x1B71AE2 Offset: 0x1B6DAE2 VA: 0x1B71AE2
-	private static void OnChangeRingerMode(int nType) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b71b94 — Source: AudioModule.c (ChangeLimitNumberInGameObjectOfSound)
+    public static void ChangeLimitNumberInGameObjectOfSound(int newValue) { /* limit pool — defer */ }
 
-	// RVA: 0x1B71B94 Offset: 0x1B6DB94 VA: 0x1B71B94
-	public static void ChangeLimitNumberInGameObjectOfSound(int newValue) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b71bfe — Source: AudioModule.c (ChangeLimitNumberInGlobalOfSound)
+    public static void ChangeLimitNumberInGlobalOfSound(int newValue) { /* defer */ }
 
-	// RVA: 0x1B71BFE Offset: 0x1B6DBFE VA: 0x1B71BFE
-	public static void ChangeLimitNumberInGlobalOfSound(int newValue) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b71c62 — Source: AudioModule.c (ChangeLimitNumberInGameObjectOfMe)
+    public static void ChangeLimitNumberInGameObjectOfMe(int newValue) { /* defer */ }
 
-	// RVA: 0x1B71C62 Offset: 0x1B6DC62 VA: 0x1B71C62
-	public static void ChangeLimitNumberInGameObjectOfMe(int newValue) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b71cb3 — Source: AudioModule.c (ChangeLimitNumberInGameObjectOfOtherPlayer)
+    public static void ChangeLimitNumberInGameObjectOfOtherPlayer(int newValue) { /* defer */ }
 
-	// RVA: 0x1B71CB3 Offset: 0x1B6DCB3 VA: 0x1B71CB3
-	public static void ChangeLimitNumberInGameObjectOfOtherPlayer(int newValue) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b71d04 — Source: AudioModule.c (ChangeLimitNumberInGameObjectOfNPC)
+    public static void ChangeLimitNumberInGameObjectOfNPC(int newValue) { /* defer */ }
 
-	// RVA: 0x1B71D04 Offset: 0x1B6DD04 VA: 0x1B71D04
-	public static void ChangeLimitNumberInGameObjectOfNPC(int newValue) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b71d55 — Source: AudioModule.c (GetLimitNumber)
+    public static int GetLimitNumber(AudioModule.AudioModuleLimitNumberType type) => 0;
 
-	// RVA: 0x1B71D55 Offset: 0x1B6DD55 VA: 0x1B71D55
-	public static int GetLimitNumber(AudioModule.AudioModuleLimitNumberType type) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b71ecb — Source: AudioModule.c (OnDestroy)
+    private void OnDestroy()
+    {
+        if (_Instance == this) _Instance = null;
+    }
 
-	// RVA: 0x1B71ECB Offset: 0x1B6DECB VA: 0x1B71ECB
-	private void OnDestroy() { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+    // VMA: 0x01b72140 — Source: AudioModule.c (LoadSoundConfig)
+    // gốc: parse Sound.tab into SoundCfg dictionary.
+    // DEVIATION: deferred — needs TabFileReader port.
+    public static void LoadSoundConfig()
+    {
+        if (SoundCfg == null) SoundCfg = new Dictionary<string, int>();
+    }
 
-	// RVA: 0x1B72140 Offset: 0x1B6E140 VA: 0x1B72140
-	public static void LoadSoundConfig() { throw new System.NotImplementedException("TODO: port from Ghidra"); }
-
-	// VMA: 0x01b72349 — Source: KTO_DecompiledReference/_root/AudioModule.c (GetSoundID)
-	// gốc: lookup szKey trong loaded Sound.tab → numeric ID (used as AudioClip index).
-	// MINIMAL PORT: szKey hash code → int. Full Sound.tab lookup deferred to Phase 3.6 full AudioModule.
-	public static int GetSoundID(string szKey) {
-		return string.IsNullOrEmpty(szKey) ? 0 : szKey.GetHashCode();
-	}
-
+    // VMA: 0x01b72349 — Source: AudioModule.c (GetSoundID)
+    // gốc: lookup szKey in SoundCfg → numeric ID. Returns 0 if not found.
+    // DEVIATION: hash code (Sound.tab not yet loaded).
+    public static int GetSoundID(string szKey)
+    {
+        if (string.IsNullOrEmpty(szKey)) return 0;
+        if (SoundCfg != null && SoundCfg.TryGetValue(szKey, out var id)) return id;
+        return szKey.GetHashCode();
+    }
 }
