@@ -16,9 +16,5 @@ public class FontOutline : Shadow
 
     // VMA: 0x01BA6AED — Source: dump.cs (ModifyMesh override)
     // gốc body: text-specific outline mesh modification (4-direction outline corners).
-    // DEVIATION: defer to base UnityEngine.UI.Shadow impl (single-direction).
-    public override void ModifyMesh(VertexHelper vh)
-    {
-        base.ModifyMesh(vh);
-    }
+    // DEVIATION: defer to base UnityEngine.UI.Shadow.ModifyMesh impl (we don't override).
 }
