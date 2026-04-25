@@ -6,6 +6,7 @@ using UnityEngine;
 using ThanMaOrigin.Lua;
 using ThanMaOrigin.Network;
 using ThanMaOrigin.Resource;
+using ThanMaOrigin.Game;
 
 namespace ThanMaOrigin.Bootstrap
 {
@@ -48,8 +49,19 @@ namespace ThanMaOrigin.Bootstrap
                 // Server replies CMD 102 RoleList (empty stub) — handled by registered Lua handler.
             }
 
+            // Phase 6: init game systems
+            Debug.Log("[thanmaorigin] Phase 6 — game system init");
+            EnsureChild<SceneLoadManager>("[SceneLoadManager]");
+            EnsureChild<PlayerSpawner>("[PlayerSpawner]");
+
+            // Phase 6 demo: simulate map load → spawn HUD via gốc Lua chain (or fallback HudSpawner).
+            // Real flow: SceneLoadManager.LoadMapAsync → emNOTIFY_MAP_LOADED → Lua Ui:OnMapLoaded.
+            // For Phase 6 testability without full gốc Lua Ui loaded:
+            yield return new WaitForSeconds(0.5f);
+            SceneLoadManager.Instance.OnMapLoadedNow(1);
+            HudSpawner.SpawnAll();
+
             Debug.Log("[thanmaorigin] === BOOT COMPLETE ===");
-            // Phase 5.4+ open UILogin via Ui:OpenWindow when Lua scripts are loaded.
         }
 
         private static T EnsureChild<T>(string name) where T : Component
