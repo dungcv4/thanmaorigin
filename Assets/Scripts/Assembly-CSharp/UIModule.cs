@@ -41,45 +41,7 @@ public class UIModule : MonoBehaviour
 	private static int m_EachWindowInterval; // 0x4C
 	private Dictionary<string, Coroutine> _DestroyCoroutine; // 0x20
 	private HashSet<string> DestroyCoroutineWhiteList; // 0x28
-	public static bool _isShowBeforeBox; // 0x50
-	private static __XLua_Gen_Delegate2 __Hotfix0_Init; // 0x58
-	private static __XLua_Gen_Delegate3 __Hotfix0_Awake; // 0x60
-	private static __XLua_Gen_Delegate7 __Hotfix0_ShowStartUI; // 0x68
-	private static __XLua_Gen_Delegate7 __Hotfix0_CloseStartUI; // 0x70
-	private static __XLua_Gen_Delegate16 __Hotfix0_ShowMsgBox; // 0x78
-	private static __XLua_Gen_Delegate17 __Hotfix0_ShowMsgBox2; // 0x80
-	private static __XLua_Gen_Delegate7 __Hotfix0_CloseMsgBox; // 0x88
-	private static __XLua_Gen_Delegate11 __Hotfix0_IsMsgBoxShow; // 0x90
-	private static __XLua_Gen_Delegate4 __Hotfix0_OnStartUILoadingProgress; // 0x98
-	private static __XLua_Gen_Delegate8 __Hotfix1_OnStartUILoadingProgress; // 0xA0
-	private static __XLua_Gen_Delegate7 __Hotfix0_OnStartUILoadingFinished; // 0xA8
-	private static __XLua_Gen_Delegate18 __Hotfix0_OnStartUIUpdateStateChange; // 0xB0
-	private static __XLua_Gen_Delegate19 __Hotfix0_GetUI; // 0xB8
-	private static __XLua_Gen_Delegate20 __Hotfix0_GetDestoryCoroutine; // 0xC0
-	private static __XLua_Gen_Delegate21 __Hotfix0_PreloadUIAsync; // 0xC8
-	private static __XLua_Gen_Delegate21 __Hotfix0_PreloadUI; // 0xD0
-	private static __XLua_Gen_Delegate22 __Hotfix0_SetUISortingOrder; // 0xD8
-	private static __XLua_Gen_Delegate10 __Hotfix0_GetTopWindow; // 0xE0
-	private static __XLua_Gen_Delegate3 __Hotfix0_Close; // 0xE8
-	private static __XLua_Gen_Delegate3 __Hotfix0_UnRegisteAutoDestroy; // 0xF0
-	private static __XLua_Gen_Delegate23 __Hotfix0_OnCloseUI; // 0xF8
-	private static __XLua_Gen_Delegate24 __Hotfix0_DestroyByTime; // 0x100
-	private static __XLua_Gen_Delegate3 __Hotfix0_DestroyUI; // 0x108
-	private static __XLua_Gen_Delegate3 __Hotfix0_Clear; // 0x110
-	private static __XLua_Gen_Delegate21 __Hotfix0_LoadResourceAsync; // 0x118
-	private static __XLua_Gen_Delegate25 __Hotfix0_LoadResource; // 0x120
-	private static __XLua_Gen_Delegate26 __Hotfix0_ScreenPointToLocalPointInRectangle; // 0x128
-	private static __XLua_Gen_Delegate4 __Hotfix0_PlaySound; // 0x130
-	private static __XLua_Gen_Delegate4 __Hotfix0_StopSound; // 0x138
-	private static __XLua_Gen_Delegate27 __Hotfix0_SetGroup; // 0x140
-	private static __XLua_Gen_Delegate14 __Hotfix0_SetGroupActive; // 0x148
-	private static __XLua_Gen_Delegate27 __Hotfix0_ResetCanvasLayer; // 0x150
-	private static __XLua_Gen_Delegate3 __Hotfix0_PushGOFront; // 0x158
-	private static __XLua_Gen_Delegate28 __Hotfix0_CreateDlcDebugUI; // 0x160
-	private static __XLua_Gen_Delegate3 __Hotfix0_ShowMsgBox_BeforeStart; // 0x168
-	private static __XLua_Gen_Delegate2 __Hotfix0_WarnningDialogBeforeStart; // 0x170
-	private static __XLua_Gen_Delegate7 __Hotfix0_DestroyMsgBoxBeforeStart; // 0x178
-	private static __XLua_Gen_Delegate3 _c__Hotfix0_ctor; // 0x180
+	public static bool _isShowBeforeBox; // 0x50	private static __XLua_Gen_Delegate3 _c__Hotfix0_ctor; // 0x180
 
 	// Methods
 
@@ -144,8 +106,12 @@ public class UIModule : MonoBehaviour
 	// RVA: 0x1BC7ACE Offset: 0x1BC3ACE VA: 0x1BC7ACE
 	private static void UnRegisteAutoDestroy(string uiName) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
 
-	// RVA: 0x1BC8F28 Offset: 0x1BC4F28 VA: 0x1BC8F28
-	public void OnCloseUI(string uiName) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+	// VMA: 0x01cc8f28 — Source: KTO_DecompiledReference/_root/UIModule.c:7603
+	// gốc: hotfix check → QualityModule.CheckUseAutoDestroyUI → schedule destroy coroutine.
+	// MINIMAL PORT (Phase 3.4 partial): empty body — defer auto-destroy to Phase 3.6.
+	public void OnCloseUI(string uiName) {
+		// Auto-destroy deferred. UI persists in memory until scene unload.
+	}
 
 	[IteratorStateMachine(typeof(UIModule.<DestroyByTime>d__36))]
 	// RVA: 0x1BC905F Offset: 0x1BC505F VA: 0x1BC905F
@@ -172,8 +138,15 @@ public class UIModule : MonoBehaviour
 	// RVA: 0x1BC982B Offset: 0x1BC582B VA: 0x1BC982B
 	public static void StopSound(int nSoundID) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
 
-	// RVA: 0x1BC9902 Offset: 0x1BC5902 VA: 0x1BC9902
-	public static void SetGroup(GameObject obj, int nGroup) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+	// VMA: 0x01cc9902 — Source: KTO_DecompiledReference/_root/UIModule.c (SetGroup section)
+	// gốc: forward gameObject + nGroup to UIModule sorting stack management.
+	// MINIMAL PORT: parent obj under _UIGroup1 (nGroup=1) hoặc _UIGroup2 (nGroup=2).
+	// Full sorting-stack port deferred to Phase 3.6.
+	public static void SetGroup(GameObject obj, int nGroup) {
+		if (obj == null) return;
+		if (nGroup == 1 && _UIGroup1 != null) obj.transform.SetParent(_UIGroup1, false);
+		else if (nGroup == 2 && _UIGroup2 != null) obj.transform.SetParent(_UIGroup2, false);
+	}
 
 	// RVA: 0x1BC9A0F Offset: 0x1BC5A0F VA: 0x1BC9A0F
 	public static void SetGroupActive(int nGroup, bool bActive) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
