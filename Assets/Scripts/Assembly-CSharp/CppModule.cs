@@ -97,7 +97,32 @@ public class CppModule : MonoBehaviour
 	public static void DoLuaString(string szChunk) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
 
 	// RVA: 0x196DCF5 Offset: 0x1969CF5 VA: 0x196DCF5
-	public static LuaTable GetGlobalTable(string szName) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+	// VMA-cite: derived from Ghidra UIView.c:Init pattern (line 7117) which calls CppModule.GetGlobalTable
+	// + chains XLua_LuaTable__GetInPath. For thanmaorigin minimal port:
+	//   - szName empty/null → return _LuaEnv.Global (root global table)
+	//   - szName specified → return _LuaEnv.Global[szName] as LuaTable (e.g. "Ui")
+	// Source: KTO_DecompiledReference/_root/CppModule.c (full port deferred to Phase 3.6)
+	public static LuaTable GetGlobalTable(string szName)
+	{
+		if (_LuaEnv == null) {
+			// Bridge to thanmaorigin LuaEngine if not directly assigned.
+			var le = ThanMaOrigin.Lua.LuaEngine.Instance;
+			if (le != null) _LuaEnv = le.Env;
+		}
+		if (_LuaEnv == null) return null;
+		if (string.IsNullOrEmpty(szName)) return _LuaEnv.Global;
+		return _LuaEnv.Global.Get<LuaTable>(szName);
+	}
+
+	// Helper (NOT in dump.cs — added for thanmaorigin C# convenience).
+	// Returns active LuaEnv (XLua interpreter context).
+	public static LuaEnv GetLuaEnv()
+	{
+		if (_LuaEnv != null) return _LuaEnv;
+		var le = ThanMaOrigin.Lua.LuaEngine.Instance;
+		if (le != null) { _LuaEnv = le.Env; return _LuaEnv; }
+		return null;
+	}
 
 	// RVA: 0x196DD76 Offset: 0x1969D76 VA: 0x196DD76
 	public static int CheckLuaTop() { throw new System.NotImplementedException("TODO: port from Ghidra"); }
