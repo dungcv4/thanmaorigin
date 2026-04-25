@@ -39,7 +39,11 @@ namespace ThanMaOrigin.Lua
             // Configure custom loader: resolve Lua files from Resources/Lua/
             Env.AddLoader(LoadFromResources);
 
-            Debug.Log("[thanmaorigin.LuaEngine] Awake — XLua initialized");
+            // Wire bridges (Phase 3.9)
+            ThanMaOrigin.Lua.KTOLuaNative.BindLua(Env);
+            ThanMaOrigin.Network.CmdRegistry.BindLua(Env);
+
+            Debug.Log("[thanmaorigin.LuaEngine] Awake — XLua initialized + bridges wired");
         }
 
         // Custom Lua loader: maps `require("login.UILogin")` → Resources/Lua/login/UILogin.lua.txt
