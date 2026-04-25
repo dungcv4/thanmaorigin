@@ -1,12 +1,34 @@
 // File: Assets/_Project/Scripts/Bootstrap/AppEntry.cs
-// Boot orchestrator — replicates gốc Client:OnStartup chain (Script_Client.lua:34-63).
+//
+// DEVIATION — bridge layer, NO 1-1 IL2CPP equivalent.
+// Reason: gốc boot triggered by native code (libclient_scene.so / il2cpp.so initializer),
+//         not by a C# MonoBehaviour. thanmaorigin needs an entry point to wire bridges +
+//         load the gốc Lua boot script.
+// Approved by user: 2026-04-26 (no-chế-cháo audit).
+//
+// Real boot logic lives in gốc `Script_Client.lua:34-63` (Client:OnStartup).
+// AppEntry's ONLY job:
+//   1. Init bridge layer (LuaEngine + NetworkManager — both DEVIATION ports)
+//   2. Init Resources/Lua/ subsystem so require() works
+//   3. DoString gốc boot: `require 'commonui.Script_Client'; Client:OnStartup()`
+//   4. Hand off control to gốc Lua flow.
+//
+// Source ref: KiemTheOrigin_DeepExtract/39_CommonUI/Lua/Script_Client.lua
+//   Client:OnStartup() does:
+//     - LocalData:PathInit()
+//     - Sdk:SetReferenceResolution(1280, 900)
+//     - Client.QualityModule.SetLimitMissileCount(true)
+//     - Client.CppModule.SetLogicUpdate(-1)
+//     - Hotfix:DoPatch()
+//     - Ui:InitGame()              ← registers OnMapLoaded subscriber
+//     - LuaProfiler:BootStart()
+//     - Login:OpenLoginScene()     ← opens gốc UILogin window
+//     - EventNotify:RegistNotify(emNOTIFY_GAME_INIT_FINISH, ...)
 
 using System.Collections;
 using UnityEngine;
 using ThanMaOrigin.Lua;
 using ThanMaOrigin.Network;
-using ThanMaOrigin.Resource;
-using ThanMaOrigin.Game;
 
 namespace ThanMaOrigin.Bootstrap
 {
@@ -16,52 +38,44 @@ namespace ThanMaOrigin.Bootstrap
         {
             Debug.Log("[thanmaorigin] === BOOT START ===");
 
-            // 1. Init LuaEngine (XLua VM + bridges)
+            // 1. Bridge: XLua VM (DEVIATION — gốc native libclient_scene.so)
             EnsureChild<LuaEngine>("[LuaEngine]");
-            yield return null; // wait one frame for Awake
+            yield return null;
 
-            // 2. Init NetworkManager (TCP socket wrapper)
+            // 2. Bridge: TCP socket wrapper (DEVIATION)
             var net = EnsureChild<NetworkManager>("[NetworkManager]");
 
-            Debug.Log("[thanmaorigin] Phase 1 boot — local APK manifest");
-            string? localManifest = null;
-            yield return KKUpdater.ReadLocalManifest(m => localManifest = m);
-            Debug.Log($"[thanmaorigin]   local manifest: {(localManifest == null ? "MISSING" : $"{localManifest.Length} bytes")}");
-
-            Debug.Log("[thanmaorigin] Phase 2 — remote manifest fetch (LocalCDN)");
-            string? remoteManifest = null;
-            yield return KKUpdater.GetRemotePatchFileList(m => remoteManifest = m);
-            if (remoteManifest != null && localManifest != null)
-            {
-                bool needPatch = KKUpdater.NeedPatch(localManifest, remoteManifest);
-                Debug.Log($"[thanmaorigin]   needPatch={needPatch}");
-                // Phase 5+ wire actual bundle download here.
-            }
-
-            Debug.Log("[thanmaorigin] Connecting to GameServer...");
+            // 3. Connect to GameServer (Phase 4 server stack)
+            Debug.Log("[thanmaorigin] Connecting GameServer 127.0.0.1:11001 ...");
             bool connected = net.Connect();
-            Debug.Log($"[thanmaorigin]   GameServer connected: {connected}");
+            Debug.Log($"[thanmaorigin]   connected: {connected}");
 
-            if (connected)
+            // 4. Hand off to gốc Lua boot.
+            //    DoString triggers Script_Client.lua:Client:OnStartup() which drives
+            //    everything else (UI init, login scene, event registration).
+            Debug.Log("[thanmaorigin] Loading gốc Lua boot (Script_Client) ...");
+            try
             {
-                Debug.Log("[thanmaorigin] Sending CMD 100 Login...");
-                CmdRegistry.SendCmd(100, System.Text.Encoding.UTF8.GetBytes("test_account"));
-                // Server replies CMD 102 RoleList (empty stub) — handled by registered Lua handler.
+                var env = LuaEngine.Instance.Env;
+                // gốc require path (capital R, dot-style flattened)
+                env.DoString(@"
+                    local ok, err = pcall(function()
+                        require('commonui.Script_Client')
+                        if Client and Client.OnStartup then
+                            Client:OnStartup()
+                        else
+                            print('[AppEntry] Client.OnStartup not found after require')
+                        end
+                    end)
+                    if not ok then print('[AppEntry] boot error: ' .. tostring(err)) end
+                ");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[thanmaorigin] Lua boot failed: {e.Message}");
             }
 
-            // Phase 6: init game systems
-            Debug.Log("[thanmaorigin] Phase 6 — game system init");
-            EnsureChild<SceneLoadManager>("[SceneLoadManager]");
-            EnsureChild<PlayerSpawner>("[PlayerSpawner]");
-
-            // Phase 6 demo: simulate map load → spawn HUD via gốc Lua chain (or fallback HudSpawner).
-            // Real flow: SceneLoadManager.LoadMapAsync → emNOTIFY_MAP_LOADED → Lua Ui:OnMapLoaded.
-            // For Phase 6 testability without full gốc Lua Ui loaded:
-            yield return new WaitForSeconds(0.5f);
-            SceneLoadManager.Instance.OnMapLoadedNow(1);
-            HudSpawner.SpawnAll();
-
-            Debug.Log("[thanmaorigin] === BOOT COMPLETE ===");
+            Debug.Log("[thanmaorigin] === BOOT HANDED OFF TO GỐC LUA ===");
         }
 
         private static T EnsureChild<T>(string name) where T : Component

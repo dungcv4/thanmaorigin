@@ -1,11 +1,20 @@
 // Class:  CppModule
 // GUID:   1838d77880a2e50444abbe02986a1b51 (preserved via .meta)
-// Source: KTO_DecompiledReference/_root/CppModule.c (22 methods, 1232 LOC)
-// Dump:   KTO_Resources/il2cpp_full_dump/dump.cs
+// Source: KTO_DecompiledReference/_root/CppModule.c (1232 LOC Ghidra)
+// Dump:   KTO_Resources/il2cpp_full_dump/dump.cs (signatures + VMA)
 //
-// 1-1 port với DEVIATIONs cited.
-// gốc dùng CppApi (libclient_scene.so) cho native event/tick/Lua bindings.
-// thanmaorigin DEVIATION: skip native CppApi, dùng C# managed equivalent.
+// ⚠ HONEST AUDIT (2026-04-26):
+// PARTIAL 1-1 PORT — method SIGNATURES + VMA cites are correct (from dump.cs RVA addresses).
+// Method BODIES are DERIVED FROM SIGNATURES + COMMON PATTERNS (Unity AudioSource/Resources/etc),
+// NOT byte-by-byte verified against gốc Ghidra C decompile.
+//
+// What's accurate: class structure, field offsets, method signatures, VMA addresses, DEVIATIONs cited.
+// What's NOT verified: exact body logic per method. Some methods may diverge from gốc behavior.
+//
+// VERIFY-NEEDED methods get 1-1 re-port when:
+//   (a) runtime test fails
+//   (b) integration with gốc Lua flow exposes mismatch
+//   (c) per-method audit pass per Phase audit cycle
 
 using System;
 using System.Collections;

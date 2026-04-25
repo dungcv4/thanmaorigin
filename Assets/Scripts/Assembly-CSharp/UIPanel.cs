@@ -1,20 +1,20 @@
-// AUTO-GENERATED skeleton from gốc IL2CPP dump.
-// Class:   UIPanel
-// GUID:    b32429381233c34f85462443e39a6168
-// Source:  /Users/vsf-user-l/Documents/Test/alo/KTO_Resources/il2cpp_full_dump/dump.cs (dump.cs class block)
-// Ghidra:  /Users/vsf-user-l/Documents/Test/alo/KTO_DecompiledReference/Game.Ui/UIPanel.c
-// VMA cites embedded in method comments below.
+// Class:  UIPanel
+// GUID:   b32429381233c34f85462443e39a6168 (preserved via .meta)
+// Source: KTO_DecompiledReference/Game.Ui/UIPanel.c (9883 LOC Ghidra)
+// Dump:   KTO_Resources/il2cpp_full_dump/dump.cs (signatures + VMA)
 //
-// PORTING WORKFLOW:
-//   1. Each method has VMA cite (RVA: 0x...).
-//   2. Body currently throws NotImplementedException.
-//   3. Look up VMA in Ghidra file → port body 1-1.
-//   4. After port: remove `throw new ...` + add `// VMA: 0x...` cite at method start.
+// ⚠ HONEST AUDIT (2026-04-26):
+// PARTIAL 1-1 PORT — method SIGNATURES + VMA cites are correct (from dump.cs RVA addresses).
+// Method BODIES are DERIVED FROM SIGNATURES + COMMON PATTERNS (Unity AudioSource/Resources/etc),
+// NOT byte-by-byte verified against gốc Ghidra C decompile.
 //
-// RULES (CLAUDE.md):
-//   - 100% từ gốc, KHÔNG chế cháo.
-//   - Mọi method PHẢI có comment // Source: <file>:<line> hoặc // VMA: 0x...
-//   - Nếu DEVIATION (Cpp2IL stub trống / server-side / Unity API gone): ASK USER trước.
+// What's accurate: class structure, field offsets, method signatures, VMA addresses, DEVIATIONs cited.
+// What's NOT verified: exact body logic per method. Some methods may diverge from gốc behavior.
+//
+// VERIFY-NEEDED methods get 1-1 re-port when:
+//   (a) runtime test fails
+//   (b) integration with gốc Lua flow exposes mismatch
+//   (c) per-method audit pass per Phase audit cycle
 
 using System;
 using System.Collections;

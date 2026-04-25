@@ -1,10 +1,20 @@
 // Class:  UIModule
 // GUID:   1320eebfe218493bcae8457b6ad9fb3f (preserved via .meta)
-// Source: KTO_DecompiledReference/_root/UIModule.c (39 methods, 2891 LOC)
-// Dump:   KTO_Resources/il2cpp_full_dump/dump.cs
+// Source: KTO_DecompiledReference/_root/UIModule.c (2891 LOC Ghidra)
+// Dump:   KTO_Resources/il2cpp_full_dump/dump.cs (signatures + VMA)
 //
-// 1-1 port với DEVIATIONs cited.
-// Manages UI window lifecycle: PreloadUI/Close/SortingOrder stack, MsgBox dialog, StartUI loading.
+// ⚠ HONEST AUDIT (2026-04-26):
+// PARTIAL 1-1 PORT — method SIGNATURES + VMA cites are correct (from dump.cs RVA addresses).
+// Method BODIES are DERIVED FROM SIGNATURES + COMMON PATTERNS (Unity AudioSource/Resources/etc),
+// NOT byte-by-byte verified against gốc Ghidra C decompile.
+//
+// What's accurate: class structure, field offsets, method signatures, VMA addresses, DEVIATIONs cited.
+// What's NOT verified: exact body logic per method. Some methods may diverge from gốc behavior.
+//
+// VERIFY-NEEDED methods get 1-1 re-port when:
+//   (a) runtime test fails
+//   (b) integration with gốc Lua flow exposes mismatch
+//   (c) per-method audit pass per Phase audit cycle
 
 using System;
 using System.Collections;

@@ -1,11 +1,20 @@
 // Class:  AudioModule
 // GUID:   4c6051c4e097b7e69304c12fbd4a29cf (preserved via .meta)
-// Source: KTO_DecompiledReference/_root/AudioModule.c (30 methods, 1608 LOC)
-// Dump:   KTO_Resources/il2cpp_full_dump/dump.cs
+// Source: KTO_DecompiledReference/_root/AudioModule.c (1608 LOC Ghidra)
+// Dump:   KTO_Resources/il2cpp_full_dump/dump.cs (signatures + VMA)
 //
-// 1-1 port với DEVIATIONs cited.
-// gốc dùng Tencent GME (EventReference, RTPC types là Wwise-style wrappers).
-// thanmaorigin DEVIATION: Unity AudioSource thay GME (voice chat skip — không port).
+// ⚠ HONEST AUDIT (2026-04-26):
+// PARTIAL 1-1 PORT — method SIGNATURES + VMA cites are correct (from dump.cs RVA addresses).
+// Method BODIES are DERIVED FROM SIGNATURES + COMMON PATTERNS (Unity AudioSource/Resources/etc),
+// NOT byte-by-byte verified against gốc Ghidra C decompile.
+//
+// What's accurate: class structure, field offsets, method signatures, VMA addresses, DEVIATIONs cited.
+// What's NOT verified: exact body logic per method. Some methods may diverge from gốc behavior.
+//
+// VERIFY-NEEDED methods get 1-1 re-port when:
+//   (a) runtime test fails
+//   (b) integration with gốc Lua flow exposes mismatch
+//   (c) per-method audit pass per Phase audit cycle
 
 using System;
 using System.Collections;

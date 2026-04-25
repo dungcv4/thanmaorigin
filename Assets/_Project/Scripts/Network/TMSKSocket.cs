@@ -1,8 +1,16 @@
 // File: Assets/_Project/Scripts/Network/TMSKSocket.cs
-// TCP client wrapper với wire format [2B len BE][2B op BE][payload].
-// Source: KTO_DecompiledReference/_root/TMSKSocket.c (gốc TCP layer in libclient_scene.so).
 //
-// Connect to gốc gateway IPs (61.28.227.144:11001) — DEVIATION: redirect to localhost:11001 for thanmaorigin LocalServer.
+// DEVIATION — bridge layer, NO 1-1 IL2CPP equivalent.
+// Reason: gốc client-side TCP đi qua native libclient_scene.so (LuaServerRemoteCallEntry chain
+//         in KTO_LibClientScene_Decompiled/INDEX.tsv VMA 0x2359ec). thanmaorigin cannot use
+//         that .so binary, must write managed C# wrapper.
+// Approved by user: 2026-04-26 (no-chế-cháo audit — explicit DEVIATION cite).
+//
+// Wire format (verified): [2B totalLen BE][2B opcode BE][payload]
+//   - Confirmed via E2E test 2026-04-26: client sent CMD 100 + 12B → server replied CMD 102.
+//
+// Naming "TMSKSocket" intentionally ad-hoc (not gốc class name). gốc has TcpServer.TCPClientHandle
+// (server-side handle) but no client-side TCP wrapper exists in IL2CPP.
 
 using System;
 using System.Collections.Concurrent;
@@ -20,20 +28,16 @@ namespace ThanMaOrigin.Network
         private Thread? _recvThread;
         private volatile bool _running;
 
-        // Inbound packets queued for main-thread dispatch
         public readonly ConcurrentQueue<(int opcode, byte[] payload)> InboundQueue = new();
 
         public bool Connected => _client?.Connected ?? false;
 
-        /// <summary>Connect synchronously (blocking ~1s timeout).</summary>
         public bool Connect(string host, int port)
         {
             try
             {
-                _client = new TcpClient();
-                _client.NoDelay = true;
-                var task = _client.ConnectAsync(host, port);
-                if (!task.Wait(2000))
+                _client = new TcpClient { NoDelay = true };
+                if (!_client.ConnectAsync(host, port).Wait(2000))
                 {
                     Debug.LogError($"[TMSKSocket] Connect timeout {host}:{port}");
                     Close();
@@ -54,7 +58,6 @@ namespace ThanMaOrigin.Network
             }
         }
 
-        /// <summary>Send packet [2B totalLen BE][2B opcode BE][payload].</summary>
         public void Send(int opcode, byte[]? payload)
         {
             if (_stream == null || !_running) return;
@@ -72,10 +75,7 @@ namespace ThanMaOrigin.Network
                     _stream.Flush();
                 }
             }
-            catch (Exception e)
-            {
-                Debug.LogError($"[TMSKSocket] Send failed: {e.Message}");
-            }
+            catch (Exception e) { Debug.LogError($"[TMSKSocket] Send failed: {e.Message}"); }
         }
 
         private void RecvLoop()
@@ -97,7 +97,7 @@ namespace ThanMaOrigin.Network
                     InboundQueue.Enqueue((opcode, payload));
                 }
             }
-            catch (IOException) { /* socket closed */ }
+            catch (IOException) { }
             catch (Exception e) { Debug.LogError($"[TMSKSocket] RecvLoop: {e.Message}"); }
             _running = false;
         }

@@ -1,13 +1,20 @@
 // Class:  ResourceModule
 // GUID:   f108f4a34467646acb0028586ec0806d (preserved via .meta)
-// Source: KTO_DecompiledReference/_root/ResourceModule.c (25 methods, 1658 LOC)
-// Dump:   KTO_Resources/il2cpp_full_dump/dump.cs
+// Source: KTO_DecompiledReference/_root/ResourceModule.c (1658 LOC Ghidra)
+// Dump:   KTO_Resources/il2cpp_full_dump/dump.cs (signatures + VMA)
 //
-// 1-1 port với DEVIATIONs cited.
-// gốc dùng ResourceCache + ResourceTask + CppApi.OpenPack chain (complex pack0.dat reader).
-// thanmaorigin DEVIATION: pack0.dat đã extract sẵn (KTO_Extracted_Pack/) → load từ Resources/Setting/.
+// ⚠ HONEST AUDIT (2026-04-26):
+// PARTIAL 1-1 PORT — method SIGNATURES + VMA cites are correct (from dump.cs RVA addresses).
+// Method BODIES are DERIVED FROM SIGNATURES + COMMON PATTERNS (Unity AudioSource/Resources/etc),
+// NOT byte-by-byte verified against gốc Ghidra C decompile.
 //
-// Counter getters fully ported (trivial). Async chain methods have minimal DEVIATION bodies.
+// What's accurate: class structure, field offsets, method signatures, VMA addresses, DEVIATIONs cited.
+// What's NOT verified: exact body logic per method. Some methods may diverge from gốc behavior.
+//
+// VERIFY-NEEDED methods get 1-1 re-port when:
+//   (a) runtime test fails
+//   (b) integration with gốc Lua flow exposes mismatch
+//   (c) per-method audit pass per Phase audit cycle
 
 using System;
 using System.Collections;
