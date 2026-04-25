@@ -1,12 +1,14 @@
-// AUTO-GENERATED stub from KTO_FullExtract/script_map.json
 // Class: UIStartUp
-// GUID: 2b741666d9ef59c2b2282670abae18e2
-// TODO: Phase 3+ port body 1-1 from KTO_DecompiledReference/
-//   File hint: /Users/vsf-user-l/Documents/Test/alo/KiemTheUI/Assets/Scripts/Assembly-CSharp/UIStartUp.cs.meta
+// GUID:  2b741666d9ef59c2b2282670abae18e2 (preserved via .meta)
+// Source: KTO_FullExtract — boot/loading-screen UI
+//
+// PARTIAL PORT 2026-04-25: API surface needed by UIModule. Real impl deferred.
 
 using UnityEngine;
 
 public class UIStartUp : MonoBehaviour
 {
+    public void SetProgress(float fProgress) { /* loading bar fill — defer */ }
+    public void SetLoadingMainInfo(string msg) { /* loading bar text — defer */ }
+    public void SetUpdateState(KKUpdater.UpdaterState state) { /* state visual — defer */ }
 }
-

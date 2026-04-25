@@ -1,12 +1,20 @@
-// AUTO-GENERATED stub from KTO_FullExtract/script_map.json
 // Class: PrefabAnchor
-// GUID: 7b7f1cf78779d4013efb6d718d000b72
-// TODO: Phase 3+ port body 1-1 from KTO_DecompiledReference/
-//   File hint: /Users/vsf-user-l/Documents/Test/alo/KiemTheUI/Assets/Scripts/Assembly-CSharp/PrefabAnchor.cs.meta
+// GUID:  7b7f1cf78779d4013efb6d718d000b72 (preserved via .meta)
+// Source: KTO_FullExtract — runtime prefab instantiation anchor
+//
+// PARTIAL PORT 2026-04-25: API surface for UIPanel.CreatePrefabByAnchor.
 
 using UnityEngine;
 
 public class PrefabAnchor : MonoBehaviour
 {
-}
+    public GameObject prefab;
+    public Transform parent;
 
+    public GameObject CreatePrefab()
+    {
+        if (prefab == null) return null;
+        var go = Instantiate(prefab, parent != null ? parent : transform);
+        return go;
+    }
+}

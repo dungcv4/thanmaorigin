@@ -85,7 +85,9 @@ public class UIViewAnimationScale : MonoBehaviour
                 var cg = _CanvasGroups[i];
                 if (cg == null) return;
                 cg.alpha = 0f;
-                _OpenSequence.Join(cg.DOFade(1f, _OpenTime));
+                // DEVIATION: DOTween Free has no CanvasGroup.DOFade shortcut — use DOTween.To.
+                var cgRef0 = cg;
+                _OpenSequence.Join(DOTween.To(() => cgRef0.alpha, v => cgRef0.alpha = v, 1f, _OpenTime));
             }
             _OpenSequence.Play();
             OnComplete?.Invoke();
@@ -125,7 +127,9 @@ public class UIViewAnimationScale : MonoBehaviour
                 var cg = _CanvasGroups[i];
                 if (cg == null) return;
                 cg.alpha = 1f;
-                _CloseSequence.Join(cg.DOFade(0f, _CloseTime));
+                // DEVIATION: DOTween Free has no CanvasGroup.DOFade shortcut — use DOTween.To.
+                var cgRef1 = cg;
+                _CloseSequence.Join(DOTween.To(() => cgRef1.alpha, v => cgRef1.alpha = v, 0f, _CloseTime));
             }
             _CloseComplete = OnComplete;
             _CloseSequence.Play();
