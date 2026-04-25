@@ -1,0 +1,173 @@
+local tbWnd = Ui:CreateWindow("UIMessageBox")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_REFRESH_MESSAGE_BOX,
+      self.OnRefreshContent,
+      self
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  txtTitle = "imgBG/imgTitle/txtTitle",
+  txtMsg = "imgBG/imgMsgBG/txtMsg",
+  btnOk = "imgBG/btnOK",
+  btnCancel = "imgBG/btnCancel",
+  btnCenter = "imgBG/btnCenter",
+  CheckTips = "imgBG/CheckTips",
+  togCheckTips = "imgBG/CheckTips/ToggleCheck",
+  togCheckTipsText = "imgBG/CheckTips/ToggleCheck/Label"
+}
+
+function tbWnd:CloseByDefault()
+  if self.szNotTipsType and self.tbKeyID[self.szNotTipsType] then
+    self.tbKeyID[self.szNotTipsType]:SetNotShowValue(self.pPanel:Toggle_GetChecked(self.togCheckTips))
+  end
+  if self.tbCancelCallback and self.tbCancelCallback[1] then
+    Lib:CallBack(self.tbCancelCallback)
+  end
+  self:Close()
+end
+
+tbWnd.tbOnClick = {
+  btnOk = function(self)
+    self:onClickOK()
+  end,
+  btnCenter = function(self)
+    self:onClickOK()
+  end,
+  btnCancel = function(self)
+    self:CloseByDefault()
+  end
+}
+tbWnd.tbKeyID = {
+  TeacherFind = MasterPrentice,
+  MoneyTreeSecondConfirm = MoneyTree,
+  LifeSkillSecondConfirm = LifeSkill,
+  FieldPractice = FieldPractice,
+  EquipEnhance = Item.EquipEnhance,
+  ZFZhenJue = ZhenFa,
+  ZhenYuan = Item.ZhenYuan,
+  GoldCardPicker = CardPicker.GoldPickData,
+  CoinCardPicker = CardPicker.CoinPickData,
+  LimitedCardPicker = CardPicker.LimitedPickData,
+  SkillBookCardPicker = CardPicker.SkillBookPickData,
+  JingMaiSave = JingMai,
+  WuXueCardPicker = WuXueCardPicker.LimitedPickData
+}
+tbWnd.tbDefaultCheck = {TeacherFind = true}
+tbWnd.tbOnToggleClick = {
+  togCheckTips = function(self, isOn)
+    if self.szNotTipsType and self.tbKeyID[self.szNotTipsType] then
+      self.tbKeyID[self.szNotTipsType]:SetNotShowValue(isOn)
+    end
+  end
+}
+
+function tbWnd:OnClose()
+  if self.nTimerId then
+    Timer:Close(self.nTimerId)
+    self.nTimerId = nil
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UI_MESSAGEBOX_CLOSE)
+end
+
+function tbWnd:OnOpen(szText, tbProc, tbBtnTxt, szNotTipsType, nTime, szToggleCheckText, nTimeOutBtnIndex)
+  szText = i18n.Parse(szText)
+  local szInfo = szText
+  if nTime and nTime > 0 then
+    szInfo = string.format(szText, tonumber(nTime) or 0)
+  end
+  self.pPanel:Label_SetText(self.txtMsg, szInfo)
+  tbBtnTxt = tbBtnTxt or {
+    i18n.szOk,
+    i18n.szCancel
+  }
+  local szBtnOK = i18n.Parse(tbBtnTxt[1])
+  local szbtnCancel = i18n.Parse(tbBtnTxt[2])
+  local szbtnCenter = szBtnOK
+  if nTime and nTime > 0 then
+    local szTimeBtn = ""
+    local szTimeBtnText = ""
+    local tbBtnAddText = ""
+    if not nTimeOutBtnIndex or nTimeOutBtnIndex == Ui.TimeOutBtnIndex.BtnOK then
+      szTimeBtn = self.btnOk
+      tbBtnAddText = {szBtnOK, "(%s)"}
+      szTimeBtnText = table.concat(tbBtnAddText)
+      szBtnOK = string.format(table.concat(tbBtnAddText), nTime)
+    elseif nTimeOutBtnIndex == Ui.TimeOutBtnIndex.Cancel then
+      szTimeBtn = self.btnCancel
+      tbBtnAddText = {szbtnCancel, "(%s)"}
+      szTimeBtnText = table.concat(tbBtnAddText)
+      szbtnCancel = string.format(table.concat(tbBtnAddText), nTime)
+    elseif nTimeOutBtnIndex == Ui.TimeOutBtnIndex.Center then
+      szTimeBtn = self.btnCenter
+      tbBtnAddText = {szbtnCenter, "(%s)"}
+      szTimeBtnText = table.concat(tbBtnAddText)
+      szbtnCenter = string.format(szTimeBtnText, nTime)
+    end
+    self.nEndTime = GetTime() + nTime
+    self.nTimerId = Timer:Register(Env.GAME_FPS, function()
+      if self.nEndTime - GetTime() <= 0 then
+        self.nTimerId = nil
+        if self.tbTimerEndCallback and self.tbTimerEndCallback[1] then
+          Lib:CallBack(self.tbTimerEndCallback)
+        end
+        self:Close()
+        return
+      end
+      local nCurTime = math.max(self.nEndTime - GetTime(), 0)
+      self.pPanel:Button_SetText(szTimeBtn, string.format(szTimeBtnText, nCurTime), "Text")
+      return true
+    end)
+  end
+  if tbProc then
+    self.tbOKCallback = tbProc[1]
+    self.tbCancelCallback = tbProc[2]
+    self.tbTimerEndCallback = tbProc[3]
+  else
+    self.tbOKCallback = nil
+    self.tbCancelCallback = nil
+    self.tbTimerEndCallback = nil
+  end
+  self.szNotTipsType = szNotTipsType
+  self.pPanel:Toggle_SetChecked(self.togCheckTips, self.tbDefaultCheck[szNotTipsType] and true or false)
+  self.pPanel:SetActive(self.CheckTips, self.szNotTipsType and true or false)
+  if nil ~= szNotTipsType and nil ~= szToggleCheckText then
+    self.pPanel:Label_SetText(self.togCheckTipsText, szToggleCheckText)
+  else
+    self.pPanel:Label_SetText(self.togCheckTipsText, i18n.EasyGet("\228\187\138\230\151\165\228\184\141\229\134\141\230\143\144\233\134\146"))
+  end
+  self.pPanel:Button_SetText(self.btnOk, szBtnOK or i18n.szOk, "Text")
+  self.pPanel:Button_SetText(self.btnCancel, szbtnCancel or i18n.szCancel, "Text")
+  self.pPanel:Button_SetText(self.btnCenter, szbtnCenter or i18n.szOk, "Text")
+  local hideFlag = "hide"
+  local isSingle = tbProc and nil == tbProc[2] or false
+  self.pPanel:SetActive(self.btnCenter, isSingle and tbBtnTxt[1] ~= hideFlag)
+  self.pPanel:SetActive(self.btnOk, not isSingle)
+  self.pPanel:SetActive(self.btnCancel, not isSingle)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UI_MESSAGEBOX_OPEN)
+end
+
+function tbWnd:onClickOK()
+  local bRemainOpen, _
+  if self.tbOKCallback and self.tbOKCallback[1] then
+    _, bRemainOpen = Lib:CallBack(self.tbOKCallback)
+  end
+  if not bRemainOpen then
+    self:Close()
+  end
+  if self.szNotTipsType and self.pPanel:Toggle_GetChecked(self.togCheckTips) == true then
+    Ui:SetNotShowTips(self.szNotTipsType)
+  end
+  if self.szNotTipsType and self.tbKeyID[self.szNotTipsType] then
+    self.tbKeyID[self.szNotTipsType]:SetNotShowValue(self.pPanel:Toggle_GetChecked(self.togCheckTips))
+  end
+end
+
+function tbWnd:OnRefreshContent(szText, tbOkFunc)
+  self.pPanel:Label_SetText(self.txtMsg, szText)
+  self.tbOKCallback = tbOkFunc
+end

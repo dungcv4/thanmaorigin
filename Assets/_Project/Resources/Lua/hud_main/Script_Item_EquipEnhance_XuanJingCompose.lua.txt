@@ -1,0 +1,118 @@
+local EquipEnhance = Item.EquipEnhance
+EquipEnhance.XuanJingCompose = EquipEnhance.XuanJingCompose or {}
+local XuanJingCompose = EquipEnhance.XuanJingCompose
+XuanJingCompose.AUTO_ADD_LV_LIMIT = 6
+XuanJingCompose.AUTO_ADD_SAME_NUM = {13, 4}
+XuanJingCompose.AUTO_COMPOSE_LV_LIMIT = 5
+XuanJingCompose.AUTO_COMPOSE_SAME_NUM = 13
+XuanJingCompose.AUTO_COMPOSE_INTERVAL = Env.GAME_FPS / 10
+
+function XuanJingCompose:OnSyncComposeResult(tbCostItemList, nGetLv, nGetNum)
+  local tbWnd = Ui:GetWindow("UIXuanJingCompose")
+  if nil ~= tbWnd then
+    tbWnd:OnSyncData()
+  end
+  if Ui:WindowVisible("UIEquipment") then
+    Ui:GetWindow("UIEquipment"):NotifyXuanJingCompose()
+  end
+  self:OnSyncHandleAutoCompose(tbCostItemList, nGetLv, nGetNum)
+end
+
+function XuanJingCompose:OnSyncHandleAutoCompose(tbCostItemList, nGetLv, nGetNum)
+  self.tbAutoComposeAwardCache[nGetLv] = (self.tbAutoComposeAwardCache[nGetLv] or 0) + nGetNum
+  for nUseLv, nUseNum in pairs(tbCostItemList) do
+    local nCountAfterSub = (self.tbAutoComposeAwardCache[nUseLv] or 0) - nUseNum
+    if nCountAfterSub > 0 then
+      self.tbAutoComposeAwardCache[nUseLv] = nCountAfterSub
+    else
+      self.tbAutoComposeAwardCache[nUseLv] = nil
+    end
+  end
+  local bCanContinueCompose = self.bAutoCompose and self:StartAutoCompose()
+  if not bCanContinueCompose then
+    if Lib:CountTB(self.tbAutoComposeAwardCache) > 0 then
+      self:ShowComposeAwardAndClearCache()
+    else
+      me.CenterMsg(i18n.Get(EquipEnhance.RETURN_XUANJING_MSG, nGetNum, nGetLv))
+    end
+  end
+end
+
+function XuanJingCompose:StartAutoCompose()
+  local bRet = false
+  local tbWnd = Ui:GetWindow("UIXuanJingCompose")
+  if nil ~= tbWnd then
+    local bSuccess = tbWnd:TryAutoAddSameToSelect(self.AUTO_COMPOSE_SAME_NUM, self.AUTO_COMPOSE_LV_LIMIT)
+    if bSuccess then
+      self.nAutoComposeTimer = Timer:Register(self.AUTO_COMPOSE_INTERVAL, self.DoAStepAutoCompose, self)
+      self.bAutoCompose = true
+      tbWnd:UpdateUIByIsAutoCompose()
+      bRet = true
+    else
+      self:StopAutoCompose()
+    end
+  end
+  if not bRet then
+    me.CenterMsg(i18n.Get(EquipEnhance.NO_MEET_CONDITION_XUANJING_MSG))
+  end
+  return bRet
+end
+
+function XuanJingCompose:StopAutoCompose()
+  self.bAutoCompose = false
+  if self.nAutoComposeTimer ~= nil then
+    Timer:Close(self.nAutoComposeTimer)
+    self.nAutoComposeTimer = nil
+  end
+  local tbWnd = Ui:GetWindow("UIXuanJingCompose")
+  if nil ~= tbWnd then
+    tbWnd:UpdateUIByIsAutoCompose()
+  end
+end
+
+function XuanJingCompose:DoAStepAutoCompose()
+  local bComposeSuccess
+  local tbWnd = Ui:GetWindow("UIXuanJingCompose")
+  if nil ~= tbWnd then
+    bComposeSuccess = tbWnd:CallServerCompose()
+  else
+    bComposeSuccess = false
+  end
+  if not bComposeSuccess then
+    self:StopAutoCompose()
+    self:ShowComposeAwardAndClearCache()
+  end
+end
+
+function XuanJingCompose:ShowComposeAwardAndClearCache()
+  for nCacheLv, nCacheNum in pairs(self.tbAutoComposeAwardCache) do
+    Ui:AddShowAwards({
+      Player.AwardType2Name[Player.award_type_item],
+      Item.EquipEnhance.XUANJING_ITEM[nCacheLv],
+      nCacheNum
+    })
+  end
+  Ui:OpenGetAwardShow()
+  self.tbAutoComposeAwardCache = {}
+end
+
+function XuanJingCompose:UICallCompose(tbItemList)
+  return Item.EquipEnhance:ComposeReq(me, tbItemList)
+end
+
+function XuanJingCompose:GetTryAddSameXuanJingLevel(nSameNum, nLimitLv)
+  for nLevel = 1, nLimitLv do
+    local nHaveCount = EquipEnhance:GetXuanJingCountInBag(me, nLevel)
+    if nSameNum <= nHaveCount then
+      return nLevel
+    end
+  end
+  return nil
+end
+
+function XuanJingCompose:Init()
+  self.tbAutoComposeAwardCache = {}
+  self.bAutoCompose = false
+end
+
+XuanJingCompose:Init()

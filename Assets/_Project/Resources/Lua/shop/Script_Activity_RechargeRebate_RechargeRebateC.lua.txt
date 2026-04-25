@@ -1,0 +1,99 @@
+Require("CommonScript/Activity/RechargeRebate/RechargeRebate.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.RechargeRebate)
+local Protocol = {
+  [tbActivity.Protocol.GainAwardResp] = "GainAwardResp"
+}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    LogErr("[RechargeRebate] ServerRequest protocol is wrong", nProtocol)
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:OnOpen()
+  self:CheckRedPoint()
+end
+
+function tbActivity:InitExtraData()
+  self.SaveKey = GetGroupKey(self.tbConfig.szSaveKey)
+end
+
+function tbActivity:OnClose()
+  if Ui:GetWindow("UIRechargeAwards") then
+    Ui:CloseWindow("UIRechargeAwards")
+  end
+end
+
+function tbActivity:GetShowInfo()
+  return {
+    szShowTime = i18n.Parse(self.tbConfig.szShowTime),
+    szDesc = i18n.Parse(self.tbConfig.szDesc),
+    tbAwardList = self:GetAwardList(),
+    nId = self.nId
+  }
+end
+
+function tbActivity:GetAwardList()
+  local tbList = {}
+  local nTotalAmount = self:GenTruthTotalAmount(me.GetUserValue(self.SaveKey, self.SaveID.TotalAmount))
+  local nAwardRecord = me.GetUserValue(self.SaveKey, self.SaveID.AwardRecord) or 0
+  for nID, tbInfo in pairs(self.tbConfig.tbAwardList) do
+    table.insert(tbList, {
+      nID = nID,
+      tbAward = Award:GetAward(tbInfo.nAwardId, tbInfo.nAwardKey),
+      nAmount = tbInfo.nAmount,
+      nTotalAmount = nTotalAmount,
+      nSuccess = 1 << nID & nAwardRecord,
+      bFirstNotEnough = false
+    })
+  end
+  local nFirstEnoughV, nSecondEnoughV
+  table.sort(tbList, function(tbFirst, tbSecond)
+    if tbFirst.nSuccess ~= tbSecond.nSuccess then
+      return tbFirst.nSuccess < tbSecond.nSuccess
+    end
+    nFirstEnoughV = tbFirst.nAmount <= nTotalAmount and 1 or 0
+    nSecondEnoughV = tbSecond.nAmount <= nTotalAmount and 1 or 0
+    if nFirstEnoughV ~= nSecondEnoughV then
+      return nFirstEnoughV > nSecondEnoughV
+    end
+    return tbFirst.nID < tbSecond.nID
+  end)
+  for _, tbInfo in ipairs(tbList) do
+    if 0 == tbInfo.nSuccess and tbInfo.nAmount > tbInfo.nTotalAmount then
+      tbInfo.bFirstNotEnough = true
+      break
+    end
+  end
+  return tbList
+end
+
+function tbActivity:GainAward(nIndex)
+  ActivityMgr:CallServerScript(self.nId, self.Protocol.GainAward, nIndex)
+end
+
+function tbActivity:GainAwardResp()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_RECHARGEAWARD_DATA_SYNC)
+  self:CheckRedPoint()
+end
+
+function tbActivity:CheckRedPoint()
+  local nTotalAmount = self:GenTruthTotalAmount(me.GetUserValue(self.SaveKey, self.SaveID.TotalAmount))
+  local nAwardRecord = me.GetUserValue(self.SaveKey, self.SaveID.AwardRecord) or 0
+  local bRedPoint = false
+  for nID, tbInfo in pairs(self.tbConfig.tbAwardList) do
+    if nTotalAmount >= tbInfo.nAmount and 0 == 1 << nID & nAwardRecord then
+      bRedPoint = true
+      break
+    end
+  end
+  if bRedPoint then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.RechargeRebate)
+    return
+  end
+  if RedPointMgr:CheckEvent(RedPointMgr.EVENT.RechargeRebate) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.RechargeRebate)
+  end
+end

@@ -1,0 +1,115 @@
+local tbWnd = Ui:CreateWindow("UILoulanResult")
+tbWnd.tbControls = {
+  btnClose = "imgBG/btnClose",
+  txtCountdown = "imgBG/btnClose/Countdown",
+  txtFinishTime = "imgBG/EvaluateInfo/Info/FinishTime/Text",
+  txtFinishScore = "imgBG/EvaluateInfo/Info/FinishScore/Text",
+  imgLevel = "imgBG/EvaluateInfo/RankProgress/imgLevel",
+  txtRating = "imgBG/Rank/Grade/SSS",
+  ItemTemplate = "imgBG/HarvestInfo/ItemList/ItemTemplate",
+  ScoreTips = "imgBG/EvaluateInfo/ScoreTips",
+  imgGlow = "imgBG/Rank/Glow"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbItemView = Ui:NewScrollView(self, self.ItemTemplate)
+  self.pPanel:SetActive(self.imgGlow, false)
+end
+
+function tbWnd:OnOpen(tbScoreInfo, tbPlayerAward)
+  self.tbScoreInfo = tbScoreInfo or {}
+  self.tbPlayerAward = tbPlayerAward or {}
+  self.nLevel = tbScoreInfo.nLevel or 0
+  self.nCostTime = tbScoreInfo.nCostTime or 0
+  self.nScore = Dungeon:GetLevelScore(self.nLevel) or 0
+  self.nNextLevelScore = Dungeon:GetLevelScore(self.nLevel - 1) or 0
+  self.szGrade = Dungeon:GetLevelDesc(self.nLevel)
+  self.nCloseTime = 15
+  self.nCloseTimer = Timer:Register(Env.GAME_FPS, self.SetCloseBtn, self)
+  self:UpdateScore()
+end
+
+function tbWnd:OnClose()
+  if self.nCloseTimer then
+    Timer:Close(self.nCloseTimer)
+    self.nCloseTimer = nil
+  end
+end
+
+function tbWnd:UpdateScore()
+  local nMin = math.floor(self.nCostTime / 60)
+  local nSec = math.floor(self.nCostTime % 60)
+  self.pPanel:Label_SetText(self.txtFinishTime, string.format("%02d:%02d", nMin, nSec))
+  self.pPanel:Label_SetText(self.txtFinishScore, tostring(self.nScore))
+  self.pPanel:Sprite_SetFillAmount(self.imgLevel, 0, self.nScore / Dungeon.tbGradeLevel[LouLanMiZong.nMaxLevel].nScore, 1, true)
+  self.pPanel:Label_SetText(self.txtRating, i18n.Parse(self.szGrade))
+  local szMsg
+  if self.nNextLevelScore > self.nScore and self.nLevel > LouLanMiZong.nMaxLevel then
+    szMsg = i18n.EasyGet("\230\156\172\230\172\161\229\190\151\229\136\134{0}\239\188\140\229\183\174{1}\229\136\134\229\143\175\230\143\144\229\141\135\229\165\150\229\138\177\231\173\137\231\186\167", self.nScore, self.nNextLevelScore - self.nScore)
+  else
+    szMsg = i18n.EasyGet("\229\189\147\229\137\141\229\183\178\230\152\175\230\156\128\233\171\152\229\165\150\229\138\177\231\173\137\231\186\167")
+  end
+  self.pPanel:Label_SetText(self.ScoreTips, szMsg)
+  self:UpdatePlayerAward()
+end
+
+function tbWnd:UpdatePlayerAward()
+  for i, tbAward in ipairs(self.tbPlayerAward) do
+    self.tbItemView:SetElement(i, function(tbElement)
+      local tbItemGrid = tbElement.tbItemGrid
+      if not tbItemGrid then
+        tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbItemGrid:SetClickEnable(true)
+      end
+      tbElement.pPanel:SetActive("Effect/Quality1", false)
+      tbElement.pPanel:SetActive("Effect/Quality2", false)
+      local szType = tbAward[1]
+      if szType == Player.AwardType2Name[Player.award_type_item] or szType == Player.AwardType2Name[Player.award_type_item_Unsafe] or szType == Player.AwardType2Name[Player.award_type_itemshow] then
+        local szName, nIcon, nView, nQuality = KItem.GetItemShowInfo(tbAward[2], me.nFaction, me.nFactionSect)
+        if nQuality >= 6 then
+          tbElement.pPanel:SetActive("Effect/Quality2", true)
+        elseif nQuality >= 4 then
+          tbElement.pPanel:SetActive("Effect/Quality1", true)
+        end
+        tbItemGrid:SetItemByTemplate(tbAward[2], tbAward[3])
+      else
+        tbItemGrid:SetDigitalItem(szType, tbAward[2])
+      end
+    end)
+  end
+  self.tbItemView:PlayItemGridAnimation()
+end
+
+function tbWnd:SetCloseBtn()
+  self.nCloseTime = self.nCloseTime - 1
+  if 0 == self.nCloseTime then
+    self.nCloseTimer = nil
+    self:Close()
+    return
+  end
+  self.pPanel:Label_SetText(self.txtCountdown, i18n.EasyGet("({0}\231\167\146)", self.nCloseTime))
+  return true
+end
+
+function tbWnd:GetRatingScore(nRating)
+  if not nScore or nScore < 0 then
+    return
+  end
+  local nGradeIndex = 0
+  for i = 1, #self.tbGradeLevel do
+    if nScore >= self.tbGradeLevel[i].nScore then
+      nGradeIndex = i
+      break
+    end
+  end
+  if nGradeIndex > 1 then
+    return self.tbGradeLevel[nGradeIndex], self.tbGradeLevel[nGradeIndex - 1]
+  else
+    return self.tbGradeLevel[nGradeIndex]
+  end
+end

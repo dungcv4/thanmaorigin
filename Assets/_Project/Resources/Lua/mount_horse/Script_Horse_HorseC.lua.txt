@@ -1,0 +1,221 @@
+Require("CommonScript/Horse/HorseCommon.lua")
+Horse.tbHorseSaveData = Horse.tbHorseSaveData or {}
+Horse.tbEquipSlot2RedPoint = {
+  [Item.ExtEquip.CFG.SLOT.HORSEREIN] = RedPointMgr.EVENT.HorseEquipGrade1,
+  [Item.ExtEquip.CFG.SLOT.HORSEBIT] = RedPointMgr.EVENT.HorseEquipGrade2,
+  [Item.ExtEquip.CFG.SLOT.HORSESADDLE] = RedPointMgr.EVENT.HorseEquipGrade3,
+  [Item.ExtEquip.CFG.SLOT.HORSESTIRRUP] = RedPointMgr.EVENT.HorseEquipGrade4,
+  [Item.ExtEquip.CFG.SLOT.HORSESHOE] = RedPointMgr.EVENT.HorseEquipGrade5
+}
+
+function Horse:IsJinJieOpen()
+  if 1 == GetTimeFrameState("OpenLevel69") then
+    return true
+  end
+  return false
+end
+
+function Horse:IsHorseEquipOpen()
+  if 1 == GetTimeFrameState("OpenLevel79") then
+    return true
+  end
+  return false
+end
+
+function Horse:OnLogin(bIsReconnect)
+end
+
+function Horse:GetHorseScriptData(pPlayer)
+  return self.tbHorseSaveData
+end
+
+function Horse:CSLevelUpgradeReq()
+  local bRet, szErr = self:CanUpgradeLevel(me)
+  if not bRet then
+    if szErr then
+      me.CenterMsg(szErr)
+    end
+    return
+  end
+  RemoteServer.RequestHorse("HorseLevelReq")
+end
+
+function Horse:CSGradeUpgradeReq(nNextGrade)
+  local nCurGrade = self:GetHorseGrade(me)
+  local bRet, szErr = self:CanUpgradeGrade(me, nCurGrade, nNextGrade)
+  if not bRet then
+    if szErr then
+      me.CenterMsg(szErr)
+    end
+    return
+  end
+  RemoteServer.RequestHorse("HorseGradeReq", nNextGrade)
+end
+
+function Horse:HorseEquipLevelReq(nIndex)
+  local bRet, szErr = self:CanEquipUpgradeLevel(me, nIndex)
+  if not bRet then
+    if szErr then
+      me.CenterMsg(szErr)
+    end
+    return
+  end
+  RemoteServer.RequestHorse("HorseEquipLevelReq", nIndex)
+end
+
+function Horse:HorseEquipLevelRsp(nIndex)
+  Ui:OpenUpgradeEffect(i18n.EasyGet("\229\141\135\233\152\182\230\136\144\229\138\159"))
+  self:OnCheckEquipLevelRedPointByIndex(nIndex)
+end
+
+function Horse:HorseGradeRsp(nCurGrade, nNextGrade, bNotNotification)
+  self:RefreshGradeAttrib(me.GetNpc(), nCurGrade, nNextGrade)
+  if not bNotNotification then
+    Ui:OpenUpgradeEffect(i18n.EasyGet("\229\141\135\233\152\182\230\136\144\229\138\159"))
+  end
+  if Ui:WindowVisible("UIBag") then
+    Ui:GetWindow("UIBag"):NotifyHorseView()
+  end
+  if Ui:WindowVisible("UIHorseJinjie") then
+    Ui:GetWindow("UIHorseJinjie"):HorseGradeRsp()
+  end
+end
+
+function Horse:HorseLevelRsp(nCurLevel, nNextLevel, bNotNotification)
+  self:RefreshLevelAttrib(me, nCurLevel, nNextLevel)
+  if not bNotNotification then
+    Ui:OpenUpgradeEffect(i18n.EasyGet("\233\169\175\229\133\187\230\136\144\229\138\159"))
+  end
+  if Ui:WindowVisible("UIBag") then
+    Ui:GetWindow("UIBag"):NotifyHorseView()
+  end
+  self:OnCheckLevelRedPoint()
+end
+
+function Horse:ActiveHorseFeatureRsp(nTemplateId)
+  self.tbHorseSaveData.tbHorseFeature = self.tbHorseSaveData.tbHorseFeature or {}
+  self.tbHorseSaveData.tbHorseFeature[nTemplateId] = 1
+  if Ui:WindowVisible("UIBag") then
+    Ui:GetWindow("UIBag"):NotifyHorseView()
+  end
+end
+
+function Horse:ChangeHorseFeatureRsp()
+  me.CenterMsg(i18n.EasyGet("\230\155\180\230\141\162\230\136\144\229\138\159"))
+  if Ui:WindowVisible("UIBag") then
+    Ui:GetWindow("UIBag"):NotifyHorseView()
+  end
+end
+
+function Horse:UpdateHorseViewState(pEquip)
+  if pEquip.nItemType ~= Item.EQUIP_HORSE then
+    return
+  end
+  if Ui:WindowVisible("UIBag") then
+    Ui:GetWindow("UIBag"):UpdateButtonGroup()
+  end
+end
+
+function Horse:OnSyncHorseInfo(tbData, bIsReConnect)
+  self.tbHorseSaveData = tbData
+end
+
+function Horse:GetHorseFeatureList()
+  local tbRet = {}
+  local tbFeature = self.tbHorseSaveData.tbHorseFeature or {}
+  for nTemplateId, _ in pairs(tbFeature) do
+    table.insert(tbRet, nTemplateId)
+  end
+  return tbRet
+end
+
+function Horse:OnCheckRedPoint()
+  self:OnCheckLevelRedPoint()
+  local nCurGrade = Horse:GetHorseGrade(me)
+  self:OnCheckGradeRedPoint(nCurGrade, nCurGrade + 1)
+  self:OnCheckEquipLevelRedPoint()
+end
+
+function Horse:OnCheckLevelRedPoint()
+  if self:CanUpgradeLevel(me) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.HorseLevel)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.HorseLevel)
+  end
+end
+
+function Horse:OnCheckGradeRedPoint(nCurGrade, nNextGrade)
+  if self:CanUpgradeGrade(me, nCurGrade, nNextGrade) then
+  else
+  end
+end
+
+function Horse:OnCheckEquipLevelRedPointByIndex(nIndex)
+  if self:CanEquipUpgradeLevel(me, nIndex) then
+    RedPointMgr:LightRedPoint(self.tbEquipSlot2RedPoint[nIndex + Item.ExtEquip.CFG.SLOT.HORSEREIN - 1])
+  else
+    RedPointMgr:FadeRedPoint(self.tbEquipSlot2RedPoint[nIndex + Item.ExtEquip.CFG.SLOT.HORSEREIN - 1])
+  end
+end
+
+function Horse:OnCheckEquipLevelRedPoint()
+  for i = 1, Horse.nHorseEquipCount do
+    self:OnCheckEquipLevelRedPointByIndex(i)
+  end
+end
+
+function Horse:OnDelItem(nItemId, dwTemplateId)
+  Horse:OnCheckEquipLevelRedPoint()
+end
+
+function Horse:ExchangeJinJieMaterialReq(nItemId)
+  local bRet, szErr = self:CanJinJieMaterialExchange(me, nItemId)
+  if not bRet then
+    if szErr then
+      me.CenterMsg(szErr)
+    end
+    return
+  end
+  
+  local function fnConfirm()
+    RemoteServer.RequestHorse("ExchangeJinJieMaterialReq", nItemId)
+  end
+  
+  local pOrgItem = me.GetItemInBag(nItemId)
+  local nOrgNum = 1
+  local tbSetting = self.tbExchangeCfg[pOrgItem.dwTemplateId]
+  local szExchItem = KItem.GetItemShowInfo(tbSetting.EXCHANGE_ITEM_ID)
+  local nExchNum = tbSetting.EXCHANGE_ITEM_NUM * nOrgNum
+  local nYuanbaoNum = tbSetting.EXCHANGE_YUANBAO_NUM
+  local szExchangeTips
+  if nYuanbaoNum <= 0 then
+    szExchangeTips = i18n.EasyGet("\230\152\175\229\144\166\229\176\134{0}\228\184\170\226\128\156{1}\226\128\157\229\133\145\230\141\162\228\184\186{2}\228\184\170\226\128\156{3}\226\128\157\239\188\159")
+  else
+    szExchangeTips = i18n.EasyGet("\230\152\175\229\144\166\229\176\134{0}\228\184\170\226\128\156{1}\226\128\157\229\133\145\230\141\162\228\184\186{2}\228\184\170\226\128\156{3}\226\128\157\229\146\140\226\128\156{4}\229\133\131\229\174\157\226\128\157\239\188\159")
+  end
+  me.MsgBox(i18n.Get(szExchangeTips, nOrgNum, pOrgItem.szName, nExchNum, szExchItem, nYuanbaoNum), {
+    {
+      i18n.szOk,
+      fnConfirm
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function Horse:OnSyncItemLimitTime()
+  if not PlayerEvent.bLogin then
+    return
+  end
+  self:OnCheckRedPoint()
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM_TIME_LIMIT, Horse)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM_TIME_LIMIT, Horse.OnSyncItemLimitTime, Horse)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, Horse)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, Horse.OnCheckRedPoint, Horse)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_DEL_ITEM, Horse)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_DEL_ITEM, Horse.OnDelItem, Horse)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, Horse)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, Horse.OnCheckRedPoint, Horse)

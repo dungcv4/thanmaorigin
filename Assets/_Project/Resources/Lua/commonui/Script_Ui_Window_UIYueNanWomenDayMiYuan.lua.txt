@@ -1,0 +1,207 @@
+local tbWnd = Ui:CreateWindow("UIYueNanWomenDayMiYuan")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_HUAHAIMIYUAN_DATA_SYNC,
+      self.OnRefreshUI,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MAP_ENTER,
+      self.OnEnterMap,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SHOP_BUY_RESULT,
+      self.OnBuyResult,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnSyncItem,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_DEL_ITEM,
+      self.OnDelItem,
+      self
+    }
+  }
+end
+
+tbWnd.tbOnClick = {
+  btnShop = function(self)
+    local nRedPointEventId = self.pMiYuanActInstance:GetRedPointEventList()[1]
+    if RedPointMgr:CheckEvent(nRedPointEventId) then
+      RedPointMgr:FadeRedPoint(nRedPointEventId)
+    end
+    Ui:OpenWindow("UINpcShop", self.nNpcShopId, nil, nil, nil, nil, Currency.TYPE.XunYuan)
+  end,
+  btnCostReward = function(self)
+    Ui:OpenWindow("UIYueNanWomenDayReward", self.nAchieveActId)
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("FlowerSeaHelp")
+  end,
+  btnXuniYuan1 = function(self)
+    self.pMiYuanActInstance:ReqFindYuan(self.pMiYuanActInstance.FindTypeIndex.OnceFind)
+  end,
+  btnXuniYuan10 = function(self)
+    self.pMiYuanActInstance:ReqFindYuan(self.pMiYuanActInstance.FindTypeIndex.BatchFind)
+  end,
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbAwardGridView = Ui:NewItemGridView(self, self.AwardTemplate)
+  if self.UIMoneyPanel then
+    self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, self.UIMoneyPanel)
+  end
+end
+
+function tbWnd:OnClose()
+  if self.nSyncTimer then
+    Timer:Close(self.nSyncTimer)
+  end
+  if self.nRemainTimer then
+    Timer:Close(self.nRemainTimer)
+  end
+end
+
+function tbWnd:OnOpen(nMiYuanActId, nAchieveActId, nNpcShopId)
+  if not (Lib:IsInteger(nMiYuanActId) and Lib:IsInteger(nAchieveActId)) or not Lib:IsInteger(nNpcShopId) then
+    return 0
+  end
+  self.pPanel:SetActive(self.NumberCell, false)
+  self.pMiYuanActInstance = ActivityMgr:GetInstanceById(nMiYuanActId)
+  self.nAchieveActId = nAchieveActId
+  local pAchieveActInstance = ActivityMgr:GetInstanceById(nAchieveActId)
+  self.nNpcShopId = nNpcShopId
+  if not self.pMiYuanActInstance or not self.pMiYuanActInstance:IsOpen() then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return 0
+  end
+  if not pAchieveActInstance or not pAchieveActInstance:IsOpen() then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return 0
+  end
+  if me.nLevel < self.pMiYuanActInstance.tbConfig.nJoinLevel then
+    me.CenterMsg(i18n.EasyGet("\229\175\185\228\184\141\232\181\183\239\188\140\230\130\168\231\154\132\231\173\137\231\186\167\228\184\141\232\182\179{0}", self.pMiYuanActInstance.tbConfig.nJoinLevel))
+    return 0
+  end
+  if RedPointMgr.EVENT[pAchieveActInstance.tbConfig.szRedPointEvent] then
+    RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnCostReward, {
+      RedPointMgr.EVENT[pAchieveActInstance.tbConfig.szRedPointEvent]
+    })
+  end
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnShop, self.pMiYuanActInstance:GetShopRedPointEvent())
+  local tbConfig = self.pMiYuanActInstance:GetConfig()
+  self.szHelpKey = tbConfig.szHelpKey
+  self.pPanel:Label_SetText(self.txtTitle, i18n.Parse(tbConfig.szTitle))
+  self.pPanel:Label_SetText(self.txtTitle01, i18n.Parse(tbConfig.szLeftTopTitle))
+  self:UpdateAwardGridView()
+  self:OnRefreshUI()
+end
+
+function tbWnd:OnDelItem()
+  if not self.nSyncTimer then
+    self.nSyncTimer = Timer:Register(1, self.OnBuyResult, self, true, self.pMiYuanActInstance.tbConfig.nFlowerTemplateId)
+  end
+end
+
+function tbWnd:OnSyncItem(nSyncItemId)
+  local pItem = me.GetItemInBag(nSyncItemId)
+  if not pItem or pItem.dwTemplateId ~= self.pMiYuanActInstance.tbConfig.nFlowerTemplateId then
+    return
+  end
+  if not self.nSyncTimer then
+    self.nSyncTimer = Timer:Register(1, self.OnBuyResult, self, true, pItem.dwTemplateId)
+  end
+end
+
+function tbWnd:OnBuyResult(bSuccess, nItemId)
+  if self.nSyncTimer then
+    Timer:Close(self.nSyncTimer)
+    self.nSyncTimer = nil
+  end
+  if nItemId ~= self.pMiYuanActInstance.tbConfig.nFlowerTemplateId then
+    return
+  end
+  local nHasFlowerCount = me.GetItemCountInBags(self.pMiYuanActInstance.tbConfig.nFlowerTemplateId)
+  self.pPanel:Label_SetText(self.txtHaveCost, nHasFlowerCount)
+  return false
+end
+
+function tbWnd:OnRefreshUI()
+  local nCurScore, nHasFindCount, _ = self.pMiYuanActInstance:GetPlayerScoreInfo()
+  local nHasFlowerCount = me.GetItemCountInBags(self.pMiYuanActInstance.tbConfig.nFlowerTemplateId)
+  self.pPanel:Label_SetText(self.txtHaveCost, nHasFlowerCount)
+  self.pPanel:Label_SetText(self.txtNumber, i18n.EasyGet("{0}\230\172\161", nHasFindCount))
+  self.pPanel:Label_SetText(self.txtMyCurScoreTitle, i18n.EasyGet("\230\136\145\231\154\132\231\167\175\229\136\134"))
+  self.pPanel:Label_SetText(self.txtMyCurScore, nCurScore)
+  self.pPanel:SetActive(self.ServerScoreCell, false)
+  self.pPanel:SetActive(self.ServerScoreCell2, false)
+  self.pPanel:SetActive(self.txtServerScoreTitle, false)
+  self.pPanel:SetActive(self.txtServerScore, false)
+  self.pPanel:Label_SetText(self.txtCost1, self.pMiYuanActInstance.FindType[self.pMiYuanActInstance.FindTypeIndex.OnceFind].nConsumeCount)
+  self.pPanel:Label_SetText(self.txtCost10, self.pMiYuanActInstance.FindType[self.pMiYuanActInstance.FindTypeIndex.BatchFind].nConsumeCount)
+  self.pPanel:Label_SetText(self.txtDiscounts, i18n.GetDiscountText(self.pMiYuanActInstance.FindType[self.pMiYuanActInstance.FindTypeIndex.BatchFind].nConsumeCount / self.pMiYuanActInstance.FindType[self.pMiYuanActInstance.FindTypeIndex.BatchFind].nFindCount * 10))
+  self:UpdateTimeStr(Lib:IIF(self.pMiYuanActInstance.nEndTime - GetTime() > 0, self.pMiYuanActInstance.nEndTime - GetTime(), 0))
+end
+
+function tbWnd:UpdateTimeStr(nRemainSec)
+  if self.nRemainTimer then
+    Timer:Close(self.nRemainTimer)
+  end
+  self.nRemainSec = nRemainSec
+  
+  local function pSetTimeFunc()
+    self.nRemainSec = self.nRemainSec - 1
+    if self.nRemainSec <= 0 then
+      self:Close()
+      return false
+    else
+      self.pPanel:Label_SetText(self.txtTime, Lib:TimeDesc2(self.nRemainSec))
+      return true
+    end
+  end
+  
+  self.pPanel:Label_SetText(self.txtTime, Lib:TimeDesc2(self.nRemainSec))
+  self.nRemainTimer = Timer:Register(Env.GAME_FPS, pSetTimeFunc, self)
+end
+
+function tbWnd:UpdateAwardGridView()
+  if #self.tbAwardGridView.tbItemList <= 0 then
+    local tbAwards = self.pMiYuanActInstance:GetDisplayAwardList()
+    for nIndex, tbAward in ipairs(tbAwards) do
+      self.tbAwardGridView:SetItem(nIndex, tbAward, true, nil)
+      local szItemKey = self.tbAwardGridView:GetItemKey(nIndex)
+      self.pPanel:Label_SetText(szItemKey .. "/imgNameBg/txtItemName", i18n.Parse(self:GetAwardName(tbAward, false)))
+      self.pPanel:SetActive(szItemKey .. "/imgNameBg", true)
+    end
+  end
+end
+
+function tbWnd:OnEnterMap()
+  self:Close()
+end
+
+function tbWnd:GetAwardName(tbAward, bNeedCount)
+  local nAwardType = Player.AwardType[tbAward[1]]
+  local szName = ""
+  if 3 == Player.AwardTypeCountIndex[nAwardType] then
+    szName = Item:GetName(tbAward[2], me)
+  elseif nAwardType == Player.award_type_money then
+    szName = Currency:GetName(tbAward[1])
+  end
+  if Lib:IsEmptyStr(szName) then
+    return ""
+  end
+  if bNeedCount then
+    szName = string.format("%sx%s", szName, Player:GetAwardValue(tbAward))
+  end
+  return szName
+end

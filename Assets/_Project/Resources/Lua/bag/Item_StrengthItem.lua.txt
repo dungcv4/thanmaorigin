@@ -1,0 +1,156 @@
+Item.StrengthItem = Item.StrengthItem or {}
+local StrengthItem = Item.StrengthItem
+StrengthItem.tbStrengthItemShowCfg = Lib:LoadTabFileEx("Setting/Item/StrengthItemShow.tab", "dsddsdd", "ItemTemplateId", {
+  "ItemTemplateId",
+  "ServerSaveKey",
+  "SortId",
+  "bOpen",
+  "szTimeFrame",
+  "nNextItemTemplateId",
+  "nConsumeNum"
+})
+for _, tbInfo in pairs(StrengthItem.tbStrengthItemShowCfg) do
+  tbInfo.nPreTemplateId = tbInfo.nPreTemplateId or 0
+  if tbInfo.nNextItemTemplateId > 0 and StrengthItem.tbStrengthItemShowCfg[tbInfo.nNextItemTemplateId] then
+    StrengthItem.tbStrengthItemShowCfg[tbInfo.nNextItemTemplateId].nPreTemplateId = tbInfo.ItemTemplateId
+  end
+end
+StrengthItem.tbStrengthItemSource = Lib:EasyLoadTabFile("Setting/Item/StrengthItemSource.tab", {"nSortId", "nSourceId"})
+StrengthItem.tbStrengthItemDesc = {}
+local tbStrengthItemDesc = Lib:EasyLoadTabFile("Setting/Item/StrengthItemDesc.tab")
+for _, tbInfo in ipairs(tbStrengthItemDesc) do
+  StrengthItem.tbStrengthItemDesc[tbInfo.nTemplateId] = StrengthItem.tbStrengthItemDesc[tbInfo.nTemplateId] or {}
+  table.insert(StrengthItem.tbStrengthItemDesc[tbInfo.nTemplateId], tbInfo)
+end
+local nFirstTime, nSecondTime
+for _, tbList in pairs(StrengthItem.tbStrengthItemDesc) do
+  table.sort(tbList, function(tbFirst, tbSecond)
+    nFirstTime = Lib:IsEmptyStr(tbFirst.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbFirst.szTimeFrameStart)
+    nSecondTime = Lib:IsEmptyStr(tbSecond.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbSecond.szTimeFrameStart)
+    return nFirstTime > nSecondTime
+  end)
+end
+
+function StrengthItem:GetServerSaveKey(dwTemplateId)
+  if not self.tbStrengthItemShowCfg[dwTemplateId] then
+    return
+  end
+  return self.tbStrengthItemShowCfg[dwTemplateId].ServerSaveKey
+end
+
+function StrengthItem:GetIsOpen(dwTemplateId)
+  if not self.tbStrengthItemShowCfg[dwTemplateId] then
+    return
+  end
+  return self.tbStrengthItemShowCfg[dwTemplateId].bOpen
+end
+
+function StrengthItem:GetSortId(dwTemplateId)
+  if not self.tbStrengthItemShowCfg[dwTemplateId] then
+    return
+  end
+  return self.tbStrengthItemShowCfg[dwTemplateId].SortId
+end
+
+function StrengthItem:GetMaxUseCount(dwTemplateId)
+  if not self.tbStrengthItemShowCfg[dwTemplateId] then
+    return 0
+  end
+  local nMaxUseCount = KItem.GetItemExtParam(dwTemplateId, 1)
+  return nMaxUseCount
+end
+
+function StrengthItem:GetUseCount(pPlayer, dwTemplateId)
+  if not self.tbStrengthItemShowCfg[dwTemplateId] then
+    return 0
+  end
+  if not pPlayer then
+    return 0
+  end
+  local szServerSaveKey = self:GetServerSaveKey(dwTemplateId)
+  local nUseCount = pPlayer.GetUserValue(GetGroupKey(szServerSaveKey), 1)
+  return nUseCount
+end
+
+function StrengthItem:GetMaxExchangeCount(dwTemplateId)
+  if not self.tbStrengthItemShowCfg[dwTemplateId] then
+    return 0
+  end
+  local nMaxUseCount = KItem.GetItemExtParam(dwTemplateId, 4)
+  return nMaxUseCount
+end
+
+function StrengthItem:GetExchangeCount(pPlayer, dwTemplateId)
+  if not self.tbStrengthItemShowCfg[dwTemplateId] then
+    return 0
+  end
+  if not pPlayer then
+    return 0
+  end
+  local nExchangeCount = 0
+  local tbBagItem = pPlayer.GetItemListInBag(dwTemplateId, 200)
+  for index, pItem in ipairs(tbBagItem) do
+    nExchangeCount = nExchangeCount + pItem.nCount
+  end
+  local tbWarehouseItem = pPlayer.GetItemListInBag(dwTemplateId, 204)
+  for index, pItem in ipairs(tbWarehouseItem) do
+    nExchangeCount = nExchangeCount + pItem.nCount
+  end
+  nExchangeCount = nExchangeCount + self:GetUseCount(pPlayer, dwTemplateId)
+  return nExchangeCount
+end
+
+function StrengthItem:GetCurExchangeData(pPlayer, nExchangeItemTempateId)
+  local tbCfg = self.tbStrengthItemShowCfg[nExchangeItemTempateId]
+  if not tbCfg then
+    LogErr("StrengthItem:GetCurExchangeData fail cfg not exist", nExchangeItemTempateId)
+    return
+  end
+  local tbData = {
+    nTempateId = nExchangeItemTempateId,
+    nConsumeNum = tbCfg.nConsumeNum
+  }
+  local nMaxCount, nCurCount
+  while self.tbStrengthItemShowCfg[tbCfg.nNextItemTemplateId] do
+    nMaxCount = self:GetMaxExchangeCount(nExchangeItemTempateId)
+    nCurCount = self:GetExchangeCount(pPlayer, nExchangeItemTempateId)
+    if nMaxCount > nCurCount then
+      break
+    end
+    nExchangeItemTempateId = tbCfg.nNextItemTemplateId
+    tbCfg = self.tbStrengthItemShowCfg[nExchangeItemTempateId]
+    if not Lib:IsEmptyStr(tbCfg.szTimeFrame) and 0 == GetTimeFrameState(tbCfg.szTimeFrame) or 0 == tbCfg.bOpen then
+      break
+    end
+    tbData.nTempateId = nExchangeItemTempateId
+    tbData.nConsumeNum = tbCfg.nConsumeNum
+  end
+  return tbData
+end
+
+function StrengthItem:IsCurUnlock(pPlayer, nTemplateId)
+  if not self.tbStrengthItemShowCfg[nTemplateId] then
+    return true
+  end
+  local tbCfg = self.tbStrengthItemShowCfg[nTemplateId]
+  if not Lib:IsEmptyStr(tbCfg.szTimeFrame) and 0 == GetTimeFrameState(tbCfg.szTimeFrame) then
+    return false
+  end
+  if tbCfg.nPreTemplateId > 0 and self:GetExchangeCount(pPlayer, tbCfg.nPreTemplateId) < self:GetMaxExchangeCount(tbCfg.nPreTemplateId) then
+    return false
+  end
+  return true
+end
+
+function StrengthItem:GetDesc(nTemplateId)
+  if not self.tbStrengthItemDesc[nTemplateId] or not next(self.tbStrengthItemDesc[nTemplateId]) then
+    return ""
+  end
+  for _, tbInfo in ipairs(self.tbStrengthItemDesc[nTemplateId]) do
+    if (Lib:IsEmptyStr(tbInfo.szTimeFrameStart) or 1 == GetTimeFrameState(tbInfo.szTimeFrameStart)) and (Lib:IsEmptyStr(tbInfo.szTimeFrameEnd) or 0 == GetTimeFrameState(tbInfo.szTimeFrameEnd)) then
+      return i18n.Parse(tbInfo.szDesc)
+    end
+  end
+  LogErr("StrengthItem:GetDesc fail ", nTemplateId)
+  return ""
+end

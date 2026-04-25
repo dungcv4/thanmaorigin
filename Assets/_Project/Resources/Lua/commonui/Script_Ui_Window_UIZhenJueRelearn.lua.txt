@@ -1,0 +1,261 @@
+local tbWnd = Ui:CreateWindow("UIZhenJueRelearn")
+
+function tbWnd:NotifyEvents()
+  return {}
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  AttrTempNow = "node/imgBG/Content/Now/AttrList/ViewPort/Content/AttrTemp",
+  AttrTempNext = "node/imgBG/Content/Next/AttrList/ViewPort/Content/AttrTemp",
+  Empty = "node/imgBG/Content/Empty",
+  btnRelearn = "node/imgBG/Content/btnRelearn",
+  btnRelearnContinue = "node/imgBG/Content/btnRelearnContinue",
+  btnReplace = "node/imgBG/Content/btnReplace",
+  btnZhenJueGallery = "node/imgBG/Content/btnZhenJueGallery",
+  wndZhenJueGallery = "wndZhenJueGallery",
+  AttrTempLib = "wndZhenJueGallery/imgBg/GetAwards/AwardList/Viewport/Content/AttrTemp",
+  txtCost = "node/imgBG/Content/Cost/txtCost",
+  btnAdd = "node/imgBG/Content/Cost/btnAdd",
+  CostItemGrid = "node/imgBG/Content/Cost/UIItemGrid",
+  wndJumpTo = "wndJumpTo",
+  WayTemplate = "wndJumpTo/imgBG/List/Viewport/Content/Template"
+}
+tbWnd.tbControls = tbControls
+tbWnd.GETTING_WAY = {
+  {
+    szTitle = function()
+      return i18n.EasyGet("\230\145\134\230\145\138")
+    end,
+    szDesc = function()
+      return i18n.EasyGet("\231\148\177\231\142\169\229\174\182\229\156\168\230\145\134\230\145\138\228\184\173\229\135\186\229\148\174\231\154\132\231\137\169\229\147\129\229\134\133\232\142\183\229\143\150")
+    end,
+    func = function()
+      if MarketStallBase:OpenWindowByItemTempId(MarketStallBase.tbStallType.Gold, ZhenFa.nHuiXinDanId) then
+        Ui:CloseWindow("UIZhenJue")
+      end
+    end
+  },
+  {
+    szTitle = function()
+      return i18n.EasyGet("\230\145\152\230\152\159\230\165\188")
+    end,
+    szDesc = function()
+      return i18n.EasyGet("\229\143\130\228\184\142\230\145\152\230\152\159\230\165\188\232\142\183\229\190\151")
+    end
+  }
+}
+tbWnd.tbOnClick = {
+  btnAdd = function(self)
+    self.pPanel:SetActive(tbControls.wndJumpTo, true)
+  end,
+  btnClose = function(self)
+    if self.bHadReRandom then
+      local function fnOk()
+        self:Close()
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\189\147\229\137\141\229\173\166\228\185\160\231\187\147\230\158\156\230\156\170\230\155\191\230\141\162\239\188\140\229\133\179\233\151\173\231\149\140\233\157\162\229\144\142\229\176\134\228\184\162\229\164\177\239\188\140\230\152\175\229\144\166\231\161\174\229\174\154\229\133\179\233\151\173\239\188\159"), {
+        {fnOk},
+        {}
+      })
+    else
+      self:Close()
+    end
+  end,
+  btnRelearn = function(self)
+    ZhenFa:ZFReRandomZhenJueReqC()
+  end,
+  btnRelearnContinue = function(self)
+    local nLastTime = LocalData:GetRoleNumber("ZhenFa_ZhenJue", 0)
+    local bIsDiffDay = Lib:IsDiffDay(14400, nLastTime)
+    if not bIsDiffDay then
+      ZhenFa:ZFReRandomZhenJueReqC()
+    else
+      local function fnOk()
+        ZhenFa:ZFReRandomZhenJueReqC()
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\228\184\138\230\172\161\229\173\166\228\185\160\231\187\147\230\158\156\229\176\134\228\184\141\228\191\157\231\149\153\239\188\140\230\152\175\229\144\166\231\187\167\231\187\173\233\135\141\230\150\176\229\173\166\228\185\160\239\188\159"), {
+        {fnOk},
+        {}
+      }, nil, "ZFZhenJue")
+    end
+  end,
+  btnReplace = function(self)
+    ZhenFa:ZFReRandomSaveReqC()
+  end,
+  btnZhenJueGallery = function(self)
+    self.pPanel:SetActive(tbControls.wndZhenJueGallery, true)
+  end
+}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose(tbControls.wndZhenJueGallery)
+  self:SetClickEmptyToClose(tbControls.wndJumpTo)
+  self.tbAttrIdSVNow = Ui:NewScrollView(self, tbControls.AttrTempNow)
+  self.tbAttrIdSVNext = Ui:NewScrollView(self, tbControls.AttrTempNext)
+  self.tbAttrIdSVLib = Ui:NewScrollView(self, tbControls.AttrTempLib)
+  self.tbCostItemGrid = Ui:NewExistItemGrid(self, tbControls.CostItemGrid)
+  self.tbCostItemGrid:SetClickEnable(true)
+  self.tbWayScrollView = Ui:NewScrollView(self, tbControls.WayTemplate)
+end
+
+function tbWnd:OnOpen()
+  self.bHadReRandom = false
+  self.pPanel:SetActive(tbControls.Empty, true)
+  self.pPanel:SetActive(tbControls.btnRelearn, true)
+  self.pPanel:SetActive(tbControls.btnReplace, false)
+  self.pPanel:SetActive(tbControls.btnRelearnContinue, false)
+  self:UpAttrIdNowSV()
+  self.tbAttrIdSVNext:Reset()
+  self:UpAttrIdLibSV()
+  self:UpdateCost()
+  self:UpdateGettingWay()
+end
+
+function tbWnd:UpdateCost()
+  self.tbCostItemGrid:SetItemByTemplate(ZhenFa.nHuiXinDanId)
+  local nCurNum = me.GetItemCountByTypeInBag(ZhenFa.nHuiXinDanId)
+  self.pPanel:Label_SetText(tbControls.txtCost, string.format("%d/%d", nCurNum, ZhenFa.nHuiXinDanCostNum))
+  if nCurNum >= ZhenFa.nHuiXinDanCostNum then
+    self.pPanel:Label_SetColorByName(tbControls.txtCost, "Enough")
+  else
+    self.pPanel:Label_SetColorByName(tbControls.txtCost, "NotEnough")
+  end
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:UpAttrIdNowSV()
+  local nCurPutOnPos, _ = ZhenFa:GetZhenFaCurPutOnPos(me)
+  local tbZJAttrId = ZhenFa:GetZhenJueAttrIdList(me, nCurPutOnPos)
+  local tbShowZJId = ZhenFa:GetZhenJueAttrShowItemIdList(me, nCurPutOnPos)
+  self.tbAttrIdSVNow:Reset()
+  for i = 1, #tbZJAttrId do
+    if tbShowZJId[i] then
+      self.tbAttrIdSVNow:SetElement(i, function(tbElement, nIndex)
+        local pPanel = tbElement.pPanel
+        local szName = Item:GetName(tbShowZJId[nIndex], me)
+        pPanel:Label_SetText("txtName", szName)
+        local nLevel = ZhenFa:GetZhenJueHoleLevel(me, nIndex)
+        local tbAttrCur = ZhenFa.ZhenJueAttrInfo[tbZJAttrId[nIndex]][nLevel][1]
+        local szAttribMsg, szValue = FightSkill:GetMagicDescSplit(tbAttrCur[1], {
+          table.unpack(tbAttrCur, 2)
+        })
+        pPanel:Label_SetText("txtAttr", szAttribMsg)
+        pPanel:Label_SetText("txtLV", nLevel)
+        if ZhenFa.tbAttactZJCfg[tbZJAttrId[nIndex]] then
+          pPanel:Sprite_SetSprite("imgType", ZhenFa.szTypeAttact)
+        else
+          pPanel:Sprite_SetSprite("imgType", ZhenFa.szTypeDefance)
+        end
+        local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        itemGrid:SetItemByTemplate(tbShowZJId[nIndex])
+        itemGrid:SetLabelSuffixText("+" .. tostring(nLevel))
+      end)
+    end
+  end
+end
+
+function tbWnd:UpAttrIdNextSV(tbZJAttrId)
+  self.bHadReRandom = true
+  local tbShowZJId = {}
+  for nHole, nAttrId in ipairs(tbZJAttrId) do
+    local nLevel = ZhenFa:GetZhenJueHoleLevel(me, nHole)
+    local nItemId = ZhenFa.ZhenJueAttrInfo[nAttrId][nLevel][2]
+    tbShowZJId[nHole] = nItemId
+  end
+  self.tbAttrIdSVNext:Reset()
+  for i = 1, #tbZJAttrId do
+    if tbShowZJId[i] then
+      self.tbAttrIdSVNext:SetElement(i, function(tbElement, nIndex)
+        local pPanel = tbElement.pPanel
+        local szName = Item:GetName(tbShowZJId[nIndex], me)
+        pPanel:Label_SetText("txtName", szName)
+        local nLevel = ZhenFa:GetZhenJueHoleLevel(me, nIndex)
+        local tbAttrCur = ZhenFa.ZhenJueAttrInfo[tbZJAttrId[nIndex]][nLevel][1]
+        local szAttribMsg, szValue = FightSkill:GetMagicDescSplit(tbAttrCur[1], {
+          table.unpack(tbAttrCur, 2)
+        })
+        pPanel:Label_SetText("txtAttr", szAttribMsg)
+        pPanel:Label_SetText("txtLV", nLevel)
+        if ZhenFa.tbAttactZJCfg[tbZJAttrId[i]] then
+          pPanel:Sprite_SetSprite("imgType", ZhenFa.szTypeAttact)
+        else
+          pPanel:Sprite_SetSprite("imgType", ZhenFa.szTypeDefance)
+        end
+        local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        itemGrid:SetItemByTemplate(tbShowZJId[nIndex])
+        itemGrid:SetLabelSuffixText("+" .. tostring(nLevel))
+      end)
+    end
+  end
+  self.pPanel:SetActive(tbControls.Empty, false)
+  self.pPanel:SetActive(tbControls.btnRelearn, false)
+  self.pPanel:SetActive(tbControls.btnReplace, true)
+  self.pPanel:SetActive(tbControls.btnRelearnContinue, true)
+  self:UpdateCost()
+end
+
+function tbWnd:UpAttrIdLibSV()
+  local nCurPutOnPos, nCurPutOnSubPos = ZhenFa:GetZhenFaCurPutOnPos(me)
+  local tbCfg = ZhenFa.ZhenFaInfo[nCurPutOnPos][nCurPutOnSubPos]
+  local tbAttackZJLib = ZhenFa.ZhenJueLibrary[tbCfg[6]]
+  local tbDefenseZJLib = ZhenFa.ZhenJueLibrary[tbCfg[8]]
+  local tbZJAttrId = {}
+  Lib:MergeTable(tbZJAttrId, tbAttackZJLib)
+  Lib:MergeTable(tbZJAttrId, tbDefenseZJLib)
+  local tbShowZJId = {}
+  for nHole, nAttrId in ipairs(tbZJAttrId) do
+    local nItemId = ZhenFa.ZhenJueAttrInfo[nAttrId][1][2]
+    tbShowZJId[nHole] = nItemId
+  end
+  self.tbAttrIdSVLib:Reset()
+  for i = 1, #tbZJAttrId do
+    if tbShowZJId[i] then
+      self.tbAttrIdSVLib:SetElement(i, function(tbElement, nIndex)
+        local pPanel = tbElement.pPanel
+        local szName = Item:GetName(tbShowZJId[nIndex], me)
+        pPanel:Label_SetText("txtName", szName)
+        local nLevel = ZhenFa:GetZhenJueHoleLevel(me, nIndex)
+        local tbAttrCur = ZhenFa.ZhenJueAttrInfo[tbZJAttrId[nIndex]][nLevel][1]
+        local szAttribMsg, szValue = FightSkill:GetMagicDescSplit(tbAttrCur[1], {
+          table.unpack(tbAttrCur, 2)
+        })
+        pPanel:Label_SetText("txtAttr", szAttribMsg)
+        if ZhenFa.tbAttactZJCfg[tbZJAttrId[i]] then
+          pPanel:Sprite_SetSprite("imgType", ZhenFa.szTypeAttact)
+        else
+          pPanel:Sprite_SetSprite("imgType", ZhenFa.szTypeDefance)
+        end
+        local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        itemGrid:SetItemByTemplate(tbShowZJId[nIndex])
+      end)
+    end
+  end
+end
+
+function tbWnd:ReplaceRsp()
+  self:OnOpen()
+end
+
+function tbWnd:UpdateGettingWay()
+  self.tbWayScrollView:Clear()
+  for i, tbWayInfo in ipairs(self.GETTING_WAY) do
+    self.tbWayScrollView:SetElement(i, function(tbElement)
+      tbElement.pPanel:Label_SetText("txtName", tbWayInfo.szTitle())
+      tbElement.pPanel:Label_SetText("txtDesc", tbWayInfo.szDesc())
+      if tbWayInfo.func then
+        tbElement.pPanel:SetActive("imgArrow", true)
+        Ui:Button_BindEvent(tbElement.pPanel, "", function()
+          tbWayInfo.func()
+          self.pPanel:SetActive(tbControls.wndJumpTo, false)
+        end)
+      else
+        tbElement.pPanel:SetActive("imgArrow", false)
+      end
+    end)
+  end
+end

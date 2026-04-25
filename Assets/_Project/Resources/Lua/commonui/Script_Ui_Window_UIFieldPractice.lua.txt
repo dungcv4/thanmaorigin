@@ -1,0 +1,343 @@
+local tbWnd = Ui:CreateWindow("UIFieldPractice")
+local AFKMedicineSetting = AFK:GetSetting():GetMedicineSetting()
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_XIULIAN_UPDATE,
+      self.ShowPractice
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnItemChange
+    },
+    {
+      EventNotify.emNOTIFY_DEL_ITEM,
+      self.OnDelItem
+    },
+    {
+      EventNotify.emNOTIFY_XIULIAN_EXP_RATE_UPDATE,
+      self.ShowExpAddRate
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL,
+      self.OnLevelUp
+    },
+    {
+      EventNotify.emNOTIFY_XIULIAN_GOTO_RECOMMENDMAP_SUCC,
+      self.OnGotoRecommendSucc
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  Progress = "node/imgBG/Content/imgLeft/Progress",
+  txtStart = "node/imgBG/Content/imgLeft/Status/txtStart",
+  txtUnstart = "node/imgBG/Content/imgLeft/Status/txtUnstart",
+  imgTimeOpen = "node/imgBG/Content/imgLeft/imgTimeOpen",
+  imgTimeClose = "node/imgBG/Content/imgLeft/imgTimeClose",
+  imgTimeOpenEffect = "node/imgBG/Content/imgLeft/imgTimeOpenEffect",
+  txtBuffValue = "node/imgBG/Content/ReplySetting/item1/txtStatus/txtStatusValue",
+  txtTimeValue = "node/imgBG/Content/imgLeft/Message/txtRemainTime/txtTimeValue",
+  txtExpValue = "node/imgBG/Content/imgLeft/Message/txtRemainExp/txtExpValue",
+  btnStart = "node/imgBG/Content/imgLeft/Message/btnStart",
+  btnPause = "node/imgBG/Content/imgLeft/Message/btnPause",
+  RecommendMap = "node/imgBG/Content/imgLeft/Message/RecommendMap/RecommendMapList",
+  ItemJiu = "node/imgBG/Content/ReplySetting/item1/UIItemGrid",
+  ItemXiuLianDan = "node/imgBG/Content/ReplySetting/item2/UIItemGrid",
+  ItemQiFuLing = "node/imgBG/Content/ReplySetting/item3/UIItemGrid",
+  btnUseJiu = "node/imgBG/Content/ReplySetting/item1/btnUse",
+  btnUseXiuLianDan = "node/imgBG/Content/ReplySetting/item2/btnUse",
+  btnUseQiFuLing = "node/imgBG/Content/ReplySetting/item3/btnUse",
+  ToggleAutoUse = "node/imgBG/Content/ReplySetting/item1/ToggleAutoUse",
+  ToggleNotice = "node/imgBG/Content/ReplySetting/item1/ToggleNotice",
+  txtCanUseNum = "node/imgBG/Content/ReplySetting/item2/txtStatus/txtStatusValue",
+  txtLuckyLeftTime = "node/imgBG/Content/ReplySetting/item3/txtAvailableTime/txtAvailableTimeValue",
+  txtLuckyLeftCount = "node/imgBG/Content/ReplySetting/item3/txtCount/txtCountValue",
+  btnTeleport = "node/imgBG/Content/imgLeft/Message/btnTeleport",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  btnClose = "node/imgBG/btnClose",
+  wndJumpTo = "wndJumpTo",
+  MapTemplate = "wndJumpTo/imgBG/List/Viewport/Content/Template",
+  txtWindow = "wndJumpTo/imgBG/txtInfo"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("FieldPracticeHelp")
+  end,
+  btnStart = function(self)
+    Sound:PlaySound("OpenPractice", _)
+    self:BtnStartOnClick()
+  end,
+  btnPause = function(self)
+    self:BtnPauseOnClick()
+  end,
+  btnUseJiu = function(self)
+    Shop:OpenShopBuyWidDefault(FieldPractice.tbDef.nJiuItemId)
+  end,
+  btnUseXiuLianDan = function(self)
+    local tbXiuLianDanItem = me.GetItemListInBag("XiuLianDan")
+    if not next(tbXiuLianDanItem) then
+      Shop:OpenShopBuyWidDefault(FieldPractice.tbDef.nXiuLianDanID)
+      return
+    end
+    if Ui.bInZone then
+      RemoteServer.Zone_UseItem(tbXiuLianDanItem[1].dwId)
+    else
+      RemoteServer.UseItem(tbXiuLianDanItem[1].dwId)
+    end
+  end,
+  btnUseQiFuLing = function(self)
+    local tbQiFuLingItem = me.GetItemListInBag("QiFuLing")
+    if not next(tbQiFuLingItem) then
+      Shop:OpenShopBuyWidDefault(FieldPractice.tbDef.nQiFuLingId)
+      return
+    end
+    if Ui.bInZone then
+      RemoteServer.Zone_UseItem(tbQiFuLingItem[1].dwId)
+    else
+      RemoteServer.UseItem(tbQiFuLingItem[1].dwId)
+    end
+  end,
+  btnTeleport = function(self)
+    self:OnRecommendBtnClicked()
+  end
+}
+tbWnd.tbOnToggleClick = {
+  ToggleAutoUse = function(self, isOn)
+    AFKMedicineSetting.bOpenUseJiu = isOn
+    AFK.AFKSetting:SaveMedicineSetting()
+  end,
+  ToggleNotice = function(self, isOn)
+    AFKMedicineSetting.bOpenBuyJiuNotice = isOn
+    AFK.AFKSetting:SaveMedicineSetting()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.gridJiu = Ui:NewExistItemGrid(self, self.ItemJiu)
+  self.gridJiu:SetClickEnable(true)
+  self.gridXiuLianDan = Ui:NewExistItemGrid(self, self.ItemXiuLianDan)
+  self.gridXiuLianDan:SetClickEnable(true)
+  self.gridQiFuLing = Ui:NewExistItemGrid(self, self.ItemQiFuLing)
+  self.gridQiFuLing:SetClickEnable(true)
+  self:SetBtnTeleport()
+  self:SetClickEmptyCallback(self.wndJumpTo)
+  self.pMapListScorllView = Ui:NewScrollView(self, self.MapTemplate, function(_, nIndex, tbElement)
+    self:OnClickArrowBtn(tbElement.nMapId)
+  end, false, false)
+end
+
+function tbWnd:OnOpen()
+  self:OnLevelUp()
+  self:ShowPractice()
+  self:ShowExpAddRate()
+  self.pPanel:SetActive(self.ToggleAutoUse, true)
+  self.pPanel:SetActive(self.ToggleNotice, true)
+  self.pPanel:Toggle_SetChecked(self.ToggleAutoUse, AFKMedicineSetting.bOpenUseJiu)
+  self.pPanel:Toggle_SetChecked(self.ToggleNotice, AFKMedicineSetting.bOpenBuyJiuNotice)
+end
+
+function tbWnd:UpdateItemGrid()
+  local nItemNum = me.GetItemCountByTypeInBag(FieldPractice.tbDef.nJiuItemId)
+  self.gridJiu:SetItemByTemplate(FieldPractice.tbDef.nJiuItemId, nItemNum)
+  self.pPanel:Button_SetText(self.btnUseJiu, i18n.EasyGet("\232\180\173\228\185\176"), "Text")
+  nItemNum = me.GetItemCountByTypeInBag(FieldPractice.tbDef.nXiuLianDanID)
+  self.gridXiuLianDan:SetItemByTemplate(FieldPractice.tbDef.nXiuLianDanID, nItemNum)
+  self.pPanel:Button_SetText(self.btnUseXiuLianDan, nItemNum > 0 and i18n.EasyGet("\228\189\191\231\148\168") or i18n.EasyGet("\232\180\173\228\185\176"), "Text")
+  nItemNum = me.GetItemCountByTypeInBag(FieldPractice.tbDef.nQiFuLingId)
+  self.gridQiFuLing:SetItemByTemplate(FieldPractice.tbDef.nQiFuLingId, nItemNum)
+  self.pPanel:Button_SetText(self.btnUseQiFuLing, nItemNum > 0 and i18n.EasyGet("\228\189\191\231\148\168") or i18n.EasyGet("\232\180\173\228\185\176"), "Text")
+end
+
+function tbWnd:ShowPractice()
+  if not self.pPanel then
+    return
+  end
+  if not self.view.gameObject.activeSelf then
+    return
+  end
+  if not self.nUpdateTimer then
+    self.nUpdateTimer = Timer:Register(Env.GAME_FPS, self.UpdateTime, self)
+  end
+  if not self.nUpdateTimer2 then
+    self.nUpdateTimer2 = Timer:Register(Env.GAME_FPS, self.UpdateTime2, self)
+  end
+  self:UpdateItemGrid()
+  self:ShowPracticeInfo()
+end
+
+function tbWnd:ShowPracticeInfo()
+  self.pPanel:Label_SetText(self.txtCanUseNum, FieldPractice:GetXiuLianDanCounts(me))
+  self:UpdateTime()
+  self:UpdateTime2()
+end
+
+function tbWnd:UpdateTime()
+  local nLeftTime = FieldPractice:GetLeftTime(me)
+  self.pPanel:Label_SetText(self.txtTimeValue, Lib:TimeDesc3(nLeftTime))
+  local bPlayState = FieldPractice:IsPlayState(me)
+  local bOpen = nLeftTime > 0 and bPlayState
+  self.pPanel:Label_SetText(self.txtExpValue, nLeftTime > 0 and me.GetUserValue(FieldPractice.tbDef.nSaveGroupID, FieldPractice.tbDef.nSaveResidueExp) or 0)
+  self.pPanel:SetActive(self.txtUnstart, not bOpen)
+  self.pPanel:SetActive(self.txtStart, bOpen)
+  self.pPanel:SetActive(self.imgTimeOpen, bOpen)
+  self.pPanel:SetActive(self.imgTimeClose, not bOpen)
+  self.pPanel:SetActive(self.imgTimeOpenEffect, bOpen)
+  self.nUpdateTimer = bOpen and self.nUpdateTimer
+  if nLeftTime > 0 and not bPlayState then
+    self.pPanel:SetActive(self.btnStart, true)
+    self.pPanel:Button_SetEnable(self.btnStart, true)
+    self.pPanel:SetActive(self.btnPause, false)
+  elseif nLeftTime > 0 and bPlayState then
+    self.pPanel:SetActive(self.btnStart, false)
+    self.pPanel:Button_SetEnable(self.btnStart, false)
+    self.pPanel:SetActive(self.btnPause, true)
+  else
+    self.pPanel:SetActive(self.btnStart, true)
+    self.pPanel:Button_SetEnable(self.btnStart, false)
+    self.pPanel:SetActive(self.btnPause, false)
+  end
+  return bOpen
+end
+
+function tbWnd:UpdateTime2()
+  if not me then
+    return
+  end
+  local tbSkillState = me.GetNpc().GetSkillState(FightSkill.LuckyAttrBuffId.QIFULING_BUFFID)
+  local nLeftTime2 = 0
+  if tbSkillState then
+    nLeftTime2 = math.ceil((tbSkillState.nEndFrame - GetFrame()) / Env.GAME_FPS)
+    nLeftTime2 = nLeftTime2 > 0 and nLeftTime2 or 0
+  end
+  self.pPanel:Label_SetText(self.txtLuckyLeftTime, Lib:TimeDesc3(nLeftTime2))
+  local szUseCount = Item:GetClass("QiFuLing"):GetUseTxt(me)
+  self.pPanel:Label_SetText(self.txtLuckyLeftCount, szUseCount)
+  self.nUpdateTimer2 = nLeftTime2 > 0 and self.nUpdateTimer2
+  return nLeftTime2 > 0
+end
+
+function tbWnd:ShowExpAddRate()
+  self.pPanel:Label_SetText(self.txtBuffValue, string.format("%d%%", FieldPractice:GetExpQuotiety()))
+end
+
+function tbWnd:OnClose()
+  if self.nUpdateTimer then
+    Timer:Close(self.nUpdateTimer)
+    self.nUpdateTimer = nil
+  end
+  if self.nUpdateTimer2 then
+    Timer:Close(self.nUpdateTimer2)
+    self.nUpdateTimer2 = nil
+  end
+end
+
+function tbWnd:OnItemChange(dwItemId, bNewItem, nAddCount)
+  if 0 == nAddCount then
+    return
+  end
+  local pItem = me.GetItemInAllSpace(dwItemId)
+  if pItem then
+    local tbItemList = {
+      FieldPractice.tbDef.nJiuItemId,
+      FieldPractice.tbDef.nXiuLianDanID,
+      FieldPractice.tbDef.nQiFuLingId
+    }
+    local nTemplateId = pItem.dwTemplateId
+    for i = 1, #tbItemList do
+      if nTemplateId == tbItemList[i] then
+        self:ShowPractice()
+      end
+    end
+  end
+end
+
+function tbWnd:OnDelItem(dwItemId, dwTemplateId)
+  local tbItemList = {
+    FieldPractice.tbDef.nJiuItemId,
+    FieldPractice.tbDef.nXiuLianDanID,
+    FieldPractice.tbDef.nQiFuLingId
+  }
+  for i = 1, #tbItemList do
+    if dwTemplateId == tbItemList[i] then
+      self:ShowPractice()
+    end
+  end
+end
+
+function tbWnd:OnLevelUp()
+  self:InitMapListScorllView()
+  self.pPanel:Label_SetText(self.RecommendMap, FieldPractice:GetRecommendation(me.nTotalLevel))
+end
+
+function tbWnd:SetBtnTeleport()
+  self.pPanel:SetActive(self.btnTeleport, true)
+end
+
+function tbWnd:BtnStartOnClick()
+  local nLeftTime = FieldPractice:GetLeftTime(me)
+  if nLeftTime <= 0 then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\228\191\174\231\130\188\230\151\182\233\151\180\228\184\141\232\182\179"))
+    return
+  end
+  RemoteServer.PlayXiuLianTime()
+end
+
+function tbWnd:BtnPauseOnClick()
+  local bPlayState = FieldPractice:IsPlayState(me)
+  if not bPlayState then
+    me.CenterMsg(i18n.EasyGet("\229\176\154\230\156\170\229\188\128\229\144\175\228\191\174\231\130\188"))
+  end
+  RemoteServer.PauseXiuLianTime()
+end
+
+function tbWnd:OnGotoRecommendSucc()
+  self.pPanel:SetActive(self.wndJumpTo, false)
+  self:Close()
+end
+
+function tbWnd:OnRecommendBtnClicked()
+  self.pPanel:SetActive(self.wndJumpTo, true)
+  self:InitMapListScorllView()
+end
+
+function tbWnd:InitMapListScorllView()
+  self.pMapListScorllView:Clear()
+  self.pPanel:Label_SetText(self.txtWindow, i18n.EasyGet("\229\156\168\228\187\165\228\184\138\229\156\176\229\155\190\228\191\174\231\130\188\229\157\135\229\143\175\232\142\183\229\190\151\229\189\147\229\137\141\231\173\137\231\186\167\232\163\133\229\164\135\229\146\140\229\185\184\232\191\144\229\174\157\231\174\177"))
+  local tbMapList = FieldPractice:GetRecommendMapList(me.nTotalLevel)
+  local nIndex = 1
+  for i, nMapId in ipairs(tbMapList) do
+    self.pMapListScorllView:SetElement(nIndex, function(tbElement)
+      local tbMapSetting = Map:GetMapSetting(nMapId)
+      if tbMapSetting then
+        local szMapName = i18n.EasyGet("{0}{1}{2}", 1 == tbMapSetting.MapLevel and "" or self:GetRecommendMapName(Map:GetMapLevel(nMapId)), i18n.Parse(tbMapSetting.MapName), 2 == Map:GetForcePkMode(nMapId) and i18n.EasyGet("\239\188\136\228\186\137\229\164\186\239\188\137") or "")
+        tbElement.pPanel:Label_SetText("txtMapName", szMapName)
+        tbElement.nMapId = nMapId
+      end
+    end)
+    nIndex = nIndex + 1
+  end
+end
+
+function tbWnd:GetRecommendMapName(nLevel)
+  if nLevel < GameSetting.MAX_PLAYER_LEVEL then
+    return i18n.EasyGet("{0}\231\186\167\194\183", nLevel)
+  end
+  return i18n.EasyGet("\229\174\151\229\184\136{0}\194\183", nLevel - GameSetting.MAX_PLAYER_LEVEL)
+end
+
+function tbWnd:OnClickEmptyClose()
+  self.pPanel:SetActive(self.wndJumpTo, false)
+end
+
+function tbWnd:OnClickArrowBtn(nMapId)
+  if GlobalHangUp:IsGlobalHangUpMap(nMapId) then
+    FieldPractice:GoToMap(me, nMapId)
+  else
+    FieldPractice:FlyToNearbyNpc(nMapId)
+  end
+end

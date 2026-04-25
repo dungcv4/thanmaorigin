@@ -1,0 +1,155 @@
+local tbWnd = Ui:CreateWindow("UIMarketStallSellServer")
+local tbControls = {
+  btnClose = "imgBG/btnClose",
+  uiItemGrid = "imgBG/ItemInfo/UIItemGrid",
+  txtItemName = "imgBG/ItemInfo/txtGoodName",
+  txtItemNum = "imgBG/ItemInfo/txtGoodNum",
+  txtItemDetail = "imgBG/ItemInfo/panelDetail/txtDetail",
+  txtAvgPrice = "imgBG/ItemInfo/txtAveragePrice",
+  imgAvgMoney = "imgBG/ItemInfo/txtAveragePrice/imgMoney",
+  txtAvgPriceValue = "imgBG/ItemInfo/txtAveragePrice/txtAveragePriceValue",
+  txtPricePer = "imgBG/PriceSetting/txtOne/txtPricePer",
+  imgOneMoney = "imgBG/PriceSetting/txtOne/imgMoney",
+  uiPriceAddAndSubGroup = "imgBG/PriceSetting/txtOne/UIAddAndSubGroup",
+  uiNumAddAndSubGroup = "imgBG/PriceSetting/txtAmount/UIAddAndSubGroup",
+  imgAllMoney = "imgBG/PriceSetting/txtAll/imgMoney",
+  txtAllPrice = "imgBG/PriceSetting/txtAll/txtPrice",
+  btnSell = "imgBG/PriceSetting/btnSell"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnSell = function(self)
+    TreasureShop:SellReq(self.nItemId, self.nCurNum, self.nPrice)
+    self:Close()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_TREASURESHOP_SYNC_AVG_PRICE,
+      self.OnUpdateAvgPrice,
+      self
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.tbItemGrid = Ui:NewExistItemGrid(self, self.uiItemGrid)
+  self.tbItemGrid:SetClickEnable(true)
+  self.tbPriceAddAndSubGroup = Ui:NewExistAddAndSubGroup(self, self.uiPriceAddAndSubGroup)
+  self.tbPriceAddAndSubGroup:SetNumPadNotOpen()
+  self.tbPriceAddAndSubGroup:BindEvent(function(nValue)
+    self:OnUpdatePriceInput(nValue)
+  end, function()
+    self:OnAddPriceInput()
+  end, function()
+    self:OnSubPriceInput()
+  end)
+  self.tbNumAddAndSubGroup = Ui:NewExistAddAndSubGroup(self, self.uiNumAddAndSubGroup)
+  self.tbNumAddAndSubGroup:BindEvent(function(nValue)
+    return self:OnUpdateNumInput(nValue)
+  end)
+end
+
+function tbWnd:OnOpen(nItemId)
+  local pItem = me.GetItemInBag(nItemId)
+  if not pItem then
+    return 0
+  end
+  local nItemTid = pItem.dwTemplateId
+  local tbWareSetting = TreasureShop:GetWareSettingByItemTid(nItemTid)
+  if not tbWareSetting then
+    return 0
+  end
+  self.nItemId = nItemId
+  self.nItemTid = nItemTid
+  self.nStepPrice = tbWareSetting.nBasePrice
+  self.nPrice = self.nStepPrice
+  self.nMaxNum = pItem.nCount <= TreasureShop.CFG.ITEM_NUM_LIMIT and pItem.nCount or TreasureShop.CFG.ITEM_NUM_LIMIT
+  self.nCurNum = self.nMaxNum
+  self.tbItemGrid:SetItem(nItemId)
+  self.pPanel:Label_SetText(tbControls.txtItemName, Item:GetName(nItemTid, me))
+  self.pPanel:Label_SetText(tbControls.txtItemNum, i18n.EasyGet("\229\189\147\229\137\141\230\139\165\230\156\137\239\188\154{0}", pItem.nCount))
+  self.pPanel:Label_SetText(tbControls.txtItemDetail, Item:GetIntro(nItemTid))
+  self.pPanel:Sprite_SetSprite(tbControls.imgAvgMoney, Currency:GetIcon(tbWareSetting.szCurrency))
+  self.pPanel:Label_SetText(tbControls.txtAvgPriceValue, TreasureShop.tbAvgPriceList[tbWareSetting.nWareId] or 0)
+  self.pPanel:Label_SetText(tbControls.txtPricePer, "")
+  self.pPanel:Sprite_SetSprite(tbControls.imgOneMoney, Currency:GetIcon(tbWareSetting.szCurrency))
+  self.tbPriceAddAndSubGroup:SetNumRange(tbWareSetting.nLowerPrice, tbWareSetting.nUpperPrice)
+  self.tbPriceAddAndSubGroup:SetInputValue(self.nPrice)
+  self.tbNumAddAndSubGroup:SetNumRange(1, self.nMaxNum)
+  self.tbNumAddAndSubGroup:SetInputValue(self.nCurNum)
+  self.pPanel:Sprite_SetSprite(tbControls.imgAllMoney, Currency:GetIcon(tbWareSetting.szCurrency))
+  self.pPanel:Label_SetText(tbControls.txtAllPrice, self.nPrice * self.nCurNum)
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:OnUpdatePriceInput(nValue)
+  self.nPrice = nValue
+  self:ShowPriceTotal()
+  self:ShowPricePercent()
+end
+
+function tbWnd:OnAddPriceInput()
+  local tbWareSetting = TreasureShop:GetWareSettingByItemTid(self.nItemTid)
+  if self.nStepPrice >= tbWareSetting.nUpperPrice then
+    return
+  end
+  self.nStepPrice = self.nStepPrice + math.max(math.ceil(tbWareSetting.nBasePrice * tbWareSetting.nStepPercent / 100), 1)
+  self.nStepPrice = math.min(tbWareSetting.nUpperPrice, self.nStepPrice)
+  self.tbPriceAddAndSubGroup:SetInputValue(self.nStepPrice)
+  self:OnUpdatePriceInput(self.nStepPrice)
+end
+
+function tbWnd:OnSubPriceInput()
+  local tbWareSetting = TreasureShop:GetWareSettingByItemTid(self.nItemTid)
+  if self.nStepPrice <= tbWareSetting.nLowerPrice then
+    return
+  end
+  self.nStepPrice = self.nStepPrice - math.max(math.ceil(tbWareSetting.nBasePrice * tbWareSetting.nStepPercent / 100), 1)
+  self.nStepPrice = math.max(tbWareSetting.nLowerPrice, self.nStepPrice)
+  self.tbPriceAddAndSubGroup:SetInputValue(self.nStepPrice)
+  self:OnUpdatePriceInput(self.nStepPrice)
+end
+
+function tbWnd:OnUpdateNumInput(nValue)
+  local nResult = nValue
+  if nResult < 1 then
+    nResult = 1
+    me.CenterMsg(i18n.EasyGet("\229\175\132\229\148\174\230\149\176\233\135\143\228\184\141\232\131\189\229\134\141\229\176\145\228\186\134"))
+  end
+  if nResult > self.nMaxNum then
+    nResult = self.nMaxNum
+    me.CenterMsg(i18n.EasyGet("\229\183\178\232\190\190\229\136\176\231\137\169\229\147\129\229\175\132\229\148\174\230\149\176\233\135\143\228\184\138\233\153\144"))
+  end
+  self.nCurNum = nResult
+  self:ShowPriceTotal()
+  return nResult
+end
+
+function tbWnd:ShowPriceTotal()
+  self.pPanel:Label_SetText(tbControls.txtAllPrice, self.nPrice * self.nCurNum)
+end
+
+function tbWnd:ShowPricePercent()
+  local tbWareSetting = TreasureShop:GetWareSettingByItemTid(self.nItemTid)
+  if self.nPrice ~= tbWareSetting.nBasePrice then
+    local nDelta = self.nPrice - tbWareSetting.nBasePrice
+    local szSign = nDelta > 0 and "+" or "-"
+    local nVal = string.format("%d%%", math.ceil(100 * math.abs(nDelta) / tbWareSetting.nBasePrice))
+    self.pPanel:Label_SetText(tbControls.txtPricePer, i18n.EasyGet("\229\159\186\229\135\134\228\187\183{0}{1}", szSign, nVal))
+  else
+    self.pPanel:Label_SetText(tbControls.txtPricePer, "")
+  end
+end
+
+function tbWnd:OnUpdateAvgPrice()
+  local tbWareSetting = TreasureShop:GetWareSettingByItemTid(self.nItemTid)
+  self.pPanel:Label_SetText(tbControls.txtAvgPriceValue, TreasureShop.tbAvgPriceList[tbWareSetting.nWareId] or 0)
+end

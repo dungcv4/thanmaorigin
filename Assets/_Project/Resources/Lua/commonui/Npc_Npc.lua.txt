@@ -1,0 +1,846 @@
+Require("CommonScript/Npc/NpcDefine.lua")
+if not Npc.tbClassBase then
+  Npc.tbClassBase = {}
+end
+if not Npc.tbClass then
+  Npc.tbClass = {
+    default = Npc.tbClassBase,
+    [""] = Npc.tbClassBase
+  }
+end
+if not Npc.tbOnDialog then
+  Npc.tbOnDialog = {}
+end
+
+function Npc:Init()
+  Npc:LoadNpcFace()
+end
+
+function Npc:LoadNpcFace()
+  self.tbNpcFace = Lib:LoadTabFileEx("Setting/Npc/NpcFace.tab", "dss", "FaceId", {
+    "FaceId",
+    "Atlas",
+    "Sprite"
+  })
+  if not self.tbNpcFace then
+    Log("Load Npc Face Failed!!!!")
+    return
+  end
+end
+
+function Npc:GetFace(nFaceId)
+  local tbFace = self.tbNpcFace[nFaceId] or self.tbNpcFace[999]
+  if not tbFace then
+    return
+  end
+  return tbFace.Atlas, tbFace.Sprite
+end
+
+function Npc:CanProcessAI(pNpc)
+  return pNpc.bCanAI or 0
+end
+
+function Npc:DragPerson(pNpcA, pNpcB)
+  if not pNpcA or not pNpcB then
+    return
+  end
+  local pPlayerB = pNpcB.GetPlayer()
+  if not pPlayerB then
+    return
+  end
+  local nMapId, nPosX, nPosY = pNpcA.GetWorldPos()
+  pPlayerB.SwitchMap(nMapId, nPosX, nPosY)
+end
+
+function Npc:IsDead(nId)
+  local pNpc = KNpc.GetById(nId)
+  if not pNpc then
+    return true
+  end
+  local doing = pNpc.GetAction()
+  if doing == Npc.Doing.death or doing == Npc.Doing.revive then
+    return true
+  end
+  return false
+end
+
+function Npc:IsMe(pNpc)
+  if MODULE_GAMECLIENT and me and me.GetNpc() then
+    return pNpc.nId == me.GetNpc().nId
+  end
+end
+
+function Npc:IsAlone(pNpc)
+  if MODULE_GAMESERVER then
+    local pPlayer = pNpc.GetPlayer()
+    if nil ~= pPlayer and pPlayer.nState == Player.emPLAYER_STATE_ALONE then
+      return true
+    end
+  elseif 1 == IsAlone() then
+    return true
+  end
+  return false
+end
+
+function Npc:GetClass(szClassName, bNotCreate)
+  local tbClass = self.tbClass[szClassName]
+  if not tbClass and 1 ~= bNotCreate then
+    tbClass = Lib:NewClass(self.tbClassBase)
+    self.tbClass[szClassName] = tbClass
+  end
+  return tbClass
+end
+
+function Npc:OnCreateClient(szClassName, pNpc)
+  local tbClass = self.tbClass[szClassName]
+  if tbClass and tbClass.OnCreateClient then
+    tbClass:OnCreateClient(pNpc)
+  end
+end
+
+function Npc:OnLoadFinish(szClassName, pNpc)
+  if HanWuYiJi:IsInFubenMap(me) and pNpc.nKind == Npc.KIND.player then
+    if pNpc.dwTeamID == me.dwTeamID and 0 == me.dwTeamID and me.GetNpc().nId ~= pNpc.nId then
+      pNpc.SetName(i18n.EasyGet("\231\165\158\231\167\152\228\186\186"))
+    elseif pNpc.dwTeamID ~= me.dwTeamID then
+      pNpc.SetName(i18n.EasyGet("\231\165\158\231\167\152\228\186\186"))
+    end
+  end
+end
+
+function Npc:OnAddFuben(pNpc, tbNpcInfo)
+  if nil ~= pNpc then
+    local tbClass = self.tbClass[pNpc.szClass]
+    if tbClass and tbClass.OnAddFuben then
+      tbClass:OnAddFuben(pNpc, tbNpcInfo)
+    end
+  end
+end
+
+function Npc:OnAIUpdate(szClassName, pNpc)
+  local tbClass = self.tbClass[szClassName]
+  if nil ~= tbClass and nil ~= tbClass.OnAIUpdate then
+    tbClass:OnAIUpdate(pNpc)
+  end
+end
+
+function Npc:OnBossWeak(szClassName, pNpc)
+  local tbClass = self.tbClass[szClassName]
+  if nil ~= tbClass and nil ~= tbClass.OnBossWeak then
+    tbClass:OnBossWeak(pNpc)
+  end
+end
+
+function Npc:OnDelete(szClassName, pNpc)
+  local tbClass = self.tbClass[szClassName]
+  if nil ~= tbClass and nil ~= tbClass.OnDelete then
+    tbClass:OnDelete(pNpc)
+  end
+  Npc:RemoveAllTimer(pNpc)
+end
+
+function Npc:CallClassFunc(pNpc, szFunc, ...)
+  local tbClass = self.tbClass[pNpc.szClass]
+  if not tbClass then
+    return
+  end
+  if not tbClass[szFunc] then
+    return
+  end
+  local func = tbClass[szFunc]
+  if not func then
+    return
+  end
+  return func(tbClass, pNpc, ...)
+end
+
+function Npc:OnCreate(szClassName, szParam, pNpc)
+  local tbClass = self.tbClass[szClassName]
+  if not tbClass then
+    return
+  end
+  if tbClass.OnCreate then
+    GameSetting:SetGlobalObj(me, pNpc, it)
+    Lib:CallBack({
+      tbClass.OnCreate,
+      tbClass,
+      szParam
+    })
+    GameSetting:RestoreGlobalObj()
+  end
+end
+
+Npc.tbDialogTitle = {}
+
+local function AddOpt(tbDialogInfo, tbOpt)
+  if tbOpt then
+    table.insert(tbDialogInfo.OptList, tbOpt)
+    return true
+  end
+  return false
+end
+
+local function AddOptList(tbDialogInfo, tbOptList)
+  if tbOptList and #tbOptList > 0 then
+    Lib:MergeTable(tbDialogInfo.OptList, tbOptList)
+    return true
+  end
+  return false
+end
+
+function Npc:OnDialog(szClassName, szParam)
+  if not MODULE_GAMESERVER then
+    return self:ShowDefaultDialog(szClassName, szParam)
+  end
+  local nTemplateId = him.nTemplateId
+  local szDefaultText = him.szDefaultDialogInfo
+  local tbDialogInfo = {
+    Text = szDefaultText,
+    NpcTemplateId = nTemplateId,
+    OptList = {}
+  }
+  local bTaskFlag = self:AddTaskDialogOption(tbDialogInfo, nTemplateId)
+  local nSameTaskOptionIndex
+  if self:AddExtraDialogOption(tbDialogInfo, me, him) then
+    bTaskFlag = true
+  end
+  if bTaskFlag then
+    local szText = self.tbDialogTitle[him.szClass] or i18n.EasyGet("\229\133\182\229\174\131\228\186\139\230\131\133")
+    tbDialogInfo.OptList[#tbDialogInfo.OptList + 1] = {
+      Text = szText,
+      Type = "Script",
+      Callback = self.ShowDefaultDialog,
+      Param = {
+        self,
+        szClassName,
+        szParam,
+        bTaskFlag
+      }
+    }
+    Dialog:Show(tbDialogInfo, me, him, nSameTaskOptionIndex)
+  elseif not self:ShowDefaultDialog(szClassName, szParam) then
+    tbDialogInfo.OptList[#tbDialogInfo.OptList + 1] = {
+      Text = i18n.EasyGet("\229\133\182\229\174\131\228\186\139\230\131\133")
+    }
+    Dialog:Show(tbDialogInfo, me, him, nSameTaskOptionIndex)
+  end
+end
+
+function Npc:OpenNpcShop(nNpcTemplateId, nMapTemplateId, nNeedItemId)
+  me.CallClientScript("Ui:OpenWindow", "UINpcShop", nNpcTemplateId, nMapTemplateId, nNeedItemId)
+  return true
+end
+
+function Npc:AddTaskDialogOption(tbDialogInfo, nTemplateId)
+  local bTaskFlag = false
+  if AddOptList(tbDialogInfo, Task:GetDialogInfo(me, him)) then
+    bTaskFlag = true
+  end
+  if AddOpt(tbDialogInfo, YiJunTask:GetDialogInfo(me, him)) then
+    bTaskFlag = true
+  end
+  return bTaskFlag
+end
+
+function Npc:AddExtraDialogOption(tbDialogInfo, pPlayer, pNpc)
+  local tbList = self:GetExtraDialogList(pPlayer, pNpc)
+  local bExtra = false
+  for _, tbInfo in pairs(tbList) do
+    local tbParam = {
+      table.unpack(tbInfo, 4)
+    }
+    table.insert(tbParam, pNpc.nId)
+    table.insert(tbDialogInfo.OptList, {
+      Text = tbInfo[2],
+      Callback = tbInfo[3],
+      Param = tbParam
+    })
+    bExtra = true
+  end
+  return bExtra
+end
+
+function Npc:AddShopDialogOption(tbDialogInfo, nTemplateId, nMapTemplateId)
+  if Shop:IsExistShop(nTemplateId) then
+    local nNeedItemId = YiJunTask:QueryNeedItem(me)
+    AddOpt(tbDialogInfo, {
+      Text = i18n.Get(Shop.Terms.TradeOpt),
+      Type = "Script",
+      Callback = self.OpenNpcShop,
+      Param = {
+        self,
+        nTemplateId,
+        nMapTemplateId,
+        nNeedItemId
+      }
+    })
+  end
+end
+
+function Npc:AddHanWuYiJiShopDialogOption(tbDialogInfo, nTemplateId, nMapTemplateId)
+  if Shop:IsExistShop(nTemplateId) then
+    AddOpt(tbDialogInfo, {
+      Text = i18n.Get(Shop.Terms.TradeOpt),
+      Type = "Script",
+      Callback = self.OpenNpcShop,
+      Param = {
+        self,
+        nTemplateId,
+        nMapTemplateId,
+        nil
+      }
+    })
+  end
+end
+
+function Npc:ShowDefaultDialog(szClassName, szParam, bTaskFlag)
+  if not self.tbClass[szClassName] then
+    return
+  end
+  self.tbClass[szClassName]:OnDialog(szParam, bTaskFlag)
+  return true
+end
+
+function Npc:RegNpcOnDeath(pNpc, fnCallback, ...)
+  if pNpc.tbOnDeath then
+    Log("too many OnDeath registrer on npc:" .. pNpc.szName)
+    return
+  end
+  pNpc.tbOnDeath = {
+    fnCallback,
+    ...
+  }
+end
+
+function Npc:UnRegNpcOnDeath(pNpc)
+  pNpc.tbOnDeath = nil
+end
+
+function Npc:OnFindEnemy(pNpc, pTarget)
+  if not pNpc.fnOnFindEnemy then
+    return
+  end
+  Lib:CallBack({
+    pNpc.fnOnFindEnemy,
+    pNpc,
+    pTarget
+  })
+end
+
+function Npc:OnDeath(szClassName, szParam, pKiller)
+  local tbClass = self.tbClass[szClassName]
+  local funcCalcNpcDeath = tbClass and tbClass.CalcNpcDeath or Npc.CalcNpcDeath
+  if funcCalcNpcDeath then
+    local bOk, pMainNpc = Lib:CallBack({
+      funcCalcNpcDeath,
+      tbClass or Npc,
+      him,
+      pKiller
+    })
+    if pMainNpc then
+      pKiller = pMainNpc
+    end
+  end
+  local tbOnDeath = him.tbOnDeath
+  if tbOnDeath then
+    local tbCall = {
+      table.unpack(tbOnDeath)
+    }
+    local tbArg = {pKiller}
+    Lib:MergeTable(tbCall, tbArg)
+    local bOK, nRet = Lib:CallBack(tbCall)
+    if not bOK or 1 ~= nRet then
+      him.tbOnDeath = nil
+    end
+  end
+  if tbClass and tbClass.OnDeath then
+    tbClass:OnDeath(pKiller)
+  end
+  if MODULE_GAMESERVER and SERVER_RUNNING_MODE ~= SERVER_MODE.ZONE_SERVER then
+    Lib:CallBack({
+      YiJunTask.OnKillNpc,
+      YiJunTask,
+      him,
+      pKiller
+    })
+    Lib:CallBack({
+      GuanFuTongJi.OnKillNpc,
+      GuanFuTongJi,
+      him,
+      pKiller
+    })
+    Lib:CallBack({
+      Task.OnKillNpc,
+      Task,
+      him,
+      pKiller
+    })
+    Lib:CallBack({
+      Task.tbLogicFieldShareNpc.OnKillNpc,
+      Task.tbLogicFieldShareNpc,
+      him.nId,
+      pKiller
+    })
+  end
+end
+
+function Npc:OnDeathClient(szClassName, pNpc)
+  local tbClass = self.tbClass[szClassName]
+  if nil ~= tbClass and nil ~= tbClass.OnDeathClient then
+    tbClass:OnDeathClient(pNpc)
+  end
+end
+
+function Npc:OnEarlyDeath(szClassName, szParam, ...)
+  if MODULE_GAMESERVER then
+    return
+  end
+end
+
+function Npc:DropAiBuffer(szBufferParams, pNpc, nMapId, nPosX, nPosY)
+  local tbBufferParams = Lib:SplitStr(szBufferParams, "|")
+  if not tbBufferParams then
+    Log("[ERROR] Npc:DropAiBuffer error: szBufferParams not exist", szBufferParams)
+    return
+  end
+  local szBuffId, szRate, szDis, szAngle, szDelay = table.unpack(tbBufferParams)
+  if not szBuffId or not szRate then
+    Log("[ERROR] Npc:DropAiBuffer error: szBufferParams error, not exist buffId", szBufferParams)
+    return
+  end
+  local nBuffId = tonumber(szBuffId)
+  local nRate = tonumber(szRate)
+  local nDis = szDis and tonumber(szDis) or 0
+  local nAngle = szAngle and tonumber(szAngle) or 0
+  local nDelayFrame = szDelay and tonumber(szDelay)
+  if nDis > 0 then
+    local nRad = math.rad(nAngle)
+    local nDis = Lib:Map2Logic(nDis)
+    nPosX = nPosX + math.cos(nRad) * nDis
+    nPosY = nPosY + math.sin(nRad) * nDis
+  end
+  
+  local function OnTimerOut()
+    Item.Obj:CallBuffer(nBuffId, nRate, nMapId, nPosX, nPosY)
+  end
+  
+  if nDelayFrame and nDelayFrame > 0 then
+    Timer:Register(nDelayFrame, OnTimerOut)
+  else
+    OnTimerOut()
+  end
+end
+
+function Npc:CreateAiNpc(szNpcParams, pNpc, nMapId, nPosX, nPosY)
+  local tbNpcParams = Lib:SplitStr(szNpcParams, "|")
+  if not tbNpcParams then
+    Log("[ERROR] Npc:CreateAiNpc error: szNpcParams not exist", szNpcParams, pNpc.nTemplateId)
+    return
+  end
+  local szNpcTemplateId, szLevel, szSeries, szX, szY, szZ, szDir = table.unpack(tbNpcParams)
+  local nNpcTemplateId = szNpcTemplateId and tonumber(szNpcTemplateId)
+  if not nNpcTemplateId then
+    Log("[ERROR] AiEvent:CallNpc error: NpcTemplateId not exist ", szNpcParams, pNpc.nTemplateId)
+    return
+  end
+  local nLevel = szLevel and tonumber(szLevel) or -1
+  local nSeries = szSeries and tonumber(szSeries) or 0
+  local nX = szX and tonumber(szX) or nPosX
+  local nY = szY and tonumber(szY) or nPosY
+  local nDir = szDir and tonumber(szDir) or 0
+  if nLevel < 0 then
+    nLevel = pNpc.nLevel
+  end
+  return KNpc.Add(nNpcTemplateId, nLevel, nSeries, nMapId, nX, nY, 0, 0, nDir)
+end
+
+function Npc:CreateAiRandNpc(szNpcParams, pNpc, nMapId, nPosX, nPosY, nDir)
+  local tbNpcParams = Lib:SplitStr(szNpcParams, "|")
+  if not tbNpcParams then
+    Log("[ERROR] Npc:CreateAiNpc error: szNpcParams not exist", szNpcParams, pNpc.nTemplateId)
+    return
+  end
+  local szNpcTemplateId, szLevel, szSeries, szDis, szAngle, szDelay, szDir = table.unpack(tbNpcParams)
+  local nNpcTemplateId = szNpcTemplateId and tonumber(szNpcTemplateId)
+  if not nNpcTemplateId then
+    Log("[ERROR] AiEvent:CallNpc error: NpcTemplateId not exist ", szNpcParams, pNpc.nTemplateId)
+    return
+  end
+  local nLevel = szLevel and tonumber(szLevel) or -1
+  local nSeries = szSeries and tonumber(szSeries) or 0
+  local nDis = szDis and tonumber(szDis) or 0
+  local nAngle = szAngle and tonumber(szAngle) or 0
+  local nDir = szDir and tonumber(szDir) or nDir
+  local nDelayFrame = szDelay and tonumber(szDelay)
+  if nDis > 0 then
+    local nRad = math.rad(nAngle + nDir / Env.LOGIC_MAX_DIR * 360)
+    local nDis = Lib:Map2Logic(nDis)
+    nPosX = nPosX + math.cos(nRad) * nDis
+    nPosY = nPosY + math.sin(nRad) * nDis
+  end
+  if nLevel < 0 then
+    nLevel = pNpc.nLevel
+  end
+  
+  local function OnTimerOut()
+    KNpc.Add(nNpcTemplateId, nLevel, nSeries, nMapId, nPosX, nPosY, 0, 0, nDir)
+  end
+  
+  if nDelayFrame and nDelayFrame > 0 then
+    Timer:Register(nDelayFrame, OnTimerOut)
+  else
+    OnTimerOut()
+  end
+end
+
+function Npc:AddAiBuff(szBuffParam, pNpc)
+  local tbStrs = Lib:SplitStr(szBuffParam, "|")
+  local nBuffId = tonumber(tbStrs[1])
+  local nTimeFrame = tonumber(tbStrs[2] or -1)
+  pNpc.AddSkillState(nBuffId, 1, 0, nTimeFrame)
+end
+
+function Npc:RemoveAiBuff(szBuffParam, pNpc)
+  local nBuffId = tonumber(szBuffParam)
+  pNpc.RemoveSkillState(nBuffId)
+end
+
+local tbAiEvent = {
+  NpcShowDialog = function(pNpc, szParam)
+    pNpc.BubbleTalk(szParam, "5")
+  end,
+  BlackMsg = function(pNpc, szParam)
+    me.SendBlackBoardMsg(szParam)
+  end,
+  DropBuffer = function(pNpc, szParam)
+    local nMapId, nX, nY = pNpc.GetWorldPos()
+    Item.Obj:DropBuffer(nMapId, nX, nY, szParam)
+  end,
+  CallBuffer = function(pNpc, szParam)
+    local tbStrs = Lib:SplitStr(szParam, ";")
+    if not tbStrs then
+      Log("[ERROR] AiEvent:CallBuffer Param error: szParam is ", szParam, pNpc.nTemplateId)
+      return
+    end
+    local nMapId, nX, nY = pNpc.GetWorldPos()
+    for _, v in pairs(tbStrs) do
+      Npc:DropAiBuffer(v, pNpc, nMapId, nX, nY)
+    end
+  end,
+  FleeRate = function(pNpc, szParam)
+    pNpc.AI_SetFleeByNear(tonumber(szParam))
+  end,
+  SetFightMode = function(pNpc, szParam)
+    local nMode = tonumber(szParam)
+    if nMode and nMode >= Npc.FIGHT_MODE.emFightMode_None and nMode <= Npc.FIGHT_MODE.emFightMode_Death then
+      pNpc.nFightMode = nMode
+    else
+      Log("[ERROR] AiEvent:SetFightMode Param error: Mode is ", nMode, pNpc.nTemplateId)
+    end
+  end,
+  CallNpc = function(pNpc, szParam)
+    local tbStrs = Lib:SplitStr(szParam, ";")
+    if not tbStrs then
+      Log("[ERROR] AiEvent:CallNpc Param error: szParam is ", szParam, pNpc.nTemplateId)
+      return
+    end
+    local nMapId, nPosX, nPosY = pNpc.GetWorldPos()
+    for _, v in pairs(tbStrs) do
+      if "" ~= v then
+        Npc:CreateAiNpc(v, pNpc, nMapId, nPosX, nPosY)
+      end
+    end
+  end,
+  CallRandNpc = function(pNpc, szParam)
+    local tbStrs = Lib:SplitStr(szParam, ";")
+    if not tbStrs then
+      Log("[ERROR] AiEvent:CallRandNpc Param error: szParam is ", szParam, pNpc.nTemplateId)
+      return
+    end
+    local nMapId, nPosX, nPosY = pNpc.GetWorldPos()
+    local nDir = pNpc.GetDir()
+    for _, v in pairs(tbStrs) do
+      if "" ~= v then
+        Npc:CreateAiRandNpc(v, pNpc, nMapId, nPosX, nPosY, nDir)
+      end
+    end
+  end,
+  AddBuff = function(pNpc, szParam)
+    local tbStrs = Lib:SplitStr(szParam, ";")
+    if not tbStrs then
+      Log("[ERROR] AiEvent:AddBuff Param error: szParam is ", szParam, pNpc.nTemplateId)
+      return
+    end
+    for _, v in pairs(tbStrs) do
+      Npc:AddAiBuff(v, pNpc)
+    end
+  end,
+  RemoveBuff = function(pNpc, szParam)
+    local tbStrs = Lib:SplitStr(szParam, ";")
+    if not tbStrs then
+      Log("[ERROR] AiEvent:RemoveBuff Param error: szParam is ", szParam, pNpc.nTemplateId)
+      return
+    end
+    for _, v in pairs(tbStrs) do
+      Npc:RemoveAiBuff(v, pNpc)
+    end
+  end
+}
+
+function Npc:OnAiEvent(szClassName, szEvent, szParam)
+  if tbAiEvent[szEvent] then
+    tbAiEvent[szEvent](him, szParam)
+  end
+end
+
+function Npc:OnAIPathArrive(pNpc)
+  local tbOnArrive = pNpc.tbOnArrive
+  GameSetting:SetGlobalObj(me, pNpc, it)
+  if tbOnArrive then
+    Lib:CallBack(tbOnArrive)
+  end
+  GameSetting:RestoreGlobalObj()
+end
+
+function Npc:RegisterNpcHpPercent(pNpc, nPercent, fnCallBack, ...)
+  pNpc.tbHpChangeEvent = pNpc.tbHpChangeEvent or {}
+  local tbHpChangeEvent = pNpc.tbHpChangeEvent
+  local nId = tbHpChangeEvent.nCurId or 1
+  tbHpChangeEvent.nCurId = nId + 1
+  tbHpChangeEvent.tbPercentEvent = tbHpChangeEvent.tbPercentEvent or {}
+  local nIdx = 1
+  for i, tbInfo in ipairs(tbHpChangeEvent.tbPercentEvent) do
+    if nPercent > tbInfo.nPercent then
+      break
+    end
+    nIdx = i + 1
+  end
+  table.insert(tbHpChangeEvent.tbPercentEvent, nIdx, {
+    nId = nId,
+    nPercent = nPercent,
+    tbCallBack = {
+      fnCallBack,
+      ...
+    }
+  })
+  pNpc.SetNotifyHpInfo(1)
+  return nId
+end
+
+function Npc:RegisterNpcHpChange(pNpc, fnCallBack)
+  pNpc.tbHpChangeEvent = pNpc.tbHpChangeEvent or {}
+  local tbHpChangeEvent = pNpc.tbHpChangeEvent
+  local nId = tbHpChangeEvent.nCurId or 1
+  tbHpChangeEvent.nCurId = nId + 1
+  tbHpChangeEvent.tbEvent = tbHpChangeEvent.tbEvent or {}
+  pNpc.SetNotifyHpInfo(1)
+  table.insert(tbHpChangeEvent.tbEvent, {fnCallBack = fnCallBack, nId = nId})
+  return nId
+end
+
+function Npc:UnRegisterNpcHpEvent(nNpcId, nId)
+  local pNpc = KNpc.GetById(nNpcId)
+  if not pNpc then
+    return
+  end
+  local tbEvent = (pNpc.tbHpChangeEvent or {}).tbEvent or {}
+  local tbPercentEvent = (pNpc.tbHpChangeEvent or {}).tbPercentEvent or {}
+  for nIdx, tbInfo in pairs(tbEvent) do
+    if tbInfo.nId == nId then
+      table.remove(tbEvent, nIdx)
+      break
+    end
+  end
+  for nIdx, tbInfo in pairs(tbPercentEvent) do
+    if tbInfo.nId == nId then
+      table.remove(tbPercentEvent, nIdx)
+      break
+    end
+  end
+  if 0 == #tbEvent and 0 == #tbPercentEvent then
+    pNpc.SetNotifyHpInfo(0)
+  end
+end
+
+function Npc:OnNpcHpChange(pNpc, nOldHp, nNewHp, nMaxHp)
+  local tbEvent = (pNpc.tbHpChangeEvent or {}).tbEvent or {}
+  local tbPercentEvent = (pNpc.tbHpChangeEvent or {}).tbPercentEvent or {}
+  GameSetting:SetGlobalObj(me, pNpc, it)
+  local nCurPercent = math.ceil(100 * nNewHp / nMaxHp)
+  local tbnIdxToRemove = {}
+  for nIdx, tbInfo in ipairs(tbPercentEvent or {}) do
+    if nCurPercent > tbInfo.nPercent then
+      break
+    end
+    table.insert(tbInfo.tbCallBack, tbInfo.nPercent)
+    table.insert(tbInfo.tbCallBack, nCurPercent)
+    Lib:CallBack(tbInfo.tbCallBack)
+    table.insert(tbnIdxToRemove, 1, nIdx)
+  end
+  for _, nIdx in ipairs(tbnIdxToRemove) do
+    table.remove(tbPercentEvent, nIdx)
+  end
+  for _, tbInfo in pairs(tbEvent) do
+    Lib:CallBack({
+      tbInfo.fnCallBack,
+      nOldHp,
+      nNewHp,
+      nMaxHp
+    })
+  end
+  GameSetting:RestoreGlobalObj()
+end
+
+function Npc:OnTimer(tbLisenter, func)
+  local bOK, bContinue = func()
+  if not bContinue then
+    local npcDelay = KNpc.GetById(tbLisenter.nNpcId)
+    if npcDelay then
+      self:RemoveTimer(npcDelay, tbLisenter.nRegisterId)
+    end
+  end
+  return bOK, bContinue
+end
+
+function Npc:AddTimer(pNpc, period, func)
+  if not pNpc.TimerComs then
+    pNpc.TimerComs = {}
+  end
+  local lisenter = {}
+  lisenter.nNpcId = pNpc.nId
+  lisenter.nRegisterId = Timer:Register(period, self.OnTimer, self, lisenter, func)
+  pNpc.TimerComs[lisenter.nRegisterId] = lisenter.nRegisterId
+end
+
+function Npc:RemoveTimer(pNpc, nTimer)
+  if not pNpc.TimerComs then
+    return
+  end
+  pNpc.TimerComs[nTimer] = nil
+  Timer:Close(nTimer)
+end
+
+function Npc:RemoveAllTimer(pNpc)
+  if not pNpc.TimerComs then
+    return
+  end
+  for k, v in pairs(pNpc.TimerComs) do
+    Timer:Close(v)
+  end
+  pNpc.TimerComs = nil
+end
+
+function Npc:SetSkillExtParam(pNpc, tbParam)
+  pNpc.tbSkillParam = tbParam
+end
+
+function Npc:GetSkillExtParam(pNpc)
+  return pNpc.tbSkillParam
+end
+
+function Npc:OnNpcDying(szClassName, pNpc)
+  local tbClass = self.tbClass[szClassName]
+  if not tbClass then
+    return
+  end
+  if not tbClass.OnNpcDying then
+    return
+  end
+  GameSetting:SetGlobalObj(me, pNpc, it)
+  tbClass:OnNpcDying(pNpc)
+  GameSetting:RestoreGlobalObj()
+end
+
+function Npc:GetNpcClassName(nNpcId)
+  local className = ""
+  local pNpc = KNpc.GetById(nNpcId)
+  if pNpc then
+    className = pNpc.szClass
+  end
+  return className
+end
+
+function Npc:GetNpcLevel(nNpcId)
+  local nLevel = 0
+  local pNpc = KNpc.GetById(nNpcId)
+  if pNpc then
+    nLevel = pNpc.nLevel
+  end
+  return nLevel
+end
+
+function Npc:GetNpcZongShiLevel(nNpcId)
+  local nZongShiLevel = 0
+  local pNpc = KNpc.GetById(nNpcId)
+  if pNpc then
+    nZongShiLevel = pNpc.nZongShiLevel
+  end
+  return nZongShiLevel
+end
+
+function Npc:GetNpcZongShiName(nNpcId)
+  local nZongShiLevel = self:GetNpcZongShiLevel(nNpcId)
+  return i18n.EasyGet("\229\174\151\229\184\136{0}", nZongShiLevel)
+end
+
+function Npc:GetNameByTemplateId(nNpcTemplateId)
+  return i18n.Parse(KNpc.GetNameByTemplateId(nNpcTemplateId))
+end
+
+function Npc:GetNpcFaction(nNpcId)
+  local nFaction = 0
+  local pNpc = KNpc.GetById(nNpcId)
+  if pNpc then
+    nFaction = pNpc.nFaction
+  end
+  return nFaction
+end
+
+function Npc:GetNpcFactionName(nNpcId)
+  local nFaction = 0
+  local pNpc = KNpc.GetById(nNpcId)
+  if pNpc then
+    nFaction = pNpc.nFaction
+  end
+  return Faction:GetName(nFaction)
+end
+
+function Npc:IsOutOfCircle(nNpcId, nRadius, nCenterX, nCenterY)
+  if not nNpcId or nNpcId <= 0 then
+    return true
+  end
+  local pNpc = KNpc.GetById(nNpcId)
+  if not pNpc then
+    return true
+  end
+  local doing = pNpc.GetAction()
+  if doing == Npc.Doing.death or doing == Npc.Doing.revive then
+    return true
+  end
+  if not nRadius or nRadius <= 0 then
+    return true
+  end
+  local _, nNpcX, nNpcY = pNpc.GetWorldPos()
+  if not (nNpcX and not (nNpcX < 0) and nNpcY) or nNpcY < 0 then
+    return true
+  end
+  local _, nMeX, nMeY = me.GetWorldPos()
+  nCenterX = nCenterX or nMeX
+  nCenterY = nCenterY or nMeY
+  return nRadius < Lib:GetDistance(nNpcX, nNpcY, nCenterX, nCenterY)
+end
+
+function Npc:GetNpcPos(nNpcTemplateId, nMapTemplateId, bRandom)
+  local tbMapNpcInfo = Map:GetMapNpcInfoByNpcTemplate(nMapTemplateId, nNpcTemplateId)
+  if not tbMapNpcInfo then
+    return
+  end
+  local tbNpcInfo = tbMapNpcInfo[1]
+  if bRandom and #tbMapNpcInfo > 1 then
+    tbNpcInfo = tbMapNpcInfo[MathRandom(#tbMapNpcInfo)]
+  end
+  tbNpcInfo.WalkNearLength = GetNpcDialogDistance(nNpcTemplateId)
+  return tbNpcInfo.XPos, tbNpcInfo.YPos, tbNpcInfo.WalkNearLength
+end
+
+Npc:Init()

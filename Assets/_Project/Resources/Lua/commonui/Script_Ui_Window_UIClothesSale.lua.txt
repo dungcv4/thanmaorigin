@@ -1,0 +1,107 @@
+local tbWnd = Ui:CreateWindow("UIClothesSale")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  btnSale01 = "node/imgBG/btnSale01",
+  btnSale02 = "node/imgBG/btnSale02",
+  Template = "node/imgBG/Content/Scroll View/Viewport/Content/Template",
+  Content = "node/imgBG/Content",
+  txtEmpty = "node/imgBG/txtEmpty"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("FashionCoupon")
+  end
+}
+tbWnd.tbButtonIndex = {General = 1, Exclusive = 2}
+tbWnd.nTenMinute = 600
+
+function tbWnd:OnCreate()
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.Template)
+  self.tbButtonGroup = Ui:NewButtonGroup(self, {
+    [self.tbButtonIndex.General] = tbControls.btnSale01,
+    [self.tbButtonIndex.Exclusive] = tbControls.btnSale02
+  }, true, function(self, nIndex)
+    self:RefreshScrollView(nIndex)
+  end)
+end
+
+function tbWnd:OnOpen()
+  self:InitCouponsList()
+  self.tbButtonGroup:Select(self.tbButtonIndex.General)
+end
+
+function tbWnd:OnClose()
+  self.tbScrollView:Clear()
+end
+
+function tbWnd:InitCouponsList()
+  local tbGeneralItems = {}
+  local tbExclusiveItems = {}
+  local tbAllCouponItem = FashionCoupon:GetAllCouponInBag(me)
+  for _, tbItem in ipairs(tbAllCouponItem) do
+    local tbCoupon = FashionCoupon:GetCouponSetting(tbItem.dwTemplateId)
+    if tbCoupon then
+      if tbCoupon.nLimitSuitUse == FashionCoupon.emFashion.NoLimit then
+        for i = 1, tbItem.nCount do
+          table.insert(tbGeneralItems, tbItem)
+        end
+      else
+        for i = 1, tbItem.nCount do
+          table.insert(tbExclusiveItems, tbItem)
+        end
+      end
+    end
+  end
+  self.tbCouponItems = {
+    [self.tbButtonIndex.General] = tbGeneralItems,
+    [self.tbButtonIndex.Exclusive] = tbExclusiveItems
+  }
+end
+
+function tbWnd:RefreshScrollView(nSelectBtnIndex)
+  local tbCouponItems = self.tbCouponItems[nSelectBtnIndex]
+  if not tbCouponItems or Lib:IsEmptyTB(tbCouponItems) then
+    self.pPanel:SetActive(tbControls.txtEmpty, true)
+    self.pPanel:SetActive(tbControls.Content, false)
+    return
+  else
+    self.pPanel:SetActive(tbControls.txtEmpty, false)
+    self.pPanel:SetActive(tbControls.Content, true)
+  end
+  self.tbScrollView:Clear()
+  for nIndex, tbItem in ipairs(tbCouponItems) do
+    self.tbScrollView:SetElement(nIndex, function(tbElement)
+      local tbCoupon = FashionCoupon:GetCouponSetting(tbItem.dwTemplateId)
+      if not tbCoupon then
+        LogErr("UIClosetSale:RefreshScrollView error. GetCouponSetting is nil by TemplateId:", tbItem.dwTemplateId)
+        return
+      end
+      tbElement.pPanel:Label_SetText("txtInfo", i18n.Parse(tbItem.szName))
+      tbElement.pPanel:Label_SetText("txtTitle", i18n.EasyGet("{0}\230\138\152", tbCoupon.nDiscount))
+      local bHas, nGenTime, nTimeOut = Item:GetTimeOut(tbItem)
+      if bHas then
+        local bIsTimeOut = Item:CheckIsTimeOut(tbItem)
+        if bIsTimeOut then
+          tbElement.pPanel:Label_SetText("txtTime", i18n.EasyGet("\229\183\178\229\164\177\230\149\136"))
+        else
+          nTimeOut = nTimeOut - GetTime()
+          local szTimeOut = Lib:TimeDesc2(nTimeOut)
+          if nTimeOut < self.nTenMinute then
+            szTimeOut = string.format("<color=#b60000>%s</color>", szTimeOut)
+          else
+            szTimeOut = string.format("<color=#4D4034>%s</color>", szTimeOut)
+          end
+          tbElement.pPanel:Label_SetText("txtTime", i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154{0}", szTimeOut))
+        end
+        tbElement.pPanel:SetActive("txtTime", true)
+      else
+        tbElement.pPanel:SetActive("txtTime", false)
+      end
+    end)
+  end
+end

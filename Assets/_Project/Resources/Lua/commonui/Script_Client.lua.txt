@@ -1,0 +1,364 @@
+Client.nServerMaxLevel = 0
+Client.nServerMaxTotalLevel = 0
+Client.UIModule = luanet.import_type("UIModule")
+Client.UpdateModule = luanet.import_type("UpdateModule")
+Client.InputModule = luanet.import_type("InputModule")
+Client.VoiceModule = luanet.import_type("VoiceModule")
+Client.TimerModule = luanet.import_type("TimerModule")
+Client.ResourceModule = luanet.import_type("ResourceModule")
+Client.AssetResourceModule = luanet.import_type("AssetResourceModule")
+Client.CppModule = luanet.import_type("CppModule")
+Client.QualityModule = luanet.import_type("QualityModule")
+Client.RepresentModule = luanet.import_type("RepresentModule")
+Client.RepresentEvent = luanet.import_type("RepresentEvent")
+Client.RepresentSetting = luanet.import_type("RepresentSetting")
+Client.SceneModule = luanet.import_type("SceneModule")
+Client.NavigationModule = luanet.import_type("NavigationModule")
+Client.AudioModule = luanet.import_type("AudioModule")
+Client.NpcManager = luanet.import_type("NpcManager")
+Client.ProfileModule = luanet.import_type("ProfileModule")
+Client.ChannelModule = luanet.import_type("ChannelModule")
+Client.HttpModule = luanet.import_type("HttpModule")
+Client.DlcModule = luanet.import_type("DlcModule")
+Client.EffectManager = luanet.import_type("EffectManager")
+Client.File = CS.System.IO.File
+Client.nServerTimeZoneSec = 0
+
+function Client:CallClientScriptWhithPlayer(szFunc, ...)
+  local bRet = pcall(me.CallClientScript, szFunc, me, ...)
+  if not bRet then
+    Log("CallClientScriptWhithPlayer ERR !!", szFunc, ...)
+  end
+end
+
+function Client:OnStartup()
+  LocalData:PathInit()
+  Sdk:SetReferenceResolution(1280, 900)
+  Client.QualityModule.SetLimitMissileCount(true)
+  Client.CppModule.SetLogicUpdate(-1)
+  Hotfix:DoPatch()
+  Ui:InitGame()
+  LuaProfiler:BootStart()
+  Log("Client OnStartup !!")
+  self:LoadHotFix()
+  Login:OpenLoginScene()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_GAME_INIT_FINISH, self.OnGameInitFinish, self)
+  self:AutoGC(900)
+  if Ui.GameEnv.bHasDebugParam and Ui.GameEnv.bDebugOpenGM then
+    Ui:OpenWindow("UIGMICON")
+  end
+  Lib:CallBack({
+    Notification.OnStartup,
+    Notification
+  })
+  Lib:CallBack({
+    Client.TransPrivateMsg,
+    Client
+  })
+  Lib:CallBack({
+    Client.TransChatMsgHistory,
+    Client
+  })
+  Lib:CallBack({
+    Client.TransChatSetting,
+    Client
+  })
+  Lib:CallBack({
+    Client.TransAfkSetting,
+    Client
+  })
+  Lib:CallBack({
+    Client.TransAutoFightMedicineUserInfo,
+    Client
+  })
+  Lib:CallBack({
+    Client.TransReturnerServerRecommendTimeAccountInfo,
+    Client
+  })
+end
+
+function Client:OnGameInitFinish()
+  if EDITOR then
+    Validator:CheckAll()
+  end
+end
+
+function Client:LoadHotFix()
+  local Application = CS.UnityEngine.Application
+  local File = CS.System.IO.File
+  local path = Application.persistentDataPath .. "/hotfix"
+  local hotFixFile = path .. "/hotfix"
+  if File.Exists(hotFixFile) then
+    local content = File.ReadAllBytes(hotFixFile)
+    local func, err = load(content, hotFixFile, "b")
+    if err then
+      return
+    end
+    if not func then
+      return
+    end
+    xpcall(func, Lib.ShowStack)
+    Log("Client:LoadHotFix:Finish")
+  end
+end
+
+function Client:Quit()
+  LuaProfiler:Stop()
+end
+
+function Client:SetPlayerDir(nDir, nMapTemplateId)
+  if not nDir or not nMapTemplateId then
+    return
+  end
+  me.nSetDirMapTId = nMapTemplateId
+  me.nSetDirDir = nDir
+  self:DoSetPlayerDir()
+end
+
+function Client:DoSetPlayerDir(bConfirm)
+  if not me.nSetDirMapTId or not me.nSetDirDir then
+    return
+  end
+  if me.nMapTemplateId ~= me.nSetDirMapTId then
+    return
+  end
+  if not bConfirm then
+    Timer:Register(5, self.DoSetPlayerDir, self, true)
+    return
+  end
+  me.GetNpc().SetDir(me.nSetDirDir)
+  me.nSetDirMapTId = nil
+end
+
+function Client:DoCommand(szCmd)
+  Log("GmCmd[" .. tostring(me and me.szName) .. "]:", szCmd)
+  local fnCmd, szMsg = load(szCmd, "[GmCmd]")
+  if not fnCmd then
+    Log("Do GmCmd failed:" .. szMsg)
+  else
+    return fnCmd()
+  end
+end
+
+function Client:GetCurServerInfo()
+  local tbLastLoginfo = LocalData:GetGlobalTable("Login", {})
+  local tbMyLogin = tbLastLoginfo[GetAccountName()] or {}
+  return SERVER_ID or "", tbMyLogin.szName
+end
+
+function Client:IsCloseIOSEntry()
+  if IOS then
+    return LocalData:GetRoleBoolean("CloseIOSEntry", false)
+  end
+  return false
+end
+
+function Client:CanShowOtherFightPower()
+  return me.nLevel >= 20 or me.GetVipLevel() > 9
+end
+
+function Client:IsOnlyUseIPv4()
+  local bResult = true
+  local szIP, tbResolved = socket.dns.toip(socket.dns.gethostname())
+  for k, v in ipairs(tbResolved.ip or {}) do
+    local tbChunks = {
+      v:match("(%d+)%.(%d+)%.(%d+)%.(%d+)")
+    }
+    if 4 ~= #tbChunks then
+      bResult = false
+    end
+    Log("Client:IsOnlyUseIPv4", #tbChunks, v)
+  end
+  return bResult
+end
+
+function Client:InitServerMaxLevel(nMaxLevel, nLowerLevel)
+  self.nServerMaxLevel = nMaxLevel or 0
+  self.nServerLowerLevel = nLowerLevel or 0
+end
+
+function Client:InitServerMaxTotalLevel(nMaxTotalLevel, nLowerTotalLevel)
+  self.nServerMaxTotalLevel = nMaxTotalLevel or 0
+  self.nServerLowerTotalLevel = nLowerTotalLevel or 0
+end
+
+function Client:Quality_ApplySettings()
+  self:Quality_SetMaxSyncPlayerCount()
+  self:Quality_SetMaxShowPlayerCount(Ui.PlayerPrefs.GetInt("MaxShowPlayerCount", -1), true)
+end
+
+function Client:Quality_SetMaxSyncPlayerCount()
+  RemoteServer.ReqSetSelfAOISyncCount(Client.QualityModule._Setting.MaxSyncPlayerCount)
+end
+
+function Client:Quality_SetMaxShowPlayerCount(nCount, bSave)
+  Client.QualityModule.SetShowPlayerCount(nCount, bSave)
+end
+
+function Client:QualityChanged(nQuality)
+  Client.QualityModule.SetQuality(nQuality)
+  Client.QualityModule.OnQualityChanged(true, Client.QualityModule._Setting.MaxShowPlayerCount)
+end
+
+function Client:InitLuaGC()
+  collectgarbage("setpause", 110)
+  collectgarbage("setstepmul", 800)
+end
+
+Client:InitLuaGC()
+
+function Client:CheckLuaTop()
+  local Debug = CS.UnityEngine.Debug
+  if Client.nTopCheckTimer == nil then
+    Client.nTopCheckTimer = Timer:Register(Env.GAME_FPS * 30, function()
+      local top, top1 = GetLuaTop()
+      if top > 100 then
+        Debug.LogError("LuaTopIndexTooHigh, Check Use KScriptSafeCall")
+      end
+      return true
+    end)
+  end
+end
+
+function Client:StartResourceMonitor()
+  if Client.nMonitorTimer then
+    Timer:Close(Client.nMonitorTimer)
+    Client.nMonitorTimer = nil
+  end
+  Client.nMonitorTimer = Timer:Register(Env.GAME_FPS, function()
+    local nResourceCache = Client.ResourceModule.GetResourceCacheCount()
+    local nRuningCount = Client.ResourceModule.GetResourceRuningCount()
+    local nAssetCache = Client.AssetResourceModule.GetCacheCount()
+    local nLoadingCount = Client.AssetResourceModule.GetLoadingCount()
+    local nAudioCache = Client.AssetResourceModule.GetAudioCacheCount()
+    local tbWnd = Ui:GetWindow("UIHud")
+    if tbWnd then
+      tbWnd.pPanel:SetActive("top/Countdown/Text", true)
+      tbWnd.pPanel:Label_SetText("top/Countdown/Text", string.format("Cache %d Audio %d Loading %d Resource %d Runing %d Total %d", nAssetCache, nAudioCache, nLoadingCount, nResourceCache, nRuningCount, nAudioCache + nAssetCache + nLoadingCount + nResourceCache + nRuningCount))
+    end
+    return true
+  end)
+end
+
+function Client:AutoGC(nGCTimeInterval)
+  if Client.nGCTimer then
+    Timer:Close(Client.nGCTimer)
+    Client.nGCTimer = nil
+  end
+  Client.nGCTimer = Timer:Register(nGCTimeInterval * Env.GAME_FPS, function()
+    local nNow = GetTime()
+    if not Client.nNextDeepGCTime then
+      Client.nNextDeepGCTime = nNow + nGCTimeInterval - 1
+    end
+    if nNow > Client.nNextDeepGCTime then
+      Client:DeepGC()
+      Client.AssetResourceModule.ReleaseCacheLoader(100)
+      Client.AssetResourceModule.ReleaseAudioCacheLoader(100)
+      Client.nNextDeepGCTime = nNow + 2 * nGCTimeInterval - 1
+    else
+      Client.ResourceModule.UnLoadResourceCache(false)
+    end
+    return true
+  end)
+end
+
+function Client:GC()
+  Client.QualityModule.StepClearMemory()
+end
+
+function Client:DeepGC()
+  Client.QualityModule.ClearMemory()
+end
+
+function Client:SetToggleHideHeadText(nValue)
+  Client.nToggleHideHeadText = nValue
+  Ui.PlayerPrefs.SetInt("ToggleHideHeadText", nValue)
+  Client.RepresentModule.SetPlayerHeadTextVisable(0 == nValue)
+end
+
+function Client:SetToggleHideBloodBar(nValue)
+  Client.nToggleHideBloodBar = nValue
+  Ui.PlayerPrefs.SetInt("ToggleHideBloodBar", nValue)
+  Client.RepresentModule.SetPlayerBloodBarVisable(0 == nValue)
+end
+
+Client:CheckLuaTop()
+
+function Client:OnChangePlayerMP()
+  if Client.NpcManager.m_Player then
+    local pNpc = me.GetNpc()
+    if pNpc then
+      Client.NpcManager.m_Player:BloodBar_SetMP(pNpc.i64CurMana, pNpc.i64MaxMana)
+    end
+  end
+end
+
+function Client:OnLoginZone()
+  if me and me.GetNpc() then
+    self:Quality_SetMaxSyncPlayerCount()
+  end
+end
+
+function Client:OnLogoutZone()
+  if me and me.GetNpc() then
+    self:Quality_SetMaxSyncPlayerCount()
+  end
+end
+
+function Client:PlayWorldEffect(nResID, nPosX, nPosY)
+  Client.EffectManager.PlayWorldEffect(nResID, nPosX / 800, nPosY / 1600)
+end
+
+function Client:RegistServerZoneCheckTimer()
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  
+  local function fnCheck()
+    local nZoneTime = GetZoneTimeSecDiff()
+    if Lib:IsInteger(nZoneTime) and 0 ~= nZoneTime and nZoneTime ~= Client.nServerTimeZoneSec then
+      Client.nServerTimeZoneSec = nZoneTime
+      EventNotify.OnNotify(EventNotify.emNOTIFY_SERVER_TIME_ZONE_UPDATE)
+      Log("[Client] ZoneTimeDiff has diff! diff=", nZoneTime)
+    end
+  end
+  
+  fnCheck()
+  self.nTimer = Timer:Register(Env.GAME_FPS, function()
+    fnCheck()
+  end)
+end
+
+function Client:OnReturnToLogin()
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  self.nServerTimeZoneSec = 0
+end
+
+function Client:OnSyncItemHelper()
+  self.nSyncItemHelperTimer = nil
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_ITEM_TIME_LIMIT)
+end
+
+function Client:OnSyncItem()
+  if self.nSyncItemHelperTimer then
+    return
+  end
+  self.nSyncItemHelperTimer = Timer:Register(Env.GAME_FPS, self.OnSyncItemHelper, self)
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_MP, Client)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_MP, Client.OnChangePlayerMP, Client)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_LOGIN_ZONE, Client)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_LOGIN_ZONE, Client.OnLoginZone, Client)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_LOGOUT_ZONE, Client)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_LOGOUT_ZONE, Client.OnLogoutZone, Client)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_LOGIN_HAND_SHAKE_END, Client)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_LOGIN_HAND_SHAKE_END, Client.RegistServerZoneCheckTimer, Client)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Client)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Client.OnReturnToLogin, Client)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, Client)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, Client.OnSyncItem, Client)

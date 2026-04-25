@@ -1,0 +1,364 @@
+local tbWnd = Ui:CreateWindow("UIActivity_MonthlyMarket")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  txtTime = "node/imgBG/Main/MainContent/txtTime",
+  btnInfo = "node/imgBG/Main/MainTittle/txtTitle/btnInfo",
+  MainTemplate = "node/imgBG/Main/MainContent/MainScrollView/MainViewport/MainContent/MainTemplate"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnInfo = function(self)
+    Ui:OnHelpClicked("SuperSaleHelp")
+  end,
+  btnClose = function(self)
+    self:Close()
+  end
+}
+tbWnd.tbConditions = {
+  Free = 1,
+  Recharge = 2,
+  LimitedTime = 3
+}
+tbWnd.nOneDaySeconds = 86400
+tbWnd.nOneHourSeconds = 3600
+tbWnd.nOneMinuteSeconds = 60
+tbWnd.tbColor = {szRedTxt = "C50505"}
+
+function tbWnd:OnCreate()
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.MainTemplate)
+  self.tbConditionShowFunc = {
+    [self.tbConditions.Free] = self.FreeTemplateShow,
+    [self.tbConditions.Recharge] = self.RechargeTemplateShow,
+    [self.tbConditions.LimitedTime] = self.LimitedTemplateShow
+  }
+end
+
+function tbWnd:OnOpen()
+  self.tbActivity = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.MonthlySpecialsActivity)
+  if not self.tbActivity then
+    return
+  end
+  self.tbActivity:TryFadeRedPoint()
+  self.bCanClickRewardBtn = true
+  self.tbCountDownTimers = {}
+  self.tbActivityCfg = self.tbActivity:GetActivityCfg()
+  self.tbAwardList = self.tbActivity:GetActivityAwardList()
+  self.nCurRewardProgress = self.tbActivity:GetCurRewardProgress(me) + 1
+  self:ActivityTimeShow()
+  self:RefreshAwardListShow()
+  local nScrollToIndex = math.max(self.nCurRewardProgress - 1, 1)
+  self.tbScrollView:ScrollToIndex(nScrollToIndex, false)
+  if not self.bEventRegisted then
+    self.bEventRegisted = true
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_MONTHLYSPECIALSACTIVITY_GETAWARD, self.OnGetGiftPackReward, self)
+  end
+end
+
+function tbWnd:OnClose()
+  self:ClearAllCountDownTimer()
+  self.tbScrollView:Clear()
+  if self.bEventRegisted then
+    self.bEventRegisted = false
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MONTHLYSPECIALSACTIVITY_GETAWARD, self)
+  end
+  if self.nTimeOutTimer then
+    Timer:Close(self.nTimeOutTimer)
+    self.nTimeOutTimer = nil
+  end
+end
+
+function tbWnd:OnGetGiftPackReward(bResult)
+  self.bCanClickRewardBtn = true
+  if bResult then
+    local tbElement = self.tbScrollView:GetElement(self.nCurRewardProgress)
+    if not tbElement then
+      LogErr("OnGetGiftPackReward can not get tbElement by nCurRewardProgress", self.nCurRewardProgress)
+      return
+    end
+    Ui:Button_UnBindEvent(tbElement.pPanel, "btnBuy")
+    Ui:Button_UnBindEvent(tbElement.pPanel, "btnReceive")
+    RedPointMgr:DynamicUnRegist(tbElement.pPanel, "btnReceive")
+    self.nCurRewardProgress = self.tbActivity:GetCurRewardProgress(me) + 1
+    self:RefreshAwardListShow()
+  end
+end
+
+function tbWnd:RefreshAwardListShow()
+  self.tbScrollView:Clear()
+  self:ClearAllCountDownTimer()
+  for nIndex, tbAwardCfg in ipairs(self.tbAwardList) do
+    self.tbScrollView:SetElement(nIndex, function(tbElement)
+      if nIndex == #self.tbAwardList then
+        tbElement.pPanel:SetActive("imgArrow", false)
+      end
+      tbElement.pPanel:Sprite_SetSprite("imgCellBg", tbAwardCfg.szGradeImgPath)
+      local pShowTemplateFunc = self.tbConditionShowFunc[tbAwardCfg.nCondition]
+      pShowTemplateFunc(self, nIndex, tbElement, tbAwardCfg)
+    end)
+  end
+end
+
+function tbWnd:TemplateAwardShow(tbElement, tbShowAward)
+  if not tbShowAward or Lib:IsEmptyTB(tbShowAward) then
+    return
+  end
+  local tbAwardScrollView = Ui:NewScrollView(tbElement, "rewardScrollViewMask/rewardScrollView/Viewport/Content/TemplateReward")
+  for nId, tbAward in ipairs(tbShowAward) do
+    tbAwardScrollView:SetElement(nId, function(tbAwardElement)
+      local tbGrid = Ui:NewExistItemGrid(tbAwardElement, "UIItemGrid")
+      if "Item" == tbAward[1] then
+        tbGrid:SetItemByTemplate(tbAward[2], tbAward[3], nil, nil, {bShowTip = true})
+      else
+        tbGrid:SetDigitalItem(tbAward[1], tbAward[2])
+      end
+      tbGrid:SetClickEnable(true)
+    end)
+  end
+end
+
+function tbWnd:FreeTemplateShow(nIndex, tbElement, tbAwardCfg)
+  local pPanel = tbElement.pPanel
+  pPanel:SetActive("btnBuy", false)
+  pPanel:SetActive("txtRewardTips", false)
+  if nIndex > self.nCurRewardProgress then
+    pPanel:SetActive("lock", true)
+    pPanel:SetActive("btnReceive", true)
+    pPanel:SetActive("imgComplete", false)
+    pPanel:SetActive("lock/txtLockTips", true)
+    pPanel:Button_SetEnable("btnReceive", false)
+  else
+    pPanel:SetActive("lock", false)
+    if nIndex == self.nCurRewardProgress then
+      pPanel:SetActive("btnReceive", true)
+      pPanel:SetActive("imgComplete", false)
+      pPanel:Button_SetEnable("btnReceive", true)
+      Ui:Button_BindEvent(pPanel, "btnReceive", self.OnClickReceiveReq, self)
+      RedPointMgr:DynamicRegisteRedPoint(pPanel, "btnReceive", {
+        RedPointMgr.EVENT.MonthlySpecialsActivity
+      })
+    else
+      pPanel:SetActive("imgComplete", true)
+      pPanel:SetActive("btnReceive", false)
+    end
+  end
+  local tbAward = Award:GetAward(tbAwardCfg.nAwardId, tbAwardCfg.nAwardKey)
+  self:TemplateAwardShow(tbElement, tbAward)
+end
+
+function tbWnd:RechargeTemplateShow(nIndex, tbElement, tbAwardCfg)
+  local pPanel = tbElement.pPanel
+  pPanel:SetActive("btnReceive", false)
+  pPanel:SetActive("btnBuy/txt", true)
+  pPanel:SetActive("txtRewardTips", false)
+  pPanel:SetActive("btnBuy/imgMoney", false)
+  if nIndex > self.nCurRewardProgress then
+    pPanel:SetActive("lock", true)
+    pPanel:SetActive("btnBuy", true)
+    pPanel:SetActive("imgComplete", false)
+    pPanel:Button_SetEnable("btnBuy", false)
+    pPanel:SetActive("lock/txtLockTips", true)
+  else
+    pPanel:SetActive("lock", false)
+    if nIndex == self.nCurRewardProgress then
+      pPanel:SetActive("btnBuy", true)
+      pPanel:SetActive("imgComplete", false)
+      pPanel:Button_SetEnable("btnBuy", true)
+      Ui:Button_BindEvent(pPanel, "btnBuy", self.OnClickReceiveReq, self)
+    else
+      pPanel:SetActive("imgComplete", true)
+      pPanel:SetActive("btnBuy", false)
+    end
+  end
+  local tbProductSetting = Recharge:GetProductSettingById(tbAwardCfg.nProductId)
+  if tbProductSetting then
+    local szShowPrice = Recharge:GetShowPrice(tbProductSetting)
+    pPanel:Label_SetText("btnBuy/txt", szShowPrice)
+    local tbAward = tbProductSetting.tbAwards
+    if not tbAward then
+      LogErr("RechargeTemplateShow tbAward by tbProductSetting.szAwards is nil", tbAwardCfg.nProductId)
+      return
+    end
+    self:TemplateAwardShow(tbElement, tbAward)
+  end
+end
+
+function tbWnd:LimitedTemplateShow(nIndex, tbElement, tbAwardCfg)
+  local pPanel = tbElement.pPanel
+  if nIndex >= self.nCurRewardProgress then
+    pPanel:SetActive("imgComplete", false)
+    pPanel:SetActive("lock/txtLockTips", false)
+    local szMoneyIcon = Currency:GetIcon(tbAwardCfg.szMoneyType)
+    pPanel:Sprite_SetSprite("btnBuy/imgMoney", szMoneyIcon)
+    pPanel:Label_SetText("btnBuy/txt", tbAwardCfg.nPrice)
+    if nIndex > self.nCurRewardProgress then
+      pPanel:SetActive("lock", true)
+      pPanel:Button_SetEnable("btnBuy", false)
+      pPanel:Button_SetEnable("btnReceive", false)
+    elseif nIndex == self.nCurRewardProgress then
+      pPanel:SetActive("lock", false)
+      pPanel:Button_SetEnable("btnBuy", true)
+      pPanel:Button_SetEnable("btnReceive", true)
+      Ui:Button_BindEvent(pPanel, "btnBuy", self.OnClickBuyReceive, self)
+      Ui:Button_BindEvent(pPanel, "btnReceive", self.OnClickReceiveReq, self)
+    end
+    if self.tbActivity:CheckExpiredCurTime(tbAwardCfg.nLimitedTime) then
+      pPanel:SetActive("btnBuy", true)
+      pPanel:SetActive("btnBuy/txt", true)
+      pPanel:SetActive("btnReceive", false)
+      pPanel:SetActive("txtRewardTips", false)
+      pPanel:SetActive("btnBuy/imgMoney", true)
+    else
+      pPanel:SetActive("btnBuy", false)
+      pPanel:SetActive("btnReceive", true)
+      pPanel:SetActive("txtRewardTips", true)
+      self:StartCountDownTimer(tbAwardCfg.nLimitedTime, pPanel, nIndex)
+      if nIndex == self.nCurRewardProgress then
+        RedPointMgr:DynamicRegisteRedPoint(pPanel, "btnReceive", {
+          RedPointMgr.EVENT.MonthlySpecialsActivity
+        })
+      end
+    end
+  elseif nIndex < self.nCurRewardProgress then
+    pPanel:SetActive("lock", false)
+    pPanel:SetActive("btnBuy", false)
+    pPanel:SetActive("btnReceive", false)
+    pPanel:SetActive("imgComplete", true)
+    pPanel:SetActive("txtRewardTips", false)
+  end
+  local tbAward = Award:GetAward(tbAwardCfg.nAwardId, tbAwardCfg.nAwardKey)
+  self:TemplateAwardShow(tbElement, tbAward)
+end
+
+function tbWnd:OnClickReceiveReq()
+  if not self.bCanClickRewardBtn then
+    return
+  end
+  if not self.tbActivity or not self.tbActivity:IsOpen(me) then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\230\148\190"))
+  end
+  if self.tbActivity:OnGetGiftPackRewardReq() then
+    self.bCanClickRewardBtn = false
+    if self.nTimeOutTimer then
+      Timer:Close(self.nTimeOutTimer)
+    end
+    self.nTimeOutTimer = Timer:Register(Env.GAME_FPS, function()
+      self.bCanClickRewardBtn = true
+      return false
+    end)
+  end
+end
+
+function tbWnd:OnClickBuyReceive()
+  local tbAward = self.tbAwardList[self.nCurRewardProgress]
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\228\189\191\231\148\168\233\135\145\229\184\129{0}\232\180\173\228\185\176\231\164\188\229\140\133", tbAward.nPrice), {
+    {
+      function()
+        self:OnClickReceiveReq()
+      end
+    },
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function tbWnd:StartCountDownTimer(nLimitedTime, pPanel, nIndex)
+  local nPassTime = self.tbActivity:GetCurMonthTime()
+  if nPassTime < self.tbActivityCfg.nMonthlyStartTime and self.tbActivityCfg.nMonthlyStartTime > self.tbActivityCfg.nMonthlyEndTime then
+    local nLastMonthDay = Lib:GetThisMonthTotalDay(GetTime() - nPassTime - 1)
+    local nLastMonthlyTotalTime = nLastMonthDay * self.nOneDaySeconds
+    nPassTime = nPassTime + nLastMonthlyTotalTime
+  end
+  local nExpiredTime = self.tbActivityCfg.nMonthlyStartTime + nLimitedTime
+  local nCountDownTime = nExpiredTime - nPassTime
+  if nCountDownTime < 0 then
+    pPanel:SetActive("txtRewardTips", false)
+    return
+  end
+  local szShowTime = self:GetCountDownShowTime(nCountDownTime)
+  pPanel:Label_SetText("txtRewardTips", szShowTime)
+  if self.tbCountDownTimers[nIndex] then
+    Timer:Close(self.tbCountDownTimers[nIndex].nTimerId)
+  end
+  local nCountDownTimer = Timer:Register(Env.GAME_FPS, self.CountDownTimer, self, nIndex)
+  self.tbCountDownTimers[nIndex] = {nCountDownTime = nCountDownTime, nTimerId = nCountDownTimer}
+end
+
+function tbWnd:GetCountDownShowTime(nCountDownTime)
+  local szShowTime = ""
+  if 0 == nCountDownTime then
+    szShowTime = i18n.EasyGet("<color=#{0}>\229\133\141\232\180\185\233\162\134\229\143\150\230\151\182\233\151\180\232\191\152\229\137\1691\231\167\146</color>", self.tbColor.szRedTxt)
+  elseif nCountDownTime >= self.nOneDaySeconds then
+    local nDay = math.floor(nCountDownTime / self.nOneDaySeconds)
+    szShowTime = i18n.EasyGet("<color=#{0}>\229\133\141\232\180\185\233\162\134\229\143\150\230\151\182\233\151\180\232\191\152\229\137\169{1}\229\164\169</color>", self.tbColor.szRedTxt, nDay)
+  elseif nCountDownTime >= self.nOneHourSeconds then
+    local nHour = math.floor(nCountDownTime / self.nOneHourSeconds)
+    szShowTime = i18n.EasyGet("<color=#{0}>\229\133\141\232\180\185\233\162\134\229\143\150\230\151\182\233\151\180\232\191\152\229\137\169{1}\229\176\143\230\151\182</color>", self.tbColor.szRedTxt, nHour)
+  elseif nCountDownTime >= self.nOneMinuteSeconds then
+    local nMinute = math.floor(nCountDownTime / self.nOneMinuteSeconds)
+    szShowTime = i18n.EasyGet("<color=#{0}>\229\133\141\232\180\185\233\162\134\229\143\150\230\151\182\233\151\180\232\191\152\229\137\169{1}\229\136\134</color>", self.tbColor.szRedTxt, nMinute)
+  elseif nCountDownTime > 0 and nCountDownTime < self.nOneMinuteSeconds then
+    szShowTime = i18n.EasyGet("<color=#{0}>\229\133\141\232\180\185\233\162\134\229\143\150\230\151\182\233\151\180\232\191\152\229\137\169{1}\231\167\146</color>", self.tbColor.szRedTxt, nCountDownTime)
+  end
+  return szShowTime
+end
+
+function tbWnd:CountDownTimer(nIndex)
+  local tbElement = self.tbScrollView:GetElement(nIndex)
+  if not tbElement then
+    LogErr("UIActivity_MonthlyMarket, On CountDownTimer get tbElement is nil,by nIndex", nIndex)
+    return
+  end
+  local tbTimer = self.tbCountDownTimers[nIndex]
+  if not tbTimer then
+    LogErr("UIActivity_MonthlyMarket, On CountDownTimer get nCountDownTime is nil,by nIndex", nIndex)
+    return
+  end
+  local pPanel = tbElement.pPanel
+  local nCountDownTime = tbTimer.nCountDownTime - 1
+  tbTimer.nCountDownTime = nCountDownTime
+  if nCountDownTime < 0 then
+    pPanel:SetActive("btnBuy", true)
+    pPanel:SetActive("btnBuy/txt", true)
+    pPanel:SetActive("btnReceive", false)
+    pPanel:SetActive("btnBuy/imgMoney", true)
+    pPanel:SetActive("txtRewardTips", false)
+    Ui:Button_UnBindEvent(pPanel, "btnReceive")
+    Ui:Button_BindEvent(pPanel, "btnBuy", self.OnClickBuyReceive, self)
+    return false
+  else
+    local szShowTime = self:GetCountDownShowTime(nCountDownTime)
+    pPanel:Label_SetText("txtRewardTips", szShowTime)
+  end
+  return true
+end
+
+function tbWnd:ActivityTimeShow()
+  local nNow = GetTime()
+  local nEndTime, nStartTime
+  local nCurMonthTime = self.tbActivity:GetCurMonthTime(nNow)
+  local nBeginMonthTime = nNow - nCurMonthTime
+  if nCurMonthTime > self.tbActivityCfg.nMonthlyStartTime then
+    nEndTime = self.tbActivityCfg.nMonthlyEndTime + nBeginMonthTime
+    nStartTime = self.tbActivityCfg.nMonthlyStartTime + nBeginMonthTime
+    if self.tbActivityCfg.nMonthlyEndTime < self.tbActivityCfg.nMonthlyStartTime then
+      nEndTime = nEndTime + Lib:GetThisMonthTotalDay() * self.nOneDaySeconds
+    end
+  else
+    local nLastMonthlyTotalTime = Lib:GetThisMonthTotalDay(nBeginMonthTime - 1) * self.nOneDaySeconds
+    nEndTime = self.tbActivityCfg.nMonthlyEndTime + nBeginMonthTime
+    nStartTime = self.tbActivityCfg.nMonthlyStartTime + nBeginMonthTime - nLastMonthlyTotalTime
+  end
+  local szEndTime = Lib:GetTimeStr6(nEndTime)
+  local szStartTime = Lib:GetTimeStr6(nStartTime)
+  local szTimeMsg = i18n.EasyGet("\230\180\187\229\138\168\230\151\182\233\151\180\239\188\154{0} \226\128\148\226\128\148 {1}", szStartTime, szEndTime)
+  self.pPanel:Label_SetText(tbControls.txtTime, szTimeMsg)
+end
+
+function tbWnd:ClearAllCountDownTimer()
+  for _, tbTimer in pairs(self.tbCountDownTimers) do
+    Timer:Close(tbTimer.nTimerId)
+  end
+  self.tbCountDownTimers = {}
+end

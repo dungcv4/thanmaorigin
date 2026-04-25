@@ -1,0 +1,974 @@
+local tbUi = Ui:CreateWindow("UIMarketStall")
+local COUNT_PER_PAGE = 8
+local SelectTypes = {mine = 1, all = 2}
+local Sort2EquipPos = {
+  Item.EQUIPPOS_WEAPON,
+  Item.EQUIPPOS_HELM,
+  Item.EQUIPPOS_NECKLACE,
+  Item.EQUIPPOS_CUFF,
+  Item.EQUIPPOS_RING,
+  Item.EQUIPPOS_ARMOR,
+  Item.EQUIPPOS_PENDANT,
+  Item.EQUIPPOS_BELT,
+  Item.EQUIPPOS_AMULET,
+  Item.EQUIPPOS_BOOTS
+}
+local EquipPos2Sort = {}
+for nSort, nEquipPos in ipairs(Sort2EquipPos) do
+  EquipPos2Sort[nEquipPos] = nSort
+end
+tbUi.FilterTypeClass = {
+  Stone = {
+    funcGetDropDownOptions = function(tbUiInstance)
+      local tbOptions = {}
+      
+      local function fn()
+        return i18n.EasyGet("\230\137\128\230\156\137\233\131\168\228\189\141")
+      end
+      
+      table.insert(tbOptions, fn())
+      for nSort, nEquipPos in ipairs(Sort2EquipPos) do
+        table.insert(tbOptions, Item.tbEquipPosName[nEquipPos]())
+      end
+      return tbOptions
+    end,
+    funcFilterItems = function(tbUiInstance, tbItems, nSelectDropdown)
+      if 0 == nSelectDropdown then
+        return tbItems
+      end
+      local nPos = Sort2EquipPos[nSelectDropdown]
+      local tbRet = {}
+      for k, v in ipairs(tbItems) do
+        local MarketStallClass = MarketStallMgr:GetMarketStallObj(tbUiInstance.nStallType)
+        local nTemplateId = MarketStallClass.tbDetailType2TempId[v.nDetailTypeId]
+        if Item.Stone:CheckStonePos(nTemplateId, nPos) then
+          table.insert(tbRet, v)
+        end
+      end
+      return tbRet
+    end
+  },
+  YuanShi = {
+    funcGetDropDownOptions = function(tbUiInstance)
+      local tbYuanShiTypeClass = tbUi.FilterTypeClass.YuanShi
+      local tbOptions = {}
+      
+      local function fn()
+        return i18n.EasyGet("\230\137\128\230\156\137\233\131\168\228\189\141")
+      end
+      
+      table.insert(tbOptions, fn())
+      if not tbYuanShiTypeClass.tbDropDownIndex2Param then
+        tbYuanShiTypeClass.funcSetDropDownIndex2Param(tbUiInstance)
+      end
+      for idx, nEquipPos in pairs(tbYuanShiTypeClass.tbDropDownIndex2Param) do
+        table.insert(tbOptions, Item.tbEquipPosName[nEquipPos]())
+      end
+      return tbOptions
+    end,
+    funcFilterItems = function(tbUiInstance, tbItems, nSelectDropdown)
+      if 0 == nSelectDropdown then
+        return tbItems
+      end
+      local nPos = tbUi.FilterTypeClass.YuanShi.tbDropDownIndex2Param[nSelectDropdown]
+      local tbRet = {}
+      for k, v in ipairs(tbItems) do
+        local MarketStallClass = MarketStallMgr:GetMarketStallObj(tbUiInstance.nStallType)
+        local nTemplateId = MarketStallClass.tbDetailType2TempId[v.nDetailTypeId]
+        if Item.Stone:CheckYuanShiPos(nTemplateId, nPos) then
+          table.insert(tbRet, v)
+        end
+      end
+      return tbRet
+    end,
+    funcSetDropDownIndex2Param = function(tbUiInstance)
+      local tbDropDownIndex2Param = {}
+      local tbHasPos = {}
+      local tbPosList = {}
+      local nYuanShiSeType = 5
+      local MarketStallClass = MarketStallMgr:GetMarketStallObj(tbUiInstance.nStallType)
+      for k, tbStallTypeSetting in ipairs(MarketStallClass.tbYuanBaoSeTypeSettings[nYuanShiSeType]) do
+        local nTemplateId = MarketStallClass.tbDetailType2TempId[tbStallTypeSetting.nDetailTypeId]
+        for nEquipPos = Item.EQUIPPOS_HELM, Item.EQUIPPOS_AMULET do
+          if Item.Stone:CheckYuanShiPos(nTemplateId, nEquipPos) then
+            tbHasPos[nEquipPos] = 1
+          end
+        end
+      end
+      for nEquipPos, _ in pairs(tbHasPos) do
+        table.insert(tbPosList, nEquipPos)
+      end
+      table.sort(tbPosList, function(nPosA, nPosB)
+        return EquipPos2Sort[nPosA] < EquipPos2Sort[nPosB]
+      end)
+      for idx, nPos in ipairs(tbPosList) do
+        tbDropDownIndex2Param[idx] = nPos
+      end
+      tbUi.FilterTypeClass.YuanShi.tbDropDownIndex2Param = tbDropDownIndex2Param
+    end
+  }
+}
+tbUi.FilterTypes = {
+  [MarketStallBase.tbStallType.Gold] = {
+    [2] = "Stone"
+  },
+  [MarketStallBase.tbStallType.YuanBao] = {
+    [4] = "Stone",
+    [5] = "YuanShi"
+  }
+}
+local szSaveKey = "MarketStallShowAllGrps"
+local tbControls = {
+  MoneyPanel = "node/UIMoneyPanel",
+  btnClose = "node/imgBG/btnClose",
+  btnGold = "node/imgBG/btnList/btnGold",
+  btnYuanBao = "node/imgBG/btnList/btnYuanBao",
+  btnAll = "node/imgBG/Content/btnList2/btnAll",
+  btnMy = "node/imgBG/Content/btnList2/btnMy",
+  panelAll = "node/imgBG/Content/AllStall",
+  panelMy = "node/imgBG/Content/MyStall",
+  panelGoodType = "node/imgBG/Content/AllStall/GoodTypePanel",
+  panelGoodDetail = "node/imgBG/Content/AllStall/GoodDetailPanel",
+  dropdownSelect = "node/imgBG/Content/AllStall/DropdownQuality",
+  txtAmount = "node/imgBG/Content/MyStall/PanelInfo/txtNum/txtAmount",
+  SalesItemTemplate = "node/imgBG/Content/MyStall/SalesScrollView/Content/ElementTemplate",
+  txtTip = "node/imgBG/Content/MyStall/txtTip",
+  txtTip1 = "node/imgBG/Content/MyStall/txtTip1",
+  btnStone = "node/imgBG/Content/MyStall/BagPanel/btnGroup/btnItemKindStone",
+  btnEquip = "node/imgBG/Content/MyStall/BagPanel/btnGroup/btnItemKindEquip",
+  btnPartner = "node/imgBG/Content/MyStall/BagPanel/btnGroup/btnItemKindPartner",
+  btnTotal = "node/imgBG/Content/MyStall/BagPanel/btnGroup/btnItemKindTotal",
+  btnNormal = "node/imgBG/Content/MyStall/BagPanel/btnGroup/btnItemKindNormal",
+  ItemCell = "node/imgBG/Content/MyStall/BagPanel/bagBackground/maskView/imgInventory/ItemCell",
+  btnAllCancelSell = "node/imgBG/Content/MyStall/btnAllCancelSell",
+  uiTreeRoot = "node/imgBG/Content/AllStall/UITree",
+  txtRefreshPrice = "node/imgBG/Content/AllStall/btnRefresh/Refresh1/txtPrice",
+  GoodTypeTemplate = "node/imgBG/Content/AllStall/GoodTypePanel/GoodTypeGroup/Content/ElementTemplate",
+  GoodDetailTemplate = "node/imgBG/Content/AllStall/GoodDetailPanel/GoodDetailGroup/Content/Item",
+  txtTypePage = "node/imgBG/Content/AllStall/GoodTypePanel/txtTypePage",
+  btnTypeLeft = "node/imgBG/Content/AllStall/GoodTypePanel/btnTypeLeft",
+  btnTypeRight = "node/imgBG/Content/AllStall/GoodTypePanel/btnTypeRight",
+  txtNoItem = "node/imgBG/Content/AllStall/txtNoItem",
+  togShow = "node/imgBG/Content/AllStall/GoodTypePanel/ListTitle/togShow",
+  btnRefresh = "node/imgBG/Content/AllStall/btnRefresh",
+  btnReturn = "node/imgBG/Content/AllStall/GoodDetailPanel/ItemTitle/btnReturn",
+  txtPage = "node/imgBG/Content/AllStall/GoodDetailPanel/ItemTitle/txtPage",
+  btnRight = "node/imgBG/Content/AllStall/GoodDetailPanel/ItemTitle/btnRight",
+  btnLeft = "node/imgBG/Content/AllStall/GoodDetailPanel/ItemTitle/btnLeft",
+  txtRefreshTime = "node/imgBG/Content/AllStall/txtRefreshTime",
+  Refresh2 = "node/imgBG/Content/AllStall/btnRefresh/Refresh2",
+  Refresh1 = "node/imgBG/Content/AllStall/btnRefresh/Refresh1",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  LabelShowTip = "node/imgBG/Content/AllStall/GoodTypePanel/ListTitle/togShow/Label"
+}
+tbUi.tbControls = tbControls
+tbUi.tbOnToggleClick = {
+  togShow = function(self, isOn)
+    self.bShowAllGrps = not isOn
+    LocalData:SetRoleBoolean(szSaveKey, self.bShowAllGrps)
+    self:RefreshAllMarket(true)
+    self:SelectMarketType(self.nCurSeTypeId, true)
+  end
+}
+tbUi.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnRefresh = function(self)
+    self:OnClickBtnRefresh()
+  end,
+  btnReturn = function(self)
+    self:TryUpdateGoodList()
+  end,
+  btnAllCancelSell = function(self)
+    self:OnClickBtnAllCancelSell()
+  end,
+  btnTypeLeft = function(self)
+    if not MarketStallBase:IsCanNextPage(me, self.nStallType) then
+      return
+    end
+    if self.nCurTypePage <= 1 then
+      return
+    end
+    self.nCurTypePage = self.nCurTypePage - 1
+    self:TryUpdateGoodList()
+  end,
+  btnTypeRight = function(self)
+    if not MarketStallBase:IsCanNextPage(me, self.nStallType) then
+      return
+    end
+    if self.nCurTypePage >= self.nTotalTypePage then
+      return
+    end
+    self.nCurTypePage = self.nCurTypePage + 1
+    self:TryUpdateGoodList()
+  end,
+  btnLeft = function(self)
+    if not MarketStallBase:IsCanNextPage(me, self.nStallType) then
+      return
+    end
+    if self.nCurPage <= 1 then
+      return
+    end
+    self.nCurPage = self.nCurPage - 1
+    local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+    if MarketStallClass:IsNeedRequestData() then
+      MarketStallClass:RequestGetItemList(self.nDetailTypeId, self.nCurPage, self.nSortType)
+      return
+    end
+    self:UpdateGoodDetail()
+  end,
+  btnRight = function(self)
+    if not MarketStallBase:IsCanNextPage(me, self.nStallType) then
+      return
+    end
+    if self.nCurPage >= self.nTotalPage then
+      return
+    end
+    self.nCurPage = self.nCurPage + 1
+    local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+    if MarketStallClass:IsNeedRequestData() then
+      MarketStallClass:RequestGetItemList(self.nDetailTypeId, self.nCurPage, self.nSortType)
+      return
+    end
+    self:UpdateGoodDetail()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("StallHelp")
+  end
+}
+Ui.UIMarketStall = Ui.UIMarketStall or {}
+Ui.UIMarketStall.tbSelectTypeIndex = {SELECT_TYPE_SELL = 1, SELECT_TYPE_BUY = 2}
+
+function tbUi:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MS_YUANBAO_ITEM_LIST_CHANGE,
+      self.TryUpdateGoodList,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MS_GOLD_ITEM_LIST_CHANGE,
+      self.OnGoldItemListArrival,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MS_MY_ITEM_LIST_CHANGE,
+      self.RefreshMyMarket,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.RefreshMoney,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_ITEM_CHANGE,
+      self.UpdateGoodDetail,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MARKET_STALL_REFRESH_ALL,
+      self.OnRefreshAllMarket,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MARKET_STALL_DETAILLIST_ARIVAL,
+      self.DoUpdateGoodList,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MARKET_STALL_GOLD_BUY_SUCCES,
+      self.OnGoldItemBuySuccess,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MARKET_STALL_MYSTALLLIST,
+      self.RefreshMySellList,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MARKET_ADD_STAR,
+      self.UpdateStarList,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MARKET_DEL_STAR,
+      self.UpdateStarList,
+      self
+    }
+  }
+end
+
+function tbUi:OnCreate()
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, tbControls.MoneyPanel)
+  self.tbStallTypeGroup = Ui:NewButtonGroup(self, {
+    [MarketStallBase.tbStallType.YuanBao] = self.btnYuanBao,
+    [MarketStallBase.tbStallType.Gold] = self.btnGold
+  }, true, function(self, nIndex)
+    self:Refresh(nIndex, self.nSelectType)
+    Ui:OpenWindow("UILoadingTips", i18n.EasyGet("\230\149\176\230\141\174\229\138\160\232\189\189\228\184\173..."), MarketStallBase.nWaitForNextPage / 1000)
+  end)
+  self.tbSelectTypeGroup = Ui:NewButtonGroup(self, {
+    [Ui.UIMarketStall.tbSelectTypeIndex.SELECT_TYPE_SELL] = self.btnMy,
+    [Ui.UIMarketStall.tbSelectTypeIndex.SELECT_TYPE_BUY] = self.btnAll
+  }, true, function(self, nIndex)
+    self:Refresh(self.nStallType, nIndex)
+    Ui:OpenWindow("UILoadingTips", i18n.EasyGet("\230\149\176\230\141\174\229\138\160\232\189\189\228\184\173..."), MarketStallBase.nWaitForNextPage / 1000)
+  end)
+  self.tbSalesScrollView = Ui:NewScrollView(self, self.SalesItemTemplate, nil, nil, true)
+  self.tbBagTypeGroup = Ui:NewButtonGroup(self, {
+    [1] = tbControls.btnNormal,
+    [2] = tbControls.btnEquip,
+    [3] = tbControls.btnStone,
+    [4] = tbControls.btnPartner,
+    [Ui.tbToggle.TogAll] = tbControls.btnTotal
+  }, true, function(self, nIndex)
+    self:MyStallBagToggleChecked(nIndex)
+  end)
+  self.uiTree = Ui:NewTree(self, tbControls.uiTreeRoot, self.TreeBigBtnOnClick, self.TreeSmallBtnOnClick)
+  self.tbBigData = {}
+  self.tbSmallData = {}
+  self.tbGoodScrollView = Ui:NewScrollView(self, tbControls.GoodTypeTemplate, function(self, nIndex, tbElement)
+    self:OnGoodItemClick(nIndex, tbElement)
+  end, nil, true)
+  self.tbGoodDetailScrollView = Ui:NewScrollView(self, tbControls.GoodDetailTemplate, nil, nil, true)
+  self.pPanel:Dropdown_BindEvent(tbControls.dropdownSelect, function(value)
+    self:OnSelectDropdown(value)
+  end)
+  self.tbItemScrollView = Ui:NewLoopScrollView(self, tbControls.ItemCell, "Item")
+  self.nRow = 5
+  self.nTotalPage = 0
+  self.nTotalTypePage = 0
+end
+
+function tbUi:OnOpen(nStallType, nSelectType, nBigIndex, nSmallIndex)
+  if not me then
+    return 0
+  end
+  local bCanOpen, nLevelLimit = MarketStallBase:CheckCanOpenUi()
+  if not bCanOpen then
+    me.CenterMsg(i18n.EasyGet("\232\190\190\229\136\176{0}\231\186\167\230\137\141\229\143\175\228\187\165\230\159\165\231\156\139\230\145\134\230\145\138", nLevelLimit))
+    return 0
+  end
+  self.nStallType = 0
+  self.nSelectType = 0
+  nStallType = nStallType or MarketStallBase.tbStallType.Gold
+  nSelectType = nSelectType or Ui.UIMarketStall.tbSelectTypeIndex.SELECT_TYPE_BUY
+  self:InitLogic()
+  self.tbStallTypeGroup:Select(nStallType)
+  self.tbSelectTypeGroup:Select(nSelectType)
+  self:InitUi()
+  self:RegistRedPoint()
+  if nBigIndex then
+    self.uiTree:RawSelectNode(nBigIndex, nSmallIndex, true)
+  else
+    self.uiTree:RawSelectNode(2, 1, false)
+  end
+  self.pPanel:Label_SetText(tbControls.LabelShowTip, i18n.EasyGet("\228\187\133\230\152\190\231\164\186\230\156\137\232\180\167"))
+  self.pPanel:Toggle_SetChecked(tbControls.togShow, not self.bShowAllGrps)
+  self.tbMoneyPanel:OnOpen()
+end
+
+function tbUi:OnClose()
+  self.tbSelectTypeGroup:ClearSelected()
+  self:StopTimer()
+  self:UnRegistRedPoint()
+end
+
+function tbUi:RegistRedPoint()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnYuanBao, {
+    RedPointMgr.EVENT.MarketStallYuanBaoTimeoutKeep
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnGold, {
+    RedPointMgr.EVENT.MarketStallGoldTimeoutKeep
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnMy, {
+    RedPointMgr.EVENT.MarketStallYuanBaoTimeoutKeep,
+    RedPointMgr.EVENT.MarketStallGoldTimeoutKeep
+  })
+end
+
+function tbUi:UnRegistRedPoint()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnYuanBao)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnGold)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnMy)
+end
+
+function tbUi:InitLogic()
+  self.bShowAllGrps = LocalData:GetRoleBoolean(szSaveKey, false)
+  self:StartTimer()
+  self.bShowSort = false
+end
+
+function tbUi:InitUi()
+  self.pPanel:Label_SetText(tbControls.txtRefreshPrice, MarketStallBase.nManualRefreshCost)
+end
+
+function tbUi:StartTimer()
+  if self.nTimer then
+    return
+  end
+  self.nTimer = Timer:Register(Env.GAME_FPS, self.UpdateNextRefreshTime, self)
+end
+
+function tbUi:StopTimer()
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+end
+
+function tbUi:UpdateNextRefreshTime()
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  local nSec = MarketStallClass:GetNextRefreshInterval()
+  self.pPanel:Label_SetText(tbControls.txtRefreshTime, Lib:TimeDesc(nSec))
+  self.pPanel:SetActive(tbControls.Refresh2, nSec <= 0)
+  self.pPanel:SetActive(tbControls.Refresh1, nSec > 0)
+  return true
+end
+
+function tbUi:Refresh(nStallType, nSelectType)
+  if self.nStallType == nStallType and self.nSelectType == nSelectType then
+    return
+  end
+  local bAlwayExpand = self.nStallType ~= nStallType
+  self.nStallType = nStallType
+  self.nSelectType = nSelectType
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  self:RefreshMoney()
+  if self.nStallType == MarketStallBase.tbStallType.YuanBao then
+    RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnMy)
+    RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnMy, {
+      RedPointMgr.EVENT.MarketStallYuanBaoTimeoutKeep
+    })
+    self:RefreshRedPoint()
+    local bShowRefresh = me.GetVipLevel() >= Vip.nMinCanRefreshMarketStallLevel
+    self.pPanel:SetActive(tbControls.btnRefresh, bShowRefresh)
+    self.pPanel:SetActive(tbControls.txtRefreshTime, bShowRefresh)
+  else
+    RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnMy)
+    RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnMy, {
+      RedPointMgr.EVENT.MarketStallGoldTimeoutKeep
+    })
+    self:RefreshRedPoint()
+    self.pPanel:SetActive(tbControls.btnRefresh, false)
+    self.pPanel:SetActive(tbControls.txtRefreshTime, false)
+  end
+  if bAlwayExpand then
+    self:UpdateTreeData()
+    self.uiTree:SelectNode(2, 1, bAlwayExpand)
+  end
+  if nSelectType == SelectTypes.mine then
+    self.tbBagTypeGroup:Select(Ui.tbToggle.TogAll)
+    MarketStallClass:RefreshMine()
+    self.pPanel:SetActive(tbControls.panelAll, false)
+    self.pPanel:SetActive(tbControls.panelMy, true)
+  else
+    self.uiTree:GoTop()
+    self.pPanel:SetActive(tbControls.panelAll, true)
+    self.pPanel:SetActive(tbControls.panelMy, false)
+  end
+end
+
+function tbUi:RefreshMoney()
+  self.tbMoneyPanel:SetMoneyValue()
+end
+
+function tbUi:RequestMySellList()
+  self:RefreshMySellList()
+end
+
+function tbUi:MyStallBagToggleChecked(nBagShowType)
+  local nLastShowType = self.nBagShowType or 0
+  if nLastShowType == nBagShowType then
+    return
+  end
+  self.nBagShowType = nBagShowType
+  self:RefreshBag()
+end
+
+function tbUi:RefreshBag()
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  local tbAvaliableItems = MarketStallClass:GetAvaliableItems()
+  local tbItems = tbAvaliableItems[self.nBagShowType]
+  if not tbItems then
+    return
+  end
+  local nCount = #tbItems
+  local nCol = math.ceil(nCount / self.nRow)
+  nCol = nCol > 5 and nCol or 5
+  
+  local function fnSetItem(tbLoopScroll, nIndex)
+    for i = 1, self.nRow do
+      local itemObj = tbLoopScroll:GetGridElement(nIndex, i)
+      local curIndex = (nIndex - 1) * self.nRow + i
+      itemObj.pPanel:SetActive("Main", true)
+      local itemGrid = Ui:NewExistItemGrid(itemObj, "UIItemGrid")
+      if curIndex <= nCount then
+        itemGrid:SetActive(true)
+        local tbItem = tbItems[curIndex]
+        local nItemId = tbItem and tbItem.dwItemId
+        local nShowCount = tbItem and tbItem.nCount
+        itemGrid.szItemOpt = "ItemBox"
+        itemGrid:SetItem(nItemId, nil, {bShowTip = true}, nil, nil, nil, nil, nShowCount)
+        local tbWndData = {
+          dwItemId = tbItem.dwItemId,
+          nItemTemplateId = tbItem.nStallItemTempId,
+          szWndType = MarketStallBase.tbUIName[MarketStallBase.tbReqItemDataCbType.SELL_INFO_PANEL],
+          nShowType = self.nBagShowType,
+          index = curIndex,
+          bBag = true,
+          nStallType = self.nStallType,
+          nCount = tbItem.nCount,
+          nPrice = tbItem.nPrice,
+          tbItem = tbItem
+        }
+        itemGrid:SetClickEnable(true, function()
+          Ui:OpenWindow(MarketStallBase.tbUIName[MarketStallBase.tbReqItemDataCbType.SELL_INFO_PANEL], tbWndData)
+        end)
+      else
+        itemGrid:SetEmpty()
+        itemGrid:SetActive(false)
+      end
+    end
+  end
+  
+  self.tbItemScrollView:SetElement(nCol, fnSetItem)
+end
+
+function tbUi:RefreshMySellList()
+  self.tbSalesScrollView:Clear()
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  local tbItems = MarketStallClass.tbMyItems
+  local nItemCount = #tbItems
+  self.pPanel:Label_SetText(tbControls.txtAmount, string.format("%d / %d", nItemCount, MarketStallBase:GetLevel2StoreMaxItem(me.nLevel)))
+  local bHasTimeout = false
+  self.pPanel:SetActive(tbControls.txtTip, nItemCount <= 0)
+  
+  local function fnSetItem(tbElement, index)
+    local tbData = tbItems[index]
+    local pPanel = tbElement.pPanel
+    local szName = KItem.GetItemShowInfo(tbData.nStallItemTempId)
+    local nTime = tbData.nTime
+    local szMoney, szMoneyAtlas = Currency:GetIcon(MarketStallBase.tbMoneyType[self.nStallType])
+    pPanel:Sprite_SetSprite("PriceObj/imgMoney", szMoney)
+    tbElement.tbData = tbData
+    local tbWndData = {
+      dwItemId = tbData.dwItemId,
+      nItemTemplateId = tbData.nStallItemTempId,
+      szWndType = MarketStallBase.tbUIName[MarketStallBase.tbReqItemDataCbType.SELL_INFO_PANEL],
+      nShowType = self.nBagShowType,
+      index = index,
+      bBag = false,
+      nStallType = self.nStallType,
+      nCount = tbData.nCount,
+      nTime = nTime,
+      bTimeOut = tbData.bTimeout,
+      nPrice = tbData.nPrice,
+      tbItem = tbData
+    }
+    MarketStallClass:SetStallItemPanel(pPanel, tbElement, MarketStallBase.tbReqItemDataCbType.SELL_INFO_PANEL, tbWndData)
+    local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+    if tbData.dwItemId and tbData.dwItemId > 0 then
+      itemGrid:SetItem(tbData.dwItemId, tbData.nStallItemTempId)
+      MarketStallClass:SetStallItemGrid(itemGrid, tbData, MarketStallBase.tbReqItemDataCbType.SELL_INFO_PANEL)
+    else
+      itemGrid:SetItemByTemplate(tbData.nStallItemTempId, tbData.nCount)
+      itemGrid:SetClickEnable(true)
+    end
+    pPanel:SetActive("txtTimeOut", tbData.bTimeout)
+    pPanel:SetActive("txtCountdown", not tbData.bTimeout)
+    local szCancelTime = MarketStallBase.nTimeout - (GetTime() - nTime)
+    pPanel:Label_SetText("txtCountdown/txtTime", string.format("%02d:%02d", math.floor(szCancelTime / 3600), math.floor(szCancelTime % 3600 / 60)))
+    pPanel:Label_SetText("txtName", i18n.Parse(szName))
+    pPanel:Label_SetText("PriceObj/txtSale", tbData.nPrice)
+    if tbData.bTimeout then
+      RedPointMgr:ForceLightRedPoint(pPanel, "Main")
+      bHasTimeout = true
+    else
+      RedPointMgr:ForceFadeRedPoint(pPanel, "Main")
+    end
+  end
+  
+  for i = 1, #tbItems do
+    self.tbSalesScrollView:SetElement(i, function(tbElement)
+      fnSetItem(tbElement, i)
+    end)
+  end
+  if bHasTimeout then
+    MarketStallClass:UpdateRedPoint(true)
+  end
+end
+
+function tbUi:RefreshRedPoint()
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  local tbItems = MarketStallClass.tbMyItems
+  for i = 1, #tbItems do
+    local tbData = tbItems[i]
+    if tbData.bTimeout then
+      MarketStallClass:UpdateRedPoint(true)
+    end
+  end
+end
+
+function tbUi:RefreshMyMarket()
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  MarketStallClass:ClearNotifyStates()
+  self:RefreshBag()
+  if self.nStallType == MarketStallBase.tbStallType.Gold then
+    self:RequestMySellList()
+  else
+    self:RefreshMySellList()
+  end
+end
+
+function tbUi:OnRefreshAllMarket()
+  self:RefreshAllMarket(true)
+  if self.nStallType == MarketStallBase.tbStallType.YuanBao then
+    local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+    MarketStallClass:RefreshType(self.nCurSeTypeId)
+  end
+end
+
+function tbUi:UpdateTreeData()
+  self.tbBigData = {}
+  self.tbSmallData = {}
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  local tbGroup = MarketStallClass:GetTypeTreeData()
+  table.insert(self.tbBigData, {
+    nType = MarketStallBase.nStarType,
+    szText = i18n.EasyGet("\230\148\182\232\151\143"),
+    tbInfo = {bStar = true}
+  })
+  for nIndex = 1, #tbGroup do
+    local tbBigData = {
+      nType = tbGroup[nIndex].nTypeId,
+      szText = i18n.Parse(tbGroup[nIndex].szTypeName),
+      tbInfo = {
+        nBaseId = tbGroup[nIndex].tbKind[1].nSeTypeId,
+        nTypeId = tbGroup[nIndex].nTypeId
+      }
+    }
+    table.insert(self.tbBigData, tbBigData)
+    local nKindNum = #tbGroup[nIndex].tbKind
+    if 1 ~= nKindNum then
+      for nKindIndex = 1, nKindNum do
+        local szSeTypeName = tbGroup[nIndex].tbKind[nKindIndex].szSeTypeName
+        local tbTemp = {
+          nTypeId = tbGroup[nIndex].nTypeId,
+          szTypeName = i18n.Parse(tbGroup[nIndex].szTypeName),
+          nSeTypeId = tbGroup[nIndex].tbKind[nKindIndex].nSeTypeId
+        }
+        local tbData = {
+          bSubMenu = true,
+          nType = tbGroup[nIndex].nTypeId,
+          szText = i18n.Parse(szSeTypeName),
+          tbInfo = tbTemp
+        }
+        table.insert(self.tbSmallData, tbData)
+      end
+    end
+  end
+  self.bIgnoreSmallBtnCallBack = true
+  self.uiTree:SetData(self.tbBigData, self.tbSmallData)
+end
+
+function tbUi:TreeBigBtnOnClick(tbInfo, nBigIndex)
+  if not tbInfo then
+    self.pPanel:SetActive(tbControls.txtNoItem, true)
+  else
+    self.pPanel:SetActive(tbControls.txtNoItem, false)
+    if tbInfo.bStar then
+      self:SelectMarketType(MarketStallBase.nStarType)
+      self.nCurSeTypeId = MarketStallBase.nStarType
+    else
+      self.uiTree:AutoSelectSmall(tbInfo.nTypeId)
+      self:SelectMarketType(tbInfo.nBaseId)
+      self.nCurSeTypeId = tbInfo.nBaseId
+      self.nTypeId = tbInfo.nTypeId
+      self:ResetDropdown()
+    end
+  end
+end
+
+function tbUi:TreeSmallBtnOnClick(tbInfo)
+  if self.bIgnoreSmallBtnCallBack then
+    self.bIgnoreSmallBtnCallBack = nil
+    return
+  end
+  self:SelectMarketType(tbInfo.nSeTypeId)
+end
+
+function tbUi:SelectMarketType(nSeTypeId, bNoNeedRefresh)
+  self.nCurSeTypeId = nSeTypeId
+  self.nCurPage = 1
+  self.nCurTypePage = 1
+  self.nSortType = 1
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  if MarketStallClass:AutoRefresh(nSeTypeId) then
+    return
+  end
+  if not bNoNeedRefresh and self.nStallType == MarketStallBase.tbStallType.YuanBao then
+    MarketStallClass:RefreshType(nSeTypeId)
+  else
+    self:TryUpdateGoodList()
+  end
+end
+
+function tbUi:TryUpdateGoodList()
+  local bHideEmpty = not self.bShowAllGrps
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  local tbItems = MarketStallClass:GetShowStallItems(self.nCurSeTypeId, bHideEmpty)
+  if tbItems then
+    self:DoUpdateGoodList(tbItems)
+  end
+end
+
+function tbUi:ResetDropdown()
+  local szFilterType = self.FilterTypes[self.nStallType][self.nTypeId]
+  local tbFilter = self.FilterTypeClass[szFilterType]
+  if tbFilter then
+    self.pPanel:SetActive(tbControls.dropdownSelect, true)
+    self.pPanel:Dropdown_ResetOptions(tbControls.dropdownSelect, tbFilter.funcGetDropDownOptions(self))
+    self.nCurSelectDropdown = 0
+  else
+    self.pPanel:SetActive(tbControls.dropdownSelect, false)
+    self.nCurSelectDropdown = nil
+  end
+end
+
+function tbUi:UpdateGoodDetail()
+  self.pPanel:SetActive(tbControls.panelGoodType, false)
+  self.pPanel:SetActive(tbControls.panelGoodDetail, true)
+  local tbItems = self.tbCurGroup
+  if not tbItems then
+    return
+  end
+  if self.nStallType == MarketStallBase.tbStallType.YuanBao then
+    self.nTotalPage = math.max(1, math.ceil(#tbItems / COUNT_PER_PAGE))
+  end
+  if self.nCurPage > self.nTotalPage then
+    self.nCurPage = self.nTotalPage
+  end
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  self.pPanel:Label_SetText(self.txtPage, string.format("%d/%d", self.nCurPage, self.nTotalPage))
+  
+  local function fnSetItem(tbElement, index)
+    local nRealIdx = index
+    if self.nStallType == MarketStallBase.tbStallType.YuanBao then
+      nRealIdx = index + 8 * (self.nCurPage - 1)
+    end
+    local tbData = tbItems[nRealIdx]
+    if tbData then
+      local pPanel = tbElement.pPanel
+      local nStallItemTempId = tbData.nStallItemTempId
+      local szName = KItem.GetItemShowInfo(nStallItemTempId)
+      pPanel:Label_SetText("txtName", i18n.Parse(szName))
+      local szMoney, szMoneyAtlas = Currency:GetIcon(MarketStallBase.tbMoneyType[self.nStallType])
+      pPanel:Sprite_SetSprite("txtPrice/icon", szMoney)
+      pPanel:Label_SetText("txtPrice/txtPriceValue", tbData.nPrice)
+      pPanel:SetActive("imgSoldOut", tbData.nCount <= 0)
+      local tbWndData = {
+        dwItemId = tbData.dwItemId,
+        szWndType = MarketStallBase.tbUIName[MarketStallBase.tbReqItemDataCbType.BUY_INFO_PANEL],
+        nStallType = self.nStallType,
+        nSeTypeId = self.nCurSeTypeId,
+        tbItem = tbData
+      }
+      tbElement.tbData = tbData
+      if tbData.nCount > 0 then
+        MarketStallClass:SetStallItemPanel(pPanel, tbElement, MarketStallBase.tbReqItemDataCbType.BUY_INFO_PANEL, tbWndData)
+      else
+        Ui:Button_UnBindEvent(pPanel, "Main")
+      end
+      local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      if tbData.dwItemId and tbData.dwItemId > 0 then
+        itemGrid:SetItem(tbData.dwItemId, nStallItemTempId)
+        MarketStallClass:SetStallItemGrid(itemGrid, tbData, MarketStallBase.tbReqItemDataCbType.BUY_INFO_PANEL)
+      else
+        itemGrid:SetItemByTemplate(nStallItemTempId, tbData.nCount)
+        itemGrid:SetClickEnable(true)
+      end
+    end
+  end
+  
+  self.tbGoodDetailScrollView:Clear()
+  for i = 1, 8 do
+    local nIndex = i
+    if self.nStallType == MarketStallBase.tbStallType.YuanBao then
+      nIndex = i + 8 * (self.nCurPage - 1)
+    end
+    local tbData = tbItems[nIndex]
+    if tbData then
+      self.tbGoodDetailScrollView:SetElement(i, function(tbElement)
+        fnSetItem(tbElement, i)
+      end)
+    end
+  end
+end
+
+function tbUi:DoUpdateGoodList(tbItems)
+  self.pPanel:SetActive(tbControls.panelGoodDetail, false)
+  self.pPanel:SetActive(tbControls.panelGoodType, true)
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  tbItems = self:FilterItemsByDropdown(tbItems)
+  local tbDetailType = MarketStallClass:GetDetailTypeList(tbItems)
+  self.nTotalTypePage = math.max(1, math.ceil(#tbDetailType / COUNT_PER_PAGE))
+  if self.nCurTypePage > self.nTotalTypePage then
+    self.nCurTypePage = self.nTotalTypePage
+  end
+  self.pPanel:Label_SetText(self.txtTypePage, string.format("%d/%d", self.nCurTypePage, self.nTotalTypePage))
+  
+  local function fnSetItem(tbElement, index)
+    local nRealIdx = index + 8 * (self.nCurTypePage - 1)
+    local tbData = tbDetailType[nRealIdx]
+    local pPanel = tbElement.pPanel
+    if tbData then
+      local bStar = MarketStallClass:IsStar(tbData.nDetailTypeId)
+      pPanel:SetActive("btnCollection/imgCollected", bStar)
+      pPanel:Label_SetText("txtName", i18n.Parse(tbData.szDetailTypeName))
+      pPanel:Label_SetText("txtSale", tbData.nCount)
+      pPanel:SetActive("imgSoldOut", tbData.nCount <= 0)
+      local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      local nTemplateId = MarketStallClass.tbDetailType2TempId[tbData.nDetailTypeId]
+      if tbData.dwItemId and tbData.dwItemId > 0 then
+        itemGrid:SetItem(tbData.dwItemId, nTemplateId)
+        MarketStallClass:SetStallItemGrid(itemGrid, tbData, MarketStallBase.tbReqItemDataCbType.BUY_INFO_PANEL)
+      else
+        itemGrid:SetItemByTemplate(nTemplateId)
+        itemGrid:SetClickEnable(true)
+      end
+      Ui:Button_BindEvent(pPanel, "btnCollection", self.OnClickStar, self, tbData, index)
+      tbElement.tbData = tbData.tbItems
+      tbElement.nDetailTypeId = tbData.nDetailTypeId
+    end
+  end
+  
+  self.tbGoodScrollView:Clear()
+  for i = 1, 8 do
+    local nIndex = i + 8 * (self.nCurTypePage - 1)
+    local tbData = tbDetailType[nIndex]
+    if tbData then
+      self.tbGoodScrollView:SetElement(i, function(tbElement)
+        fnSetItem(tbElement, i)
+      end)
+    end
+  end
+  self.pPanel:SetActive(tbControls.txtNoItem, #tbItems <= 0)
+end
+
+function tbUi:FilterItemsByDropdown(tbItems)
+  local szFilterType = self.FilterTypes[self.nStallType][self.nTypeId]
+  local tbFilter = self.FilterTypeClass[szFilterType]
+  if tbFilter then
+    self.pPanel:Dropdown_SetValue(tbControls.dropdownSelect, self.nCurSelectDropdown)
+    return tbFilter.funcFilterItems(self, tbItems, self.nCurSelectDropdown)
+  else
+    return tbItems
+  end
+end
+
+function tbUi:OnGoodItemClick(index, tbElement)
+  self.nCurPage = 1
+  self.nDetailTypeId = tbElement.nDetailTypeId
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  if MarketStallClass:IsNeedRequestData() then
+    MarketStallClass:RequestGetItemList(self.nDetailTypeId, self.nCurPage, self.nSortType)
+    return
+  end
+  local tbItem = tbElement.tbData
+  if #tbItem <= 0 then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\229\136\134\231\177\187\230\154\130\230\151\160\228\184\138\230\158\182\229\149\134\229\147\129"))
+    return
+  end
+  self.tbCurGroup = tbItem
+  self:UpdateGoodDetail()
+end
+
+function tbUi:OnGoldItemListArrival(bRet, nDetailType, nPage, nSortType, tbStallItemList, nTotalCount)
+  if not bRet then
+    self:TryUpdateGoodList()
+    return
+  end
+  if self.nDetailTypeId == nDetailType and self.nCurPage == nPage and self.nSortType == nSortType then
+    self.tbCurGroup = tbStallItemList
+    self.nTotalPage = math.max(1, math.ceil(nTotalCount / COUNT_PER_PAGE))
+    self:UpdateGoodDetail()
+  end
+end
+
+function tbUi:OnSelectDropdown(nValue)
+  self.nCurSelectDropdown = nValue
+  self:TryUpdateGoodList()
+end
+
+function tbUi:UpdateStarList()
+  if self.nCurSeTypeId == MarketStallBase.nStarType then
+    self:SelectMarketType(MarketStallBase.nStarType)
+  end
+end
+
+function tbUi:OnClickBtnAllCancelSell()
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  local bRet, szMsg = MarketStallClass:AllStallCancelSell()
+  me.CenterMsg(szMsg)
+end
+
+function tbUi:RefreshAllMarket(bNoNeedRefresh)
+  self:SelectMarketType(self.nCurSeTypeId, bNoNeedRefresh)
+end
+
+function tbUi:OnGoldItemBuySuccess()
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  MarketStallClass:RequestGetItemList(self.nDetailTypeId, self.nCurPage, self.nSortType)
+end
+
+function tbUi:OnClickStar(tbItem, index)
+  if not tbItem then
+    return
+  end
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  local bStar = MarketStallClass:IsStar(tbItem.nDetailTypeId)
+  local bChange = false
+  if bStar then
+    if MarketStallClass:DelStar(tbItem.nDetailTypeId) then
+      bChange = true
+    end
+  elseif MarketStallClass:AddStar(tbItem.nDetailTypeId) then
+    bChange = true
+  end
+  if bChange then
+    self.pPanel:SetActive(string.format("node/imgBG/Content/AllStall/GoodTypePanel/GoodTypeGroup/Content/Element%d/btnCollection/imgCollected", index), not bStar)
+  end
+end
+
+function tbUi:OnClickBtnRefresh()
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  if MarketStallClass ~= MarketStallYuanBao then
+    return
+  end
+  if me.GetVipLevel() < Vip.nMinCanRefreshMarketStallLevel then
+    me.CenterMsg(i18n.EasyGet("\233\156\128\232\166\129\229\136\176\232\190\190Vip{0}\231\186\167\227\128\130", Vip.nMinCanRefreshMarketStallLevel))
+    return
+  end
+  
+  local function fnConfirm()
+    MarketStallClass:ManualRefresh(self.nCurSeTypeId)
+  end
+  
+  local cost = MarketStallClass:GetManualRefreshCost()
+  if cost > 0 then
+    me.MsgBox(i18n.EasyGet("\231\161\174\229\174\154\232\166\129\232\138\177\232\180\185 <color=#ffff0e>{0}\229\133\131\229\174\157</color> \232\191\155\232\161\140\229\136\183\230\150\176\229\144\151\239\188\159", cost), {
+      {
+        i18n.EasyGet("\231\161\174\229\174\154"),
+        fnConfirm
+      },
+      {
+        i18n.EasyGet("\229\143\150\230\182\136")
+      }
+    }, "MarketStallRefresh")
+  else
+    fnConfirm()
+  end
+end

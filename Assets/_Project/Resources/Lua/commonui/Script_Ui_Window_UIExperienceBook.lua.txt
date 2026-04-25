@@ -1,0 +1,348 @@
+local tbWnd = Ui:CreateWindow("UIExperienceBook")
+
+function tbWnd:NotifyEvents()
+  local tbRegEvent = {
+    {
+      EventNotify.emNOTIFY_SYN_EXPBOOK_DATA_FINISH,
+      self.SetList,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SYN_EXPBOOK_DATA_SINGGLE,
+      self.UpdateFriendItem,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TONG_MEMBERLIST,
+      self.SetList
+    }
+  }
+  return tbRegEvent
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  txtGoodName = "node/imgBG/Content/ItemInfo/txtGoodName",
+  txtDetail = "node/imgBG/Content/ItemInfo/panelDetail/txtDetail",
+  UIItemGrid = "node/imgBG/Content/ItemInfo/UIItemGrid",
+  FriendTemplate = "node/imgBG/Content/PlayerList/Viewport/Content/Template",
+  FriendScroll = "node/imgBG/Content/PlayerList/Viewport",
+  txtFriendEmpty = "node/imgBG/Content/txtEmpty",
+  btnSearch = "node/imgBG/Content/btnOk",
+  inputSearch = "node/imgBG/Content/InputChat"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnSearch = function(self)
+    self:Search()
+  end
+}
+tbWnd.tbGiveTargetType = {
+  Friend = function(self)
+    self:SetFriendList()
+  end,
+  Tong = function(self)
+    self:SetTongList()
+  end,
+  Legion = function(self)
+    self:SetLegionList()
+  end
+}
+tbWnd.tbGiveTypeFn = {
+  Fashion = function(pWnd, nPlayerId, nItemId, nTemplateId, nCount)
+    local tbFriend = FriendShip:GetFriendDataInfo(nPlayerId)
+    if not tbFriend then
+      me.CenterMsg(i18n.EasyGet("\233\128\137\230\139\169\232\181\160\233\128\129\231\154\132\231\142\169\229\174\182\230\149\176\230\141\174\233\148\153\232\175\175\232\175\183\233\135\141\230\150\176\233\128\137\230\139\169"))
+      return
+    end
+    if not KItem.GetItemExtParam(nTemplateId, 3) then
+      LogErr("UIExperienceBook. GiveFashion error. 3 in extParam is nil", nTemplateId)
+      return
+    end
+    local nFashionId = KItem.GetItemExtParam(nTemplateId, 1) or 0
+    local tbFashionItem = Fashion:GetFashionSetting(me, nFashionId)
+    if tbFashionItem then
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\229\175\185<color=#C56D05>{0}</color>\232\181\160\233\128\129<color=#54AB4D>\229\164\150\232\167\130\239\188\154{1}</color> \239\188\159", tbFriend.szName, tbFashionItem.szName), {
+        {
+          function()
+            Shop:GiveFashionInsideBag(nPlayerId, nTemplateId, nCount)
+            pWnd:Close()
+          end
+        },
+        {}
+      }, {
+        i18n.EasyGet("\231\161\174\229\174\154"),
+        i18n.EasyGet("\229\143\150\230\182\136")
+      })
+    end
+  end,
+  ExperienceBook = function(pWnd, nPlayerId, nItemId, nTemplateId, nCount)
+    ExpBook:GiveItemExpBook(nPlayerId, nTemplateId, nCount)
+  end,
+  DomainbattleItem = function(pWnd, nPlayerId, nItemId, nTemplateId)
+    DomainBattle:GiveItem(nPlayerId, nItemId, nTemplateId)
+  end,
+  GlobalDomainbattleItem = function(pWnd, nPlayerId, nItemId, nTemplateId)
+    GlobalDomainBattle:GiveItem(nPlayerId, nItemId, nTemplateId)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbFriendScroll = Ui:NewScrollView(self, self.FriendTemplate)
+  self.ItemGrid = Ui:NewExistItemGrid(self, self.UIItemGrid)
+end
+
+function tbWnd:OnOpen(nTemplateId, nItemId, szGiveType, bLimitCount, bLimitOnline, szGiveTarget)
+  FriendShip:RequestUpdateFriendInfo()
+  ExpBook:RequestUpdateExpBook()
+  if "Tong" == szGiveTarget then
+    Tong:UpdateMemberList()
+  end
+  self.nItemId = nItemId
+  self.nTemplateId = nTemplateId
+  self.szGiveType = szGiveType
+  self.bLimitCount = bLimitCount
+  self.bLimitOnline = bLimitOnline
+  self.szGiveTarget = szGiveTarget or "Friend"
+  self.nCount = 1
+  self.pPanel:SetActive(self.txtFriendEmpty, false)
+  self.pPanel:SetActive(self.FriendScroll, false)
+  local nHaveNum = me.GetItemCountByTypeInBag(self.nTemplateId)
+  self.ItemGrid:SetItemByTemplate(self.nTemplateId, nHaveNum)
+  self.pPanel:Input_SetText(self.inputSearch, "")
+  self:ShowPanel()
+end
+
+function tbWnd:ShowPanel()
+  self:SetDesc()
+  local fnTarget = self.tbGiveTargetType[self.szGiveTarget]
+  fnTarget(self)
+end
+
+function tbWnd:SetDesc()
+  local tbInfo = Item:GetItemBaseProp(self.nTemplateId)
+  if not tbInfo then
+    return
+  end
+  local szDesc = string.gsub(tbInfo.szIntro, "\\n", "\n")
+  self.pPanel:Label_SetText(self.txtGoodName, i18n.Parse(tbInfo.szName))
+  self.pPanel:Label_SetText(self.txtDetail, i18n.Parse(szDesc))
+end
+
+function tbWnd:SetList()
+  local fnTarget = self.tbGiveTargetType[self.szGiveTarget]
+  fnTarget(self)
+end
+
+function tbWnd:SetFriendList()
+  local tbAllFriend = FriendShip:GetAllFriendData()
+  local bHasFriend = tbAllFriend and not Lib:IsEmptyTB(tbAllFriend)
+  local tbOnlineFriend = {}
+  local szSearchStr = self.pPanel:Input_GetText(self.inputSearch)
+  if self.bLimitOnline then
+    for _, tbFriend in ipairs(tbAllFriend) do
+      if tbFriend.nState == Player.emPLAYER_STATE_NORMAL and (not szSearchStr or "" == szSearchStr or string.find(tbFriend.szName, szSearchStr)) then
+        table.insert(tbOnlineFriend, tbFriend)
+      end
+    end
+    bHasFriend = tbOnlineFriend and not Lib:IsEmptyTB(tbOnlineFriend)
+    self.pPanel:SetActive(self.FriendScroll, bHasFriend)
+    self.pPanel:SetActive(self.txtFriendEmpty, not bHasFriend)
+    self.tbOnlineFriend = tbOnlineFriend
+    if not bHasFriend then
+      return
+    end
+  else
+    self.pPanel:SetActive(self.FriendScroll, bHasFriend)
+    self.pPanel:SetActive(self.txtFriendEmpty, not bHasFriend)
+    for _, tbFriend in ipairs(tbAllFriend) do
+      if not szSearchStr or "" == szSearchStr or string.find(tbFriend.szName, szSearchStr) then
+        table.insert(tbOnlineFriend, tbFriend)
+      end
+    end
+  end
+  self.pPanel:Label_SetText(self.txtFriendEmpty, i18n.EasyGet("\230\178\161\230\156\137\229\143\175\228\187\165\232\181\160\233\128\129\231\154\132\229\165\189\229\143\139"))
+  table.sort(tbOnlineFriend, function(a, b)
+    if a.nState == Player.emPLAYER_STATE_NORMAL and b.nState ~= Player.emPLAYER_STATE_NORMAL then
+      return true
+    end
+    if a.nState ~= Player.emPLAYER_STATE_NORMAL and b.nState == Player.emPLAYER_STATE_NORMAL then
+      return false
+    end
+    return a.nImity > b.nImity
+  end)
+  self.tbFriends = tbOnlineFriend
+  self.tbFriendScroll:Reset()
+  for nIndex, tbFriend in ipairs(tbOnlineFriend) do
+    self.tbFriendScroll:SetElement(nIndex, function(tbElement)
+      self:SetFriendItem(tbElement, tbFriend)
+    end)
+  end
+end
+
+function tbWnd:SetTongList()
+  local tbAllFriend = Tong:GetMemberList() or {}
+  local bHasFriend = tbAllFriend and not Lib:IsEmptyTB(tbAllFriend)
+  local tbOnlineFriend = {}
+  local szSearchStr = self.pPanel:Input_GetText(self.inputSearch)
+  if self.bLimitOnline then
+    for _, tbFriend in ipairs(tbAllFriend) do
+      if 1 == tbFriend.nIsOnLine and tbFriend.nMemberId ~= me.dwID and (not szSearchStr or "" == szSearchStr or string.find(tbFriend.szName, szSearchStr)) then
+        table.insert(tbOnlineFriend, tbFriend)
+      end
+    end
+    bHasFriend = tbOnlineFriend and not Lib:IsEmptyTB(tbOnlineFriend)
+    self.pPanel:SetActive(self.FriendScroll, bHasFriend)
+    self.pPanel:SetActive(self.txtFriendEmpty, not bHasFriend)
+    self.tbOnlineFriend = tbOnlineFriend
+    if not bHasFriend then
+      return
+    end
+  else
+    self.pPanel:SetActive(self.FriendScroll, bHasFriend)
+    self.pPanel:SetActive(self.txtFriendEmpty, not bHasFriend)
+    for _, tbFriend in ipairs(tbAllFriend) do
+      if tbFriend.nMemberId ~= me.dwID and (not szSearchStr or "" == szSearchStr or string.find(tbFriend.szName, szSearchStr)) then
+        table.insert(tbOnlineFriend, tbFriend)
+      end
+    end
+  end
+  self.tbFriendScroll:Reset()
+  for nIndex, tbFriend in ipairs(tbOnlineFriend) do
+    self.tbFriendScroll:SetElement(nIndex, function(tbElement)
+      self:SetTongMember(tbElement, tbFriend)
+    end)
+  end
+  self.pPanel:Label_SetText(self.txtFriendEmpty, i18n.EasyGet("\230\178\161\230\156\137\229\143\175\228\187\165\232\181\160\233\128\129\231\154\132\229\184\174\228\188\154\230\136\144\229\145\152"))
+end
+
+function tbWnd:UpdateFriendItem(nUpdatePlayerID)
+  if not self.bLimitOnline then
+    return
+  end
+  if not self.tbOnlineFriend then
+    return
+  end
+  for nIndex, tbFriend in ipairs(self.tbOnlineFriend) do
+    if nUpdatePlayerID == tbFriend.dwID then
+      self.tbFriendScroll:SetElement(nIndex, function(tbElement)
+        self:SetFriendItem(tbElement, tbFriend)
+      end)
+    end
+  end
+  local nHaveNum = me.GetItemCountByTypeInBag(self.nTemplateId)
+  self.ItemGrid:SetItemByTemplate(self.nTemplateId, nHaveNum)
+end
+
+function tbWnd:SetFriendItem(tbElement, tbFriend)
+  local pPanel = tbElement.pPanel
+  local tbPortraitObjPanel = Ui:NewExistPortraitObjPanel(tbElement, "PortraitObj")
+  tbPortraitObjPanel:SetRoleIcon(tbFriend.nPortrait)
+  tbPortraitObjPanel:SetPortraitFrame(tbFriend.nPortraitFrame or 0)
+  tbPortraitObjPanel:SetFactionIcon(tbFriend.nFaction)
+  tbPortraitObjPanel:SetLevel(tbFriend.nLevel)
+  tbPortraitObjPanel:SetFactionIconActive(true)
+  tbPortraitObjPanel:SetOutlineObjActive(tbFriend.nState ~= Player.emPLAYER_STATE_NORMAL)
+  pPanel:Label_SetText("txtName", tbFriend.szName or tbFriend.szWantedName)
+  if self.bLimitCount then
+    pPanel:SetActive("txtCount", true)
+    local hasSendTimes = ExpBook.Cfg.MAXSENDTIMES - ExpBook:GetLeftSendTimes(tbFriend.dwId)
+    pPanel:Label_SetText("txtCount", i18n.EasyGet("\228\187\138\230\151\165\229\183\178\232\181\160 {0}/3", hasSendTimes))
+  else
+    pPanel:SetActive("txtCount", false)
+  end
+  Ui:Button_BindEvent(pPanel, "btnGive", function()
+    self:GiveItem(tbFriend)
+  end)
+end
+
+function tbWnd:SetTongMember(tbElement, tbMember)
+  local pPanel = tbElement.pPanel
+  local tbPortraitObjPanel = Ui:NewExistPortraitObjPanel(tbElement, "PortraitObj")
+  tbPortraitObjPanel:SetRoleIcon(tbMember.nPortrait)
+  tbPortraitObjPanel:SetPortraitFrame(tbMember.nPortraitFrame or 0)
+  tbPortraitObjPanel:SetFactionIcon(tbMember.nFaction)
+  tbPortraitObjPanel:SetLevel(tbMember.nTotalLevel)
+  tbPortraitObjPanel:SetFactionIconActive(true)
+  tbPortraitObjPanel:SetOutlineObjActive(1 ~= tbMember.nIsOnLine)
+  pPanel:Label_SetText("txtName", tbMember.szName or tbMember.szWantedName)
+  pPanel:SetActive("txtCount", false)
+  Ui:Button_BindEvent(pPanel, "btnGive", function()
+    self:GiveItem({
+      szName = tbMember.szName,
+      dwID = tbMember.nMemberId
+    })
+  end)
+end
+
+function tbWnd:SetLegionList()
+  local tbAllFriend = Legion:GetMemberList() or {}
+  local bHasFriend = tbAllFriend and not Lib:IsEmptyTB(tbAllFriend)
+  local tbOnlineFriend = {}
+  local szSearchStr = self.pPanel:Input_GetText(self.inputSearch)
+  if self.bLimitOnline then
+    for _, tbFriend in ipairs(tbAllFriend) do
+      if 1 == tbFriend.nIsOnLine and tbFriend.nMemberId ~= me.dwID and (not szSearchStr or "" == szSearchStr or string.find(tbFriend.szName, szSearchStr)) then
+        table.insert(tbOnlineFriend, tbFriend)
+      end
+    end
+    bHasFriend = tbOnlineFriend and not Lib:IsEmptyTB(tbOnlineFriend)
+    self.pPanel:SetActive(self.FriendScroll, bHasFriend)
+    self.pPanel:SetActive(self.txtFriendEmpty, not bHasFriend)
+    self.tbOnlineFriend = tbOnlineFriend
+    if not bHasFriend then
+      return
+    end
+  else
+    self.pPanel:SetActive(self.FriendScroll, bHasFriend)
+    self.pPanel:SetActive(self.txtFriendEmpty, not bHasFriend)
+    for _, tbFriend in ipairs(tbAllFriend) do
+      if tbFriend.nMemberId ~= me.dwID and (not szSearchStr or "" == szSearchStr or string.find(tbFriend.szName, szSearchStr)) then
+        table.insert(tbOnlineFriend, tbFriend)
+      end
+    end
+  end
+  self.tbFriendScroll:Reset()
+  for nIndex, tbFriend in ipairs(tbOnlineFriend) do
+    self.tbFriendScroll:SetElement(nIndex, function(tbElement)
+      self:SetLegionMember(tbElement, tbFriend)
+    end)
+  end
+  self.pPanel:Label_SetText(self.txtFriendEmpty, i18n.EasyGet("\230\178\161\230\156\137\229\143\175\228\187\165\232\181\160\233\128\129\231\154\132\229\184\174\228\188\154\230\136\144\229\145\152"))
+end
+
+function tbWnd:SetLegionMember(tbElement, tbMember)
+  local pPanel = tbElement.pPanel
+  local tbPortraitObjPanel = Ui:NewExistPortraitObjPanel(tbElement, "PortraitObj")
+  tbPortraitObjPanel:SetRoleIcon(tbMember.nPortrait)
+  tbPortraitObjPanel:SetPortraitFrame(tbMember.nPortraitFrame or 0)
+  tbPortraitObjPanel:SetFactionIcon(tbMember.nFaction)
+  tbPortraitObjPanel:SetLevel(tbMember.nLevel)
+  tbPortraitObjPanel:SetFactionIconActive(true)
+  pPanel:Label_SetText("txtName", tbMember.szName or tbMember.szWantedName)
+  pPanel:SetActive("txtCount", false)
+  Ui:Button_BindEvent(pPanel, "btnGive", function()
+    self:GiveItem({
+      szName = tbMember.szName,
+      dwID = tbMember.nMemberId
+    })
+  end)
+end
+
+function tbWnd:GiveItem(tbFriend)
+  self.nCount = 1
+  Log(string.format("GiveItem Player %s, %s Give Item To Player %s, %s : %s x %s", me.szName, me.dwID, tbFriend.szName, tbFriend.dwID, self.nTemplateId, self.nCount))
+  local haveNum = me.GetItemCountByTypeInBag(self.nTemplateId)
+  if self.nCount <= 0 or haveNum < self.nCount then
+    me.CenterMsg(i18n.EasyGet("\230\149\176\233\135\143\228\184\141\232\182\179"))
+    return
+  end
+  self.tbGiveTypeFn[self.szGiveType](self, tonumber(tbFriend.dwID), self.nItemId, self.nTemplateId, self.nCount)
+end
+
+function tbWnd:Search()
+  local fnTarget = self.tbGiveTargetType[self.szGiveTarget]
+  fnTarget(self)
+end

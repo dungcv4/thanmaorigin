@@ -1,0 +1,91 @@
+ViewRole.tbAllRoleIdList = ViewRole.tbAllRoleIdList or {}
+ViewRole.tbDwId2RoleInfo = ViewRole.tbDwId2RoleInfo or {}
+ViewRole.MAX_SAVE_ROLE_NUM = 30
+ViewRole.UPDATE_TIME_CD = 30
+
+function ViewRole:GetRoleInfoById(dwRoleId, bIsHadOpenWnd)
+  local tbRole = self.tbDwId2RoleInfo[dwRoleId]
+  if not tbRole then
+    return
+  end
+  if bIsHadOpenWnd then
+    return tbRole
+  end
+  if GetTime() - tbRole.nUpdateTime > self.UPDATE_TIME_CD then
+    return
+  end
+  return tbRole
+end
+
+function ViewRole:OpenWindow(szWnd, dwRoleId, ...)
+  local tbArgs = {
+    ...
+  }
+  local tbEquip, tbExtEquip, tbPartnerInfo = self:GetCurResInfo(dwRoleId, szWnd)
+  if not (tbEquip and tbExtEquip) or not tbPartnerInfo then
+    self.szWaitWnd = szWnd
+    
+    function self.fWaitCallback()
+      ViewRole:OpenWindow(szWnd, dwRoleId, table.unpack(tbArgs))
+    end
+    
+    return
+  end
+  Ui:OpenWindow(szWnd, tbEquip, tbExtEquip, tbPartnerInfo, dwRoleId, ...)
+end
+
+function ViewRole:OnGetSyncData(tbRole)
+  if not tbRole then
+    return
+  end
+  local dwRoleId = tbRole.dwID
+  tbRole.nUpdateTime = GetTime()
+  for i = #self.tbAllRoleIdList, 1, -1 do
+    if self.tbAllRoleIdList[i] == dwRoleId then
+      table.remove(self.tbAllRoleIdList, i)
+    end
+  end
+  if #self.tbAllRoleIdList >= self.MAX_SAVE_ROLE_NUM then
+    local dwID = table.remove(self.tbAllRoleIdList, 1)
+    self.tbDwId2RoleInfo[dwID] = nil
+  end
+  table.insert(self.tbAllRoleIdList, dwRoleId)
+  self.tbDwId2RoleInfo[dwRoleId] = tbRole
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_VIEWROLE_DATA, dwRoleId)
+  if not self.szWaitWnd or Ui:WindowVisible(self.szWaitWnd) then
+    return
+  end
+  local pAsyncRole = KPlayer.GetAsyncData(dwRoleId)
+  if not pAsyncRole then
+    return
+  end
+  if self.fWaitCallback then
+    self.fWaitCallback()
+    self.fWaitCallback = nil
+    self.szWaitWnd = nil
+  end
+end
+
+function ViewRole:GetCurResInfo(dwRoleId, szWnd)
+  local pAsyncRole = KPlayer.GetAsyncData(dwRoleId)
+  local tbRole = self:GetRoleInfoById(dwRoleId)
+  if not pAsyncRole or not tbRole then
+    RemoteServer.ViewPlayerInfo(dwRoleId, szWnd)
+    return
+  end
+  pAsyncRole.tbRoleInfo = tbRole
+  if self.dwRoleId and self.dwRoleId > 0 then
+    KPlayer.CloseAsyncData(self.dwRoleId)
+  end
+  if self.dwRoleId and dwRoleId ~= self.dwRoleId then
+    self.dwRoleId = nil
+  end
+  local tbEquip, tbExtEquip, tbPartnerInfo = KPlayer.ViewAsyncData(dwRoleId)
+  self.tbEquip = tbEquip
+  self.tbExtEquip = tbExtEquip
+  self.tbPartnerInfo = tbPartnerInfo
+  if tbEquip then
+    self.dwRoleId = dwRoleId
+    return tbEquip, tbExtEquip, tbPartnerInfo
+  end
+end

@@ -1,0 +1,153 @@
+local tbWnd = Ui:CreateClass("UIDragonBoatRace", "UIPanel")
+local tbControls = {
+  ItemTemplate = "List01/RewardScrollView/Viewport/Content/Template",
+  txtTitle = "txtTitle",
+  txtTime = "txtTime01",
+  txtSecondTitle = "List01/txtSecondTittle",
+  txtStory = "List01/txtStory",
+  txtNum = "txtNum",
+  btnPlus = "txtNum/btnPlus",
+  btnHelp = "txtTitle/btnHelp",
+  btnGo = "btnGo",
+  btnRank = "btnRank",
+  btnAdd = "Template/btnAdd",
+  imgFinish = "List01/Reward/img_Finish "
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.szHelpKey)
+  end,
+  btnGo = function(self)
+    Lib:DoString(self.szJoinCallback)
+  end,
+  btnPlus = function(self)
+    local tbInfo = Item:GetClass("CountAddProp"):GetAddDegreeInfo(self.szDegreeName)
+    if not tbInfo then
+      me.CenterMsg(i18n.EasyGet("\231\188\186\229\176\145\233\133\141\231\189\174"))
+      return
+    end
+    if DegreeCtrl:GetDegree(me, self.szDegreeName) > 0 then
+      me.CenterMsg(i18n.EasyGet("\229\183\178\232\190\190\229\143\130\232\181\155\230\172\161\230\149\176\228\184\138\233\153\144\239\188\140\232\175\183\229\133\136\230\182\136\232\128\151\229\137\169\228\189\153\230\172\161\230\149\176\229\144\142\229\134\141\228\189\191\231\148\168"))
+      return
+    end
+    local szName = Item:GetName(tbInfo.TemplateId, me)
+    if DegreeCtrl:GetDegree(me, tbInfo.CostDegree) <= 0 then
+      me.CenterMsg(i18n.EasyGet("\230\130\168\228\187\138\230\151\165\229\183\178\231\187\143\228\189\191\231\148\168\232\191\135{0}\228\186\134", szName))
+      return
+    end
+    local nCount, tbItemList = me.GetItemCountByTypeInBag(tbInfo.TemplateId)
+    if nCount <= 0 then
+      me.CenterMsg(i18n.EasyGet("\230\130\168\231\154\132\232\131\140\229\140\133\229\134\133\230\178\161\230\156\137{0}", szName))
+      Shop:OpenShopBuyWidDefault(tbInfo.TemplateId, 1)
+      return
+    end
+    
+    local function agreeFunc(tbItemList)
+      local _, pItem = next(tbItemList)
+      if pItem then
+        RemoteServer.UseItem(pItem.dwId)
+      end
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\130\168\231\154\132\232\131\140\229\140\133\229\134\133\230\139\165\230\156\137{0}{1}\228\184\170\239\188\140\231\142\176\228\189\191\231\148\1681\228\184\170\229\162\158\229\138\160\228\184\128\230\172\161\229\143\130\228\184\142\230\172\161\230\149\176", szName, nCount), {
+      {agreeFunc, tbItemList},
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+    return true, nil
+  end,
+  btnRank = function(self)
+    Ui:OpenWindow("UITemporaryActivityRank", self.tbEntranceRankData, 1)
+  end
+}
+
+function tbWnd:OnCreate()
+end
+
+function tbWnd:OnOpen(nEntranceIndex, nIndex)
+  self.nEntranceIndex = nEntranceIndex or self.nEntranceIndex
+  if self.nEntranceIndex then
+    self:UpdateInfo(self.nEntranceIndex, nIndex)
+  end
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.btnGo)
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnGo, {
+    RedPointMgr.EVENT.QingmingAncestors
+  })
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_BUY_DEGREE_SUCCESS, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_BUY_DEGREE_SUCCESS, self.UpdateInfo, self)
+end
+
+function tbWnd:UpdateInfo(nEntranceIndex, nIndex)
+  self.nEntranceIndex = nEntranceIndex or self.nEntranceIndex
+  self.nIndex = self.nIndex or nIndex
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(self.nEntranceIndex)
+  local tbInfo = self.tbActivityList[self.nIndex]
+  if not tbInfo then
+    return
+  end
+  self.nId = self.nId or self.tbActivityList[self.nIndex].nId
+  local tbExtraData = ActivityMgr.EntranceSchedule:GetExtraData(self.nEntranceIndex, tbInfo.nIndex)
+  self.pPanel:Label_SetText(tbControls.txtSecondTitle, i18n.Get(tbExtraData.szSecondTitle))
+  self.pPanel:Label_SetText(tbControls.txtStory, i18n.Get(tbExtraData.szStory))
+  self.szDegreeName = tbExtraData.szDegreeName
+  self.szJoinCallback = tbExtraData.szJoinCallback
+  self.szHelpKey = tbInfo.szHelpKey
+  self.pPanel:Label_SetText(self.txtTitle, tbInfo.szName)
+  local szTime = string.format("<color=#1FFB24>%s</color>", tbInfo.szShowTime)
+  self.pInstance = ActivityMgr:GetInstanceById(tbInfo.nId)
+  local nStartTime = self.pInstance:GetStartTime()
+  local nEndTime = self.pInstance:GetEndTime()
+  if nStartTime < GetTime() then
+    local nDiff = nEndTime - GetTime()
+    szTime = i18n.EasyGet("<color=#1FFB24>{0}</color> {1}\229\144\142\231\187\147\230\157\159", tbInfo.szShowTime, Lib:TimeDesc2(nDiff))
+  end
+  if nEndTime < GetTime() then
+    szTime = i18n.EasyGet("<color=#1FFB24>{0}</color> \229\183\178\231\187\147\230\157\159", tbInfo.szShowTime)
+  end
+  self.pPanel:Label_SetText(self.txtTime, szTime)
+  self:UpdateListView(tbInfo.tbAward)
+  self:UpdateAtttendInfo()
+  self.tbEntranceRankData = ActivityMgr.EntranceSchedule:GetEntranceRankData(self.nEntranceIndex)
+end
+
+function tbWnd:UpdateListView(tbAward)
+  if not tbAward then
+    return
+  end
+  if self.tbListView then
+    self.tbListView:Clear()
+  end
+  self.tbListView = Ui:NewScrollView(self, self.ItemTemplate)
+  self.tbListView:Reset()
+  for i = 1, #tbAward do
+    self.tbListView:SetElement(i, function(tbElement)
+      self:UpdateListElement(tbElement, tbAward[i])
+    end, true)
+  end
+end
+
+function tbWnd:UpdateAtttendInfo()
+  self.pPanel:Label_SetText(self.txtNum, i18n.EasyGet("\228\187\138\230\151\165\229\143\175\229\143\130\228\184\142\230\172\161\230\149\176\239\188\154{0}/{1}", DegreeCtrl:GetDegree(me, self.szDegreeName), DegreeCtrl:GetMaxDegree(self.szDegreeName, me)))
+end
+
+function tbWnd:UpdateListElement(tbElement, tbAward)
+  local tbGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  tbGrid:SetGenericItem(tbAward)
+  if "Item" == tbAward[1] then
+    local szName = Item:GetName(tbAward[2], me)
+    tbElement.pPanel:Label_SetText("txtActivityName", szName)
+  else
+    local szName = Currency:GetName(tbAward[1])
+    tbElement.pPanel:Label_SetText("txtActivityName", szName)
+  end
+  tbGrid:SetClickEnable(true)
+end
+
+function tbWnd:OnClose()
+  if self.tbListView then
+    self.tbListView:Reset()
+  end
+end

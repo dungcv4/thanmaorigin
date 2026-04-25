@@ -1,0 +1,99 @@
+Require("CommonScript/FieldPractice/FieldPractice.lua")
+local tbJiuItem = Item:GetClass("Jiu")
+tbJiuItem.nTemplateId = FieldPractice.tbDef.nJiuTempId
+tbJiuItem.nJiuSkillId = FieldPractice.tbDef.nJiuSkillId
+tbJiuItem.nNormalQuotiety = FieldPractice.tbDef.nNormalQuotiety
+tbJiuItem.nQuotietyPerRole = FieldPractice.tbDef.nQuotietyPerRole
+
+function tbJiuItem:OnUse(it)
+  if SERVER_RUNNING_MODE == SERVER_MODE.ZONE_SERVER and not GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    return
+  end
+  local dwTemplateId = it.dwTemplateId
+  local nSkillLevel = KItem.GetItemExtParam(dwTemplateId, 1)
+  local nDuraTime = KItem.GetItemExtParam(dwTemplateId, 2)
+  if not (nSkillLevel and nDuraTime) or 0 == nDuraTime or 0 == nSkillLevel then
+    print("Item Jiu ExtParam wrong!")
+    return 0
+  end
+  if me.GetNpc().GetSkillState(self.nJiuSkillId) then
+    me.CenterMsg(i18n.EasyGet("{0}\229\138\159\230\149\136\230\156\170\232\191\135\239\188\140\232\191\152\230\152\175\231\168\141\229\144\142\229\134\141\229\150\157\229\144\167", it.szName))
+    return 0
+  end
+  me.AddSkillState(self.nJiuSkillId, nSkillLevel, 1, nDuraTime * Env.GAME_FPS, 0, 1)
+  me.CenterMsg(i18n.EasyGet("\228\189\160\229\150\157\228\186\134\228\184\128\231\147\182{0}", it.szName))
+  if me.dwTeamID > 0 then
+    self:SyncAllTeamMemberJiuState(me.dwTeamID)
+  else
+    me.CallClientScript("FieldPractice:OnUseJiuItem", self.nQuotietyPerRole)
+  end
+  Lib:CallBack({
+    Event.OnEvent,
+    Event,
+    Event.emEVENT_XIU_LIAN_USE_JIU,
+    me.dwID
+  })
+  return 1
+end
+
+function tbJiuItem:CalcQuotiety(tbPlayer)
+  local nTimes = 0
+  for i, pPlayer in pairs(tbPlayer) do
+    if pPlayer then
+      local tbState = pPlayer.GetNpc().GetSkillState(self.nJiuSkillId)
+      if tbState then
+        local nSkillLevel = tbState.nSkillLevel
+        if nSkillLevel > 0 then
+          nTimes = nTimes + 1
+        end
+      end
+    end
+  end
+  return (self.nQuotietyPerRole - self.nNormalQuotiety) * nTimes + self.nNormalQuotiety
+end
+
+function tbJiuItem:SyncAllTeamMemberJiuState(dwTeamID)
+  local tbTeamData = TeamMgr:GetTeamById(dwTeamID)
+  if not tbTeamData then
+    return
+  end
+  local tbMemberList = tbTeamData:GetMembers()
+  local tbPlayerList = {}
+  local tbInfo = {}
+  for _, nMemberId in pairs(tbMemberList) do
+    local pMember = KPlayer.GetPlayerObjById(nMemberId)
+    if pMember then
+      local tbSkillState = pMember.GetNpc().GetSkillState(self.nJiuSkillId)
+      if tbSkillState then
+        tbInfo[nMemberId] = tbSkillState.nEndFrame
+      end
+      table.insert(tbPlayerList, pMember)
+    end
+  end
+  for _, pPlayer in ipairs(tbPlayerList) do
+    pPlayer.CallClientScript("FieldPractice:OnSyncJiuStateTb", tbInfo)
+  end
+end
+
+function tbJiuItem:GetTeamMemberJiuState(pPlayer)
+  local dwTeamID = pPlayer.dwTeamID
+  if dwTeamID <= 0 then
+    return
+  end
+  local tbTeamData = TeamMgr:GetTeamById(dwTeamID)
+  if not tbTeamData then
+    return
+  end
+  local tbMemberList = tbTeamData:GetMembers()
+  local tbInfo = {}
+  for _, nMemberId in pairs(tbMemberList) do
+    local pMember = KPlayer.GetPlayerObjById(nMemberId)
+    if pMember then
+      local tbSkillState = pMember.GetNpc().GetSkillState(self.nJiuSkillId)
+      if tbSkillState then
+        tbInfo[nMemberId] = tbSkillState.nEndFrame
+      end
+    end
+  end
+  pPlayer.CallClientScript("FieldPractice:OnSyncJiuStateTb", tbInfo)
+end

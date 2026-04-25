@@ -1,0 +1,667 @@
+local tbWnd = Ui:CreateWindow("UIMiningAgency")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MININGAGENCY_ONADDITEM,
+      self.OnAddItem
+    },
+    {
+      EventNotify.emNOTIFY_MININGAGENCY_ONDELETEITEM,
+      self.OnDeleteItem
+    },
+    {
+      EventNotify.emNOTIFY_MININGAGENCY_ONCHANGEMONEY,
+      self.OnChangeMoney
+    },
+    {
+      EventNotify.emNOTIFY_MININGAGENCY_ONCHANGESTATE,
+      self.OnChangeState
+    },
+    {
+      EventNotify.emNOTIFY_MININGAGENCY_ONMININGSUCCESS,
+      self.OnMiningSuccess
+    },
+    {
+      EventNotify.emNOTIFY_MININGAGENCY_ONCANCEL,
+      self.OnCancel
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.OnChangeCurrency,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SERVER_CONNECT_LOST,
+      self.OnServerConnectLost
+    }
+  }
+end
+
+local tbControls = {
+  LeftPanel_Owner = "node/imgBG/ContentMining/Left/01",
+  OtherPlayerPanel_Owner = "node/imgBG/ContentMining/Left/01/OtherTradePanel",
+  txtOtherPlayerName_Owner = "node/imgBG/ContentMining/Left/01/OtherTradePanel/RoleInfo/BG/txtRoleName",
+  txtGoldTotal_Owner = "node/imgBG/ContentMining/Left/01/OtherTradePanel/Gold01/txtGoldTittle/imgGold/txtGoldTittle01/txtGoldNum",
+  txtGoldOther_Owner = "node/imgBG/ContentMining/Left/01/OtherTradePanel/Gold02/txtGoldTittle/imgGold/txtGoldTittle01/txtGoldNum",
+  txtGoldTitleOther_Owner = "node/imgBG/ContentMining/Left/01/OtherTradePanel/Gold02/txtGoldTittle",
+  txtGoldMe_Owner = "node/imgBG/ContentMining/Left/01/SelfTradePanel/Gold/imgGoldNum/UIAddAndSubGroup/btnInput/txtInput",
+  txtNotice_Owner = "node/imgBG/ContentMining/Left/01/Notice/BG/txtTradeRoleInfo",
+  txtMePlayerName_Owner = "node/imgBG/ContentMining/Left/01/SelfTradePanel/RoleInfo/BG/txtRoleName",
+  templateChosenItem_Owner = "node/imgBG/ContentMining/Left/01/SelfTradePanel/bagBackground/maskView/imgInventory/Item",
+  imgLock_Owner = "node/imgBG/ContentMining/Left/01/SelfTradePanel/imgLock",
+  txtQuota_Owner = "node/imgBG/ContentMining/Left/01/SelfTradePanel/txtQuota",
+  LeftPanel_Helper = "node/imgBG/ContentMining/Left/02",
+  OtherPlayerPanel_Helper = "node/imgBG/ContentMining/Left/02/SelfTradePanel",
+  txtOtherPlayerName_Helper = "node/imgBG/ContentMining/Left/02/SelfTradePanel/RoleInfo/BG/txtRoleName",
+  txtGoldTotal_Helper = "node/imgBG/ContentMining/Left/02/OtherTradePanel/Gold01/txtGoldTittle/imgGold/txtGoldTittle01/txtGoldNum",
+  txtGoldOther_Helper = "node/imgBG/ContentMining/Left/02/OtherTradePanel/Gold02/txtGoldTittle/imgGold/txtGoldTittle01/txtGoldNum",
+  txtGoldTitleOther_Helper = "node/imgBG/ContentMining/Left/02/OtherTradePanel/Gold02/txtGoldTittle",
+  txtGoldMe_Helper = "node/imgBG/ContentMining/Left/02/SelfTradePanel/Gold/imgGoldNum/UIAddAndSubGroup/btnInput/txtInput",
+  txtNotice_Helper = "node/imgBG/ContentMining/Left/02/Notice/BG/txtTradeRoleInfo",
+  txtMePlayerName_Helper = "node/imgBG/ContentMining/Left/02/OtherTradePanel/RoleInfo/BG/txtRoleName",
+  templateChosenItem_Helper = "node/imgBG/ContentMining/Left/02/SelfTradePanel/bagBackground/maskView/imgInventory/Item",
+  imgLock_Helper = "node/imgBG/ContentMining/Left/02/SelfTradePanel/imgLock",
+  txtQuota_Helper = "node/imgBG/ContentMining/Left/02/SelfTradePanel/txtQuota",
+  toggleQuickWithdraw = "node/imgBG/ContentMining/BagPanel/toggleQuickWithdraw",
+  txtRules = "node/imgBG/ContentMining/BagPanel/ContRules/Scroll View/Viewport/Content/Template/txt",
+  ContItem = "node/imgBG/ContentMining/BagPanel/ContItem",
+  templateBagItemRow = "node/imgBG/ContentMining/BagPanel/ContItem/bagItemSV/Viewport/imgInventory/ItemCell",
+  ContRecord = "node/imgBG/ContentMining/BagPanel/ContRecord",
+  txtRecord = "node/imgBG/ContentMining/BagPanel/ContRecord/Scroll View/Viewport/Content/Template",
+  txtBagRemainCount = "node/imgBG/ContentMining/BagPanel/txtItemGroup/txtItemCountValue",
+  btnRecord = "node/imgBG/ContentMining/Left/01/BtnRecord",
+  btnLock = "node/imgBG/ContentMining/btnLockTrade",
+  txtLock = "node/imgBG/ContentMining/btnLockTrade/Text",
+  btnConfirm = "node/imgBG/ContentMining/btnConfirmTrade",
+  txtConfirm = "node/imgBG/ContentMining/btnConfirmTrade/Text",
+  wndMiningRecord = "wndMining",
+  templateRecordWnd = "wndMining/imgBG/List/Viewport/Content/Template",
+  MoneyPanel = "node/UIMoneyPanel",
+  btnClose = "node/imgBG/btnClose"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    MiningAgency:ReqCancel()
+    self:Close()
+  end,
+  btnRecord = function(self)
+    self.pPanel:SetActive(tbControls.wndMiningRecord, true)
+    self:RefreshWndRecord()
+  end,
+  btnLock = function(self)
+    local pProcessor = MiningAgency:GetProcessor()
+    if pProcessor then
+      local nState = pProcessor:GetPlayerMiningState(me.dwID)
+      if nState == MiningAgency.UNLOCK_STATE then
+        MiningAgency:ReqSetStateLock()
+      elseif nState == MiningAgency.LOCK_STATE then
+        MiningAgency:ReqSetStateUnlock()
+      end
+    end
+  end,
+  btnConfirm = function(self)
+    local pProcessor = MiningAgency:GetProcessor()
+    if pProcessor then
+      local nState = pProcessor:GetPlayerMiningState(me.dwID)
+      if nState == MiningAgency.LOCK_STATE then
+        MiningAgency:ReqSetStateConfirm()
+      elseif nState == MiningAgency.CONFIRM_STATE then
+        MiningAgency:ReqSetStateLock()
+      end
+    end
+  end
+}
+tbWnd.tbOnToggleClick = {
+  toggleQuickWithdraw = function(self, isOn)
+    self.bQuickWithdraw = isOn
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, tbControls.MoneyPanel)
+  self.tbBagScrollView = Ui:NewLoopScrollView(self, tbControls.templateBagItemRow, "Item")
+  self.nRow = 6
+  self.tbRecordWndScrollView = Ui:NewScrollView(self, tbControls.templateRecordWnd)
+  self:SetClickEmptyCallback(self.wndMiningRecord)
+  self.PriceAddAndSubGroup_Owner = Ui:NewExistAddAndSubGroup(self, "node/imgBG/ContentMining/Left/01/SelfTradePanel/Gold/imgGoldNum/UIAddAndSubGroup")
+  self.PriceAddAndSubGroup_Owner:BindEvent(function(nValue)
+    if not MiningAgency:ReqSetMoney(nValue) then
+      return 0, i18n.Get(MiningAgency.MSG.PLZ_INPUT_MONEY)
+    end
+  end)
+  self.PriceAddAndSubGroup_Helper = Ui:NewExistAddAndSubGroup(self, "node/imgBG/ContentMining/Left/02/SelfTradePanel/Gold/imgGoldNum/UIAddAndSubGroup")
+  self.PriceAddAndSubGroup_Helper:BindEvent(function(nValue)
+    if not MiningAgency:ReqSetMoney(nValue) then
+      return 0, i18n.Get(MiningAgency.MSG.PLZ_INPUT_MONEY)
+    end
+  end)
+end
+
+function tbWnd:GetNodeKey(szNode)
+  if self.nMeType == MiningAgency.OWNER then
+    return szNode .. "_Owner"
+  elseif self.nMeType == MiningAgency.HELPER then
+    return szNode .. "_Helper"
+  end
+end
+
+function tbWnd:OnOpen(tbOtherInfo, nMeType)
+  self.bQuickWithdraw = false
+  self.pPanel:Toggle_SetChecked(tbControls.toggleQuickWithdraw, false)
+  self.tbOtherInfo = tbOtherInfo
+  self.nMeType = nMeType
+  self.pPanel:SetActive(self.txtQuota_Owner, false)
+  self.pPanel:SetActive(self.txtQuota_Helper, false)
+  self.pPanel:SetActive(self.toggleQuickWithdraw, self.nMeType == MiningAgency.OWNER)
+  self.pPanel:Label_SetText(self.txtGoldTitleOther_Owner, i18n.EasyGet("\229\141\143\229\138\169\230\150\185\230\182\136\232\128\151"))
+  self.pPanel:Label_SetText(self.txtGoldTitleOther_Helper, i18n.EasyGet("\232\162\171\229\141\143\229\138\169\230\150\185\230\182\136\232\128\151"))
+  self.pPanel:SetActive(tbControls[self:GetNodeKey("imgLock")], false)
+  if self.nMeType == MiningAgency.OWNER then
+    self:InitMeType_Owner()
+  elseif self.nMeType == MiningAgency.HELPER then
+    self:InitMeType_Helper()
+  end
+  self:InitChosenItemGrid()
+  self.pPanel:Label_SetText(tbControls[self:GetNodeKey("txtMePlayerName")], me.szName)
+  self.pPanel:Label_SetText(tbControls[self:GetNodeKey("txtOtherPlayerName")], self.tbOtherInfo.szPlayerName)
+  self:RefreshMeMoney()
+  self:RefreshOtherMoney()
+  self:RefreshTotalMoney()
+  self:RefreshNotice("")
+  self:RefreshMoneyPanel()
+  self:RefreshBagRemainCount()
+  self:ResetState()
+  self:RefreshRecord()
+  local szAllRules = ""
+  for nIndex, szRule in ipairs(MiningAgency.RULES) do
+    szAllRules = string.format("%s%s\n", szAllRules, i18n.Get(szRule))
+  end
+  self.pPanel:Label_SetText(tbControls.txtRules, szAllRules)
+end
+
+function tbWnd:InitItemList()
+  if self.nMeType == MiningAgency.HELPER then
+    return
+  end
+  local tbMiningItemConfig = MiningAgency:GetMiningItemConfig()
+  local tbItemList = {}
+  for nTemplateId, tbCfg in pairs(tbMiningItemConfig) do
+    local nCount = me.GetItemCountInBags(nTemplateId)
+    if nCount > 0 then
+      local tbItem = {nTemplateId = nTemplateId, nCount = nCount}
+      table.insert(tbItemList, tbItem)
+    end
+  end
+  table.sort(tbItemList, function(tbItemA, tbItemB)
+    return tbItemA.nTemplateId > tbItemB.nTemplateId
+  end)
+  self.tbItemList = tbItemList
+end
+
+function tbWnd:InitChosenItemGrid()
+  local tbChosenItemGridList
+  self.tbChosenItemGrid_Owner = self.tbChosenItemGrid_Owner or {}
+  self.tbChosenItemGrid_Helper = self.tbChosenItemGrid_Helper or {}
+  if self.nMeType == MiningAgency.OWNER then
+    tbChosenItemGridList = self.tbChosenItemGrid_Owner
+  elseif self.nMeType == MiningAgency.HELPER then
+    tbChosenItemGridList = self.tbChosenItemGrid_Helper
+  end
+  for nIdx = 1, MiningAgency.nMaxGrid do
+    if not tbChosenItemGridList[nIdx] then
+      local szKey = self.pPanel:CloneObject(tbControls[self:GetNodeKey("templateChosenItem")], string.format("%s%d", "Element", nIdx))
+      local tbItemGrid = Ui:NewExistItemGrid(self, string.format("%s%s", szKey, "/UIItemGrid"))
+      tbChosenItemGridList[nIdx] = tbItemGrid
+    end
+    tbChosenItemGridList[nIdx]:SetEmpty()
+  end
+  self.pPanel:SetActive(tbControls[self:GetNodeKey("templateChosenItem")], false)
+end
+
+function tbWnd:UpdateItemList(nTemplateId, nCount)
+  if self.nMeType == MiningAgency.HELPER then
+    return
+  end
+  for i = 1, #self.tbItemList do
+    if self.tbItemList[i].nTemplateId == nTemplateId then
+      self.tbItemList[i].nCount = self.tbItemList[i].nCount + nCount
+      return
+    end
+  end
+end
+
+function tbWnd:UpdateItemSV()
+  if self.nMeType == MiningAgency.HELPER then
+    return
+  end
+  local nCount = Lib:CountTB(self.tbItemList)
+  local nMaxCount = me.GetMaxCountInBag()
+  
+  local function fnSetItem(tbLoopScroll, nIndex)
+    local nCol = nMaxCount - self.nRow * (nIndex - 1)
+    if nCol > self.nRow then
+      nCol = self.nRow
+    end
+    for i = 1, self.nRow do
+      if i <= nCol then
+        local itemObj = tbLoopScroll:GetGridElement(nIndex, i)
+        local curIndex = (nIndex - 1) * self.nRow + i
+        itemObj.pPanel:SetActive("Main", true)
+        local itemGrid = Ui:NewExistItemGrid(itemObj, "UIItemGrid")
+        self:SaveItemGrid(nIndex, i, itemGrid)
+        if curIndex <= nCount then
+          itemGrid:SetActive(true)
+          local tbItem = self.tbItemList[curIndex]
+          local nTemplateId = tbItem and tbItem.nTemplateId
+          local nCount = tbItem and tbItem.nCount
+          itemGrid.szItemOpt = "Trade_ItemBox"
+          itemGrid:SetItem(nil, nTemplateId, {bShowTip = true, bShowSeries = nil}, nil, nil, nil, nil, nCount)
+          itemGrid:SetClickEnable(true, function()
+            if not MiningAgency:CheckItemCanMining(nTemplateId) then
+              me.CenterMsg(i18n.Parse(MiningAgency:GetItemMiningRemind(nTemplateId)))
+              return
+            end
+            if self.bQuickWithdraw then
+              self.nLastClickTime = self.nLastClickTime or 0
+              if GetTime() - self.nLastClickTime <= 0 then
+                return
+              end
+              self.nLastClickTime = GetTime()
+              MiningAgency:ReqAddItem(nTemplateId, math.min(nCount, MiningAgency:GetItemMaxNumPerGrid(nTemplateId)))
+            else
+              local tbData = {nTemplate = nTemplateId, nShowCount = nCount}
+              tbData.tbItemExtParams = {}
+              tbData.tbItemExtParams.tbTradeInfo = {
+                szWndType = "UITradeItemPanel",
+                nItemId = nTemplateId,
+                nMaxCount = math.min(nCount, MiningAgency:GetItemMaxNumPerGrid(nTemplateId)),
+                bOnTrade = false
+              }
+              Item:ShowItemDetail(tbData)
+            end
+          end)
+        else
+          itemGrid:SetEmpty()
+          itemGrid:SetActive(false)
+        end
+      else
+        tbLoopScroll:GetGridElement(nIndex, i).pPanel:SetActive("Main", false)
+      end
+    end
+  end
+  
+  self.tbBagScrollView:SetElement(math.ceil(nMaxCount / self.nRow), fnSetItem)
+end
+
+function tbWnd:SaveItemGrid(nRow, nCol, itemGrid)
+  self.tbItemGridSave = self.tbItemGridSave or {}
+  self.tbItemGridSave[nRow] = self.tbItemGridSave[nRow] or {}
+  self.tbItemGridSave[nRow][nCol] = itemGrid
+end
+
+function tbWnd:GetItemGrid(nRow, nCol)
+  if self.tbItemGridSave ~= nil and self.tbItemGridSave[nRow] ~= nil then
+    return self.tbItemGridSave[nRow][nCol]
+  else
+    return nil
+  end
+end
+
+function tbWnd:UpdateChosenItemGrid()
+  local tbChosenItemGridList
+  if self.nMeType == MiningAgency.OWNER then
+    tbChosenItemGridList = self.tbChosenItemGrid_Owner
+  elseif self.nMeType == MiningAgency.HELPER then
+    tbChosenItemGridList = self.tbChosenItemGrid_Helper
+  end
+  local tbChosenItemList = MiningAgency:GetChosenItemList()
+  if not tbChosenItemList then
+    for i = 1, #tbChosenItemGridList do
+      tbChosenItemGridList[i]:SetEmpty()
+    end
+  else
+    local nOccupiedGridCount = 0
+    for _, tbItem in ipairs(tbChosenItemList) do
+      local nCount = tbItem.nCount
+      local nGridCount = math.ceil(nCount / MiningAgency:GetItemMaxNumPerGrid(tbItem.nTemplateId))
+      if nGridCount > 0 then
+        for i = 1, nGridCount do
+          nOccupiedGridCount = nOccupiedGridCount + 1
+          local nThisItemMaxNumPerGrid = MiningAgency:GetItemMaxNumPerGrid(tbItem.nTemplateId)
+          local nThisGridItemCount = nThisItemMaxNumPerGrid
+          if i == nGridCount and 0 ~= nCount % nThisItemMaxNumPerGrid then
+            nThisGridItemCount = nCount % nThisItemMaxNumPerGrid
+          end
+          tbChosenItemGridList[nOccupiedGridCount]:SetItem(nil, tbItem.nTemplateId, {bShowTip = false, bShowSeries = nil}, nil, nil, nil, nil, nThisGridItemCount)
+          if self.nMeType == MiningAgency.HELPER then
+            tbChosenItemGridList[nOccupiedGridCount]:SetClickEnable(true)
+          else
+            tbChosenItemGridList[nOccupiedGridCount]:SetClickEnable(true, function()
+              if self.bQuickWithdraw then
+                MiningAgency:ReqDeleteItem(tbItem.nTemplateId, math.min(nCount, MiningAgency:GetItemMaxNumPerGrid(tbItem.nTemplateId)))
+              else
+                local tbData = {
+                  nTemplate = tbItem.nTemplateId,
+                  nShowCount = nCount
+                }
+                tbData.tbItemExtParams = {}
+                tbData.tbItemExtParams.tbTradeInfo = {
+                  szWndType = "UITradeItemPanel",
+                  nItemId = tbItem.nTemplateId,
+                  nMaxCount = math.min(nCount, MiningAgency:GetItemMaxNumPerGrid(tbItem.nTemplateId)),
+                  bOnTrade = true
+                }
+                Item:ShowItemDetail(tbData)
+              end
+            end)
+          end
+        end
+      end
+    end
+    if nOccupiedGridCount < #tbChosenItemGridList then
+      for i = nOccupiedGridCount + 1, #tbChosenItemGridList do
+        tbChosenItemGridList[i]:SetEmpty()
+      end
+    end
+  end
+end
+
+function tbWnd:OnAddItem(nTemplateId, nCount)
+  self:UpdateItemList(nTemplateId, -nCount)
+  self:UpdateChosenItemGrid()
+  self:UpdateOneItem(nTemplateId)
+  self:RefreshTotalMoney()
+  if self.nMeType == MiningAgency.HELPER then
+    self:RefreshNotice(i18n.Get(MiningAgency.MSG.OTHER_CHANGE_ITEM_COUNT))
+  end
+end
+
+function tbWnd:OnDeleteItem(nTemplateId, nCount)
+  self:UpdateItemList(nTemplateId, nCount)
+  self:UpdateChosenItemGrid()
+  self:UpdateOneItem(nTemplateId)
+  self:RefreshTotalMoney()
+  if self.nMeType == MiningAgency.HELPER then
+    self:RefreshNotice(i18n.Get(MiningAgency.MSG.OTHER_CHANGE_ITEM_COUNT))
+  end
+end
+
+function tbWnd:OnChangeMoney(nPlayerId, nMoney)
+  self:RefreshMeMoney()
+  self:RefreshOtherMoney()
+  self:RefreshTotalMoney()
+  if nPlayerId ~= me.dwID then
+    self:RefreshNotice(i18n.Get(MiningAgency.MSG.OTHER_CHANGE_MONEY))
+  end
+end
+
+function tbWnd:OnCancel(nCancelPlayerId, szCancelPlayerName)
+  self:Close()
+end
+
+function tbWnd:OnChangeCurrency()
+  self:RefreshMoneyPanel()
+end
+
+function tbWnd:OnChangeState(nState, nPlayerId, szPlayerName)
+  local pProcessor = MiningAgency:GetProcessor()
+  local nOtherPlayerId = pProcessor:GetOtherPlayerId(me.dwID)
+  local nMeState = pProcessor:GetPlayerMiningState(me.dwID)
+  local nOtherState = pProcessor:GetPlayerMiningState(nOtherPlayerId)
+  local nOwnerState = Lib:IIF(self.nMeType == MiningAgency.OWNER, nMeState, nOtherState)
+  self.pPanel:Button_SetEnable(self.btnLock, nMeState ~= MiningAgency.CONFIRM_STATE)
+  local szLock = Lib:IIF(nMeState == MiningAgency.UNLOCK_STATE, i18n.EasyGet("\233\148\129\229\174\154\228\186\164\230\152\147"), i18n.EasyGet("\229\143\150\230\182\136\233\148\129\229\174\154"))
+  self.pPanel:Label_SetText(self.txtLock, szLock)
+  self.pPanel:Button_SetEnable(self.btnConfirm, nMeState ~= MiningAgency.UNLOCK_STATE and nOtherState ~= MiningAgency.UNLOCK_STATE)
+  local szConfirm = Lib:IIF(nMeState == MiningAgency.CONFIRM_STATE, i18n.EasyGet("\229\143\150\230\182\136\231\161\174\232\174\164"), i18n.EasyGet("\230\156\128\231\187\136\231\161\174\232\174\164"))
+  self.pPanel:Label_SetText(self.txtConfirm, szConfirm)
+  self.PriceAddAndSubGroup_Owner:SetEnable(nMeState == MiningAgency.UNLOCK_STATE)
+  self.PriceAddAndSubGroup_Helper:SetEnable(nMeState == MiningAgency.UNLOCK_STATE)
+  self.pPanel:SetActive(tbControls[self:GetNodeKey("imgLock")], nOwnerState ~= MiningAgency.UNLOCK_STATE)
+  if pProcessor:CheckBothLock() then
+    self:RefreshNotice(i18n.Get(MiningAgency.MSG.BOTH_LOCK))
+  elseif nPlayerId ~= me.dwID then
+    if nState == MiningAgency.UNLOCK_STATE then
+      self:RefreshNotice(i18n.Get(MiningAgency.MSG.OTHER_SIDE_UNLOCK))
+    elseif nState == MiningAgency.LOCK_STATE then
+      self:RefreshNotice(i18n.Get(MiningAgency.MSG.OTHER_SIDE_LOCK))
+    elseif nState == MiningAgency.CONFIRM_STATE then
+      self:RefreshNotice(i18n.Get(MiningAgency.MSG.OTHER_SIDE_CONFIRM))
+    end
+  elseif nMeState == MiningAgency.LOCK_STATE and nOtherState == MiningAgency.UNLOCK_STATE then
+    self:RefreshNotice(i18n.Get(MiningAgency.MSG.WAIT_OTHER_SIDE_LOCK))
+  elseif nMeState == MiningAgency.CONFIRM_STATE and nOtherState == MiningAgency.LOCK_STATE then
+    self:RefreshNotice(i18n.Get(MiningAgency.MSG.WAIT_OTHER_SIDE_CONFIRM))
+  end
+end
+
+function tbWnd:OnChangeState_Lock(nPlayerId, szPlayerName)
+  if me.dwID == nPlayerId then
+    self.pPanel:Label_SetText(self.txtLock, i18n.EasyGet("\229\143\150\230\182\136\233\148\129\229\174\154"))
+    self.pPanel:Label_SetText(self.txtConfirm, i18n.EasyGet("\230\156\128\231\187\136\231\161\174\232\174\164"))
+    self.PriceAddAndSubGroup_Owner:SetEnable(false)
+    self.PriceAddAndSubGroup_Helper:SetEnable(false)
+  end
+  local pProcessor = MiningAgency:GetProcessor()
+  local nOtherPlayerId = pProcessor:GetOtherPlayerId(me.dwID)
+  local nOtherState = pProcessor:GetPlayerMiningState(nOtherPlayerId)
+  local nMeState = pProcessor:GetPlayerMiningState(me.dwID)
+  self.pPanel:Button_SetEnable(self.btnLock, true)
+  self.pPanel:Button_SetEnable(self.btnConfirm, nMeState ~= MiningAgency.UNLOCK_STATE and nOtherState ~= MiningAgency.UNLOCK_STATE)
+  local nOwnerId, nHelperId = pProcessor:GetPlayerIds()
+  local nOwnerState = pProcessor:GetPlayerMiningState(nOwnerId)
+  self.pPanel:SetActive(tbControls[self:GetNodeKey("imgLock")], nOwnerState ~= MiningAgency.UNLOCK_STATE)
+end
+
+function tbWnd:OnChangeState_Unlock(nPlayerId, szPlayerName)
+  local pProcessor = MiningAgency:GetProcessor()
+  local nOwnerId, nHelperId = pProcessor:GetPlayerIds()
+  local nOwnerState = pProcessor:GetPlayerMiningState(nOwnerId)
+  self.pPanel:SetActive(tbControls[self:GetNodeKey("imgLock")], nOwnerState ~= MiningAgency.UNLOCK_STATE)
+  if me.dwID == nPlayerId then
+    self.pPanel:Label_SetText(self.txtLock, i18n.EasyGet("\233\148\129\229\174\154\228\186\164\230\152\147"))
+    self.pPanel:Label_SetText(self.txtConfirm, i18n.EasyGet("\230\156\128\231\187\136\231\161\174\232\174\164"))
+    self.PriceAddAndSubGroup_Owner:SetEnable(true)
+    self.PriceAddAndSubGroup_Helper:SetEnable(true)
+    self.pPanel:Button_SetEnable(self.btnLock, true)
+    self.pPanel:Button_SetEnable(self.btnConfirm, false)
+  else
+    local nMeState = pProcessor:GetPlayerMiningState(me.dwID)
+    local szLock = Lib:IIF(nMeState == MiningAgency.LOCK_STATE, i18n.EasyGet("\229\143\150\230\182\136\233\148\129\229\174\154"), i18n.EasyGet("\233\148\129\229\174\154\228\186\164\230\152\147"))
+    local szConfirm = i18n.EasyGet("\230\156\128\231\187\136\231\161\174\232\174\164")
+    self.pPanel:Label_SetText(self.txtLock, szLock)
+    self.pPanel:Label_SetText(self.txtConfirm, szConfirm)
+    self.PriceAddAndSubGroup_Owner:SetEnable(nMeState == MiningAgency.UNLOCK_STATE)
+    self.PriceAddAndSubGroup_Helper:SetEnable(nMeState == MiningAgency.UNLOCK_STATE)
+    self.pPanel:Button_SetEnable(self.btnLock, true)
+    self.pPanel:Button_SetEnable(self.btnConfirm, false)
+  end
+end
+
+function tbWnd:OnChangeState_Confirm(nPlayerId, szPlayerName)
+  if me.dwID == nPlayerId then
+    self.pPanel:Label_SetText(self.txtLock, i18n.EasyGet("\229\143\150\230\182\136\233\148\129\229\174\154"))
+    self.pPanel:Label_SetText(self.txtConfirm, i18n.EasyGet("\229\143\150\230\182\136\231\161\174\232\174\164"))
+    self.PriceAddAndSubGroup_Owner:SetEnable(false)
+    self.PriceAddAndSubGroup_Helper:SetEnable(false)
+  end
+  local pProcessor = MiningAgency:GetProcessor()
+  local nMeState = pProcessor:GetPlayerMiningState(me.dwID)
+  local nOwnerId, nHelperId = pProcessor:GetPlayerIds()
+  local nOwnerState = pProcessor:GetPlayerMiningState(nOwnerId)
+  self.pPanel:Button_SetEnable(self.btnLock, nMeState ~= MiningAgency.CONFIRM_STATE)
+  self.pPanel:Button_SetEnable(self.btnConfirm, true)
+  self.pPanel:SetActive(tbControls[self:GetNodeKey("imgLock")], nOwnerState ~= MiningAgency.UNLOCK_STATE)
+end
+
+function tbWnd:UpdateOneItem(nTemplateId)
+  if self.nMeType == MiningAgency.HELPER then
+    return
+  end
+  local nCount = Lib:CountTB(self.tbItemList)
+  local nMaxCount = me.GetMaxCountInBag()
+  local nNum = math.ceil(nMaxCount / self.nRow)
+  for nIndex = 1, nNum do
+    for i = 1, self.nRow do
+      local curIndex = (nIndex - 1) * self.nRow + i
+      if nCount < curIndex then
+        return
+      end
+      if self.tbItemList[curIndex].nTemplateId == nTemplateId then
+        local itemGrid = self:GetItemGrid(nIndex, i)
+        if itemGrid then
+          itemGrid:SetActive(true)
+          local tbItem = self.tbItemList[curIndex]
+          local nTemplateId = tbItem and tbItem.nTemplateId
+          local nCount = tbItem and tbItem.nCount
+          itemGrid.szItemOpt = "Trade_ItemBox"
+          itemGrid:SetItem(nil, nTemplateId, {bShowTip = true, bShowSeries = nil}, nil, nil, nil, nil, nCount)
+          itemGrid:SetClickEnable(true, function()
+            if not MiningAgency:CheckItemCanMining(nTemplateId) then
+              me.CenterMsg(i18n.Parse(MiningAgency:GetItemMiningRemind(nTemplateId)))
+              return
+            end
+            if self.bQuickWithdraw then
+              self.nLastClickTime = self.nLastClickTime or 0
+              if GetTime() - self.nLastClickTime <= 0 then
+                return
+              end
+              self.nLastClickTime = GetTime()
+              MiningAgency:ReqAddItem(nTemplateId, math.min(nCount, MiningAgency:GetItemMaxNumPerGrid(nTemplateId)))
+            else
+              local tbData = {nTemplate = nTemplateId, nShowCount = nCount}
+              tbData.tbItemExtParams = {}
+              tbData.tbItemExtParams.tbTradeInfo = {
+                szWndType = "UITradeItemPanel",
+                nItemId = nTemplateId,
+                nMaxCount = math.min(nCount, MiningAgency:GetItemMaxNumPerGrid(nTemplateId)),
+                bOnTrade = false
+              }
+              Item:ShowItemDetail(tbData)
+            end
+          end)
+        end
+        return
+      end
+    end
+  end
+end
+
+function tbWnd:InitMeType_Owner()
+  self.pPanel:SetActive(self.LeftPanel_Owner, true)
+  self.pPanel:SetActive(self.LeftPanel_Helper, false)
+  self.pPanel:SetActive(self.ContItem, true)
+  self.pPanel:SetActive(self.ContRecord, false)
+  self:InitItemList()
+  self:UpdateItemSV()
+end
+
+function tbWnd:InitMeType_Helper()
+  self.pPanel:SetActive(self.LeftPanel_Owner, false)
+  self.pPanel:SetActive(self.LeftPanel_Helper, true)
+  self.pPanel:SetActive(self.ContItem, false)
+  self.pPanel:SetActive(self.ContRecord, true)
+end
+
+function tbWnd:RefreshNotice(szNotice)
+  self.pPanel:Label_SetText(tbControls[self:GetNodeKey("txtNotice")], szNotice)
+end
+
+function tbWnd:RefreshBagRemainCount()
+  self.pPanel:Label_SetText(tbControls.txtBagRemainCount, me.GetFreeBagCount())
+end
+
+function tbWnd:RefreshTotalMoney()
+  local pProcessor = MiningAgency:GetProcessor()
+  local nRequireMoney = pProcessor:GetRequireMoney()
+  local szTotalMoney = tostring(nRequireMoney)
+  local nLackOfMoney = pProcessor:GetLackOfMoney()
+  if nLackOfMoney > 0 then
+    szTotalMoney = string.format("%s %s", szTotalMoney, i18n.Get(MiningAgency.MSG.MONEY_NOT_ENOUGH_NUM, nLackOfMoney))
+  end
+  self.pPanel:Label_SetText(tbControls[self:GetNodeKey("txtGoldTotal")], szTotalMoney)
+end
+
+function tbWnd:RefreshOtherMoney()
+  local pProcessor = MiningAgency:GetProcessor()
+  local nOtherMoney = pProcessor:GetPlayerMiningMoney(self.tbOtherInfo.nPlayerId)
+  self.pPanel:Label_SetText(tbControls[self:GetNodeKey("txtGoldOther")], nOtherMoney)
+end
+
+function tbWnd:RefreshMeMoney()
+  local pProcessor = MiningAgency:GetProcessor()
+  local nMeMoney = pProcessor:GetPlayerMiningMoney(me.dwID)
+  if nMeMoney > 0 then
+    self.pPanel:Label_SetText(tbControls[self:GetNodeKey("txtGoldMe")], nMeMoney)
+  else
+    self.pPanel:Label_SetText(tbControls[self:GetNodeKey("txtGoldMe")], i18n.Get(MiningAgency.MSG.PLZ_INPUT_MONEY))
+  end
+end
+
+function tbWnd:RefreshMoneyPanel()
+  self.tbMoneyPanel:SetMoneyValue()
+end
+
+function tbWnd:OnMiningSuccess()
+  self:ResetState()
+  self:RefreshRecord()
+  self:RefreshMeMoney()
+  self:RefreshOtherMoney()
+  self:RefreshTotalMoney()
+  self:RefreshMoneyPanel()
+  self:RefreshBagRemainCount()
+  self:InitItemList()
+  self:UpdateItemSV()
+  self:UpdateChosenItemGrid()
+end
+
+function tbWnd:ResetState()
+  self:OnChangeState(MiningAgency.UNLOCK_STATE, me.dwID, me.szName)
+end
+
+function tbWnd:OnClickEmptyClose()
+  self.pPanel:SetActive(tbControls.wndMiningRecord, false)
+end
+
+function tbWnd:RefreshRecord()
+  local szAllRecords = ""
+  local tbRecordTextList = MiningAgency:GetRecordTextList()
+  if tbRecordTextList then
+    for nIndex, szText in ipairs(tbRecordTextList) do
+      szAllRecords = string.format("%s%s\n", szAllRecords, i18n.Parse(szText))
+    end
+  end
+  self.pPanel:Label_SetText(tbControls.txtRecord, szAllRecords)
+end
+
+function tbWnd:RefreshWndRecord()
+  self.tbRecordWndScrollView:Clear()
+  local tbRecordTextList = MiningAgency:GetRecordTextList()
+  if not tbRecordTextList then
+    return
+  end
+  for nIndex, szText in ipairs(tbRecordTextList) do
+    self.tbRecordWndScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtDesc", i18n.Parse(szText))
+    end)
+  end
+end
+
+function tbWnd:OnClose()
+  Ui:CloseWindow("UIItemTips")
+  Ui:CloseWindow("UINumKeyboard")
+  self.tbItemList = nil
+end
+
+function tbWnd:OnDestroy()
+  self.tbRecordWndScrollView:Clear()
+  self.tbChosenItemGrid_Owner = nil
+  self.tbChosenItemGrid_Helper = nil
+end
+
+function tbWnd:OnServerConnectLost()
+  self:Close()
+end

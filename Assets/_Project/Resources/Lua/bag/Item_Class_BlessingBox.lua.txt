@@ -1,0 +1,149 @@
+local tbItem = Item:GetClass("BlessingBox")
+tbItem.PARAM_PARAM_ID = 1
+tbItem.bRecordData = false
+tbItem.tbRecordList = {}
+tbItem.tbTotalRecordList = {}
+
+function tbItem:OnUse(it)
+  return self:OnUseMany(it, 1)
+end
+
+function tbItem:OnUseMany(it, nCount)
+  local pPlayer = me
+  local nLeftBag = pPlayer.GetFreeBagCount()
+  if nLeftBag <= 0 then
+    pPlayer.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\231\169\186\233\151\180\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\228\189\191\231\148\168\239\188\129"))
+    return 0
+  end
+  if nCount > it.nCount then
+    pPlayer.CenterMsg(i18n.EasyGet("\233\129\147\229\133\183\230\149\176\233\135\143\228\184\141\232\182\179"))
+    return 0
+  end
+  local nParamId = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_PARAM_ID)
+  local tbCfg = Item.BlessingBox:GetCfgById(nParamId)
+  if not tbCfg then
+    LogErr(string.format("BlessingBox:OnUseMany config is not exist dwTemplateId=%d, nParamId=%d", it.dwTemplateId, nParamId or 0))
+    pPlayer.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\233\129\147\229\133\183\230\154\130\230\151\182\228\184\141\229\143\175\228\189\191\231\148\168"))
+    return 0
+  end
+  local nOpenNum
+  local nSaveKey = GetGroupKey(tbCfg.szSaveKey)
+  local nVersionNum = pPlayer.GetUserValue(nSaveKey, tbCfg.nVersionSaveId)
+  if nVersionNum ~= tbCfg.nVersion then
+    pPlayer.SetUserValue(nSaveKey, tbCfg.nOpenNumSaveId, 0)
+    for _, tbInfo in pairs(tbCfg.tbAwardList) do
+      pPlayer.SetUserValue(nSaveKey, tbInfo.nSaveId, 0)
+    end
+    pPlayer.SetUserValue(nSaveKey, tbCfg.nVersionSaveId, tbCfg.nVersion)
+    nOpenNum = 0
+  else
+    nOpenNum = pPlayer.GetUserValue(nSaveKey, tbCfg.nOpenNumSaveId)
+  end
+  local nNum = 0
+  local tbAward = {}
+  local tbTmpAward, nTmpAwardKey
+  for i = 1, nCount do
+    tbTmpAward, nTmpAwardKey = self:OpenBox(pPlayer, nSaveKey, tbCfg, nOpenNum + i)
+    if not tbTmpAward then
+      break
+    end
+    nNum = nNum + 1
+    Lib:MergeTable(tbAward, tbTmpAward)
+    if self.bRecordData then
+      Lib:CallBack({
+        self.RecordData,
+        self,
+        me.dwID,
+        nTmpAwardKey
+      })
+    end
+  end
+  if nNum > 0 then
+    pPlayer.SetUserValue(nSaveKey, tbCfg.nOpenNumSaveId, nOpenNum + nNum)
+    pPlayer.SendAward(tbAward, true, true, Env.LogWay_BlessingBox)
+  end
+  return nNum
+end
+
+function tbItem:OpenBox(pPlayer, nSaveKey, tbCfg, nOpenNum)
+  local nPreNum = 0
+  local nNum, nCurNum
+  for nIndex, tbInfo in ipairs(tbCfg.tbMaxStepList) do
+    if nOpenNum > tbInfo[2] - (nPreNum + tbCfg.tbAwardList[tbInfo[1]].nMaxNum) then
+      nNum = nOpenNum - (tbInfo[2] - (nPreNum + tbCfg.tbAwardList[tbInfo[1]].nMaxNum))
+      nCurNum = pPlayer.GetUserValue(nSaveKey, tbCfg.tbAwardList[tbInfo[1]].nSaveId)
+      if nNum > nCurNum and nOpenNum <= tbInfo[2] then
+        pPlayer.SetUserValue(nSaveKey, tbCfg.tbAwardList[tbInfo[1]].nSaveId, nCurNum + 1)
+        Log("BlessingBox max step", pPlayer.dwID, tbCfg.tbAwardList[tbInfo[1]].nSaveId, nCurNum + 1)
+        return Award:GetAward(tbCfg.nAwardId, tbInfo[1]), tbInfo[1]
+      end
+    end
+    if tbCfg.tbMaxStepList[nIndex + 1] and tbCfg.tbAwardList[tbInfo[1]].nMaxStep - tbCfg.tbAwardList[tbInfo[1]].nMaxNum <= tbCfg.tbMaxStepList[nIndex + 1][2] then
+      nPreNum = nPreNum + tbCfg.tbAwardList[tbInfo[1]].nMaxNum
+    else
+      nPreNum = 0
+    end
+  end
+  local tbCurNumList = {}
+  local nMaxWeight = self:CalTotalWeight(pPlayer, nOpenNum, nSaveKey, tbCfg, tbCurNumList)
+  if nMaxWeight <= 0 then
+    return
+  end
+  return self:CalRandomAward(pPlayer, nSaveKey, tbCfg, nMaxWeight, nOpenNum, tbCurNumList)
+end
+
+function tbItem:CalTotalWeight(pPlayer, nOpenNum, nSaveKey, tbCfg, tbCurNumList)
+  local nMaxWeight = 0
+  for _, tbInfo in pairs(tbCfg.tbAwardList) do
+    if nOpenNum >= tbInfo.nStep then
+      if 0 == tbInfo.nMaxNum then
+        nMaxWeight = nMaxWeight + tbInfo.nWeight
+      else
+        tbCurNumList[tbInfo.nAwardKey] = tbCurNumList[tbInfo.nAwardKey] or pPlayer.GetUserValue(nSaveKey, tbInfo.nSaveId)
+        if tbCurNumList[tbInfo.nAwardKey] < tbInfo.nMaxNum then
+          nMaxWeight = nMaxWeight + tbInfo.nWeight
+        end
+      end
+    end
+  end
+  return nMaxWeight
+end
+
+function tbItem:CalRandomAward(pPlayer, nSaveKey, tbCfg, nMaxWeight, nOpenNum, tbCurNumList)
+  local nRandom = MathRandom(nMaxWeight)
+  local nCurNum = 0
+  for _, tbInfo in pairs(tbCfg.tbAwardList) do
+    if nOpenNum >= tbInfo.nStep then
+      if 0 == tbInfo.nMaxNum then
+        nCurNum = nCurNum + tbInfo.nWeight
+      elseif tbCurNumList[tbInfo.nAwardKey] < tbInfo.nMaxNum then
+        nCurNum = nCurNum + tbInfo.nWeight
+      end
+      if nRandom <= nCurNum then
+        if tbInfo.nMaxNum > 0 then
+          pPlayer.SetUserValue(nSaveKey, tbInfo.nSaveId, pPlayer.GetUserValue(nSaveKey, tbInfo.nSaveId) + 1)
+        end
+        return Award:GetAward(tbCfg.nAwardId, tbInfo.nAwardKey), tbInfo.nAwardKey
+      end
+    end
+  end
+end
+
+function tbItem:TestRatio()
+  self.tbTestRatioList = self.tbTestRatioList or {}
+  self.tbTestRatioList[me.dwID] = {}
+end
+
+function tbItem:RecordData(dwID, nAwardKey)
+  self.tbRecordList[dwID] = self.tbRecordList[dwID] or {}
+  self.tbRecordList[dwID][nAwardKey] = (self.tbRecordList[dwID][nAwardKey] or 0) + 1
+end
+
+function tbItem:DumpRecordList()
+  local nCount = 0
+  for _, nNum in pairs(self.tbRecordList[me.dwID] or {}) do
+    nCount = nCount + nNum
+  end
+  Lib:Tree(self.tbRecordList[me.dwID] or {})
+  Log("DumpRecordList", me.dwID, nCount)
+end

@@ -1,0 +1,78 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.ChildrensBalloon)
+local Protocol = {
+  [tbActivity.Protocol.SyncData] = "SyncData"
+}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    LogErr("AchieveAwardC: ServerRequest failed, invalid Protocol = ", nProtocol)
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:OnOpen()
+  self:OnPlayerLogin()
+end
+
+function tbActivity:OnClientClose()
+end
+
+function tbActivity:OnPlayerLogin()
+  self:CheckRedPoint()
+  self:RegisterItemChangeEvent()
+end
+
+function tbActivity:GetRedPointEventId()
+  return {
+    self:GetRedPointEvent()
+  }
+end
+
+function tbActivity:GetRedPointEventList()
+  return self:GetRedPointEventId()
+end
+
+function tbActivity:GetRedPointEvent()
+  if not self.tbConfig.szRedPointEvent or Lib:IsEmptyStr(self.tbConfig.szRedPointEvent) or not RedPointMgr.EVENT[self.tbConfig.szRedPointEvent] then
+    return
+  end
+  return RedPointMgr.EVENT[self.tbConfig.szRedPointEvent]
+end
+
+function tbActivity:GetAward()
+  ActivityMgr:CallServerScriptV2(self.nId, tbActivity.Protocol.GetBalloon)
+end
+
+function tbActivity:SyncData()
+  self:CheckRedPoint()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHILDRENSNALLOON_GETAWARD)
+end
+
+function tbActivity:CheckRedPoint()
+  local nRedPoint = self:GetRedPointEventId()[1]
+  local nItemCount, t = me.GetItemCountByTypeInBag(tonumber(self.tbConfig.nRedPointItemId))
+  if nItemCount > 0 then
+    if not RedPointMgr:CheckEvent(nRedPoint) then
+      RedPointMgr:LightRedPoint(nRedPoint)
+    end
+  elseif RedPointMgr:CheckEvent(nRedPoint) then
+    RedPointMgr:FadeRedPoint(nRedPoint)
+  end
+  if self.RedPointCheckTimer then
+    Timer:Close(self.RedPointCheckTimer)
+    self.RedPointCheckTimer = nil
+  end
+end
+
+function tbActivity:CheckRedPointLate()
+  if self.RedPointCheckTimer then
+    return
+  end
+  self.RedPointCheckTimer = Timer:Register(Env.GAME_FPS * 5, self.CheckRedPoint, self)
+end
+
+function tbActivity:RegisterItemChangeEvent()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.CheckRedPointLate, self)
+end

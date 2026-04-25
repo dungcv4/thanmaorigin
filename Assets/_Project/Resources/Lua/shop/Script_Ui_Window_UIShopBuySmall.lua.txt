@@ -1,0 +1,171 @@
+local tbWnd = Ui:CreateWindow("UIShopBuySmall")
+tbWnd.nMaxInputCount = 99
+tbWnd.nMinInputCount = 1
+tbWnd.tbControls = {
+  txtCanBuy = "node/imgBG/Content/panelGoods/txtCanBuy",
+  txtCanBuyNum = "node/imgBG/Content/imgBg/txtCanBuy/txtCount",
+  txtGoodName = "node/imgBG/Content/panelGoods/txtGoodName",
+  UIItemGrid = "node/imgBG/Content/panelGoods/UIItemGrid",
+  UIAddAndSubGroup = "node/imgBG/Content/panelBuy/UIAddAndSubGroup",
+  imgCoin = "node/imgBG/Content/panelBuy/imgCoin",
+  txtCostCount = "node/imgBG/Content/panelBuy/txtCostCount",
+  btnBuy = "node/imgBG/Content/panelBuy/btnBuy",
+  txtDesc = "node/imgBG/Content/txtDesc",
+  btnClose = "node/imgBG/btnClose"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseByDefault()
+  end,
+  btnBuy = function(self)
+    self:DoBuy()
+  end
+}
+
+function tbWnd:CloseByDefault()
+  self:Close()
+end
+
+function tbWnd:NotifyEvents()
+  return {}
+end
+
+function tbWnd:OnCreate()
+  self.AddAndSubGroup = Ui:NewExistAddAndSubGroup(self, self.UIAddAndSubGroup)
+  self.AddAndSubGroup:BindEvent(function(nValue)
+    if not self.tbInfo then
+      me.CenterMsg(Shop.Terms.NeedChoiceWare)
+      return
+    end
+    local nResult = self:UpdateNumberInput(nValue)
+    return nResult
+  end)
+  self.AddAndSubGroup:SetNumPadPos(-148, 12)
+  self.ItemGrid = Ui:NewExistItemGrid(self, self.UIItemGrid)
+end
+
+function tbWnd:OnOpen(tbInfo, bNeedIconTips)
+  self.tbInfo = tbInfo
+  self.tbInfo.nCount = self.tbInfo.nCount or 1
+  local nMaxNum = self:GetMaxCount()
+  if -1 == tbInfo.nRemainCount then
+    self.pPanel:SetActive(self.txtCanBuy, false)
+  else
+    self.pPanel:SetActive(self.txtCanBuy, true)
+    self.pPanel:Label_SetText(self.txtCanBuyNum, tbInfo.nRemainCount)
+  end
+  self.bBuy = nil
+  self.ItemGrid:SetClickEnable(bNeedIconTips)
+  self.AddAndSubGroup:SetNumRange(self.nMinInputCount, nMaxNum or self.nMaxInputCount)
+  self:UpdateNumberInput(self.nMinInputCount)
+  self:ShowPanel()
+end
+
+function tbWnd:OnResponseBuy()
+  self.bBuy = false
+  self:Close()
+end
+
+function tbWnd:ShowPanel()
+  self.pPanel:SetActive(self.txtDesc, false)
+  self.pPanel:Label_SetText(self.txtCostCount, 0)
+  local szCurrency = self.tbInfo.szCurrencyType
+  local nCount = self.tbInfo.nCount
+  local nPrice = self.tbInfo.nPrice * nCount
+  if nPrice * nCount <= me.GetMoney(szCurrency) then
+    self.pPanel:Label_SetColor(self.txtCostCount, 0.9607843137254902, 0.8901960784313725, 0.2980392156862745)
+  else
+    self.pPanel:Label_SetColorByName(self.txtCostCount, "Red")
+  end
+  self.AddAndSubGroup:SetInputValue(self.tbInfo.nCount or 1)
+  local tbBaseInfo = Item:GetItemBaseProp(self.tbInfo.nItemId)
+  local szTitle = KItem.GetItemShowInfo(self.tbInfo.nItemId, me.nFaction, me.nFactionSect, me.GetNpc().GetBodySex())
+  self.ItemGrid:SetItemByTemplate(self.tbInfo.nItemId)
+  self.ItemGrid:SetClickEnable(true)
+  self.pPanel:Label_SetText(self.txtGoodName, i18n.Parse(szTitle))
+  self.pPanel:SetActive(self.btnBuy, true)
+  local szIcon = Currency:GetIcon(szCurrency)
+  self.pPanel:Sprite_SetSprite(self.imgCoin, szIcon)
+  self.pPanel:Label_SetText(self.txtCostCount, nPrice)
+end
+
+function tbWnd:DoBuy()
+  if self.bBuy then
+    return
+  end
+  if self.tbInfo.nWareId then
+    local szCurrency = self.tbInfo.szCurrencyType
+    local nbuyCount = self.tbInfo.nCount
+    if self.tbInfo.nPrice * nbuyCount > me.GetMoney(szCurrency) then
+      if not GainCurrency:ReadyForJump(szCurrency) then
+        local szName = Currency:GetName(szCurrency) or i18n.Get(Shop.Terms.Currency)
+        local szMsg = table.concat({
+          szName,
+          i18n.Get(Shop.Terms.NotEnough)
+        })
+        me.CenterMsg(szMsg)
+      end
+      self:Close()
+      return
+    end
+    RemoteServer.OnShopRequest(Shop.Protocol.C2SBuy, self.tbInfo.nWareId, nbuyCount, Shop.nRequestIndex)
+    self.bBuy = true
+    self:Close()
+  end
+end
+
+function tbWnd:GetMoneyAndType()
+  if not self.tbInfo then
+    return 0, nil
+  end
+  local szCurrency = self.tbInfo.szCurrencyType
+  local nPrice = self.tbInfo.nPrice
+  return nPrice, szCurrency
+end
+
+function tbWnd:GetMaxCount()
+  if not self.tbInfo then
+    return 0
+  end
+  local nPrice, szCurrency = self:GetMoneyAndType()
+  local nMoney = me.GetMoney(szCurrency)
+  local nMax = math.floor(nMoney / nPrice)
+  local nToCount = nMax
+  nToCount = nToCount > 0 and nToCount or self.nMinInputCount
+  if nToCount > self.nMaxInputCount then
+    nToCount = self.nMaxInputCount
+  end
+  if self.tbInfo.nRemainCount >= 0 and nToCount > self.tbInfo.nRemainCount then
+    nToCount = self.tbInfo.nRemainCount
+  end
+  local nStackMax = Item:GetItemBaseProp(self.tbInfo.nItemId).nStackMax
+  if 0 == nStackMax then
+    nStackMax = 1
+  end
+  if nToCount > nStackMax then
+    nToCount = nStackMax
+  end
+  return nToCount
+end
+
+function tbWnd:UpdateNumberInput(nNum)
+  if not self.tbInfo then
+    self.AddAndSubGroup:SetInputValue(0)
+    self.pPanel:Label_SetText(self.txtCostCount, 0)
+    return 0
+  end
+  local nPrice, szCurrency = self:GetMoneyAndType()
+  if nNum > self.nMaxInputCount then
+    me.CenterMsg(i18n.Get(Shop.Terms.InputLimit))
+    nNum = self.nMaxInputCount
+    return nNum
+  end
+  if nPrice * nNum <= me.GetMoney(szCurrency) then
+    self.pPanel:Label_SetColor(self.txtCostCount, 0.9607843137254902, 0.8901960784313725, 0.2980392156862745)
+  else
+    self.pPanel:Label_SetColorByName(self.txtCostCount, "Red")
+  end
+  self.tbInfo.nCount = nNum
+  self.pPanel:Label_SetText(self.txtCostCount, self.tbInfo.nPrice * nNum)
+  return nNum
+end

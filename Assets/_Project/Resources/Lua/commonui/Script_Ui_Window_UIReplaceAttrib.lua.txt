@@ -1,0 +1,289 @@
+local tbWnd = Ui:CreateWindow("UIReplaceAttrib")
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  txtTitle = "node/imgBG/txtTitle",
+  rightIxtTip = "node/imgBG/Content/Right/imgTip/txtTip",
+  goEquipGrid = "node/imgBG/Content/%s/UIItemGrid",
+  txtEquipName = "node/imgBG/Content/%s/txtEquipName",
+  txtEquipLv = "node/imgBG/Content/%s/txtEquipLv/txtEquipLvNum",
+  goAttr = "node/imgBG/Content/%s/ListAttrib",
+  txtAttrName = "node/imgBG/Content/%s/ListAttrib/Attribute%d/txtAttrib",
+  toggleAttr = "node/imgBG/Content/%s/ListAttrib/Attribute%d/toggle",
+  txtCost = "node/imgBG/Content/panelCost/txtKinContrib",
+  btnTransfer = "node/imgBG/Content/btnReplace",
+  txtFightPowerUp = "node/imgBG/Content/txtFightPowerUp",
+  txtFightPowerUpNum = "node/imgBG/Content/txtFightPowerUp/txtFightPowerUpNum"
+}
+local tbControls = tbWnd.tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnTransfer = function(self)
+    self:ClickTransfer()
+  end
+}
+tbWnd.SHOW_KEY = {DST = "Left", SRC = "Right"}
+tbWnd.ATTR_NUM_LIMIT = 6
+
+function tbWnd:OnCreate()
+  self.tbEquipGridList = {
+    [self.SHOW_KEY.DST] = Ui:NewExistItemGrid(self, string.format(self.goEquipGrid, self.SHOW_KEY.DST)),
+    [self.SHOW_KEY.SRC] = Ui:NewExistItemGrid(self, string.format(self.goEquipGrid, self.SHOW_KEY.SRC))
+  }
+  for nId = 1, self.ATTR_NUM_LIMIT do
+    local szPath = string.format(self.toggleAttr, self.SHOW_KEY.DST, nId)
+    Ui:Toggle_BindEvent(self.pPanel, szPath, function(self, isOn)
+      if isOn then
+        self:SwitchAttr(self.SHOW_KEY.DST, nId)
+      end
+    end, self)
+    szPath = string.format(self.toggleAttr, self.SHOW_KEY.SRC, nId)
+    Ui:Toggle_BindEvent(self.pPanel, szPath, function(self, isOn)
+      if isOn then
+        self:SwitchAttr(self.SHOW_KEY.SRC, nId)
+      end
+    end, self)
+  end
+end
+
+function tbWnd:OnOpen(nSrcEquipId, nDstEquipId)
+  if not nDstEquipId or 0 == nDstEquipId then
+    me.CenterMsg(i18n.EasyGet("\229\176\154\230\156\170\231\169\191\230\136\180\232\163\133\229\164\135"))
+    return self:Close()
+  end
+  self.tbEquipList = {}
+  self.tbAttrList = {}
+  self:ShowTwoSideEquip(nSrcEquipId, nDstEquipId)
+  self:ShowTransfer()
+  self:SetSrcToggleActiveAndEnable()
+  self.pPanel:Label_SetText(self.txtTitle, i18n.EasyGet("\232\163\133\229\164\135\230\180\151\231\187\131"))
+  self.pPanel:Label_SetText(self.btnTransfer .. "/Text", i18n.EasyGet("\230\180\151\231\187\131"))
+end
+
+function tbWnd:ShowEquip(szKey, pEquip, nColorShowBaseEquipLevel)
+  self:ClearEquip(szKey)
+  if not pEquip then
+    return
+  end
+  self.tbEquipList[szKey] = pEquip
+  self.tbEquipGridList[szKey]:SetItem(pEquip.dwId, pEquip.dwTemplateId)
+  self.pPanel:Label_SetText(string.format(self.txtEquipName, szKey), i18n.Parse(pEquip.szName))
+  self.pPanel:Label_SetText(string.format(self.txtEquipLv, szKey), pEquip.nLevel)
+  self.pPanel:SetActive(string.format(self.goAttr, szKey), true)
+  if szKey == self.SHOW_KEY.SRC then
+    self.pPanel:Label_SetText(self.rightIxtTip, i18n.EasyGet("\233\128\137\230\139\169\228\184\128\230\157\161\232\166\129\230\180\151\231\187\131\231\154\132\229\177\158\230\128\167"))
+  end
+  local tbAttrList = Item.EquipForge:GetAttr(pEquip)
+  local nSeries = pEquip.GetSeries()
+  for nId = 1, self.ATTR_NUM_LIMIT do
+    local szComp = string.format(self.txtAttrName, szKey, nId)
+    local nGroupId, nLv = table.unpack(tbAttrList[nId])
+    if 0 ~= nGroupId and 0 ~= nLv then
+      local tbSetting = FightSkill:GetExternAttrib(nGroupId, nLv)
+      if tbSetting then
+        local tbDesc = {}
+        for _, tbSubSetting in ipairs(tbSetting) do
+          local szMagic = tbSubSetting.szAttribName
+          szMagic = Item.EquipForge.ATTR_CONVERT[szMagic] and Item.EquipForge.ATTR_CONVERT[szMagic][nSeries] or szMagic
+          table.insert(tbDesc, Item:GetClass("equip"):GetMagicAttribDesc(szMagic, tbSubSetting.tbValue))
+        end
+        local _, nColor = Item.EquipForge:ColorAttr(pEquip.nEquipPos, nColorShowBaseEquipLevel, nLv)
+        local szColor = Item:GetQualityColor(nColor)
+        self.pPanel:Label_SetText(szComp, table.concat(tbDesc))
+        self.pPanel:Label_SetColorByName(szComp, szColor)
+      else
+        self.pPanel:Label_SetText(szComp, "")
+      end
+    else
+      self.pPanel:Label_SetText(szComp, i18n.EasyGet("\231\169\186\229\177\158\230\128\167"))
+      self.pPanel:Label_SetColorByName(szComp, "Gray")
+    end
+  end
+end
+
+function tbWnd:ShowTwoSideEquip(nSrcEquipId, nDstEquipId)
+  local pDstEquip = KItem.GetItemObj(nDstEquipId)
+  if not pDstEquip then
+    return
+  end
+  self:ShowEquip(self.SHOW_KEY.DST, pDstEquip, pDstEquip.nLevel)
+  self:ShowEquip(self.SHOW_KEY.SRC, KItem.GetItemObj(nSrcEquipId), pDstEquip.nLevel)
+end
+
+function tbWnd:ClearEquip(szKey)
+  self.tbEquipGridList[szKey]:SetEmpty()
+  self.pPanel:Label_SetText(string.format(self.txtEquipName, szKey), "")
+  self.pPanel:Label_SetText(string.format(self.txtEquipLv, szKey), "")
+  self.pPanel:ToggleGroup_SetAllowSwitchOff(string.format(self.goAttr, szKey), true)
+  for nId = 1, self.ATTR_NUM_LIMIT do
+    self.pPanel:Toggle_SetChecked(string.format(self.toggleAttr, szKey, nId), false)
+  end
+  self.pPanel:SetActive(string.format(self.goAttr, szKey), false)
+  self.tbEquipList[szKey] = nil
+  self.tbAttrList[szKey] = nil
+end
+
+function tbWnd:ShowTransfer()
+  self:ClearTransfer()
+  if not (self.tbEquipList[self.SHOW_KEY.SRC] and self.tbAttrList[self.SHOW_KEY.SRC] and self.tbEquipList[self.SHOW_KEY.DST]) or not self.tbAttrList[self.SHOW_KEY.DST] then
+    return
+  end
+  local nEquipPos = self.tbEquipList[self.SHOW_KEY.SRC].nEquipPos
+  local nLevel = self.tbEquipList[self.SHOW_KEY.SRC].nLevel
+  local tbAttrs = Item.EquipForge:GetAttr(self.tbEquipList[self.SHOW_KEY.SRC])
+  if not tbAttrs then
+    return
+  end
+  local tbAttr = tbAttrs[self.tbAttrList[self.SHOW_KEY.SRC]]
+  if not tbAttr then
+    return
+  end
+  local nAttrGroupId, nAttrLevel = table.unpack(tbAttr)
+  if 0 == nAttrGroupId or 0 == nAttrLevel then
+    return
+  end
+  local szColor = Item.EquipForge:ColorAttr(nEquipPos, nLevel, nAttrLevel)
+  local nCost = Item.EquipForge.TRANSFER_COST[szColor][nEquipPos][nLevel]
+  self.pPanel:Label_SetText(self.txtCost, tostring(nCost))
+  self.pPanel:Button_SetEnable(self.btnTransfer, true)
+  self:SetFightpowerChange()
+end
+
+function tbWnd:ClearTransfer()
+  self.pPanel:Label_SetText(self.txtCost, "")
+  self.pPanel:Button_SetEnable(self.btnTransfer, false)
+  self:SetPowerChangeTextDefault()
+end
+
+function tbWnd:ClickTransfer()
+  Item.EquipForge:TransferReq(me, self.tbEquipList[self.SHOW_KEY.SRC].dwId, self.tbAttrList[self.SHOW_KEY.SRC], self.tbEquipList[self.SHOW_KEY.DST].dwId, self.tbAttrList[self.SHOW_KEY.DST])
+end
+
+function tbWnd:NotifyTransfer(nSrcEquipId, nDstEquipId)
+  if not Ui:WindowVisible(self.ClassName) then
+    return
+  end
+  local pSrcEquip = self.tbEquipList[self.SHOW_KEY.SRC]
+  local pDstEquip = self.tbEquipList[self.SHOW_KEY.DST]
+  if not (pSrcEquip and pSrcEquip.dwId == nSrcEquipId and pDstEquip) or pDstEquip.dwId ~= nDstEquipId then
+    return
+  end
+  self:ShowTwoSideEquip(nSrcEquipId, nDstEquipId)
+  self:ShowTransfer()
+  self:SetSrcToggleActiveAndEnable()
+end
+
+function tbWnd:SwitchAttr(szKey, nId)
+  self.pPanel:ToggleGroup_SetAllowSwitchOff(string.format(self.goAttr, self.SHOW_KEY.SRC), false)
+  self.pPanel:ToggleGroup_SetAllowSwitchOff(string.format(self.goAttr, self.SHOW_KEY.DST), false)
+  self.tbAttrList[szKey] = nId
+  for i = 1, self.ATTR_NUM_LIMIT do
+    self.pPanel:Toggle_SetEnable(string.format(self.toggleAttr, self.SHOW_KEY.DST, i), true)
+  end
+  local tbAttrs = Item.EquipForge:GetAttr(self.tbEquipList[self.SHOW_KEY.SRC])
+  if not tbAttrs then
+    return
+  end
+  local tbAttr = tbAttrs[nId]
+  if not tbAttr then
+    return
+  end
+  if self.tbEquipList[self.SHOW_KEY.SRC] and self.tbEquipList[self.SHOW_KEY.DST] and szKey == self.SHOW_KEY.SRC then
+    local nSrcGroupId, nSrcLevel = table.unpack(tbAttr)
+    if 0 ~= nSrcGroupId and 0 ~= nSrcLevel then
+      local tbDstAttrList = Item.EquipForge:GetAttr(self.tbEquipList[self.SHOW_KEY.DST])
+      local bFound = false
+      if not bFound then
+        for nDstId, tbDstAttr in ipairs(tbDstAttrList) do
+          local nDstGroupId, nDstLevel = table.unpack(tbDstAttr)
+          if nDstGroupId == nSrcGroupId then
+            if nSrcLevel > nDstLevel then
+              self.pPanel:Toggle_SetChecked(string.format(self.toggleAttr, self.SHOW_KEY.DST, nDstId), true)
+            end
+            bFound = true
+            break
+          end
+        end
+      end
+      if not bFound then
+        for nDstId, tbDstAttr in ipairs(tbDstAttrList) do
+          local nDstGroupId, nDstLevel = table.unpack(tbDstAttr)
+          if 0 == nDstGroupId or 0 == nDstLevel then
+            self.pPanel:Toggle_SetChecked(string.format(self.toggleAttr, self.SHOW_KEY.DST, nDstId), true)
+            bFound = true
+            break
+          end
+        end
+      end
+      if bFound then
+        for nId = 1, self.ATTR_NUM_LIMIT do
+          self.pPanel:Toggle_SetEnable(string.format(self.toggleAttr, self.SHOW_KEY.DST, nId), false)
+        end
+      end
+    end
+  end
+  self:ShowTransfer()
+end
+
+function tbWnd:SetFightpowerChange()
+  local nLeftAttrGroupId, nLeftAttrLevel = table.unpack(Item.EquipForge:GetAttr(self.tbEquipList[self.SHOW_KEY.DST])[self.tbAttrList[self.SHOW_KEY.DST]])
+  if not nLeftAttrGroupId or not nLeftAttrLevel then
+    return
+  end
+  local nRightAttrGroupId, nRightAttrLevel = table.unpack(Item.EquipForge:GetAttr(self.tbEquipList[self.SHOW_KEY.SRC])[self.tbAttrList[self.SHOW_KEY.SRC]])
+  if not nRightAttrGroupId or not nRightAttrLevel then
+    return
+  end
+  local RightAttr = FightSkill:GetExternAttrib(nRightAttrGroupId, nRightAttrLevel)
+  local LeftAttr = FightSkill:GetExternAttrib(nLeftAttrGroupId, nLeftAttrLevel)
+  local nLeftFightpower = 0
+  if LeftAttr then
+    nLeftFightpower = LeftAttr.nFightPower
+  end
+  local nRightFightpower = 0
+  if RightAttr then
+    nRightFightpower = RightAttr.nFightPower
+  end
+  self:SetPowerChangeTextByValue(nRightFightpower - nLeftFightpower)
+end
+
+function tbWnd:SetPowerChangeTextDefault()
+  self.pPanel:Label_SetText(self.txtFightPowerUp, i18n.EasyGet("\230\136\152\229\138\155\229\128\188\229\162\158\229\138\160"))
+  self.pPanel:Label_SetColorByName(self.txtFightPowerUp, "NewGreen")
+  self.pPanel:Label_SetText(self.txtFightPowerUpNum, "")
+end
+
+function tbWnd:SetPowerChangeTextByValue(nAddFightpowerNum)
+  if nAddFightpowerNum >= 0 then
+    self.pPanel:Label_SetText(self.txtFightPowerUp, i18n.EasyGet("\230\136\152\229\138\155\229\128\188\229\162\158\229\138\160"))
+    self.pPanel:Label_SetText(self.txtFightPowerUpNum, nAddFightpowerNum)
+    self.pPanel:Label_SetColorByName(self.txtFightPowerUp, "NewGreen")
+    self.pPanel:Label_SetColorByName(self.txtFightPowerUpNum, "NewGreen")
+  else
+    self.pPanel:Label_SetText(self.txtFightPowerUp, i18n.EasyGet("\230\136\152\229\138\155\229\128\188\229\135\143\229\176\145"))
+    self.pPanel:Label_SetText(self.txtFightPowerUpNum, -nAddFightpowerNum)
+    self.pPanel:Label_SetColorByName(self.txtFightPowerUp, "NewRed")
+    self.pPanel:Label_SetColorByName(self.txtFightPowerUpNum, "NewRed")
+  end
+end
+
+function tbWnd:SetSrcToggleActiveAndEnable()
+  local tbSrcAttrList = self.tbEquipList[self.SHOW_KEY.SRC] and Item.EquipForge:GetAttr(self.tbEquipList[self.SHOW_KEY.SRC]) or {}
+  local tbDstAttrList = self.tbEquipList[self.SHOW_KEY.DST] and Item.EquipForge:GetAttr(self.tbEquipList[self.SHOW_KEY.DST]) or {}
+  for nSrcId, tbSrcAttr in ipairs(tbSrcAttrList) do
+    local nSrcGroupId, nSrcLevel = table.unpack(tbSrcAttr)
+    local bSrcAttributeExsit = 0 ~= nSrcGroupId and 0 ~= nSrcLevel
+    local bShowToggle = bSrcAttributeExsit
+    if bSrcAttributeExsit then
+      for _, tbDstAttr in ipairs(tbDstAttrList) do
+        local nDstGroupId, nDstLevel = table.unpack(tbDstAttr)
+        if nSrcGroupId == nDstGroupId and nSrcLevel <= nDstLevel then
+          bShowToggle = false
+          break
+        end
+      end
+    end
+    self.pPanel:SetActive(string.format(tbControls.toggleAttr, self.SHOW_KEY.SRC, nSrcId), bShowToggle)
+  end
+end

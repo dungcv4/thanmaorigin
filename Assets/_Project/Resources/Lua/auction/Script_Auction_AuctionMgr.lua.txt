@@ -1,0 +1,239 @@
+Auction.tbAuctionData = Auction.tbAuctionData or {}
+Auction.tbAuctionDealList = Auction.tbAuctionDealList or {}
+Auction.tbNotifyIndex = Auction.tbNotifyIndex or {}
+
+function Auction:OnAuctionSyncData(szType, tbAuction, bSyncFinish)
+  if szType then
+    self.tbAuctionData[szType] = tbAuction
+  end
+  if bSyncFinish then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_AUCTION_DATA, "Auction", szType)
+  end
+end
+
+function Auction:GetAuctionData(szType)
+  local nNow = GetTime()
+  local szGlobalType = self:GetGlobalType()
+  if not self.tbAuctionData[szGlobalType] then
+    self.tbAuctionData[szGlobalType] = {
+      szType = szGlobalType,
+      tbItems = {},
+      nEndTime = nNow * 2
+    }
+  end
+  local szShoperType = self:GetShoperType()
+  if not self.tbAuctionData[szShoperType] then
+    self.tbAuctionData[szShoperType] = {
+      szType = szShoperType,
+      tbItems = {},
+      nEndTime = nNow * 2
+    }
+  end
+  if szType then
+    return self.tbAuctionData[szType]
+  end
+  return self.tbAuctionData
+end
+
+function Auction:Ask4AllAuctionDataAndMonitorUI(bMonitor)
+  RemoteServer.OnAuctionRequest("OnSyncAllAuctionsAndMonitorUI", bMonitor)
+end
+
+function Auction:ClearAuctionCache()
+  local nNowTime = GetTime()
+  local nEndTime
+  for szType, tbAuctionData in pairs(self.tbAuctionData or {}) do
+    if self:IsGlobal(szType) or self:IsShoper(szType) or self.Def.tbTypeToName[szType] then
+      nEndTime = tbAuctionData.nEndTime
+      for _, tbItemData in pairs(tbAuctionData.tbItems or {}) do
+        if nEndTime < tbItemData.nTimeOut then
+          nEndTime = tbItemData.nTimeOut
+        end
+      end
+      if nNowTime > nEndTime then
+        self.tbAuctionData[szType] = nil
+      end
+    end
+  end
+end
+
+function Auction:AskAuctionDealListInfo(szType)
+  RemoteServer.OnAuctionRequest("AskDealListInfo", szType)
+end
+
+function Auction:OnAuctionSyncDealList(szType, tbDealList)
+  self.tbAuctionDealList[szType] = tbDealList
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_AUCTION_DATA, "AuctionDealList", szType)
+end
+
+function Auction:GetAuctionDealList(szType)
+  return self.tbAuctionDealList[szType]
+end
+
+function Auction:AuctionPriceChanged(szType, tbItemData, nId, nPrice)
+  local tbAuctionData = self:GetAuctionData(szType)
+  local bFound = false
+  for _, tbItem in pairs(tbAuctionData.tbItems) do
+    if tbItem.nId == nId then
+      bFound = true
+      break
+    end
+  end
+  if not bFound then
+    return
+  end
+  local szMoneyType
+  if self:IsShoper(szType) then
+    szMoneyType = self:GetShoperAuctionItemMoneyType(tbItemData.nOrgId)
+  else
+    szMoneyType = self:GetAuctionItemMoneyType(tbItemData.nItemId)
+  end
+  local szMoneyName = Currency:GetName(szMoneyType)
+  if nPrice > me.GetMoney(szMoneyType) then
+    local function fnBid()
+      me.CenterMsg(i18n.EasyGet("{0}\228\184\141\232\182\179", szMoneyName))
+      
+      Ui:CloseWindow("UIMessageBox")
+    end
+    
+    local function fnClose()
+      Ui:CloseWindow("UIMessageBox")
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\189\147\229\137\141\231\171\158\228\187\183\229\183\178\229\143\152\229\138\168\239\188\140\228\189\160\231\161\174\229\174\154\232\166\129\232\138\177\232\180\185 <color=#{0}>{1}{2}</color> \229\143\130\228\184\142\231\171\158\230\139\141\229\144\151\239\188\159", Ui.tbColor:GetColorHexByDefineName("Red"), nPrice, szMoneyName), {
+      {fnBid},
+      {fnClose}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+    return
+  end
+  self:SyncOneItem(szType, tbItemData, tbItemData.nId)
+  
+  local function fnBid()
+    RemoteServer.OnAuctionRequest("Bid", szType, tbItemData.nId, nPrice)
+    Auction:SaveMyAuctionInfo(szType, tbItemData)
+    Ui:CloseWindow("UIMessageBox")
+  end
+  
+  local function fnClose()
+    Ui:CloseWindow("UIMessageBox")
+  end
+  
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\189\147\229\137\141\231\171\158\228\187\183\229\183\178\229\143\152\229\138\168\239\188\140\228\189\160\231\161\174\229\174\154\232\166\129\232\138\177\232\180\185 <color=#{0}>{1}{2}</color> \229\143\130\228\184\142\231\171\158\230\139\141\229\144\151\239\188\159", Ui.tbColor:GetColorHexByDefineName("Gold"), nPrice, szMoneyName), {
+    {fnBid},
+    {fnClose}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function Auction:AuctionOpenNew(szType)
+  RedPointMgr:LightRedPoint(RedPointMgr.EVENT.AuctionOpen)
+  if self:IsShoper(szType) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.ShoperAuctionOpen)
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.ChildrenLimitAuction)
+  end
+  if not self:IsGlobal(szType) then
+    local nIndex = self.tbNotifyIndex[szType]
+    if nIndex then
+      Ui:CancelNotifyMsg(nIndex)
+    end
+    local bShoper = self:IsShoper(szType)
+    local nNow = GetTime()
+    local nTimeOut
+    if bShoper then
+      nTimeOut = nNow + self.Def.nShoperLastingTime
+    else
+      nTimeOut = nNow + self.Def.nAuctionPrepareTime + self.Def.nKinOrTongAuctionLastingTime + self.Def.nBidOverDelayTime
+    end
+    self.tbNotifyIndex[szType] = Ui:SynNotifyMsg({
+      szType = "AuctionOpenNew",
+      nTimeOut = nTimeOut,
+      bShoper = bShoper
+    })
+  end
+end
+
+function Auction:AuctionFinish(szType)
+  if not self:IsGlobal(szType) or not self:IsShoper(szType) then
+    local nIndex = self.tbNotifyIndex[szType]
+    if nIndex then
+      self.tbNotifyIndex[szType] = nil
+      Ui:CancelNotifyMsg(nIndex)
+    end
+  end
+end
+
+function Auction:SyncOneItem(szType, tbSyncData, nSyncId)
+  local tbItems = self.tbAuctionData[szType] and self.tbAuctionData[szType].tbItems or nil
+  if tbItems then
+    for nId, _ in pairs(tbItems) do
+      if nSyncId == tbItems[nId].nId then
+        if tbSyncData then
+          tbItems[nId] = tbSyncData
+          if tbSyncData.bSold then
+            tbSyncData.bKeepSoldOut = true
+          end
+          break
+        end
+        tbItems[nId].bKeepSoldOut = true
+        break
+      end
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_AUCTION_DATA, "SyncOneItem", szType, tbSyncData, nSyncId)
+end
+
+function Auction:AskMonitorUI(bMonitor)
+  RemoteServer.OnAuctionRequest("MonitorUI", bMonitor)
+end
+
+function Auction:OnNotifyExpectEachGold(szType, nEachGold)
+  local tbAuctionData = self.tbAuctionData[szType]
+  if not tbAuctionData then
+    return
+  end
+  tbAuctionData.nExpectEachGold = nEachGold
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_AUCTION_DATA, "ExpectEachGold", szType, nEachGold)
+end
+
+function Auction:SaveMyAuctionInfo(szType, tbItemData)
+  local nNow = GetTime()
+  if not self.tbMyAuctionData then
+    self.tbMyAuctionData = {}
+  end
+  if not self.tbMyAuctionData[szType] then
+    self.tbMyAuctionData[szType] = {}
+  end
+  self.tbMyAuctionData[szType][tbItemData.nId] = tbItemData
+end
+
+function Auction:IsMyAuctionInfo(szType, nId)
+  local nNow = GetTime()
+  if not self.tbMyAuctionData then
+    return false
+  end
+  if not self.tbMyAuctionData[szType] then
+    return false
+  end
+  if not self.tbMyAuctionData[szType][nId] then
+    return false
+  end
+  if nNow > self.tbMyAuctionData[szType][nId].nTimeOut then
+    self.tbMyAuctionData[szType][nId] = nil
+    return false
+  end
+  return true
+end
+
+function Auction:OnLogout()
+  self.tbAuctionData = {}
+  self.tbAuctionDealList = {}
+  self.tbNotifyIndex = {}
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Auction)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Auction.OnLogout, Auction)

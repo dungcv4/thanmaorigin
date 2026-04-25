@@ -1,0 +1,155 @@
+Require("Setting/Npc/Ai/SeventhEvening/TongXinShuCfg.lua")
+local tbItem = Item:GetClass("TongXinItem")
+local tbTongXinCfg = Npc.TongXinShu.Cfg
+local nNeedMemberCount = 2
+
+function tbItem:OnUse(it)
+  local bOK, szCheckMsg = self:CheckProperTime()
+  if not bOK then
+    me.CenterMsg(szCheckMsg)
+    return 0
+  end
+  local pNpc = KNpc.GetNearestNpcByTemplateId(me.GetNpc(), tbTongXinCfg.nTongXinNpcTemplateId, tbTongXinCfg.nPlantRadius)
+  if pNpc then
+    me.CenterMsg(i18n.EasyGet("\233\153\132\232\191\145\230\156\137\229\133\182\228\187\150\229\144\140\229\191\131\230\160\145\239\188\140\232\175\183\231\167\187\230\173\165\229\136\171\229\164\132\231\167\141\230\164\141\229\144\167"))
+    return 0
+  end
+  local nPlantTime = me.GetUserValue(Npc.TongXinShu.SaveKey, Npc.TongXinShu.SaveID.IsPlanting)
+  if GetTime() - nPlantTime <= 300 then
+    me.CenterMsg(i18n.EasyGet("\230\130\168\232\191\152\230\156\137\230\173\163\229\156\168\231\167\141\230\164\141\231\154\132\229\144\140\229\191\131\230\160\145"))
+    return 0
+  end
+  local tbMembers = TeamMgr:GetMembers(me.dwTeamID)
+  local pMember
+  for _, dwID in ipairs(tbMembers) do
+    if dwID ~= me.dwID then
+      pMember = KPlayer.GetPlayerObjById(dwID)
+      if not pMember then
+        local tbRoleStayInfo = KPlayer.GetRoleStayInfo(dwID)
+        if tbRoleStayInfo then
+          me.CenterMsg(i18n.Get(tbTongXinCfg.Terms.szNotOnLine, tbRoleStayInfo.szName))
+        end
+        return 0
+      else
+        break
+      end
+    end
+  end
+  if not pMember then
+    me.CenterMsg(i18n.EasyGet("\229\175\185\230\150\185\228\184\141\229\156\168\231\186\191\228\184\138"))
+    return 0
+  end
+  local bRet, szMsg = self:CheckMapAndDistance(me, pMember)
+  if not bRet then
+    me.CenterMsg(szMsg)
+    return 0
+  end
+  local nMapId, nLocX, nLocY = me.GetWorldPos()
+  local pNewNpc = KNpc.Add(tbTongXinCfg.nTongXinNpcTemplateId, 1, -1, nMapId, nLocX, nLocY, 0, 0, 0)
+  if pNewNpc then
+    pNewNpc.nFatherPlayerId = me.dwID
+    me.CenterMsg(i18n.Get(tbTongXinCfg.GrowText.ShuZhongUnLive))
+    pMember.CenterMsg(i18n.Get(tbTongXinCfg.GrowText.ShuZhongUnLive))
+    me.SetUserValue(Npc.TongXinShu.SaveKey, Npc.TongXinShu.SaveID.IsPlanting, GetTime())
+    pNewNpc.tbFirstPlant = {}
+    local nIsFirstPlant = me.GetUserValue(Npc.TongXinShu.SaveKey, Npc.TongXinShu.SaveID.IsFirstPlant)
+    if 0 == nIsFirstPlant then
+      table.insert(pNewNpc.tbFirstPlant, me.dwID)
+    end
+    pNewNpc.nFatherName = me.szName
+    me.CallClientScript("Ui:CloseWindow", "UIBag")
+    me.CallClientScript("Ui:CloseWindow", "UIItemTips")
+    return 1
+  else
+    me.CenterMsg(i18n.EasyGet("\229\144\140\229\191\131\230\160\145\230\146\173\231\167\141\229\164\177\232\180\165\239\188\140\232\175\183\231\168\141\229\144\142\229\134\141\232\175\149"))
+    return 0
+  end
+end
+
+function tbItem:OnClientUse(it)
+  if not me then
+    return 0
+  end
+  local bRet, szMsg = self:CheckProperTime()
+  if not bRet then
+    me.CenterMsg(szMsg)
+    return 0
+  end
+  if 0 == me.nSex then
+    if not self:CheckMap(me) then
+      me.CenterMsg(i18n.Get(tbTongXinCfg.Terms.szNotProperMap))
+      return 0
+    end
+    if not TeamMgr:HasTeam(me) then
+      me.CenterMsg(i18n.EasyGet("\233\152\159\228\188\141\228\186\186\230\149\176\228\184\141\232\182\179{0}\228\186\186\239\188\140\232\175\183\231\187\132\233\152\159\229\144\142\229\134\141\228\189\191\231\148\168", nNeedMemberCount))
+      return 0
+    end
+    local nMemberCount = TeamMgr:GetMembersCount()
+    if nMemberCount < nNeedMemberCount then
+      me.CenterMsg(i18n.EasyGet("\233\152\159\228\188\141\229\134\133\228\186\186\230\149\176\228\184\141\232\182\179{0}\228\186\186\239\188\140\232\175\183\229\156\168{1}\228\186\186\233\152\159\228\188\141\228\184\173\228\189\191\231\148\168", nNeedMemberCount, nNeedMemberCount))
+      return 0
+    elseif nMemberCount > nNeedMemberCount then
+      me.CenterMsg(i18n.EasyGet("\233\152\159\228\188\141\229\134\133\228\186\186\230\149\176\229\164\167\228\186\142{0}\228\186\186\239\188\140\232\175\183\229\156\168{1}\228\186\186\233\152\159\228\188\141\228\184\173\228\189\191\231\148\168", nNeedMemberCount, nNeedMemberCount))
+      return 0
+    end
+    local tbMembers = TeamMgr:GetMembers()
+    for _, tbMemberInfo in pairs(tbMembers) do
+      if 1 ~= tbMemberInfo.nSex then
+        me.CenterMsg(i18n.EasyGet("\232\175\183\228\184\142\229\165\179\230\128\167\231\142\169\229\174\182\231\187\132\233\152\159\229\144\142\229\134\141\228\189\191\231\148\168"))
+        return 0
+      end
+    end
+    return 1
+  elseif 1 == me.nSex then
+    me.CenterMsg(i18n.EasyGet("\232\175\183\229\156\168\229\156\176\229\155\190\228\184\138\231\130\185\229\135\187\233\156\128\232\166\129\230\181\135\231\129\140\231\154\132\229\144\140\229\191\131\231\167\141"))
+    return 0
+  else
+    return 0
+  end
+end
+
+function tbItem:CheckMap(pPlayer)
+  for _, nTemplateId in ipairs(tbTongXinCfg.tbUseMap) do
+    if pPlayer.nMapTemplateId == nTemplateId then
+      return true
+    end
+  end
+  return false
+end
+
+function tbItem:CheckMapAndDistance(pPlayer, pMember)
+  local bProperMap = false
+  if pPlayer.nMapTemplateId then
+    for _, nId in ipairs(tbTongXinCfg.tbUseMap) do
+      if nId == pPlayer.nMapTemplateId then
+        bProperMap = true
+      end
+    end
+  end
+  if not bProperMap then
+    return false, i18n.Get(tbTongXinCfg.Terms.szNotProperMap)
+  end
+  local nMemberMapId, nMemberX, nMemberY = pMember.GetWorldPos()
+  local nMeMapId, nMeX, nMeY = pPlayer.GetWorldPos()
+  if nMemberMapId ~= nMeMapId then
+    return false, i18n.Get(tbTongXinCfg.Terms.szNotInSameMap, pMember.szName)
+  end
+  local nDistance = Lib:GetDistance(nMemberX, nMemberY, nMeX, nMeY)
+  if nDistance > tbTongXinCfg.nMemberDist then
+    return false, i18n.Get(tbTongXinCfg.Terms.szMemberTooFar, pMember.szName)
+  end
+  return true, ""
+end
+
+function tbItem:CheckProperTime()
+  local nHour = Lib:GetLocalDayHour()
+  if nHour >= tbTongXinCfg.nBanHourStart and nHour < tbTongXinCfg.nBanHourEnd then
+    return false, i18n.Get(tbTongXinCfg.Terms.szBanPlant)
+  else
+    return true, ""
+  end
+end
+
+function tbItem:OnTimeOut(pItem, pPlayer)
+  Item:OnTimeOutHelper(pItem, pPlayer, "TongXinItem")
+end

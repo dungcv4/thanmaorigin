@@ -1,0 +1,319 @@
+ZhenFa.szTypeAttact = "UI/atlas/zhenfa/icon_zhenjue_attack.png"
+ZhenFa.szTypeDefance = "UI/atlas/zhenfa/icon_zhenjue_shield.png"
+ZhenFa.szZhenJueClick = "ZhenJueClick"
+ZhenFa.OFFSET = 14400
+ZhenFa.tbItemId2GridLevel = {
+  [33004] = 1,
+  [33005] = 2,
+  [33006] = 3,
+  [33007] = 4,
+  [33008] = 5,
+  [33009] = 6,
+  [32999] = 7
+}
+
+function ZhenFa:GetNextLevelTimeframe(STType, nMaxLevel)
+  local tbTimeframe
+  if 1 == STType then
+    tbTimeframe = self.tbTimeFrame2ZFMaxLevel
+  else
+    tbTimeframe = self.tbTimeFrame2ZJMaxLevel
+  end
+  for k, v in ipairs(tbTimeframe) do
+    if nMaxLevel < v.nLevel then
+      return v.szTimeFrame
+    end
+  end
+  return ""
+end
+
+function ZhenFa:GetNextLevelTipsGrade(STType, nMaxLevel)
+  local tbCfg
+  if 1 == STType then
+    tbCfg = self.tbTimeFrame2ZFMaxLevel
+  else
+    tbCfg = self.tbTimeFrame2ZJMaxLevel
+  end
+  for k, v in ipairs(tbCfg) do
+    if nMaxLevel < v.nLevel then
+      return v.nTipGrade
+    end
+  end
+  return 0
+end
+
+function ZhenFa:ZFUpgradeReqC()
+  RemoteServer.RequestZhenFa("ZFUpgradeReq")
+end
+
+function ZhenFa:ZFZhenJueLingWuReqC(nZJHole, nLWType)
+  RemoteServer.RequestZhenFa("ZFZhenJueLingWuReq", nZJHole, nLWType)
+end
+
+function ZhenFa:ZFPutOnC(nPos)
+  RemoteServer.RequestZhenFa("ZFPutOn", nPos)
+end
+
+function ZhenFa:ZFReRandomZhenJueReqC()
+  RemoteServer.RequestZhenFa("ZFReRandomZhenJueReq")
+end
+
+function ZhenFa:ZFReRandomSaveReqC()
+  RemoteServer.RequestZhenFa("ZFReRandomSaveReq")
+end
+
+function ZhenFa:GetHadActiveZhenFaList(pPlayer)
+  local tbTemp = {}
+  local tbRet = {}
+  for i, tbInfo in ipairs(self.ZhenFaInfo) do
+    for j, tbV1 in pairs(tbInfo) do
+      if ZhenFa:GetZhenFaActiveStatus(pPlayer, i, j) then
+        tbTemp[i] = math.max(tbTemp[i] or 0, j)
+      end
+    end
+  end
+  local nCurPos = self:GetZhenFaCurPutOnPos(pPlayer)
+  for nPos, nSubPos in pairs(tbTemp) do
+    if nCurPos == nPos then
+      table.insert(tbRet, {nPos, nSubPos})
+      break
+    end
+  end
+  for nPos, nSubPos in pairs(tbTemp) do
+    if nCurPos ~= nPos then
+      table.insert(tbRet, {nPos, nSubPos})
+    end
+  end
+  return tbRet
+end
+
+function ZhenFa:GetZhenJueHoleCount(nPos, nSubPos)
+  local tbCfg = self.ZhenFaInfo[nPos][nSubPos]
+  return tbCfg[5] + tbCfg[7], tbCfg[5], tbCfg[7]
+end
+
+function ZhenFa:GetZhenJueAttrShowItemIdList(pPlayer, nPos)
+  local tbTemp = ZhenFa:GetZhenJueAttrIdList(pPlayer, nPos)
+  local tbRet = {}
+  for nHole, nAttrId in ipairs(tbTemp) do
+    local nLevel = self:GetZhenJueHoleLevel(pPlayer, nHole)
+    local nItemId = self.ZhenJueAttrInfo[nAttrId][nLevel][2]
+    tbRet[nHole] = nItemId
+  end
+  return tbRet
+end
+
+function ZhenFa:GetZhenJueAttrByItemId(pPlayer, nPos, nHole)
+  local tbTemp = ZhenFa:GetZhenJueAttrIdList(pPlayer, nPos)
+  local nAttrId = tbTemp[nHole]
+  if not nAttrId then
+    return
+  end
+  local nLevel = self:GetZhenJueHoleLevel(pPlayer, nHole)
+  return self.ZhenJueAttrInfo[nAttrId][nLevel][1]
+end
+
+function ZhenFa:OnZFTeamPlayerChange(nOldNum, nCurNum)
+  local nCurPutOnPos, nCurPutOnSubPos = self:GetZhenFaCurPutOnPos(me)
+  local nLevel = self:GetZhenFaLevel(me)
+  if not me.IsMaskPlayerAttr() then
+    self:RemoveZFAttribute(me, nCurPutOnPos, nCurPutOnSubPos, nOldNum, nLevel)
+    self:ApplyZFAttribute(me, nCurPutOnPos, nCurPutOnSubPos, nCurNum, nLevel)
+  end
+end
+
+function ZhenFa:GetTeamMemberCount(pPlayer)
+  return TeamMgr:GetMembersCount()
+end
+
+function ZhenFa:S2CActiveInfoChange(nPos, nSubPos)
+  Ui:CloseWindow("UIQuickUseItem")
+  if Ui:WindowVisible("UIZhenFa_New") then
+    Ui:GetWindow("UIZhenFa_New"):UpdateZhenFaSV()
+  else
+    Ui:OpenWindow("UIZhenFa_New", nPos)
+  end
+  self:OnCheckRedPoint()
+end
+
+function ZhenFa:ZFActiveRsp(nCurPutOnPos, nCurPutOnSubPos, nPos, nSubPos)
+  if Ui:WindowVisible("UIZhenFa_New") then
+    Ui:GetWindow("UIZhenFa_New"):UpdateView()
+  end
+  if not me.IsMaskPlayerAttr() then
+    local nLevel = self:GetZhenFaLevel(me)
+    self:ChangeZFAttr(me, nCurPutOnPos, nCurPutOnSubPos, nPos, nSubPos, nLevel, nLevel)
+  end
+end
+
+function ZhenFa:S2CZFPutOnChange(nLastPutOnPos, nLastPutOnSubPos, nPos, nSubPos)
+  if Ui:WindowVisible("UIZhenFa_New") then
+    Ui:GetWindow("UIZhenFa_New"):UpdateView("PutOn")
+  end
+  if not me.IsMaskPlayerAttr() then
+    local nLevel = self:GetZhenFaLevel(me)
+    self:ChangeZFAttr(me, nLastPutOnPos, nLastPutOnSubPos, nPos, nSubPos, nLevel, nLevel)
+    self:ChangeZhenJueAttr(me, nLastPutOnPos, nPos)
+  end
+  self:OnCheckZhenJueRedPoint()
+end
+
+function ZhenFa:S2CZFLevelChange(nLevel)
+  if Ui:WindowVisible("UIZhenFa_New") then
+    Ui:GetWindow("UIZhenFa_New"):UpdateView()
+  end
+  me.CenterMsg(i18n.EasyGet("\229\141\135\231\186\167\230\136\144\229\138\159"))
+  if not me.IsMaskPlayerAttr() then
+    local nCurPutOnPos, nCurPutOnSubPos = self:GetZhenFaCurPutOnPos(me)
+    self:ChangeZFAttr(me, nCurPutOnPos, nCurPutOnSubPos, nCurPutOnPos, nCurPutOnSubPos, nLevel - 1, nLevel)
+  end
+  if self:CanUpgradeZFLevel(me) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.ZhenFaLevelUp)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ZhenFaLevelUp)
+  end
+end
+
+function ZhenFa:ZFZhenJueLingWuRsp(nAddExp, bResult, bUpgrade, nZJHole, nCurLevel)
+  if bResult then
+    me.CenterMsg(i18n.EasyGet("\233\162\134\230\130\159\230\136\144\229\138\159, \232\142\183\229\190\151{0}\231\187\143\233\170\140", nAddExp))
+  else
+    me.CenterMsg(i18n.EasyGet("\233\162\134\230\130\159\229\164\177\232\180\165"))
+  end
+  local nPos = self:GetZhenFaCurPutOnPos(me)
+  if bUpgrade then
+    local nAttrId = me.GetUserValue(self.tbSaveGroupKey[nPos], self.ZHENJUE_ATTR_BEGIN + nZJHole)
+    if not me.IsMaskPlayerAttr() then
+      self:RemoveZhenJueAttributeByAttrId(me, nAttrId, nCurLevel)
+      self:ApplyZhenJueAttributeByAttrId(me, nAttrId, nCurLevel + 1)
+    end
+    if Ui:WindowVisible("UIZhenFa_New") then
+      Ui:GetWindow("UIZhenFa_New"):UpdateView()
+    end
+  end
+  if Ui:WindowVisible("UIZhenJue") then
+    Ui:GetWindow("UIZhenJue"):UpdateView()
+  end
+  self:OnCheckZhenJueRedPoint()
+end
+
+function ZhenFa:SCApplyZhenJueAttribute(nAttrId)
+  self:ApplyZhenJueAttributeByAttrId(me, nAttrId, 1)
+end
+
+function ZhenFa:ZFReRandomZhenJueRsp(tbZJAttrId)
+  if Ui:WindowVisible("UIZhenJueRelearn") then
+    Ui:GetWindow("UIZhenJueRelearn"):UpAttrIdNextSV(tbZJAttrId)
+  end
+end
+
+function ZhenFa:ZFReRandomSaveRsp(tbOldAttrIdList, tbNewAttrIdList)
+  local nCurPutOnPos, _ = self:GetZhenFaCurPutOnPos(me)
+  if tbOldAttrIdList and tbNewAttrIdList and not me.IsMaskPlayerAttr() then
+    self:RemoveZhenJueAttribute(me, nCurPutOnPos, tbOldAttrIdList)
+    self:ApplyZhenJueAttribute(me, nCurPutOnPos, tbNewAttrIdList)
+  end
+  if Ui:WindowVisible("UIZhenFa_New") then
+    Ui:GetWindow("UIZhenFa_New"):UpdateView()
+  end
+  if Ui:WindowVisible("UIZhenJue") then
+    Ui:GetWindow("UIZhenJue"):UpdateView()
+  end
+  if Ui:WindowVisible("UIZhenJueRelearn") then
+    Ui:GetWindow("UIZhenJueRelearn"):ReplaceRsp()
+  end
+end
+
+function ZhenFa:SetNotShowValue(bNotShowToday)
+  if bNotShowToday then
+    LocalData:SetRoleNumber("ZhenFa_ZhenJue", GetTime())
+  end
+end
+
+function ZhenFa:OnCheckRedPoint()
+  if self:CanUpgradeZFLevel(me) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.ZhenFaLevelUp)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ZhenFaLevelUp)
+  end
+  self:OnCheckZhenJueRedPoint()
+end
+
+function ZhenFa:CheckRedPointTypeHadClickToday()
+  local nLocalDay = Lib:GetLocalDay(GetTime() - self.OFFSET)
+  local nLastClickTime = LocalData:GetRoleNumber(self.szZhenJueClick, 0) - self.OFFSET
+  local nLastClickDay = Lib:GetLocalDay(nLastClickTime)
+  if nLocalDay == nLastClickDay then
+    return true
+  else
+    return false
+  end
+end
+
+function ZhenFa:OnCheckZhenJueRedPoint()
+  local nPos = self:GetZhenFaCurPutOnPos(me)
+  if not nPos or nPos <= 0 then
+    return
+  end
+  for i = 1, self.nMaxZhenJue do
+    self:OnCheckZhenJueRedPointByHoleIndex(nPos, i)
+  end
+end
+
+function ZhenFa:OnCheckZhenJueRedPointByHoleIndex(nPos, nHoleIndex)
+  local nSaveKey = self.ZHENJUE_ATTR_BEGIN + nHoleIndex
+  local nAttrId = me.GetUserValue(self.tbSaveGroupKey[nPos], nSaveKey)
+  if nAttrId > 0 and (self:CanZhenJueLingWu(me, nHoleIndex, self.nNormalLingWu) or self:CanZhenJueLingWu(me, nHoleIndex, self.nPerfectLingWu)) and not self:CheckRedPointTypeHadClickToday() then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.ZhenFaZJLevelUpBegin + nHoleIndex - 1)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ZhenFaZJLevelUpBegin + nHoleIndex - 1)
+  end
+end
+
+function ZhenFa:OnSyncItemLimitTime(nItemId)
+  if not PlayerEvent.bLogin then
+    return
+  end
+  self:OnCheckRedPoint()
+end
+
+function ZhenFa:OnDelItem(nItemId, dwTemplateId)
+  if dwTemplateId and (dwTemplateId == self.nNormalLingWuDanId or dwTemplateId == self.nPerfectLingWuDanId or dwTemplateId == self.nQiangZhenFuId) then
+    self:OnCheckRedPoint()
+  end
+end
+
+function ZhenFa:CanLingWuZhenJueC()
+  local nPos = self:GetZhenFaCurPutOnPos(me)
+  if not nPos or nPos <= 0 then
+    return false
+  end
+  for i = 1, self.nMaxZhenJue do
+    local nSaveKey = self.ZHENJUE_ATTR_BEGIN + i
+    local nAttrId = me.GetUserValue(self.tbSaveGroupKey[nPos], nSaveKey)
+    if nAttrId > 0 then
+      if self:CanZhenJueLingWu(me, i, self.nNormalLingWu) then
+        return true
+      end
+      if self:CanZhenJueLingWu(me, i, self.nPerfectLingWu) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function ZhenFa:IsUnlock()
+  return 1 == GetTimeFrameState(self.tbCfg.szUnlockTimeframe) and me.nLevel >= self.tbCfg.nUnlockLevel
+end
+
+function ZhenFa:ResetAttr()
+  self:OnUnEquip(me)
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, ZhenFa)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, ZhenFa.OnCheckRedPoint, ZhenFa)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM_TIME_LIMIT, ZhenFa)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM_TIME_LIMIT, ZhenFa.OnSyncItemLimitTime, ZhenFa)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_DEL_ITEM, ZhenFa)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_DEL_ITEM, ZhenFa.OnDelItem, ZhenFa)

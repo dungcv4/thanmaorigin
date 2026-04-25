@@ -1,0 +1,245 @@
+Require("CommonScript/BeachFight/BeachFightCfg.lua")
+HaiLingWangMu.bIsCanExit = true
+HaiLingWangMu.nAutoTalkNpcTime = 3
+
+function HaiLingWangMu:OnSetTargetPosResp(nPosX, nPosY)
+  Dungeon:SetTargetPos(nPosX, nPosY)
+end
+
+function HaiLingWangMu:OnClearTargetPosResp()
+  Dungeon:ClearTargetPos()
+end
+
+function HaiLingWangMu:OnChangeNewTargetResp(szTargetType)
+  if HaiLingWangMu.Cfg.TargetCfg[szTargetType] then
+    local szMsg = HaiLingWangMu.Cfg.TargetCfg[szTargetType].szBeforeMsg
+    if not Lib:IsEmptyStr(szMsg) then
+      me.CenterMsg(i18n.Get(szMsg))
+    end
+  end
+end
+
+function HaiLingWangMu:OnFinishTargetResp(szTargetType)
+  if HaiLingWangMu.Cfg.TargetCfg[szTargetType] then
+    local szMsg = HaiLingWangMu.Cfg.TargetCfg[szTargetType].szFinishMsg
+    if not Lib:IsEmptyStr(szMsg) then
+      me.CenterMsg(i18n.Get(szMsg))
+    end
+  end
+end
+
+function HaiLingWangMu:OnNotifyPrepareResp(nRestTime)
+  self.bIsCanExit = false
+  local tbTimeInfo
+  if Lib:IsInteger(nRestTime) then
+    tbTimeInfo = {
+      nRestTime,
+      i18n.EasyGet("\229\135\134\229\164\135\230\151\182\233\151\180\239\188\154%s")
+    }
+    Ui:OpenWindow("UIReadyGo", nRestTime)
+  else
+    tbTimeInfo = {}
+  end
+  FubenUIController:ShowDefaultInfo({tbTimeInfo}, {
+    i18n.EasyGet("\231\173\137\229\190\133\229\137\175\230\156\172\229\188\128\229\167\139")
+  })
+end
+
+function HaiLingWangMu:OnUpdateTargetProgress(szProgress, nLeftTime)
+  local tbTexts = {}
+  self.bIsCanExit = false
+  table.insert(tbTexts, szProgress)
+  local tbTimerParam = {}
+  if nil ~= nLeftTime then
+    tbTimerParam = {
+      {
+        nLeftTime,
+        i18n.EasyGet("\229\137\175\230\156\172\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154%s")
+      }
+    }
+  else
+    tbTimerParam = {}
+  end
+  FubenUIController:ShowDefaultInfo(tbTimerParam, tbTexts)
+end
+
+function HaiLingWangMu:OnNotifySettlementResp(nRestTime)
+  local tbTimeInfo
+  if nil ~= nRestTime then
+    tbTimeInfo = {
+      nRestTime,
+      i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154%s")
+    }
+  else
+    tbTimeInfo = {}
+  end
+  FubenUIController:ShowDefaultInfo({tbTimeInfo}, {
+    i18n.EasyGet("\229\137\175\230\156\172\229\183\178\231\187\147\230\157\159")
+  })
+  self.bIsCanExit = true
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function HaiLingWangMu:RegisterFubenUIChecker()
+  local tbMap = {}
+  for index, tbInfo in ipairs(HaiLingWangMu.Cfg.tbStage) do
+    table.insert(tbMap, tbInfo.nTemplateID)
+  end
+  FubenUIController:RegisterChecker(tbMap, self)
+end
+
+HaiLingWangMu:RegisterFubenUIChecker()
+
+function HaiLingWangMu:IsNeedExitFubenButton()
+  return self.bIsCanExit
+end
+
+function HaiLingWangMu:OnFubenMapLoaded()
+  FubenUIController:OpenDefaultFuBenUI()
+end
+
+function HaiLingWangMu:OnLeave()
+  if self.IsCanExit then
+    FubenUIController:CloseFubenUI()
+    self.IsCanExit = nil
+  end
+  self:OnCloseAutoTalkNpcTimer()
+end
+
+function HaiLingWangMu:RequieExit()
+  FubenUIController:RequireQuit()
+end
+
+function HaiLingWangMu:SetCanExit(bCanExit)
+  self.IsCanExit = bCanExit
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function HaiLingWangMu:CallServerScript(nProtocol, ...)
+  RemoteServer.RequestHaiLingWangMu(nProtocol, ...)
+end
+
+function HaiLingWangMu:OnJoin()
+  local function fnOpenTeamWindowShowBarrack()
+    Ui:OpenWindow("UITeam")
+    
+    local tbWnd = Ui:GetWindow("UITeam")
+    if not tbWnd:SelectBigAndSmallButton("Barracks", "HaiLingWangMu") then
+      LogErr("Barracks big button or HaiLingWangMu small button is not exsit in UITeam left")
+    end
+  end
+  
+  if not TeamMgr:HasTeam() then
+    Ui:CloseWindow("UIActivity")
+    fnOpenTeamWindowShowBarrack()
+  elseif not TeamMgr:IsCaptain() then
+    me.CenterMsg(TeamMgr.OnlyCaptainCanJoinHintMsg())
+  elseif not TeamMgr:TeamFull() then
+    Ui:CloseWindow("UIActivity")
+    Ui:OpenWindow("UITeam")
+    TeamMgr:SetTeamActivity(TeamMgr:GetActivityId("Barracks", "HaiLingWangMu"))
+    local tbWnd = Ui:GetWindow("UITeam")
+    tbWnd:SelectBigButton("myTeam")
+  else
+    Ui:CloseWindow("UIActivity")
+    local nActivityId = TeamMgr:GetActivityId("Barracks", "HaiLingWangMu")
+    if nil ~= nActivityId then
+      TeamMgr:AutoSetAndEnterActivity(nActivityId)
+    end
+  end
+end
+
+function HaiLingWangMu:OnReadyGo(nRestTime)
+  if Lib:IsInteger(nRestTime) then
+    Ui:OpenWindow("UIReadyGo", nRestTime)
+  end
+end
+
+function HaiLingWangMu:SetCanExit(bCanExit)
+  self.IsCanExit = bCanExit
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function HaiLingWangMu:UpdateShowInfo(szProgress, nRestTime)
+  local tbTimeInfo
+  if nil ~= nRestTime then
+    tbTimeInfo = {
+      nRestTime,
+      i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154%s")
+    }
+  else
+    tbTimeInfo = {}
+  end
+  FubenUIController:ShowDefaultInfo({tbTimeInfo}, {szProgress})
+end
+
+function HaiLingWangMu:UpdateShowInfo2(szProgress, nRestTime, nRestTime2)
+  local tbTimeInfo = {}
+  if nRestTime and nRestTime2 and szProgress then
+    table.insert(tbTimeInfo, {
+      nRestTime,
+      i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154%s")
+    })
+    table.insert(tbTimeInfo, {
+      nRestTime2,
+      i18n.EasyGet(szProgress)
+    })
+  end
+  FubenUIController:ShowDefaultInfo(tbTimeInfo, {})
+end
+
+function HaiLingWangMu:GoToNpc()
+  if not self.nTargetNpcId then
+    return
+  end
+  if TeamMgr:IsFollowTeammate() then
+    return
+  end
+  if AutoPath:IsPathing() then
+    return
+  end
+  if Ui:WindowVisible("UIProgressBar") then
+    return
+  end
+  if Ui:WindowVisible("UINpcDialog") then
+    return
+  end
+  if not self.bCheckFilg then
+    return
+  end
+  self.bCheckFilg = false
+  local pNpc = KNpc.GetNearestNpcByTemplateId(me.GetNpc(), self.nTargetNpcId, AFK:GetSetting():GetFightSetting().nSearchRadius)
+  if pNpc then
+    Operation:SimpleTap(pNpc.nId)
+  end
+end
+
+function HaiLingWangMu:OnStartAutoTalkNpc(nTempNpcId)
+  if not nTempNpcId then
+    return false
+  end
+  self.nTargetNpcId = nTempNpcId
+  self.nAutoTalkNpcTimer = Timer:Register(Env.GAME_FPS * self.nAutoTalkNpcTime, function()
+    self.bCheckFilg = true
+    self:GoToNpc()
+    return true
+  end)
+end
+
+function HaiLingWangMu:OnCloseAutoTalkNpcTimer()
+  if self.nAutoTalkNpcTimer then
+    Timer:Close(self.nAutoTalkNpcTimer)
+    self.nAutoTalkNpcTimer = nil
+  end
+end
+
+function HaiLingWangMu:OnAFKStateChange(bAFKState)
+  if bAFKState == AFK.LeadFightStateTB.emStop then
+    self:OnCloseAutoTalkNpcTimer()
+  elseif bAFKState == AFK.LeadFightStateTB.emAutoFight then
+    self:OnStartAutoTalkNpc(self.nTargetNpcId)
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_AFK_STATE, HaiLingWangMu)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_AFK_STATE, HaiLingWangMu.OnAFKStateChange, HaiLingWangMu)

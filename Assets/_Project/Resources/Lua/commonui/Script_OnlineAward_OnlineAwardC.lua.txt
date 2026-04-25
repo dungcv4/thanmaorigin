@@ -1,0 +1,138 @@
+Require("CommonScript/OnlineAward/OnlineAwardComm.lua")
+
+function OnlineAward:StartOnlineAwardTimer(nCurStageId, nCurOnlineTime)
+  self.tbOnlineAwardTimerTable = {}
+  for nStageId, onlineAwardCfgData in pairs(self.tbOnlineAwardCfg) do
+    if nCurStageId < nStageId then
+      local nSurplusTime = onlineAwardCfgData.Time - nCurOnlineTime
+      if nSurplusTime > 0 then
+        if self.tbOnlineAwardTimerTable[nStageId] then
+          Timer:Close(self.tbOnlineAwardTimerTable[nStageId])
+        end
+        self.tbOnlineAwardTimerTable[nStageId] = Timer:Register(Env.GAME_FPS * nSurplusTime, function()
+          OnlineAward:ReqRecordCurStageId(nStageId)
+        end)
+      else
+        OnlineAward:ReqRecordCurStageId(nStageId)
+      end
+    end
+  end
+end
+
+function OnlineAward:ReqRecordCurStageId(nStageId)
+  RemoteServer.OnOnlineAwardRequest(OnlineAward.Protocol.C2SReqRecordCurStageId, nStageId)
+end
+
+function OnlineAward:SyncOnlineAwardData()
+  local onlineAwardData = {}
+  onlineAwardData.nCurStageId = me.GetUserValue(OnlineAward.GroupKey1, OnlineAward.CurStageId)
+  onlineAwardData.nLastDayStageId = me.GetUserValue(OnlineAward.GroupKey1, OnlineAward.LastDayStageId)
+  onlineAwardData.bIsReceiveTotalAward = 1 == me.GetUserValue(OnlineAward.GroupKey1, OnlineAward.IsReceiveTotalAward) and true or false
+  onlineAwardData.tbStageStateTable = {}
+  for nStageId, onlineAwardCfgData in pairs(self.tbOnlineAwardCfg) do
+    local nState = me.GetUserValue(OnlineAward.GroupKey2, nStageId)
+    if 0 == nState then
+      onlineAwardData.tbStageStateTable[nStageId] = false
+    else
+      onlineAwardData.tbStageStateTable[nStageId] = true
+    end
+  end
+  self.onlineAwardData = onlineAwardData
+  self:RefreshOnlineAwardRedPoint()
+end
+
+function OnlineAward:UpdateOnlineAwardStageState(nStageId, bState)
+  if self.onlineAwardData ~= nil then
+    self.onlineAwardData.tbStageStateTable[nStageId] = bState
+  end
+  self:RefreshOnlineAwardRedPoint()
+end
+
+function OnlineAward:UpdateOnlineAwardStageId(nStageId)
+  if self.onlineAwardData ~= nil then
+    self.onlineAwardData.nCurStageId = nStageId
+  end
+  self:RefreshOnlineAwardRedPoint()
+end
+
+function OnlineAward:UpdateOnlineAwardIsReceiveTotalAward(bIsReceiveTotalAward)
+  if self.onlineAwardData ~= nil then
+    self.onlineAwardData.bIsReceiveTotalAward = bIsReceiveTotalAward
+  end
+  self:RefreshOnlineAwardRedPoint()
+end
+
+function OnlineAward:GetOnlineAwardData()
+  return self.onlineAwardData
+end
+
+function OnlineAward:GetRemainingTime(nStageId)
+  local nRemainingTime = math.floor(Timer:GetRestTime(self.tbOnlineAwardTimerTable[nStageId]) / Env.GAME_FPS)
+  return nRemainingTime
+end
+
+function OnlineAward:ReqReceiveAward(tbStageIdList)
+  if 0 == #tbStageIdList then
+    return
+  end
+  RemoteServer.OnOnlineAwardRequest(OnlineAward.Protocol.C2SReqReceiveAward, tbStageIdList)
+end
+
+function OnlineAward:ReqReceiveTotalAward()
+  if self.onlineAwardData ~= nil and self.onlineAwardData.bIsReceiveTotalAward == false and 0 ~= self.onlineAwardData.nLastDayStageId then
+    RemoteServer.OnOnlineAwardRequest(OnlineAward.Protocol.C2SReqReceiveTotalAward)
+  end
+end
+
+function OnlineAward:RefreshOnlineAwardView()
+  if Ui:WindowVisible("UIWelfare") == true then
+    Ui:GetWindow("UIWelfare"):UpdateOnlineAwardPanel()
+  end
+end
+
+function OnlineAward:OpenOnlineRewardPreview()
+  if Ui:WindowVisible("UIWelfare") == true then
+    Ui:GetWindow("UIWelfare"):OpenOnlineRewardPreview()
+  end
+end
+
+function OnlineAward:CheckUiIsOpen()
+  if self.onlineAwardData ~= nil and me.nLevel >= OnlineAward.nOpenLv then
+    return true
+  else
+    return false
+  end
+end
+
+function OnlineAward:RefreshOnlineAwardRedPoint()
+  local bIsHaveRedPoint = false
+  for nStageId, onlineAwardCfgData in pairs(OnlineAward.tbOnlineAwardCfg) do
+    if self.onlineAwardData ~= nil and nStageId <= self.onlineAwardData.nCurStageId and self.onlineAwardData.tbStageStateTable[nStageId] == false then
+      bIsHaveRedPoint = true
+      break
+    end
+  end
+  if self.onlineAwardData ~= nil and false == self.onlineAwardData.bIsReceiveTotalAward and 0 ~= self.onlineAwardData.nLastDayStageId then
+    bIsHaveRedPoint = true
+  end
+  if true == bIsHaveRedPoint then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.OnlineAward)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.OnlineAward)
+  end
+end
+
+function OnlineAward:OnReturnToLogin()
+  self.onlineAwardData = nil
+  if nil ~= self.tbOnlineAwardTimerTable then
+    for nStageId, nTimer in pairs(self.tbOnlineAwardTimerTable) do
+      if self.tbOnlineAwardTimerTable[nStageId] then
+        Timer:Close(self.tbOnlineAwardTimerTable[nStageId])
+      end
+    end
+    self.tbOnlineAwardTimerTable = nil
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, OnlineAward)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, OnlineAward.OnReturnToLogin, OnlineAward)

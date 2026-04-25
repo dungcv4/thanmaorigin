@@ -1,0 +1,135 @@
+Require("CommonScript/Activity/ActivityMgrDef.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.HandInAuction)
+tbActivity.SaveID = {
+  LastStartTimeKey = 1,
+  SubNumID = 2,
+  EventIDList = {
+    YiJunCompleted = 3,
+    FuNiuMountain = 4,
+    YOYOGameCompleted = 5,
+    BattleCompleted = 6,
+    BaiHuTangJoin = 7,
+    JoinShiYueDao = 8,
+    KinChallengeJoin = 9,
+    WuLinGaoShouJoin = 10,
+    PrimaryDailyGiftBuy = 11,
+    MiddleDailyGiftBuy = 12,
+    AdvancedDailyGiftBuy = 13,
+    WuLinQinShiJoin = 14,
+    WuLinQinShiKeYiJoin = 15,
+    BattleHanWuJoin = 16,
+    QinShiJoin = 17,
+    HanWuJoin = 18,
+    KinChallengeJoinStage1 = 19,
+    KinChallengeJoinStage2 = 20,
+    KinChallengeJoinStage3 = 21,
+    ShuangYuJoin = 23,
+    WuLinQinShiKeYiShuangYuJoin = 24,
+    WuLinQinShiKeYiShuangYuJoinXiangYang = 25
+  },
+  IsCompensated = 22
+}
+tbActivity.Protocol = {
+  Submit = 1,
+  SubmitResp = 2,
+  OnDialog = 3,
+  SyncData = 4
+}
+
+function tbActivity:LoadConfig()
+  self.ACTIVITY_CONFIG = Lib:EasyLoadTabFile("Setting/Activity/HandInAuction/HandInAuctionCfg.tab", {"nConfigId"})
+  for _, tbInfo in pairs(self.ACTIVITY_CONFIG) do
+    if 1 == tbInfo.nNeedAuctionModule then
+      tbInfo.tbLevel = Lib:SplitStr2Num(tbInfo.szLevel, "|") or {}
+    end
+    tbInfo.nTimeOut = not Lib:IsEmptyStr(tbInfo.szTimeOut) and Lib:ParseDateTime(tbInfo.szTimeOut) or 0
+  end
+  local tbEventAward = Lib:EasyLoadTabFile("Setting/Activity/HandInAuction/EventAward.tab")
+  for _, tbInfo in ipairs(tbEventAward or {}) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("HandInAuction: LoadConfig EventAward nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbEventAward = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbEventAward or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbEventAward[tbInfo.szEventName] = tbInfo
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+end
+
+function tbActivity:CanJoin(nLevel)
+  return nLevel >= self.tbConfig.nJoinLevel
+end
+
+function tbActivity:HasTong(pPlayer)
+  local dwTongId = pPlayer.dwTongId
+  return dwTongId and dwTongId > 0
+end
+
+function tbActivity:HasSubmissionItem(pPlayer)
+  local nCount = pPlayer.GetItemCountInBags(self.tbConfig.nTemplateId)
+  return nCount > 0
+end
+
+function tbActivity:GenNeedSubmissionNum(nLevelIndex)
+  if nLevelIndex <= 0 or nLevelIndex > #self.tbConfig.tbLevel then
+    return 0
+  end
+  if not self.tbConfig.tbLevel[nLevelIndex - 1] then
+    return self.tbConfig.tbLevel[nLevelIndex]
+  end
+  return self.tbConfig.tbLevel[nLevelIndex] - self.tbConfig.tbLevel[nLevelIndex - 1]
+end
+
+function tbActivity:GetCurLevel(nHandInNum)
+  for i = #self.tbConfig.tbLevel, 1, -1 do
+    if nHandInNum >= self.tbConfig.tbLevel[i] then
+      return i
+    end
+  end
+  return 0
+end
+
+function tbActivity:IsOpenAuctionModule()
+  return self.tbConfig.nNeedAuctionModule and 1 == self.tbConfig.nNeedAuctionModule
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  self.tbConfig = tbActCfg.Cfg
+  self.tbConfig.szTitle = i18n.Encode(self.tbConfig.szTitle)
+  self.tbConfig.szDialogText = i18n.Encode(self.tbConfig.szDialogText)
+  self.tbConfig.szAucReadyMFrom = i18n.Encode(self.tbConfig.szAucReadyMFrom)
+  self.tbConfig.szAucReadyMTitle = i18n.Encode(self.tbConfig.szAucReadyMTitle)
+  self.tbConfig.szAucReadyMContent = i18n.Encode(self.tbConfig.szAucReadyMContent)
+  self.tbConfig.szFullFillMFrom = i18n.Encode(self.tbConfig.szFullFillMFrom)
+  self.tbConfig.szFullFillMTitle = i18n.Encode(self.tbConfig.szFullFillMTitle)
+  self.tbConfig.szFullFillMText = i18n.Encode(self.tbConfig.szFullFillMText)
+  self.tbConfig.szSubmissionMFrom = i18n.Encode(self.tbConfig.szSubmissionMFrom)
+  self.tbConfig.szSubmissionMTitle = i18n.Encode(self.tbConfig.szSubmissionMTitle)
+  self.tbConfig.szSubmissionMContent = i18n.Encode(self.tbConfig.szSubmissionMContent)
+  self.tbConfig.szShowTime = i18n.Encode(self.tbConfig.szShowTime)
+  self.tbConfig.szName = i18n.Encode(self.tbConfig.szName)
+  self.tbConfig.szDesc = i18n.Encode(self.tbConfig.szDesc)
+  self.tbConfig.szDetailDesc = i18n.Encode(self.tbConfig.szDetailDesc)
+  self.tbConfig.txtSecondTittle = i18n.Encode(self.tbConfig.txtSecondTittle)
+  if self.tbConfig.szBtnGoText then
+    self.tbConfig.szBtnGoText = i18n.Encode(self.tbConfig.szBtnGoText)
+  end
+  if 1 == self.tbConfig.nNeedAuctionModule then
+    self.tbConfig.tbLevel = Lib:SplitStr2Num(self.tbConfig.szLevel, "|") or {}
+  end
+  if self.tbConfig.szTimeOut == "0" then
+    self.tbConfig.nTimeOut = 0
+  else
+    self.tbConfig.nTimeOut = not Lib:IsEmptyStr(self.tbConfig.szTimeOut) and Lib:ParseDateTime(self.tbConfig.szTimeOut) or 0
+  end
+  self.tbConfig.tbEventAward = {}
+  for _, tbEventInfo in pairs(tbActCfg.EventAward) do
+    self.tbConfig.tbEventAward[tbEventInfo.szEventName] = tbEventInfo
+  end
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+  return true
+end
+
+function tbActivity:CheckConfigValid(tbConfig)
+  return true
+end

@@ -1,0 +1,147 @@
+local tbWnd = Ui:CreateClass("UIQiHunSplit", "UIPanel")
+local tbControls = {
+  itemQiHun = "itemQiHun",
+  UIItemGridGet = "itemGet/UIItemGrid",
+  txtCostNum = "txtCostNum",
+  txtGet = "txtGet",
+  btnSplit = "btnSplit",
+  UIAddAndSubGroup = "UIAddAndSubGroup"
+}
+tbWnd.tbControls = tbControls
+local QiHun = Item.QiHun
+tbWnd.tbOnClick = {
+  btnSplit = function(self)
+    local nLevel = self.tbOwner:GetSelectLevel()
+    if not nLevel then
+      me.CenterMsg(i18n.EasyGet("\230\156\170\233\128\137\230\139\169\229\153\168\233\173\130"))
+      return
+    end
+    if nLevel <= 1 then
+      me.CenterMsg(i18n.EasyGet("1\231\186\167\229\153\168\233\173\130\228\184\141\229\143\175\230\139\134\232\167\163"))
+      return
+    end
+    
+    local function fnOk()
+      QiHun:SplitReq(nLevel, self.nSelectNum)
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\230\138\138{0}\228\184\170\227\128\144\229\153\168\233\173\130\194\183{1}\231\186\167\227\128\145\230\139\134\232\167\163\228\184\186{2}\228\184\170\227\128\144\229\153\168\233\173\130\194\183{3}\231\186\167\227\128\145", self.nSelectNum, nLevel, self.nSelectNum * 2, nLevel - 1), {
+      {fnOk},
+      {}
+    })
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbItemGet = Ui:NewExistItemGrid(self, tbControls.UIItemGridGet)
+  self.tbItemGet:SetClickEnable(true)
+  self.AddAndSubGroup = Ui:NewExistAddAndSubGroup(self, tbControls.UIAddAndSubGroup)
+  self.AddAndSubGroup:BindEvent(function(nValue)
+    local nResult = self:UpdateNumberInput(nValue)
+    return nResult
+  end)
+end
+
+function tbWnd:OnOpen()
+  self.nSelectNum = 1
+  self:UpdateView()
+end
+
+function tbWnd:OnClose()
+  if self.tbTargetEffect then
+    self.pPanel:DeleteObject(self.tbTargetEffect.szKey)
+    self.tbTargetEffect = nil
+  end
+end
+
+function tbWnd:OnSelectQiHun()
+  self:UpdateView()
+end
+
+function tbWnd:UpdateNumberInput(nNum)
+  if not self.tbOwner.nSelectIndex or not self.tbOwner.tbQiHunItem[self.tbOwner.nSelectIndex] then
+    me.CenterMsg(i18n.EasyGet("\232\175\183\233\128\137\230\139\169\229\153\168\233\173\130"))
+    return 0
+  end
+  local tbData = self.tbOwner.tbQiHunItem[self.tbOwner.nSelectIndex]
+  if nNum > tbData[2] then
+    nNum = tbData[2]
+  end
+  self.nSelectNum = nNum
+  self:UpdateView()
+  return nNum
+end
+
+function tbWnd:SplitRsp()
+  self.nSelectNum = 1
+  self:UpdateView()
+end
+
+function tbWnd:UpdateView()
+  self.AddAndSubGroup:SetInputValue(self.nSelectNum)
+  if not self.tbOwner.nSelectIndex or not self.tbOwner.tbQiHunItem[self.tbOwner.nSelectIndex] then
+    self.pPanel:Label_SetText(tbControls.txtCostNum, "")
+    self.tbItemGet:SetEmpty()
+    self.pPanel:Label_SetText(tbControls.txtGet, "")
+    if self.tbTargetEffect then
+      self.pPanel:DeleteObject(self.tbTargetEffect.szKey)
+      self.tbTargetEffect = nil
+    end
+  else
+    local tbData = self.tbOwner.tbQiHunItem[self.tbOwner.nSelectIndex]
+    local szSplitName = Item:GetName(tbData[1], me)
+    local nQuality = Item:GetQuality(tbData[1])
+    local _, szColor = Item:GetQualityColor(nQuality)
+    self.pPanel:Label_SetText(tbControls.txtCostNum, i18n.EasyGet("<color=#{0}>{1} {2}\228\184\170</color>", szColor, szSplitName, self.nSelectNum))
+    local nLevel = self.tbOwner:GetSelectLevel()
+    self:ShowTargetQiHun(nLevel)
+    if not nLevel or nLevel < QiHun.nQiHunSplitMinLevel then
+      self.tbItemGet:SetEmpty()
+      self.pPanel:Label_SetText(tbControls.txtGet, "")
+      return
+    end
+    local nGetLevel = nLevel - 1
+    local nGetId = QiHun.tbLevelInfo[nGetLevel][1]
+    local szGetName = Item:GetName(nGetId, me)
+    nQuality = Item:GetQuality(nGetId)
+    _, szColor = Item:GetQualityColor(nQuality)
+    self.pPanel:Label_SetText(tbControls.txtGet, i18n.EasyGet("<color=#{0}>{1} {2}\228\184\170</color>", szColor, szGetName, QiHun.nQiHunSplitGetNum * self.nSelectNum))
+    self.tbItemGet:SetItemByTemplate(nGetId)
+    self.AddAndSubGroup:SetNumRange(1, tbData[2])
+  end
+end
+
+function tbWnd:ShowTargetQiHun(nLevel)
+  if not nLevel then
+    if self.tbTargetEffect then
+      self.pPanel:DeleteObject(self.tbTargetEffect.szKey)
+      self.tbTargetEffect = nil
+    end
+    return
+  end
+  local nTemplateId = QiHun.tbLevelInfo[nLevel][1]
+  local szName = Item:GetName(nTemplateId, me)
+  local nQuality = Item:GetQuality(nTemplateId)
+  local szColor = Item:GetQualityColor(nQuality)
+  self.pPanel:Label_SetText(tbControls.txtGet, i18n.EasyGet("<color=#{0}>{1} 1\228\184\170</color>", szColor, szName))
+  local szPath = "UI/Effect/UIQiHun_Effect/QiHun_"
+  if nLevel < 10 then
+    szPath = szPath .. "0" .. nLevel .. ".prefab"
+  else
+    szPath = szPath .. nLevel .. ".prefab"
+  end
+  if szPath then
+    if not self.tbTargetEffect then
+      self.tbTargetEffect = {}
+      self.tbTargetEffect.szPath = szPath
+      self.tbTargetEffect.szKey = self.pPanel:DynamicLoadGameObject(tbControls.itemQiHun, szPath, "effect")
+      self.pPanel:SetSortingOrder(self.tbTargetEffect.szKey, 1)
+    elseif szPath ~= self.tbTargetEffect.szPath then
+      self.pPanel:DeleteObject(self.tbTargetEffect.szKey)
+      self.tbTargetEffect.szKey = self.pPanel:DynamicLoadGameObject(tbControls.itemQiHun, szPath, "effect")
+      self.pPanel:SetSortingOrder(self.tbTargetEffect.szKey, 1)
+      self.tbTargetEffect.szPath = szPath
+    end
+    self.pPanel:SetActive(self.tbTargetEffect.szKey, true)
+  end
+end

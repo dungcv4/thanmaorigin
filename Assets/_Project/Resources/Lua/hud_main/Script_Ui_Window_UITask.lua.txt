@@ -1,0 +1,326 @@
+local tbWnd = Ui:CreateWindow("UITask")
+tbWnd.tbBigTypeTitleList = {}
+tbWnd.tbSubTypeInfoList = {}
+tbWnd.tbBigTypeBtnObjList = {}
+tbWnd.tbSubTypeBtnObjList = {}
+tbWnd.tbCurSelectTaskInfo = {}
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnGo = "node/imgBG/Content/panelDetail/btnGo",
+  panelNoTask = "node/imgBG/Content/panelNoTask",
+  panelDetail = "node/imgBG/Content/panelDetail",
+  txtTarget = "node/imgBG/Content/panelDetail/groupTarget/txtTarget",
+  txtDesc = "node/imgBG/Content/panelDetail/groupDesc/txtDesc",
+  awardItem = "node/imgBG/Content/panelDetail/groupAward/ItemList/Viewport/Content/Item",
+  uiTreeRoot = "node/imgBG/Content/panelHead/UITree"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnGo = function(self)
+    if 0 == Lib:CountTB(self.tbCurSelectTaskInfo) then
+      return
+    end
+    local nTaskId = self.tbCurSelectTaskInfo.nTaskId
+    if self.tbCurSelectTaskInfo.nTaskId > 0 then
+      if Task:CheckCondition(me, nTaskId) then
+        Task:DoAction_Client(me, nTaskId)
+        self:Close()
+      else
+        me.CenterMsg(Task:GetCondGuideMsg(nTaskId))
+      end
+      local nCurStep, _ = Task:GetCurStepAndTotalStep(nTaskId)
+      EventNotify.OnNotify(EventNotify.emNOTIFY_ON_CLICK_GOTO_TASK, nTaskId, nCurStep)
+    else
+      local szKey = self.tbCurSelectTaskInfo.szDailyKey
+      local tbDaily = Task.tbDailyTaskSettings[szKey]
+      if tbDaily then
+        tbDaily.OnTrack()
+        self:Close()
+      end
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.uiTree = Ui:NewTree(self, self.uiTreeRoot, self.onClickTreeBigBtn, self.onClickTreeSmallBtn)
+  self.tbItemScrollView = Ui:NewItemGridScrollView(self, self.awardItem, 6, 1, "TaskAwardItem")
+  self.tbItemScrollView:Reset()
+end
+
+function tbWnd:OnOpen(nSelectTaskId, nSelectTaskBig)
+  self.nSelectTaskId = nSelectTaskId
+  self.nSelectTaskBig = nSelectTaskBig or 1
+  self.nSelectTaskSmall = 1
+  self:UpdateHeadInfo()
+  self:UpdateSubTaskInfo()
+  if not self.nSelectTaskId then
+    self:AutoSelectTask(nSelectTaskBig)
+  else
+    self:SelectTask()
+  end
+  self:Update()
+  self.uiTree:SelectNode(self.nSelectTaskBig, self.nSelectTaskSmall)
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:SelectTask()
+  self.tbCurSelectTaskInfo = {}
+  local tbBigTypeList = {
+    Task.TASK_TYPE_MAIN,
+    Task.TASK_TYPE_SUB,
+    Task.TASK_TYPE_DAILY,
+    Task.TASK_TYPE_ACT
+  }
+  for nBigIndex, nBigType in ipairs(tbBigTypeList) do
+    self.tbSubTypeInfoList[nBigType] = self.tbSubTypeInfoList[nBigType] or {}
+    for nSmallIndex, tbInfo in pairs(self.tbSubTypeInfoList[nBigType]) do
+      if tbInfo.nTaskId == self.nSelectTaskId then
+        self.tbCurSelectTaskInfo = tbInfo
+        self.nSelectTaskBig = nBigIndex
+        self.nSelectTaskSmall = nSmallIndex
+      end
+    end
+  end
+  if Lib:IsEmptyTB(self.tbCurSelectTaskInfo) then
+    self.nSelectTaskId = nil
+    self:AutoSelectTask()
+  end
+end
+
+function tbWnd:AutoSelectTask(nSelectTaskBig)
+  self.tbCurSelectTaskInfo = {}
+  local tbBigTypeList = {
+    Task.TASK_TYPE_MAIN,
+    Task.TASK_TYPE_SUB,
+    Task.TASK_TYPE_DAILY,
+    Task.TASK_TYPE_ACT
+  }
+  for nBigIndex, nBigType in ipairs(tbBigTypeList) do
+    if not nSelectTaskBig or nSelectTaskBig == nBigType then
+      self.tbSubTypeInfoList[nBigType] = self.tbSubTypeInfoList[nBigType] or {}
+      for nSmallIndex, tbInfo in pairs(self.tbSubTypeInfoList[nBigType]) do
+        self.tbCurSelectTaskInfo = tbInfo
+        self.nSelectTaskBig = nBigIndex
+        self.nSelectTaskSmall = nSmallIndex
+        return
+      end
+    end
+  end
+end
+
+function tbWnd:UpdateHeadInfo()
+  self.tbBigTypeTitleList = {
+    [Task.TASK_TYPE_MAIN] = i18n.EasyGet("\228\184\187\231\186\191\228\187\187\229\138\161"),
+    [Task.TASK_TYPE_SUB] = i18n.EasyGet("\230\148\175\231\186\191\228\187\187\229\138\161"),
+    [Task.TASK_TYPE_DAILY] = i18n.EasyGet("\230\151\165\229\184\184\228\187\187\229\138\161"),
+    [Task.TASK_TYPE_ACT] = i18n.EasyGet("\230\180\187\229\138\168\228\187\187\229\138\161")
+  }
+end
+
+function tbWnd:UpdateSubTaskInfo()
+  self.tbSubTypeInfoList = {}
+  for nBigType, _ in pairs(self.tbBigTypeTitleList) do
+    self.tbSubTypeInfoList[nBigType] = {}
+  end
+  local tbPlayerTask = Task.tbTaskData or {}
+  tbPlayerTask.tbCurTaskList = tbPlayerTask.tbCurTaskList or {}
+  for _, tbInfo in pairs(tbPlayerTask.tbCurTaskList) do
+    local tbTaskCfg = Task:GetTaskCfg(tbInfo.nTaskId)
+    if tbTaskCfg and Task:IsEmptyTask(tbInfo.nTaskId) == false then
+      local szColorTitle = Task:GetTitleIncludeColor(Task:GetTitle(tbInfo.nTaskId), tbTaskCfg.nTaskType, "TaskPanelColor")
+      table.insert(self.tbSubTypeInfoList[tbTaskCfg.nTaskType], {
+        nTaskId = tbInfo.nTaskId,
+        szTitle = szColorTitle
+      })
+    end
+  end
+  for szKey, tbInfo in pairs(Task.tbDailyTaskSettings) do
+    if tbInfo:IsInCurTaskList() then
+      local szColorTitle = Task:GetTitleIncludeColor(tbInfo:GetTitle(), tbInfo.nTaskType, "TaskPanelColor")
+      table.insert(self.tbSubTypeInfoList[tbInfo.nTaskType], {
+        nTaskId = tbInfo.nTaskId,
+        szDailyKey = szKey,
+        szTitle = szColorTitle
+      })
+    end
+  end
+end
+
+function tbWnd:Update()
+  self:UpdateHead()
+  self:UpdateDetail()
+end
+
+function tbWnd:UpdateHead()
+  local tbBigTypeData = {}
+  local tbSmallTypeData = {}
+  local bHaveActivityTask = false
+  for nType = Task.TASK_TYPE_MAIN, Task.TASK_TYPE_ACT do
+    if self.tbBigTypeTitleList[nType] then
+      local szTypeName = self.tbBigTypeTitleList[nType]
+      self.tbSubTypeInfoList[nType] = self.tbSubTypeInfoList[nType] or {}
+      for _, tbInfo in pairs(self.tbSubTypeInfoList[nType]) do
+        table.insert(tbSmallTypeData, {
+          nType = nType,
+          szText = tbInfo.szTitle,
+          tbInfo = tbInfo
+        })
+        if nType == Task.TASK_TYPE_ACT then
+          bHaveActivityTask = true
+        end
+      end
+      if nType == Task.TASK_TYPE_ACT then
+        if bHaveActivityTask then
+          table.insert(tbBigTypeData, {
+            nType = nType,
+            szText = szTypeName,
+            tbInfo = {nType}
+          })
+        end
+      else
+        table.insert(tbBigTypeData, {
+          nType = nType,
+          szText = szTypeName,
+          tbInfo = {nType}
+        })
+      end
+    end
+  end
+  self.uiTree:SetData(tbBigTypeData, tbSmallTypeData)
+end
+
+function tbWnd:onClickTreeBigBtn(tbInfo)
+  local nBigType = tbInfo[1]
+  local tbTaskList = self.tbSubTypeInfoList[nBigType] or {}
+  if Lib:CountTB(tbTaskList) <= 0 then
+    self:UpdateDetail_NoTask()
+  end
+end
+
+function tbWnd:onClickTreeSmallBtn(tbInfo)
+  self.tbCurSelectTaskInfo = tbInfo
+  self:UpdateDetail()
+end
+
+function tbWnd:UpdateDetail_NoTask()
+  self.pPanel:SetActive(self.panelNoTask, true)
+  self.pPanel:SetActive(self.panelDetail, false)
+end
+
+function tbWnd:UpdateDetail()
+  self.pPanel:Label_SetText(self.txtTarget, "")
+  self.pPanel:Label_SetText(self.txtDesc, "")
+  self.tbItemScrollView:Reset()
+  if Lib:IsEmptyTB(self.tbCurSelectTaskInfo) then
+    return
+  end
+  self.pPanel:SetActive(self.panelNoTask, false)
+  self.pPanel:SetActive(self.panelDetail, true)
+  if self.tbCurSelectTaskInfo.nTaskId > 0 then
+    self:UpdateDetail_NormalTask()
+  else
+    self:UpdateDetail_DailyTaskSetting()
+  end
+end
+
+function tbWnd:TargetTextRemoveColor(szText)
+  local szPatten = "^(.-)<color=#[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]>(.-)</color>(.*)$"
+  while true do
+    local result, _, sz1, sz2, sz3 = string.find(szText, szPatten)
+    if nil == result then
+      break
+    end
+    szText = sz1 .. sz2 .. sz3
+  end
+  return szText
+end
+
+function tbWnd:UpdateDetail_NormalTask()
+  local nTaskId = self.tbCurSelectTaskInfo.nTaskId
+  local tbTaskCfg = Task:GetTaskCfg(nTaskId)
+  if not tbTaskCfg then
+    return
+  end
+  self.pPanel:Label_SetText(self.txtTarget, self:TargetTextRemoveColor(Task:GetTarget(nTaskId)))
+  self.pPanel:Label_SetText(self.txtDesc, i18n.Parse(tbTaskCfg.szDesc))
+  self.tbItemScrollView:UpdateGenericItem(tbTaskCfg.tbAward or {}, true)
+end
+
+function tbWnd:UpdateDetail_DailyTaskSetting()
+  local szKey = self.tbCurSelectTaskInfo.szDailyKey
+  local tbDaily = Task.tbDailyTaskSettings[szKey]
+  if not tbDaily then
+    return
+  end
+  self.pPanel:Label_SetText(self.txtTarget, self:TargetTextRemoveColor(tbDaily.GetTarget()))
+  self.pPanel:Label_SetText(self.txtDesc, tbDaily.fnMsg())
+  if tbDaily.GetShowTarget then
+    local tbAward = tbDaily:GetShowTarget() or {}
+    self.tbItemScrollView:UpdateGenericItem(tbAward or {}, true)
+  else
+    self.tbItemScrollView:Reset()
+  end
+end
+
+function tbWnd:SelectSubTaskInWindow(nSubTaskId)
+  local nBigType = Task.TASK_TYPE_SUB
+  local nAddIndex = 0
+  local nSmallIndex
+  for _, tbSmallData in ipairs(self.uiTree.tbSmallData) do
+    if tbSmallData.nType == nBigType then
+      nAddIndex = nAddIndex + 1
+      if tbSmallData.tbInfo.nTaskId == nSubTaskId then
+        nSmallIndex = nAddIndex
+        break
+      end
+    end
+  end
+  if nil ~= nSmallIndex then
+    self.uiTree:SelectNode(nBigType, nSmallIndex)
+    return true
+  else
+    return false
+  end
+end
+
+function tbWnd:onSyncData()
+  self:UpdateSubTaskInfo()
+  self:AutoSelectTask()
+  self:Update()
+end
+
+function tbWnd:LeaveMap()
+  self:Close()
+end
+
+function tbWnd:OnWndOpen(szWndName)
+  if "UINpcDialog" == szWndName then
+    self:Close()
+  end
+end
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_UPDATE_TASK,
+      self.onSyncData
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL,
+      self.onSyncData
+    },
+    {
+      EventNotify.emNOTIFY_MAP_LEAVE,
+      self.LeaveMap
+    },
+    {
+      EventNotify.emNOTIFY_WND_OPENED,
+      self.OnWndOpen
+    }
+  }
+end

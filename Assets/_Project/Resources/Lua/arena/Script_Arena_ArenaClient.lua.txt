@@ -1,0 +1,263 @@
+Require("Script/Fuben/FubenUIController.lua")
+Arena.nDungeonEndTime = nil
+
+function Arena:TryOpen()
+  if me.nLevel < Arena.Cfg.nLevelLimit then
+    me.CenterMsg(i18n.Get(self.Cfg.tbText.szLevelNotEnough, Arena.Cfg.nLevelLimit))
+    return false
+  end
+  self.bWantOpen = true
+  local bOpen = true
+  if not self.tbMyInfo then
+    self:RequestMyInfo()
+    bOpen = false
+  end
+  if not self.tbChallengeList then
+    self:RequestChallengeList(true)
+    bOpen = false
+  end
+  if bOpen then
+    Arena:Open()
+  end
+end
+
+function Arena:Open()
+  if self.tbMyInfo and self.tbChallengeList and self.bWantOpen then
+    if not Ui:WindowVisible("UIArena") then
+      Ui:OpenWindow("UIArena")
+    else
+      Ui:GetWindow("UIArena"):UpdateChallengeScorllView()
+    end
+    self.bWantOpen = false
+  end
+end
+
+function Arena:RequestMyInfo()
+  RemoteServer.ArenaRequest("SyncPlayerInfo")
+end
+
+function Arena:OnSyncInfo(tbInfo)
+  self.tbMyInfo = tbInfo
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PLAYERINFO_ARRIVE)
+  Arena:Open()
+end
+
+function Arena:RequestChallengeList(bUpdateNow)
+  local nTime = GetTime()
+  if self.nLastTime and nTime - self.nLastTime < Arena.Cfg.nRefreshCd then
+    me.CenterMsg(i18n.Get(self.Cfg.tbText.szNeedRefreshAfterSeveralSecond, Arena.Cfg.nRefreshCd - (nTime - self.nLastTime)))
+    return
+  end
+  self.nLastTime = nTime
+  RemoteServer.ArenaRequest("GetChallengeList", bUpdateNow)
+end
+
+function Arena:OnSyncChallengeList(tbList, bUpdateNow)
+  self.tbChallengeList = tbList
+  Arena:Open()
+  if bUpdateNow then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_CHALLENGE)
+  else
+    self.nSyncChallengeListTime = GetTime()
+  end
+end
+
+function Arena:GetChallengeList()
+  return self.tbChallengeList
+end
+
+function Arena:OnArenaResult(nWin)
+  self.nDungeonEndTime = nil
+  Ui:OpenWindow("UIArenaResult", nWin, 4)
+end
+
+function Arena:TryChallengeByPos(nPos, nPlayerId)
+  local nNow = GetTime()
+  if nNow - self.nLastSignUpTimeStamp < 2 then
+    me.CenterMsg(i18n.EasyGet("\230\130\168\231\154\132\230\147\141\228\189\156\229\164\170\233\162\145\231\185\129\228\186\134\239\188\140\232\175\183\231\168\141\229\144\142\229\134\141\232\175\149\239\188\129"))
+    return
+  end
+  if DegreeCtrl:GetDegree(me, "Arena") > 0 then
+    local nBegin, nEnd = Arena:GetChallengeRange(self.tbMyInfo.nRank)
+    if nPos < nBegin or nPos > nEnd then
+      me.CenterMsg(i18n.Get(self.Cfg.tbText.szRankCanNotChallenge))
+      return
+    end
+    Arena:CheckAndEnter(me, function()
+      self.nLastSignUpTimeStamp = nNow
+      RemoteServer.ArenaRequest("SignUp", nPos, nPlayerId)
+    end)
+  elseif DegreeCtrl:GetDegree(me, "ArenaBuyTimes") > 0 then
+    self:OpenBuyDegreeMessageBox()
+  else
+    me.CenterMsg(i18n.Get(self.Cfg.tbText.szLackTimesTips))
+  end
+end
+
+function Arena:UICallBuyDegree()
+  if DegreeCtrl:GetDegree(me, "Arena") > 0 then
+    me.CenterMsg(i18n.Get(self.Cfg.tbText.szHaveRemainTimesNeedNotBuy))
+    return
+  end
+  if DegreeCtrl:GetDegree(me, "ArenaBuyTimes") <= 0 then
+    me.CenterMsg(i18n.Get(self.Cfg.tbText.szNotHaveBuyTimes))
+    return
+  end
+  self:OpenBuyDegreeMessageBox()
+end
+
+function Arena:OpenBuyDegreeMessageBox()
+  local nCostYuanBao = self:GetBuyDegreeCost(me)
+  local nLeftBuyTime = DegreeCtrl:GetDegree(me, "ArenaBuyTimes")
+  local szMsg = i18n.Get(i18n.Get(self.Cfg.tbText.szLackTimesAndBuyTimesTips), nCostYuanBao, Arena.Cfg.nDailyFreeCount, nLeftBuyTime)
+  
+  local function fnOK()
+    if me.GetMoney("YuanBao") < nCostYuanBao then
+      me.CenterMsg(i18n.Get(self.Cfg.tbText.szLackCurrency))
+      return
+    end
+    RemoteServer.ArenaRequest("BuyDegree")
+  end
+  
+  local function fnCancel()
+  end
+  
+  Ui:OpenWindow("UIMessageBoxBig", szMsg, {fnOK, fnCancel})
+end
+
+function Arena:SynFailNotifyMsg(szName)
+  Ui:SynNotifyMsg({
+    szType = "Arena",
+    szName = szName,
+    nTimeOut = GetTime() + 1800
+  })
+end
+
+function Arena:Clear()
+  self.nLastSignUpTimeStamp = 0
+  self.bWantOpen = nil
+  self.bNeedOpen = nil
+  self.nLastTime = nil
+  self.tbMyInfo = nil
+  self.tbChallengeList = nil
+  self.nFightStartTime = nil
+  self.IsCanExit = nil
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  self.nSyncChallengeListTime = nil
+  self.nRefreshChallengeListTime = nil
+end
+
+function Arena:OnLogin(bIsReconnect)
+  self:Clear()
+  self:RequestMyInfo()
+  if bIsReconnect then
+    self:UpdateDungeonInfo()
+  end
+end
+
+function Arena:SetFightStartTime(nTime)
+  self.nFightStartTime = nTime
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+  end
+  self.nTimer = Timer:Register(Env.GAME_FPS, self.CheckStartCountdown, self)
+end
+
+function Arena:OnMapLoaded(nMapId)
+  if self.bNeedOpen then
+    self:TryOpen()
+    self.bNeedOpen = nil
+  end
+end
+
+function Arena:CheckStartCountdown()
+  local nLeftTime = self.nFightStartTime - GetTime()
+  if nLeftTime <= Arena.Cfg.nCountDownBeginTime then
+    if me.nMapTemplateId == Arena.Cfg.nMapTemplateId then
+      Ui:OpenWindow("UIReadyGo", nLeftTime - 1)
+      self.nFightStartTime = nil
+      self.nDungeonEndTime = GetTime() + Arena.Cfg.nFightTime + Arena.Cfg.nPrepareTime
+    end
+    return false
+  end
+  return true
+end
+
+function Arena:SetCanExit(bCanExit)
+  self.IsCanExit = bCanExit
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function Arena:RegisterFubenUIChecker()
+  FubenUIController:RegisterChecker({
+    Arena.Cfg.nMapTemplateId
+  }, self)
+end
+
+function Arena:OnFubenMapLoaded(pPlayer)
+  pPlayer.GetNpc().SetDir(36)
+  FubenUIController:ShowDefaultInfo()
+  FubenUIController:OpenDefaultFuBenUI()
+end
+
+function Arena:OnLeave()
+  self.bNeedOpen = true
+  self.IsCanExit = nil
+  FubenUIController:CloseFubenUI()
+  if Ui:WindowVisible("UIMessageBox") then
+    Ui:CloseWindow("UIMessageBox")
+  end
+  if Ui:WindowVisible("UIArenaResult") then
+    Ui:CloseWindow("UIArenaResult")
+  end
+end
+
+function Arena:IsNeedExitFubenButton()
+  return self.IsCanExit or false
+end
+
+function Arena:ReqRegisterNeedRefreshArenaInfo()
+  RemoteServer.ArenaRequest("RegisterNeedRefreshArenaInfo")
+end
+
+function Arena:ReqUnRegisterNeedRefreshArenaInfo()
+  RemoteServer.ArenaRequest("UnRegisterNeedRefreshArenaInfo")
+end
+
+function Arena:ResRefreshArenaInfo()
+  if Ui:WindowVisible("UIArena") == true then
+    self:RequestChallengeList(false)
+  else
+    self:ReqUnRegisterNeedRefreshArenaInfo()
+  end
+end
+
+function Arena:CloseAremaView()
+  if Ui:WindowVisible("UIArena") == true then
+    Ui:CloseWindow("UIArena")
+  end
+end
+
+function Arena:UpdateDungeonInfo()
+  if self.nDungeonEndTime then
+    local bIsOver = self.nDungeonEndTime < GetTime()
+    if not bIsOver then
+      FubenUIController:ShowDefaultInfo({
+        {
+          self.nDungeonEndTime - GetTime(),
+          i18n.EasyGet(Arena.Cfg.tbText.szLeftUIRemainTime)
+        }
+      }, {
+        i18n.Get(Arena.Cfg.tbText.szWinCondition)
+      })
+      Arena:SetCanExit(true)
+    end
+  end
+end
+
+Arena:RegisterFubenUIChecker()
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, Arena.OnLogin, Arena)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LOADED, Arena.OnMapLoaded, Arena)

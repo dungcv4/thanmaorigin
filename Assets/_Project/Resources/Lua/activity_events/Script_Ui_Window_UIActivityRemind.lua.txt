@@ -1,0 +1,94 @@
+Require("Script/Notification.lua")
+local tbWnd = Ui:CreateWindow("UIActivityRemind")
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  Template = "node/imgBG/Content/imgList/Viewport/List/Template"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.tbScrollView = Ui:NewScrollView(self, self.Template)
+end
+
+function tbWnd:OnOpen()
+  self.bNeedSave = false
+  self:UpdateNotifySetting()
+end
+
+function tbWnd:OnClose()
+  if self.bNeedSave then
+    LocalData:SetRoleTable(Notification.UserInfoKey, self.tbMySysNotify)
+  end
+end
+
+function tbWnd:UpdateNotifySetting()
+  self.tbScrollView:Clear()
+  local tbSysNotiy = Calendar:GetSysNotiyTable()
+  self.tbMySysNotify = LocalData:GetRoleTable(Notification.UserInfoKey, {})
+  local nIndex = 1
+  for i = 1, #tbSysNotiy do
+    if CanaryRelease:IsSysNotifyActive(tbSysNotiy[i].szKey) then
+      self.tbScrollView:SetElement(nIndex, function(tbElement)
+        local pPanel = tbElement.pPanel
+        local tbActivitySetting = Calendar:GetActInfo(tbSysNotiy[i].nActivityId)
+        if not tbActivitySetting then
+          return
+        end
+        local szTime1, szTime2 = Calendar:GetActivityTipTimeDesc(tbActivitySetting.szKey)
+        pPanel:Label_SetText("txtName", i18n.Parse(tbActivitySetting.szName))
+        pPanel:Label_SetText("txtCycle", i18n.Parse(szTime1))
+        if 1 == tbSysNotiy[i].nIsSubSel then
+          pPanel:Label_SetText("txtTime", "")
+          local tbTimes = Lib:SplitStr(szTime2, ",")
+          for index, value in ipairs(tbTimes) do
+            local TemplateTime = "togTime/TemplateTime" .. index
+            pPanel:Label_SetText(TemplateTime .. "/Label", value)
+            pPanel:SetActive(TemplateTime, true)
+            if 1 == self.tbMySysNotify[tbSysNotiy[i].szKey].tbSubSel[index] then
+              pPanel:Toggle_SetChecked(TemplateTime, true)
+            else
+              pPanel:Toggle_SetChecked(TemplateTime, false)
+            end
+            Ui:Toggle_BindEvent(pPanel, TemplateTime, function(self, isOn)
+              self:SwitchSub(tbSysNotiy[i].szKey, isOn, index)
+            end, self)
+          end
+        else
+          pPanel:Label_SetText("txtTime", i18n.Parse(szTime2))
+        end
+        if self.tbMySysNotify[tbSysNotiy[i].szKey].bLineSel then
+          pPanel:Toggle_SetChecked("togglePush", true)
+        else
+          pPanel:Toggle_SetChecked("togglePush", false)
+        end
+        Ui:Toggle_BindEvent(pPanel, "togglePush", function(self, isOn)
+          self:Switch(tbSysNotiy[i].szKey, isOn)
+        end, self)
+      end)
+      nIndex = nIndex + 1
+    end
+  end
+end
+
+function tbWnd:Switch(szKey, bRemind)
+  if bRemind then
+    self.tbMySysNotify[szKey].bLineSel = true
+  else
+    self.tbMySysNotify[szKey].bLineSel = false
+  end
+  self.bNeedSave = true
+end
+
+function tbWnd:SwitchSub(szKey, bRemind, nIndex)
+  local nValue = 0
+  if bRemind then
+    nValue = 1
+  end
+  self.tbMySysNotify[szKey].tbSubSel[nIndex] = nValue
+  self.bNeedSave = true
+end

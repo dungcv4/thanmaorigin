@@ -1,0 +1,258 @@
+Require("CommonScript/Npc/NpcDefine.lua")
+local tbWnd = Ui:CreateWindow("UIHanWuSelectSeries")
+local tbControls = {
+  goMainPanel = "imgBG",
+  txtCountdownTip = "imgBG/Countdown/txtCountdownTip",
+  txtCountdownValue = "imgBG/Countdown/txtCountdownValue",
+  goSelectSeries = "imgBG/SelectSeries",
+  goSeriesTemplate = "imgBG/SelectSeries/SeriesList/SeriesTemplate",
+  txtSeriesInfo = "imgBG/SelectSeries/InfoScroll/Viewport/Content/txtInfo",
+  goSelectFaction = "imgBG/SelectFaction",
+  goPlayerTemplate = "imgBG/SelectFaction/PlayerList/PlayerTemplate"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {}
+tbWnd.TYPE_SERIES = "SERIES"
+tbWnd.TYPE_FACTION = "FACTION"
+tbWnd.SERIES_TO_CTRL = {
+  [Npc.emSERIES_TYPE.SERIES_METAL] = "SeriesText/txtMetal",
+  [Npc.emSERIES_TYPE.SERIES_WOOD] = "SeriesText/txtWood",
+  [Npc.emSERIES_TYPE.SERIES_WATER] = "SeriesText/txtWater",
+  [Npc.emSERIES_TYPE.SERIES_FIRE] = "SeriesText/txtFire",
+  [Npc.emSERIES_TYPE.SERIES_EARTH] = "SeriesText/txtEarth"
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_HANWUYIJI_SYNC_MEM_INFO,
+      self.OnSyncMemInfo
+    },
+    {
+      EventNotify.emNOTIFY_HANWUYIJI_SYNC_SEL_SERIES,
+      self.OnSyncSelSeries
+    },
+    {
+      EventNotify.emNOTIFY_HANWUYIJI_SYNC_SEL_FACTION,
+      self.OnSyncSelFaction
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.tbSeriesScrollView = Ui:NewScrollView(self, tbControls.goSeriesTemplate)
+  self.tbPlayerScrollView = Ui:NewScrollView(self, tbControls.goPlayerTemplate)
+end
+
+function tbWnd:OnOpen(szType, nEndTime)
+  self.szType = szType or self.TYPE_SERIES
+  self.nEndTime = nEndTime
+  self.nTimer = self.nTimer or nil
+  if szType == self.TYPE_SERIES then
+    self:ShowSeriesDesc()
+    self:ShowSeriesDetail()
+    self:StartTimer()
+  elseif szType == self.TYPE_FACTION then
+    self:ShowFactionDesc()
+    self:ShowFactionDetail()
+    self:StartTimer()
+  else
+    return 0
+  end
+end
+
+function tbWnd:OnClose()
+  self:StopTimer()
+end
+
+function tbWnd:ShowSeriesDesc()
+  self.pPanel:SetActive(tbControls.goSelectSeries, true)
+  self.pPanel:SetActive(tbControls.goSelectFaction, false)
+  self.pPanel:Label_SetText(tbControls.txtCountdownTip, i18n.EasyGet("\232\175\183\233\128\137\230\139\169\228\189\160\229\156\168\229\175\146\230\173\166\233\129\151\232\191\185\228\184\173\231\154\132\228\186\148\232\161\140\239\188\154"))
+  self.pPanel:Label_SetText(tbControls.txtCountdownValue, 0)
+end
+
+function tbWnd:ShowSeriesDetail()
+  self.tbSeriesScrollView:Reset()
+  local nMemberId
+  local nCnt = 0
+  local tbInfo, szName, nLevel, nPortrait
+  for nSeries = Npc.emSERIES_TYPE.SERIES_NONE + 1, Npc.emSERIES_TYPE.SERIES_NUM - 1 do
+    nMemberId = HanWuYiJi.tbSeriesList[nSeries]
+    if nMemberId then
+      nCnt = nCnt + 1
+      self.tbSeriesScrollView:SetElement(nCnt, function(tbElement)
+        local pPanel = tbElement.pPanel
+        for nOptSeries, szCtrl in pairs(self.SERIES_TO_CTRL) do
+          pPanel:SetActive(szCtrl, nOptSeries == nSeries)
+        end
+        pPanel:Sprite_SetSprite("imgSeriesBg", HanWuYiJi.SERIES_TO_IMAGE_BG[nSeries])
+        local nPortraitFrame
+        if me.dwID == nMemberId then
+          szName, nLevel, nPortrait = me.szName, me.nLevel, me.nPortrait
+          nPortraitFrame = PlayerPortraitFrame:GetMeCurPortraitFrameId(me)
+        else
+          tbInfo = HanWuYiJi.tbMemberList[nMemberId]
+          if tbInfo then
+            szName, nLevel, nPortrait = tbInfo.szName, tbInfo.nLevel, tbInfo.nPortrait
+            nPortraitFrame = tbInfo.nPortraitFrame
+          else
+            szName, nLevel, nPortrait = nil, nil, nil
+            nPortraitFrame = nil
+          end
+        end
+        if szName and nLevel and nPortrait then
+          pPanel:SetActive("txtPlayerName", true)
+          pPanel:SetActive("PortraitObj", true)
+          pPanel:SetActive("txtEmpty", false)
+          pPanel:Label_SetText("txtPlayerName", szName)
+          pPanel:Label_SetText("PortraitObj/Level/Text", nLevel)
+          pPanel:Sprite_SetSprite("PortraitObj/Portrait/Image", PlayerPortrait:GetIcon(nPortrait))
+          PlayerPortraitFrame:SetPortraitFrame(pPanel, "PortraitObj/PortraitFrame", nPortraitFrame)
+        else
+          pPanel:SetActive("txtPlayerName", false)
+          pPanel:SetActive("PortraitObj", false)
+          pPanel:SetActive("txtEmpty", true)
+        end
+        Ui:Button_BindEvent(pPanel, "Main", self.OnClickSelSeries, self, nSeries)
+      end)
+    end
+  end
+  if "" ~= HanWuYiJi.TEXT.UI_SELECT_SERIES_DESC then
+    self.pPanel:Label_SetText(tbControls.txtSeriesInfo, i18n.Get(HanWuYiJi.TEXT.UI_SELECT_SERIES_DESC))
+  end
+end
+
+function tbWnd:ShowFactionDesc()
+  self.pPanel:SetActive(tbControls.goSelectSeries, false)
+  self.pPanel:SetActive(tbControls.goSelectFaction, true)
+  self.pPanel:Label_SetText(tbControls.txtCountdownTip, i18n.EasyGet("\232\175\183\233\128\137\230\139\169\228\189\160\229\156\168\229\175\146\230\173\166\233\129\151\232\191\185\228\184\173\231\154\132\232\183\175\231\186\191\239\188\154"))
+  self.pPanel:Label_SetText(tbControls.txtCountdownValue, 0)
+end
+
+function tbWnd:ShowFactionDetail()
+  self.tbPlayerScrollView:Reset()
+  local nMemberId
+  local nCnt = 0
+  local tbMemberInfo, szName, nLevel, nPortrait, nSex, tbFactionInfo, nFaction, nFactionSect
+  for nSeries = Npc.emSERIES_TYPE.SERIES_NONE + 1, Npc.emSERIES_TYPE.SERIES_NUM - 1 do
+    nMemberId = HanWuYiJi.tbSeriesList[nSeries]
+    if nMemberId and 0 ~= nMemberId then
+      nCnt = nCnt + 1
+      self.tbPlayerScrollView:SetElement(nCnt, function(tbElement)
+        local nPortraitFrame
+        local pPanel = tbElement.pPanel
+        if me.dwID == nMemberId then
+          szName, nLevel, nPortrait, nSex = me.szName, me.nLevel, me.nPortrait, me.nSex
+        else
+          tbMemberInfo = HanWuYiJi.tbMemberList[nMemberId]
+          if tbMemberInfo then
+            szName, nLevel, nPortrait, nSex = tbMemberInfo.szName, tbMemberInfo.nLevel, tbMemberInfo.nPortrait, tbMemberInfo.nSex
+            nPortraitFrame = tbMemberInfo.nPortraitFrame
+          else
+            szName, nLevel, nPortrait, nSex = nil, nil, nil, nil
+            nPortraitFrame = nil
+          end
+        end
+        tbFactionInfo = HanWuYiJi.tbSelFactionList[nMemberId]
+        if tbFactionInfo then
+          nFaction, nFactionSect = tbFactionInfo.nFaction, tbFactionInfo.nFactionSect
+        else
+          nFaction, nFactionSect = nil, nil
+        end
+        pPanel:Label_SetText("txtPlayerName", szName or "")
+        pPanel:Label_SetText("PortraitObj/Level/Text", nLevel or "")
+        pPanel:Sprite_SetSprite("PortraitObj/Portrait/Image", nPortrait and PlayerPortrait:GetIcon(nPortrait) or "")
+        PlayerPortraitFrame:SetPortraitFrame(pPanel, "PortraitObj/PortraitFrame", nPortraitFrame)
+        pPanel:Sprite_SetSprite("imgSeriesBg", HanWuYiJi.SERIES_TO_IMAGE_BG[nSeries])
+        if not tbElement.tbFactionScrollView then
+          tbElement.tbFactionScrollView = Ui:NewScrollView(tbElement, "FactionList/FactionTemplate")
+        end
+        local tbFactionScrollView = tbElement.tbFactionScrollView
+        tbFactionScrollView:Reset()
+        local tbOptFactionList = HanWuYiJi.tbOptFactionList[nMemberId]
+        if tbOptFactionList then
+          for nIndex, tbOptFaction in ipairs(tbOptFactionList) do
+            tbFactionScrollView:SetElement(nIndex, function(tbElement)
+              local pPanel = tbElement.pPanel
+              pPanel:Sprite_SetSprite("imgFaction", Faction:GetIcon(tbOptFaction.nFaction))
+              pPanel:Label_SetText("txtFaction", Faction:GetSectName(tbOptFaction.nFaction, tbOptFaction.nFactionSect))
+              if nFaction == tbOptFaction.nFaction and nFactionSect == tbOptFaction.nFactionSect then
+                pPanel:SetActive("imgSelected", true)
+                Ui:Button_UnBindEvent(pPanel, "Main")
+              else
+                pPanel:SetActive("imgSelected", false)
+                if me.dwID == nMemberId then
+                  Ui:Button_BindEvent(pPanel, "Main", self.OnClickSelFaction, self, tbOptFaction.nFaction, tbOptFaction.nFactionSect)
+                else
+                  Ui:Button_UnBindEvent(pPanel, "Main")
+                end
+              end
+            end)
+          end
+        end
+      end)
+    end
+  end
+end
+
+function tbWnd:OnClickSelSeries(nSeries)
+  HanWuYiJi:SelSeriesReq(nSeries)
+end
+
+function tbWnd:OnClickSelFaction(nFaction, nFactionSect)
+  HanWuYiJi:SelFactionReq(nFaction, nFactionSect)
+end
+
+function tbWnd:OnSyncMemInfo()
+  if self.szType == self.TYPE_SERIES then
+    self:ShowSeriesDetail()
+  elseif self.szType == self.TYPE_FACTION then
+    self:ShowFactionDetail()
+  end
+end
+
+function tbWnd:OnSyncSelSeries()
+  if self.szType ~= self.TYPE_SERIES then
+    return
+  end
+  self:ShowSeriesDetail()
+end
+
+function tbWnd:OnSyncSelFaction()
+  if self.szType ~= self.TYPE_FACTION then
+    return
+  end
+  self:ShowFactionDetail()
+end
+
+function tbWnd:StopTimer()
+  if not self.nTimer then
+    return
+  end
+  Timer:Close(self.nTimer)
+  self.nTimer = nil
+end
+
+function tbWnd:StartTimer()
+  self:StopTimer()
+  self.nTimer = Timer:Register(Env.GAME_FPS, self.OnTimer, self)
+  self:OnTimer()
+end
+
+function tbWnd:OnTimer()
+  local nLeftTime = self.nEndTime - GetTime()
+  if nLeftTime > 0 then
+    self.pPanel:Label_SetText(tbControls.txtCountdownValue, nLeftTime)
+  else
+    self.pPanel:Label_SetText(tbControls.txtCountdownValue, 0)
+  end
+  if nLeftTime > 0 then
+    return true
+  end
+  self.nTimer = nil
+  self:Close()
+end
+
+function tbWnd:SetPos(nPosX, nPosY)
+end

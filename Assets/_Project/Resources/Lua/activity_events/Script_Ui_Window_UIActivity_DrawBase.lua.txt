@@ -1,0 +1,299 @@
+local tbWnd = Ui:CreateWindow("UIActivity_DrawBase")
+local nMaxCellNum = 24
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_PAINTING_OPENCELL,
+      self.ReqRefreshCellUI,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_PAINTING_GETGROUP,
+      self.ReqRefreshGroupUI,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_PAINTING_GETALLREWARD,
+      self.ReqRefreshGrandPrizeUI,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.OnChangeMoney,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_PLAYER_DATA_END,
+      self.OnChangeMoney,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnSyncItem,
+      self
+    }
+  }
+end
+
+tbWnd.tbOnClick = {
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.pPainting.tbConfig.szHelpKey)
+  end,
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnAdd = function(self)
+    Ui:OpenWindow("UIAccess_Tip1", 1, self.pPainting.tbConfig.nMaterialsId)
+  end,
+  btnGo = function(self)
+    local szItemName = KItem.GetItemShowInfo(self.pPainting.tbConfig.nMaterialsId)
+    if me.GetItemCountByTypeInBag(self.pPainting.tbConfig.nMaterialsId) <= 0 then
+      me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\156\170\230\139\165\230\156\137{0}\239\188\140\232\175\183\229\133\136\229\142\187\232\142\183\229\190\151", szItemName))
+      return
+    end
+    self.pPainting:ReqSawPuzzle()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbRewardScrollView = Ui:NewScrollView(self, self.reward)
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, self.UIMoneyPanel)
+end
+
+function tbWnd:OnClose()
+  self.pItemGrid = nil
+  if self.nCellEffectTimer then
+    Timer:Close(self.nCellEffectTimer)
+    self.nCellEffectTimer = nil
+  end
+end
+
+function tbWnd:OnOpen(nActId)
+  if not Lib:IsInteger(nActId) then
+    return 0
+  end
+  self.pPainting = ActivityMgr:GetInstanceById(nActId)
+  if not self.pPainting or not self.pPainting:IsOpen() then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return 0
+  end
+  if me.nLevel < self.pPainting.tbConfig.nLevel then
+    me.CenterMsg(i18n.EasyGet("\229\175\185\228\184\141\232\181\183\239\188\140\230\130\168\231\154\132\231\173\137\231\186\167\228\184\141\232\182\179{0}", self.pPainting.tbConfig.nLevel))
+    return 0
+  end
+  self.pPanel:Label_SetText(self.txtTitle, i18n.Parse(self.pPainting.tbConfig.szName))
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnGo, {
+    RedPointMgr.EVENT[self.pPainting.tbConfig.szItemRedPoint]
+  })
+  self.tbMoneyPanel:SetIconsShow()
+  self.tbMoneyPanel:SetMoneyValue()
+  self:UpdateImg()
+  self:ReqRefreshUI()
+end
+
+function tbWnd:UpdateRewardView()
+  local tbAward = Award:GetAward(self.pPainting.tbConfig.nAwardId, self.pPainting.tbConfig.nAwardKey)
+  if not tbAward then
+    return
+  end
+  self.tbRewardScrollView:Clear()
+  for i = 1, #tbAward do
+    self.tbRewardScrollView:SetElement(i, function(tbElement)
+      self:UpdateListElement(tbElement, tbAward[i])
+    end, true)
+  end
+end
+
+function tbWnd:OnChangeMoney()
+  self.tbMoneyPanel:SetMoneyValue()
+end
+
+function tbWnd:RefreshCost()
+  if not self.pItemGrid then
+    self.pItemGrid = Ui:NewExistItemGrid(self, self.UIItemGrid)
+  end
+  self.pItemGrid:SetItemByTemplate(self.pPainting.tbConfig.nMaterialsId, 1)
+  self.pItemGrid:SetClickEnable(true)
+  local nCount = me.GetItemCountByTypeInBag(self.pPainting.tbConfig.nMaterialsId)
+  self.pPanel:Label_SetText(self.txtCost, i18n.Parse(tostring(nCount) .. "/" .. tostring(1)))
+  local szItemName = KItem.GetItemShowInfo(self.pPainting.tbConfig.nMaterialsId)
+  self.pPanel:Label_SetText(self.txtName, i18n.Parse(szItemName))
+end
+
+function tbWnd:RefreshRewardGroup()
+  local nGroupNum = #self.pPainting.tbConfig.tbCellGroup
+  for i = 1, nGroupNum do
+    local szCont_Gift = string.format("node/imgBG/Cont_Gift%02d", i)
+    local nGroupRewardData = self.pPainting:GetCellGroupReward(me)
+    local bIsShow = Lib:GetBit(nGroupRewardData, i)
+    self.pPanel:SetActive(szCont_Gift, not bIsShow)
+    if not bIsShow then
+      local bIsShowEffect = self.pPainting:IsGetCellGroupReward(me, i)
+      self.pPanel:SetActive(szCont_Gift .. "/Img_BoxBg", bIsShowEffect)
+      self.pPanel:SetActive(szCont_Gift .. "/Img_Select01", bIsShowEffect)
+      self.pPanel:SetActive(szCont_Gift .. "/Img_UnOpen", not bIsShowEffect)
+      self.pPanel:SetActive(szCont_Gift .. "/Img_Box", bIsShowEffect)
+      Ui:Button_BindEvent(self.pPanel, szCont_Gift .. "/Img_Box", self.OnGetGroupReward, self, i)
+      local szGroupEffectPath = string.format(szCont_Gift .. "/Hud_Effect", i)
+      self.pPanel:SetActive(szGroupEffectPath, bIsShowEffect)
+    end
+  end
+end
+
+function tbWnd:RefreshRewardAll()
+  self.pPanel:SetActive(self.Cont_All, false)
+  local nNum = self.pPainting:GetOpenCellNum(me)
+  if nNum < self.pPainting.tbConfig.nCellNum then
+    return
+  end
+  local nGrandPrize = self.pPainting:GetGrandPrize(me)
+  if 0 ~= nGrandPrize then
+    return
+  end
+  local nGroupNum = #self.pPainting.tbConfig.tbCellGroup
+  local nGroupRewardData = self.pPainting:GetCellGroupReward(me)
+  for i = 1, nGroupNum do
+    local bRet = Lib:GetBit(nGroupRewardData, i)
+    if not bRet then
+      return
+    end
+  end
+  self.pPanel:SetActive(self.Cont_All, true)
+  self.pPanel:SetActive(self.Hud_Effect, true)
+  Ui:Button_BindEvent(self.pPanel, self.Cont_All .. "/Img_Box", self.OnGetGrandPrize, self)
+end
+
+function tbWnd:ReqRefreshUI()
+  self:UpdateRewardView()
+  self:RefreshCost()
+  self:RefreshRewardGroup()
+  self:RefreshRewardAll()
+  local nOpenCellData = self.pPainting:GetOpenCellData(me)
+  for i = 1, self.pPainting.tbConfig.nCellNum do
+    local szImg_Cont01 = string.format(self.Img_Grid .. "/Img_Cont%02d", i)
+    local bRet = Lib:GetBit(nOpenCellData, i)
+    self.pPanel:SetActive(szImg_Cont01 .. "/Image", not bRet)
+    self.pPanel:SetActive(szImg_Cont01 .. "/Img_Line01", not bRet)
+    self.pPanel:SetActive(szImg_Cont01 .. "/Img_Line02", not bRet)
+    self.pPanel:SetActive(szImg_Cont01 .. "/Img_Line03", not bRet)
+    self.pPanel:SetActive(szImg_Cont01 .. "/Img_Line04", not bRet)
+    self.pPanel:SetActive(szImg_Cont01 .. "/LevelUp_Effect", bRet)
+    Ui:Button_BindEvent(self.pPanel, szImg_Cont01 .. "/Image", self.OnClickCell, self, i)
+  end
+  local nNum = self.pPainting:GetOpenCellNum(me)
+  self.pPanel:Label_SetText(self.Txt_Info, i18n.EasyGet("\229\143\175\228\189\191\231\148\168{0}\233\135\145\229\184\129\231\130\185\229\188\128\230\156\170\228\186\174\230\160\188\229\173\144", self.pPainting:GetConfig().nConsumeNum))
+  if nNum >= self.pPainting.tbConfig.nOpenConsumption then
+    self.pPanel:SetActive(self.Txt_Info, true)
+  else
+    self.pPanel:SetActive(self.Txt_Info, false)
+  end
+end
+
+function tbWnd:ReqRefreshCellUI(nIndex)
+  self:RefreshCost()
+  self:RefreshRewardGroup()
+  local szImg_Cont01 = string.format(self.Img_Grid .. "/Img_Cont%02d", nIndex)
+  self.pPanel:SetActive(szImg_Cont01 .. "/Image", false)
+  self.pPanel:SetActive(szImg_Cont01 .. "/Img_Line01", false)
+  self.pPanel:SetActive(szImg_Cont01 .. "/Img_Line02", false)
+  self.pPanel:SetActive(szImg_Cont01 .. "/Img_Line03", false)
+  self.pPanel:SetActive(szImg_Cont01 .. "/Img_Line04", false)
+  local nNum = self.pPainting:GetOpenCellNum(me)
+  self.pPanel:Label_SetText(self.Txt_Info, i18n.EasyGet("\229\143\175\228\189\191\231\148\168{0}\233\135\145\229\184\129\231\130\185\229\188\128\230\156\170\228\186\174\230\160\188\229\173\144", self.pPainting:GetConfig().nConsumeNum))
+  if nNum >= self.pPainting.tbConfig.nOpenConsumption then
+    self.pPanel:SetActive(self.Txt_Info, true)
+  else
+    self.pPanel:SetActive(self.Txt_Info, false)
+  end
+  self:ShowCellEffect(nIndex)
+end
+
+function tbWnd:ReqRefreshGroupUI(nGroupId)
+  self:RefreshRewardAll()
+  local szCont_Gift = string.format("node/imgBG/Cont_Gift%02d", nGroupId)
+  local szGroupEffectPath = string.format(szCont_Gift .. "/Hud_Effect", nGroupId)
+  self.pPanel:SetActive(szGroupEffectPath, false)
+  self.pPanel:SetActive(szCont_Gift, false)
+end
+
+function tbWnd:ReqRefreshGrandPrizeUI()
+  self.pPanel:SetActive(self.Hud_Effect, false)
+  self.pPanel:SetActive(self.Cont_All, false)
+end
+
+function tbWnd:OnSyncItem(nSyncItemId)
+  local pItem = me.GetItemInBag(nSyncItemId)
+  if not pItem or pItem.dwTemplateId ~= self.pPainting.tbConfig.nMaterialsId then
+    return
+  end
+  self:RefreshCost()
+end
+
+function tbWnd:OnGetGroupReward(nGroupIndex)
+  self.pPainting:ReqGetGroupReward(nGroupIndex)
+end
+
+function tbWnd:OnGetGrandPrize()
+  self.pPainting:ReqGetGrandPrize()
+end
+
+function tbWnd:ShowCellEffect(nIndex)
+  if self.nCellEffectTimer then
+    Timer:Close(self.nCellEffectTimer)
+    self.pPanel:SetActive(self.szCellEffectPath, false)
+  end
+  self.szCellEffectPath = string.format(self.Img_Grid .. "/Img_Cont%02d/LevelUp_Effect", nIndex)
+  self.pPanel:SetActive(self.szCellEffectPath, true)
+  Sound:PlaySound("CastingWin", _)
+  self.nCellEffectTimer = Timer:Register(Env.GAME_FPS, function()
+    self.pPanel:SetActive(self.szCellEffectPath, false)
+    self.nCellEffectTimer = nil
+  end)
+end
+
+function tbWnd:OnClickCell(nIndex)
+  local nNum = self.pPainting:GetOpenCellNum(me)
+  if nNum < self.pPainting.tbConfig.nOpenConsumption then
+    me.CenterMsg(i18n.EasyGet("\232\191\152\230\156\170\231\130\185\228\186\174{0}\228\184\170\230\160\188\229\173\144\239\188\140\232\175\183\229\133\136\231\130\185\229\135\187\229\143\179\228\184\139\230\150\185\230\139\188\229\155\190\231\130\185\228\186\174", self.pPainting.tbConfig.nOpenConsumption))
+    return
+  end
+  if me.GetMoney("Gold") < self.pPainting.tbConfig.nConsumeNum then
+    GainCurrency:ReadyForJump("Gold")
+    return
+  end
+  
+  local function fnConfirm()
+    self.pPainting:ReqSawPuzzle(true, nIndex)
+  end
+  
+  local szMsg = i18n.EasyGet("\230\152\175\229\144\166\233\128\137\230\139\169\232\138\177\232\180\185{0}\233\135\145\229\184\129\231\130\185\228\186\174", self.pPainting.tbConfig.nConsumeNum)
+  me.MsgBox(szMsg, {
+    {
+      i18n.szOk,
+      fnConfirm
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function tbWnd:UpdateImg()
+  local tbConfig = self.pPainting:GetConfig()
+  if not tbConfig then
+    return
+  end
+  local szImgName = tbConfig.szImgCell
+  local szImgFormal = tbConfig.szImgFormal
+  if not szImgFormal or not szImgName then
+    return
+  end
+  for Idx = 1, nMaxCellNum do
+    local szNum = string.format("%02d", Idx)
+    local szImgFull = string.format(szImgName, szNum)
+    local szImgPath = string.format(self.ImageCell, szNum)
+    self.pPanel:Sprite_SetSprite(szImgPath, szImgFull)
+  end
+  self.pPanel:Sprite_SetSprite(self.Img_FormalBg, szImgFormal)
+end

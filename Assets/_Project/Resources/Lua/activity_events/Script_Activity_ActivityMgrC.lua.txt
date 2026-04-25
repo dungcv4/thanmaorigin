@@ -1,0 +1,243 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+ActivityMgr.tbConfigList = ActivityMgr.tbConfigList or {}
+ActivityMgr.tbInstance = ActivityMgr.tbInstance or {}
+ActivityMgr.tbClassName2Id = ActivityMgr.tbClassName2Id or {}
+
+function ActivityMgr:GetActivityConfigC(tbIdList)
+  RemoteServer.RequestActivity(ActivityMgr.Protocol.GetActivityConfig, tbIdList)
+end
+
+function ActivityMgr:BuildInstance(tbInfo)
+  if self.tbInstance[tbInfo.nId] then
+    return
+  end
+  local szClassName = self:GenClassName(tbInfo)
+  if not szClassName then
+    return
+  end
+  local pInstance = self:Create(szClassName)
+  if not pInstance then
+    return
+  end
+  if pInstance.IsServerOnly and pInstance:IsServerOnly() then
+    return
+  end
+  pInstance:OnInit(tbInfo)
+  pInstance:OnOpen()
+  self.tbInstance[tbInfo.nId] = pInstance
+end
+
+function ActivityMgr:OnSyncActivityConfig(tbConfigList)
+  for _, tbInfo in ipairs(tbConfigList) do
+    self.tbConfigList[tbInfo.nId] = tbInfo
+    ActivityMgr.tbClassName2Id[tbInfo.szClassName] = ActivityMgr.tbClassName2Id[tbInfo.szClassName] or {}
+    ActivityMgr.tbClassName2Id[tbInfo.szClassName][tbInfo.nId] = true
+  end
+end
+
+function ActivityMgr:GetActivityDataC(tbIdList)
+  RemoteServer.RequestActivity(ActivityMgr.Protocol.GetActivityData, tbIdList)
+end
+
+function ActivityMgr:OnSyncActivityData(tbDataList)
+  local szGroupName, szGroupSubType, szClassName
+  for _, tbInfo in ipairs(tbDataList) do
+    if not self:IsActivityGroup(tbInfo[1]) then
+      if not self.tbClassName2Id[tbInfo[1].szClassName] or not self.tbClassName2Id[tbInfo[1].szClassName][tbInfo[1].nId] then
+        self.tbClassName2Id[tbInfo[1].szClassName] = self.tbClassName2Id[tbInfo[1].szClassName] or {}
+        self.tbClassName2Id[tbInfo[1].szClassName][tbInfo[1].nId] = true
+      end
+    else
+      szGroupName, szGroupSubType = tbInfo[1].szGroupName, tbInfo[1].szGroupSubType
+      szClassName = ActivityGroup[szGroupName][szGroupSubType].szClassName
+    end
+    self:BuildInstance(tbInfo[1])
+    local pInstance = self.tbInstance[tbInfo[1].nId]
+    if pInstance and pInstance.LoadSyncData then
+      pInstance:LoadSyncData(tbInfo[2])
+    end
+  end
+end
+
+function ActivityMgr:OnClose(tbIdList)
+  for _, nId in ipairs(tbIdList) do
+    if self.tbInstance[nId] then
+      if self.tbInstance[nId].OnClientClose then
+        Lib:CallBack({
+          self.tbInstance[nId].OnClientClose,
+          self.tbInstance[nId]
+        })
+      else
+        Lib:CallBack({
+          self.tbInstance[nId].OnClose,
+          self.tbInstance[nId]
+        })
+      end
+      self.tbInstance[nId] = nil
+    end
+  end
+end
+
+function ActivityMgr:CallServerScript(nActivityId, ...)
+  RemoteServer.RequestActivity(ActivityMgr.Protocol.DoActivityOperation, nActivityId, ...)
+end
+
+function ActivityMgr:CallServerScriptV2(nActivityId, ...)
+  RemoteServer.RequestActivityV2(self.Protocol.DoActivityOperationV2, nActivityId, ...)
+end
+
+function ActivityMgr:ServerRequest(nId, ...)
+  local pInstance = self.tbInstance[nId]
+  if not pInstance then
+    return
+  end
+  if not pInstance.ServerRequest then
+    return
+  end
+  pInstance:ServerRequest(...)
+end
+
+function ActivityMgr:GetConfigById(nId)
+  return self.tbConfigList[nId]
+end
+
+function ActivityMgr:OnLogin()
+  self:GetActivityConfigC({})
+end
+
+function ActivityMgr:OnLogout()
+  Log("ActivityMgr:OnLogout")
+  local tbIdList = {}
+  for nId in pairs(self.tbInstance) do
+    table.insert(tbIdList, nId)
+  end
+  self:OnClose(tbIdList)
+end
+
+function ActivityMgr:GetIdListByClassName(szClassName)
+  return self.tbClassName2Id[szClassName] or {}
+end
+
+function ActivityMgr:GetNearestNpc(nNpcTemplateId, nMapTemplateId)
+  if me.nMapTemplateId ~= nMapTemplateId then
+    return
+  end
+  return KNpc.GetNearestNpcByTemplateId(me.GetNpc(), nNpcTemplateId, AFK:GetSetting():GetFightSetting().nSearchRadius)
+end
+
+function ActivityMgr:GotoNpc(nNpcTemplateId, nMapTemplateId)
+  if nNpcTemplateId <= 0 or nMapTemplateId <= 0 then
+    return
+  end
+  local nPosX, nPosY, nWalkNearLength = Npc:GetNpcPos(nNpcTemplateId, nMapTemplateId, true)
+  if not (nPosX and nPosY) or not nWalkNearLength then
+    LogErr("ActivityMgr:GotoNpc fail", nNpcTemplateId, nMapTemplateId, nPosX, nPosY, nWalkNearLength)
+    return
+  end
+  
+  local function fnCallback()
+    local function __timer_Callback()
+      local pNpc = ActivityMgr:GetNearestNpc(nNpcTemplateId, nMapTemplateId)
+      
+      if not pNpc or not pNpc.nId then
+        return
+      end
+      Operation:SimpleTap(pNpc.nId, false)
+    end
+    
+    AFK:Stop()
+    Timer:Register(5, __timer_Callback)
+  end
+  
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  AFK:Stop()
+  AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, fnCallback, nWalkNearLength, nil, nNpcTemplateId)
+end
+
+function ActivityMgr:GotoPos(nNpcTemplateId, nMapTemplateId, nPosX, nPosY, szCloseUi)
+  if nNpcTemplateId <= 0 or nMapTemplateId <= 0 then
+    return
+  end
+  if Ui:WindowVisible(szCloseUi) then
+    Ui:CloseWindow(szCloseUi)
+  end
+  
+  local function fnCallback()
+    local function __timer_Callback()
+      local pNpc = ActivityMgr:GetNearestNpc(nNpcTemplateId, nMapTemplateId)
+      
+      if not pNpc or not pNpc.nId then
+        return
+      end
+      Operation:SimpleTap(pNpc.nId, false)
+    end
+    
+    AFK:Stop()
+    Timer:Register(5, __timer_Callback)
+  end
+  
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  AFK:Stop()
+  AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, fnCallback, 0, nil, nNpcTemplateId)
+end
+
+function ActivityMgr:GotoMap(nMapId)
+  if me.nMapId == nMapId then
+    me.CenterMsg(i18n.EasyGet("\230\130\168\229\183\178\231\187\143\229\156\168\229\189\147\229\137\141\229\156\176\229\155\190\228\186\134"))
+    return
+  end
+  local bOk, szMsg = Map:CanSwitchMap(me.nTotalLevel, nMapId)
+  if not bOk then
+    if szMsg then
+      me.CenterMsg(szMsg)
+    end
+    return
+  end
+  AFK:Stop()
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  Map:SwitchMap(nMapId)
+end
+
+function ActivityMgr:GotoDynamicNpc(nMapId, nPosX, nPosY, func, nWalkNearLength)
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  AFK:Stop()
+  AutoPath:GotoAndCallEx(nMapId, nPosX, nPosY, func, nWalkNearLength or Npc.DIALOG_DISTANCE)
+end
+
+function ActivityMgr:GenRedPointEventIdList(szRedPointList)
+  local tbList = {}
+  for _, szEvent in ipairs(szRedPointList) do
+    table.insert(tbList, RedPointMgr.EVENT[szEvent])
+  end
+  return tbList
+end
+
+function ActivityMgr:OnCrossDay()
+  Log("ActivityMgr:OnCrossDay")
+  for _, pInstance in pairs(self.tbInstance) do
+    if pInstance:IsOpen() and pInstance.OnCrossDay then
+      Lib:CallBack({
+        pInstance.OnCrossDay,
+        pInstance
+      })
+    end
+  end
+end
+
+function ActivityMgr:Init()
+  if self.bHasInitialized then
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, ActivityMgr)
+  end
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, ActivityMgr.OnCrossDay, ActivityMgr)
+  self.bHasInitialized = true
+end
+
+ActivityMgr:Init()

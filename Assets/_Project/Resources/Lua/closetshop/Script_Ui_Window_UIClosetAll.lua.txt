@@ -1,0 +1,265 @@
+local tbWnd = Ui:CreateClass("UIClosetAll", "UIPanel")
+local tbControls = {
+  btnSuit = "tg/btnSuit",
+  btnSingle = "tg/btnSingle",
+  SuitContent = "tg/SuitContent",
+  SingleContent = "tg/SingleContent",
+  SuitTemplate = "tg/SuitContent/Viewport/Content/Template",
+  SingleTemplate = "tg/SingleContent/Viewport/Content/Template"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbShopType = {Single = 1, Suit = 2}
+tbWnd.tbShowType = {
+  [1] = function()
+    return i18n.EasyGet("\229\141\179\229\176\134\229\188\128\230\148\190")
+  end,
+  [2] = function()
+    return i18n.EasyGet("\233\166\150\229\133\133\232\142\183\229\190\151")
+  end,
+  [3] = function()
+    return i18n.EasyGet("\229\165\151\232\163\133\232\180\173\228\185\176")
+  end
+}
+tbWnd.tbOnClick = {
+  btnSuit = function(self)
+    self.nShopType = self.tbShopType.Suit
+    self:RefreshShopByShopType()
+  end,
+  btnSingle = function(self)
+    self.nShopType = self.tbShopType.single
+    self:RefreshShopByShopType()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbSuitScrollView = Ui:NewScrollView(self, tbControls.SuitTemplate)
+  self.tbSingleScrollView = Ui:NewScrollView(self, tbControls.SingleTemplate)
+end
+
+function tbWnd:OnOpen()
+  self.nShopType = self.tbShopType.Suit
+  self:RefreshShopByShopType()
+  self:UpdateSuitScrollViewShow()
+  self:UpdateSingleScrollViewShow()
+end
+
+function tbWnd:OnDestroy()
+  self.tbSuitScrollView:Clear()
+  self.tbSingleScrollView:Clear()
+  self.tbSuitScrollView = nil
+  self.tbSingleScrollView = nil
+end
+
+function tbWnd:RefreshShopByShopType()
+  local bIsSuit = self.nShopType == self.tbShopType.Suit
+  self.pPanel:SetActive(tbControls.SuitContent, bIsSuit)
+  self.pPanel:SetActive(tbControls.SingleContent, not bIsSuit)
+  self.pPanel:ButtonGroup_SetSelect(tbControls.btnSuit, bIsSuit)
+  self.pPanel:ButtonGroup_SetSelect(tbControls.btnSingle, not bIsSuit)
+end
+
+function tbWnd:UpdateView()
+  self:UpdateSuitScrollViewShow()
+  self:UpdateSingleScrollViewShow()
+end
+
+function tbWnd:UpdateSuitScrollViewShow()
+  local tbShops = Shop:GetFashionOpenShops()
+  if not tbShops or Lib:IsEmptyTB(tbShops) then
+    return
+  end
+  for nId, tbShop in pairs(tbShops) do
+    if tbShop.nType == tbWnd.tbShopType.Suit then
+      tbShops[nId] = tbShop
+    else
+      tbShops[nId] = nil
+    end
+  end
+  local tbSuits = {}
+  for _, tbShop in pairs(tbShops) do
+    local tbSuit = Shop:GetFashionShopSuits(tbShop.nId)
+    if tbSuit and not Lib:IsEmptyTB(tbSuit) then
+      Lib:MergeTable(tbSuits, tbSuit)
+    end
+  end
+  tbSuits = self:SuitDeduplication(tbSuits)
+  tbSuits = self:SortShopData(tbSuits)
+  self.tbSuitScrollView:Reset()
+  for nIndex, tbSuit in ipairs(tbSuits) do
+    self.tbSuitScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      local nAllPrice = 0
+      local tbHave = Fashion:GetHaveFashions()
+      for nGridId, tbShop in ipairs(tbSuit.tbItemList) do
+        local nFashionId = tbShop.nFashionID
+        local tbSetting = Fashion:GetFashionSetting(me, nFashionId)
+        tbElement.pGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid" .. nGridId)
+        Fashion:InitFashionGrid(tbElement.pGrid, tbSetting)
+        if tbHave[nFashionId] then
+          pPanel:SetActive("imgHaveBg" .. nGridId, true)
+        else
+          pPanel:SetActive("imgHaveBg" .. nGridId, false)
+        end
+        nAllPrice = nAllPrice + tbShop.nPrice
+      end
+      if tbSuit.nShowType and self.tbShowType[tbSuit.nShowType] then
+        pPanel:SetActive("Cost", false)
+        pPanel:SetActive("MarkDiscounts", false)
+        pPanel:SetActive("txtComingSoon", true)
+        pPanel:Label_SetText("txtComingSoon", self.tbShowType[tbSuit.nShowType]())
+      else
+        local szMoneyIcon = Currency:GetIcon(tbSuit.szMoneyType)
+        pPanel:Sprite_SetSprite("Cost/imgMoney", szMoneyIcon)
+        pPanel:SetActive("txtComingSoon", false)
+        if tbSuit.nDiscountPrice > 0 then
+          pPanel:SetActive("MarkDiscounts", true)
+          pPanel:Label_SetText("Cost/txtCost", tbSuit.nDiscountPrice)
+          pPanel:Label_SetText("Cost/CostDiscounts/txtCost", tbSuit.nPrice)
+          pPanel:Label_SetText("MarkDiscounts/txt", i18n.GetDiscountText(tbSuit.nSuitDiscount))
+        else
+          pPanel:SetActive("MarkDiscounts", false)
+          pPanel:Label_SetText("Cost/txtCost", tbSuit.nPrice)
+          pPanel:Label_SetText("Cost/CostDiscounts/txtCost", nAllPrice)
+        end
+      end
+      pPanel:SetActive("imgSelected", false)
+      pPanel:SetActive("Cost/CostDiscounts", true)
+      pPanel:SetActive("MarkNew", tbSuit.bShowNewTip)
+      Ui:Button_BindEvent(pPanel, "Button", function()
+        local tbWnd = Ui:GetWindow("UIClosetShop")
+        if tbWnd then
+          tbWnd:SelectPanel(2)
+          tbWnd:RefreshSuitPanelSelectShop(tbSuit.nShopId, tbSuit.nSuitId)
+        end
+        pPanel:SetActive("imgSelected", true)
+      end)
+    end)
+  end
+end
+
+function tbWnd:UpdateSingleScrollViewShow()
+  local tbShops = Shop:GetFashionOpenShops()
+  if not tbShops or Lib:IsEmptyTB(tbShops) then
+    return
+  end
+  for nId, tbShop in pairs(tbShops) do
+    if tbShop.nType == tbWnd.tbShopType.Single then
+      tbShops[nId] = tbShop
+    else
+      tbShops[nId] = nil
+    end
+  end
+  local tbItems = {}
+  for _, tbShop in pairs(tbShops) do
+    local tbItem = Shop:GetShopItemsToShow(tbShop.nId)
+    if tbItem and not Lib:IsEmptyTB(tbItem) then
+      Lib:MergeTable(tbItems, tbItem)
+    end
+  end
+  tbItems = self:SingleDeduplication(tbItems)
+  tbItems = self:SortShopData(tbItems)
+  self.tbSingleScrollView:Reset()
+  for nIndex, tbItem in ipairs(tbItems) do
+    local nFashionId = tbItem.nFashionID
+    local tbSetting, bCanUse = Fashion:GetFashionSetting(me, nFashionId)
+    if bCanUse then
+      self.tbSingleScrollView:SetElement(nIndex, function(tbElement)
+        local pPanel = tbElement.pPanel
+        tbElement.pGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        Fashion:InitFashionGrid(tbElement.pGrid, tbSetting)
+        local tbHave = Fashion:GetHaveFashions()
+        if tbHave[nFashionId] then
+          pPanel:SetActive("imgHaveBg", true)
+        else
+          pPanel:SetActive("imgHaveBg", false)
+        end
+        if tbItem.nShowType and self.tbShowType[tbItem.nShowType] then
+          pPanel:SetActive("Cost", false)
+          pPanel:SetActive("MarkDiscounts", false)
+          pPanel:SetActive("txtComingSoon", true)
+          pPanel:Label_SetText("txtComingSoon", self.tbShowType[tbItem.nShowType]())
+        else
+          local szMoneyIcon = Currency:GetIcon(tbItem.szMoneyType)
+          pPanel:Sprite_SetSprite("Cost/imgMoney", szMoneyIcon)
+          pPanel:SetActive("txtComingSoon", false)
+          if tbItem.nDiscountPrice > 0 then
+            pPanel:SetActive("MarkDiscounts", true)
+            pPanel:SetActive("Cost/CostDiscounts", true)
+            pPanel:Label_SetText("Cost/txtCost", tbItem.nDiscountPrice)
+            pPanel:Label_SetText("Cost/CostDiscounts/txtCost", tbItem.nPrice)
+            pPanel:Label_SetText("MarkDiscounts/txt", i18n.EasyGet("{0}\230\138\152", tbItem.nDiscount))
+          else
+            pPanel:SetActive("MarkDiscounts", false)
+            pPanel:SetActive("Cost/CostDiscounts", false)
+            pPanel:Label_SetText("Cost/txtCost", tbItem.nPrice)
+          end
+        end
+        pPanel:SetActive("imgSelected", false)
+        pPanel:SetActive("MarkNew", tbItem.bShowNewTip)
+        Ui:Button_BindEvent(pPanel, "Button", function()
+          local pWnd = Ui:GetWindow("UIClosetShop")
+          if pWnd then
+            pWnd:SelectPanel(3)
+            local tbItemExcel = Shop:GetFashionShopItemExcelInfo(tbItem.nId)
+            pWnd:RefreshSinglePanelSelectShop(tbItem.nPart + 1, tbSetting.nLayer, tbItemExcel.tbShopIds[1], tbItem.nId)
+          end
+        end)
+      end)
+    end
+  end
+end
+
+function tbWnd:SortShopData(tbShopItems)
+  local tbNewTips = {}
+  local tbNothingTips = {}
+  local tbDiscountTips = {}
+  local tbNewDiscountTips = {}
+  for _, tbItem in ipairs(tbShopItems) do
+    if tbItem.nDiscountPrice > 0 and tbItem.bShowNewTip then
+      table.insert(tbNewDiscountTips, tbItem)
+    elseif tbItem.nDiscountPrice > 0 then
+      table.insert(tbDiscountTips, tbItem)
+    elseif tbItem.bShowNewTip then
+      table.insert(tbNewTips, tbItem)
+    else
+      table.insert(tbNothingTips, tbItem)
+    end
+  end
+  
+  local function fnSort(a, b)
+    return a.nSort > b.nSort
+  end
+  
+  table.sort(tbNewTips, fnSort)
+  table.sort(tbNothingTips, fnSort)
+  table.sort(tbDiscountTips, fnSort)
+  table.sort(tbNewDiscountTips, fnSort)
+  local tbItems1 = Lib:MergeTable(tbNewDiscountTips, tbDiscountTips)
+  local tbItems2 = Lib:MergeTable(tbNewTips, tbNothingTips)
+  local tbItems = Lib:MergeTable(tbItems1, tbItems2)
+  return tbItems
+end
+
+function tbWnd:SingleDeduplication(tbShops)
+  local tbItems = {}
+  local tbRecord = {}
+  for _, tbItem in ipairs(tbShops) do
+    if not tbRecord[tbItem.nId] then
+      tbRecord[tbItem.nId] = true
+      table.insert(tbItems, tbItem)
+    end
+  end
+  return tbItems
+end
+
+function tbWnd:SuitDeduplication(tbShops)
+  local tbItems = {}
+  local tbRecord = {}
+  for _, tbShop in ipairs(tbShops) do
+    if not tbRecord[tbShop.nSuitId] then
+      tbRecord[tbShop.nSuitId] = true
+      table.insert(tbItems, tbShop)
+    end
+  end
+  return tbItems
+end

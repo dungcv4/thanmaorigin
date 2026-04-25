@@ -1,0 +1,212 @@
+Require("CommonScript/ZhaiXingLou/ZhaiXingLouComm.lua")
+Require("CommonScript/ZhaiXingLou/ZhaiXingLouCfg.lua")
+Require("Script/Fuben/FubenUIController.lua")
+ZhaiXingLou.Hall = ZhaiXingLou.Hall or {}
+local Hall = ZhaiXingLou.Hall
+ZhaiXingLou.Match = ZhaiXingLou.Match or {}
+local Match = ZhaiXingLou.Match
+
+function ZhaiXingLou:JoinZhaiXingLou()
+  local szMsg
+  local bIsHaveTeam = TeamMgr:HasTeam()
+  local nTeamMemberNum = 0
+  
+  local function fnCustom()
+    if true == bIsHaveTeam then
+      RemoteServer.OnTeamUpRequest("EnterActivity", TeamMgr.ACTIVITY_ID.ZhaiXingLou)
+    else
+      self:ReqJoinZhaiXingLou()
+    end
+  end
+  
+  if false == bIsHaveTeam then
+    szMsg = i18n.EasyGet("\230\152\175\229\144\166\229\141\149\231\139\172\230\138\165\229\144\141\230\145\152\230\152\159\230\165\188\239\188\159\228\189\160\229\176\134\229\146\140\229\133\182\228\187\150\233\152\159\228\188\141\230\156\170\230\187\161\231\154\132\228\190\160\229\163\171\233\154\143\230\156\186\231\187\132\230\136\144\233\152\159\228\188\141")
+  else
+    local bIsCaptain = TeamMgr:IsCaptain(me.dwID)
+    if false == bIsCaptain then
+      szMsg = i18n.EasyGet("\232\175\183\231\148\177\233\152\159\233\149\191\230\147\141\228\189\156")
+      me.CenterMsg(szMsg)
+    else
+      nTeamMemberNum = TeamMgr:GetMembersCount()
+      if nTeamMemberNum < ZhaiXingLou.TeamMemberNumLimit then
+        szMsg = i18n.EasyGet("\233\152\159\228\188\141\228\184\141\232\182\1793\228\186\186\239\188\140\229\176\134\233\154\143\230\156\186\229\140\185\233\133\141\233\152\159\229\143\139\239\188\140\230\152\175\229\144\166\231\161\174\229\174\154\229\143\130\229\138\160\239\188\159")
+      end
+    end
+  end
+  if nTeamMemberNum < ZhaiXingLou.TeamMemberNumLimit then
+    local function fnClose()
+      Ui:CloseWindow("UIMessageBox")
+    end
+    
+    local function fnAgree()
+      Ui:CloseWindow("UIMessageBox")
+      local bIsCanJoin = ZhaiXingLou:CheckJoinZhaiXingLou()
+      if false == bIsCanJoin then
+        return false
+      end
+      ActivityCheck:CheckCanEnterActivityEx(me, fnCustom, nil, false, false, true, nil, {"UIActivity"}, false)
+      return true
+    end
+    
+    Ui:OpenWindow("UIMessageBox", szMsg, {
+      {fnAgree},
+      {fnClose}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    }, nil, nil)
+  else
+    local bIsCanJoin = self:CheckJoinZhaiXingLou()
+    if false == bIsCanJoin then
+      return false
+    end
+    ActivityCheck:CheckCanEnterActivityEx(me, fnCustom, nil, false, false, true, nil, {"UIActivity"}, false)
+  end
+end
+
+function ZhaiXingLou:CheckJoinZhaiXingLou()
+  if me.nLevel < ZhaiXingLou.LvLimit then
+    me.CenterMsg(i18n.EasyGet("\228\189\160\231\154\132\231\173\137\231\186\167\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\232\191\155\229\133\165\230\180\187\229\138\168"))
+    return false
+  end
+  local nTeamMemberNum = TeamMgr:GetMembersCount()
+  if nTeamMemberNum > ZhaiXingLou.TeamMemberNumLimit then
+    me.CenterMsg(i18n.EasyGet("\230\173\164\230\180\187\229\138\168\233\152\159\228\188\141\228\186\186\230\149\176\230\156\128\229\164\154{0}\229\143\130\228\184\142", ZhaiXingLou.TeamMemberNumLimit))
+    return false
+  end
+  local tbTeamMemberDataList = TeamMgr:GetMembers()
+  for i, teamMemberData in ipairs(tbTeamMemberDataList) do
+    if teamMemberData.nLevel < ZhaiXingLou.LvLimit then
+      me.CenterMsg(i18n.EasyGet("{0}\231\173\137\231\186\167\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\232\191\155\229\133\165\230\180\187\229\138\168", teamMemberData.szName))
+      return false
+    end
+  end
+  local bIsGameStart = Calendar:IsActivityInOpenState("ZhaiXingLou")
+  if false == bIsGameStart then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175\230\136\150\228\184\141\229\156\168\230\138\165\229\144\141\230\151\182\233\151\180\229\134\133"))
+    return false
+  end
+  return true
+end
+
+function ZhaiXingLou:ReqJoinZhaiXingLou()
+  RemoteServer.OnZhaiXingLouRequest(ZhaiXingLou.Protocol.C2SReqJoinZhaiXingLou)
+end
+
+function ZhaiXingLou:OpenMatchInfoView(tbMatchResultTable, nCloseTime, nSelfTeamIndex)
+  local tbTeamDataLeft = {}
+  tbTeamDataLeft.nTeamId = nSelfTeamIndex
+  tbTeamDataLeft.tbTeamPlayerInfoDataList = {}
+  for nPlayerId, tbZhaiXingLouPlayerInfoData in pairs(tbMatchResultTable[nSelfTeamIndex]) do
+    local tbTeamPlayerInfoData = {}
+    tbTeamPlayerInfoData.nDamage = tbZhaiXingLouPlayerInfoData.nDamage
+    tbTeamPlayerInfoData.nFaction = tbZhaiXingLouPlayerInfoData.nFaction
+    tbTeamPlayerInfoData.nFight = tbZhaiXingLouPlayerInfoData.nFight
+    tbTeamPlayerInfoData.nKill = tbZhaiXingLouPlayerInfoData.nKill
+    tbTeamPlayerInfoData.nLevel = tbZhaiXingLouPlayerInfoData.nLevel
+    tbTeamPlayerInfoData.nPlayerId = tbZhaiXingLouPlayerInfoData.nPlayerId
+    tbTeamPlayerInfoData.nPortrait = tbZhaiXingLouPlayerInfoData.nPortrait
+    tbTeamPlayerInfoData.szKinOrTongName = tbZhaiXingLouPlayerInfoData.szKinName
+    tbTeamPlayerInfoData.szPlayerName = tbZhaiXingLouPlayerInfoData.szPlayerName
+    table.insert(tbTeamDataLeft.tbTeamPlayerInfoDataList, tbTeamPlayerInfoData)
+  end
+  local tbTeamDataRight = {}
+  for nTeamId, tbZhaiXingLouPlayerInfoData in pairs(tbMatchResultTable) do
+    if nTeamId ~= nSelfTeamIndex then
+      tbTeamDataRight.nTeamId = nTeamId
+      tbTeamDataRight.tbTeamPlayerInfoDataList = {}
+      for nPlayerId, tbZhaiXingLouPlayerInfoData in pairs(tbZhaiXingLouPlayerInfoData) do
+        local tbTeamPlayerInfoData = {}
+        tbTeamPlayerInfoData.nDamage = tbZhaiXingLouPlayerInfoData.nDamage
+        tbTeamPlayerInfoData.nFaction = tbZhaiXingLouPlayerInfoData.nFaction
+        tbTeamPlayerInfoData.nFight = tbZhaiXingLouPlayerInfoData.nFight
+        tbTeamPlayerInfoData.nKill = tbZhaiXingLouPlayerInfoData.nKill
+        tbTeamPlayerInfoData.nLevel = tbZhaiXingLouPlayerInfoData.nLevel
+        tbTeamPlayerInfoData.nPlayerId = tbZhaiXingLouPlayerInfoData.nPlayerId
+        tbTeamPlayerInfoData.nPortrait = tbZhaiXingLouPlayerInfoData.nPortrait
+        tbTeamPlayerInfoData.szKinOrTongName = tbZhaiXingLouPlayerInfoData.szKinName
+        tbTeamPlayerInfoData.szPlayerName = tbZhaiXingLouPlayerInfoData.szPlayerName
+        table.insert(tbTeamDataRight.tbTeamPlayerInfoDataList, tbTeamPlayerInfoData)
+      end
+    end
+  end
+  local nState = tbMatchResultTable[nSelfTeamIndex][me.dwID].nState
+  Ui:OpenWindow("UITeamBattleResult", tbTeamDataLeft, tbTeamDataRight, nState, nCloseTime)
+end
+
+function ZhaiXingLou:OpenTeamInfoView(tbTeamResultTable, nSelfTeamIndex)
+  if Ui:WindowVisible("UITeamBattleInfo") == false then
+    Ui:OpenWindow("UITeamBattleInfo", tbTeamResultTable, nSelfTeamIndex)
+  else
+    Ui:GetWindow("UITeamBattleInfo"):RefreshView(tbTeamResultTable, nSelfTeamIndex)
+  end
+end
+
+function ZhaiXingLou:CloseTeamInfoView()
+  Ui:CloseWindow("UITeamBattleInfo")
+end
+
+function ZhaiXingLou:StopAutoFight()
+  Dungeon:ClearTargetPos()
+  Dungeon:StopAutoRunTimer()
+  local bLeadFight = AFK:IsLeadFightRunning()
+  if bLeadFight then
+    AFK:Stop()
+  end
+end
+
+function Match:IsNeedExitFubenButton()
+  return false
+end
+
+function Match:OnFubenMapLoaded(pPlayer)
+  FubenUIController:OpenDefaultFuBenUI()
+end
+
+function Hall:OnFubenMapLoaded(pPlayer)
+  FubenUIController:OpenDefaultFuBenUI()
+end
+
+function Hall:IsNeedExitFubenButton()
+  return ZhaiXingLou.isHaveExitBtn
+end
+
+function Hall:IsShowTipWhenQuit()
+  return false
+end
+
+function ZhaiXingLou:ChangeExitBtnState(bIsHaveExitBtn)
+  self.isHaveExitBtn = bIsHaveExitBtn
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function ZhaiXingLou:RegisterFubenUIChecker()
+  local tbHallMapList = {}
+  table.insert(tbHallMapList, ZhaiXingLou.HallTemplateMapId)
+  table.insert(tbHallMapList, GlobalZhaiXingLou.HallTemplateMapId)
+  table.insert(tbHallMapList, GlobalZhaiXingLou.WinHallTemplateMapId)
+  for nFloor, nMapTemplateId in ipairs(ZhaiXingLou.HallFloorTemplateMapId) do
+    table.insert(tbHallMapList, nMapTemplateId)
+  end
+  FubenUIController:RegisterChecker(tbHallMapList, self.Hall)
+  local tbMatchMapList = {}
+  for i, nTemplateMapId in ipairs(ZhaiXingLou.FloorTemplateMapId) do
+    table.insert(tbMatchMapList, nTemplateMapId)
+  end
+  table.insert(tbMatchMapList, GlobalZhaiXingLou.MatchTemplateMapId)
+  FubenUIController:RegisterChecker(tbMatchMapList, self.Match)
+end
+
+function ZhaiXingLou:CheckCanShow()
+  return false
+end
+
+function ZhaiXingLou:Init()
+  if not self.bInit then
+    self:RegisterFubenUIChecker()
+    self.bInit = true
+    self.isHaveExitBtn = true
+  end
+end
+
+ZhaiXingLou:Init()

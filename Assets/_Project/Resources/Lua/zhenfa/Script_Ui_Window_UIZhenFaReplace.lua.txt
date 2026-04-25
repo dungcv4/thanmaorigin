@@ -1,0 +1,164 @@
+local tbWnd = Ui:CreateClass("ZhenFaReplace", "UIPanel")
+local tbControls = {
+  ZhenFaTemplate = "imgList/ViewPort/List/Template",
+  txtZhenFaName = "txtZhenFaName",
+  ZhenFaItemGrid = "UIItemGrid",
+  txtZhenFaLV = "txtZhenFaLV",
+  txtZhenFaNumAttack = "txtZhenJue/txtZhenFaNum",
+  txtZhenFaNumDefense = "txtZhenJue01/txtZhenFaNum",
+  ZhenJueTemplate = "AwardList/Viewport/template/ItemTemplate",
+  AttrTemplate = "Scroll View/Viewport/template/01",
+  btnEquip = "btnEquip"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnEquip = function(self)
+    local nPos = self.tbZhenFaData[self.nZFSelect][1]
+    ZhenFa:ZFPutOnC(nPos)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbZhenFaSV = Ui:NewScrollView(self, tbControls.ZhenFaTemplate, self.OnZhenFaClick)
+  self.tbZhenJueSV = Ui:NewScrollView(self, tbControls.ZhenJueTemplate)
+  self.tbAttrSV = Ui:NewScrollView(self, tbControls.AttrTemplate)
+  self.tbZFItemGrid = Ui:NewExistItemGrid(self, tbControls.ZhenFaItemGrid)
+end
+
+function tbWnd:OnOpen(nPos)
+  self:UpdateZhenFaSV()
+  self.nZFSelect = 1
+  if nPos then
+    for i = 1, #self.tbZhenFaData do
+      if self.tbZhenFaData[i][1] == nPos then
+        self.nZFSelect = i
+      end
+    end
+  end
+  self.tbZhenFaSV:ScrollToIndex(self.nZFSelect, true)
+end
+
+function tbWnd:OnClose()
+  if self.nZFSelect then
+    local tbOldElement = self.tbZhenFaSV:GetElement(self.nZFSelect)
+    tbOldElement.pPanel:SetActive("imgSelected", false)
+  end
+end
+
+function tbWnd:UpdateView()
+  local nSelectPos = self.tbZhenFaData[self.nZFSelect][1]
+  self:UpdateZhenFaSV()
+  self.nZFSelect = 1
+  for i = 1, #self.tbZhenFaData do
+    if self.tbZhenFaData[i][1] == nSelectPos then
+      self.nZFSelect = i
+    end
+  end
+  self.tbZhenFaSV:ScrollToIndex(self.nZFSelect, true)
+end
+
+function tbWnd:UpdateZhenFaSV()
+  local nCurPutOnPos, _ = ZhenFa:GetZhenFaCurPutOnPos(me)
+  self.tbZhenFaData = ZhenFa:GetHadActiveZhenFaList(me)
+  self.tbZhenFaSV:Reset()
+  for i = 1, #self.tbZhenFaData do
+    self.tbZhenFaSV:SetElement(i, function(tbElement, nIndex)
+      local pPanel = tbElement.pPanel
+      local nPos = self.tbZhenFaData[nIndex][1]
+      local nSubPos = self.tbZhenFaData[nIndex][2]
+      pPanel:Label_SetText("txtName", i18n.Get(ZhenFa.ZhenFaInfo[nPos][nSubPos][1]))
+      pPanel:Label_SetText("txtLevel/txtLevelValue", ZhenFa:GetZhenJueHoleCount(nPos, nSubPos))
+      local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      itemGrid:SetItemByTemplate(ZhenFa.ZhenFaInfo[nPos][nSubPos][2])
+      if nPos == nCurPutOnPos then
+        pPanel:SetActive("imgEquipped", true)
+      else
+        pPanel:SetActive("imgEquipped", false)
+      end
+      itemGrid:SetClickEnable(true, function()
+        self:OnZhenFaClick(nIndex, tbElement)
+      end)
+    end)
+  end
+end
+
+function tbWnd:OnZhenFaClick(nIndex, tbElement)
+  if self.nZFSelect then
+    local tbOldElement = self.tbZhenFaSV:GetElement(self.nZFSelect)
+    tbOldElement.pPanel:SetActive("imgSelected", false)
+  end
+  self.nZFSelect = nIndex
+  tbElement.pPanel:SetActive("imgSelected", true)
+  self:UpdateAttrSV()
+  self:UpdateDetailInfo()
+end
+
+function tbWnd:GetSelectPos()
+  local nPos = self.tbZhenFaData[self.nZFSelect][1]
+  local nSubPos = self.tbZhenFaData[self.nZFSelect][2]
+  return nPos, nSubPos
+end
+
+function tbWnd:UpdateDetailInfo()
+  local nPos = self.tbZhenFaData[self.nZFSelect][1]
+  local nSubPos = self.tbZhenFaData[self.nZFSelect][2]
+  self.pPanel:Label_SetText(tbControls.txtZhenFaName, i18n.Get(ZhenFa.ZhenFaInfo[nPos][nSubPos][1]))
+  self.tbZFItemGrid:SetItemByTemplate(ZhenFa.ZhenFaInfo[nPos][nSubPos][2])
+  local nZhenFaLevel = ZhenFa:GetZhenFaLevel(me)
+  self.pPanel:Label_SetText(tbControls.txtZhenFaLV, i18n.EasyGet("\233\152\181\230\179\149\231\173\137\231\186\167  {0}\231\186\167", nZhenFaLevel))
+  local _, nAttCount, nDefCount = ZhenFa:GetZhenJueHoleCount(nPos, nSubPos)
+  self.pPanel:Label_SetText(tbControls.txtZhenFaNumAttack, nAttCount)
+  self.pPanel:Label_SetText(tbControls.txtZhenFaNumDefense, nDefCount)
+  self:UpdateZhenJueSV(nPos)
+end
+
+function tbWnd:UpdateZhenJueSV(nPos)
+  local tbShowZJId = ZhenFa:GetZhenJueAttrShowItemIdList(me, nPos)
+  self.tbZhenJueSV:Reset()
+  for i = 1, #tbShowZJId do
+    self.tbZhenJueSV:SetElement(i, function(tbElement, nIndex)
+      local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      itemGrid:SetItemByTemplate(tbShowZJId[nIndex])
+      local nLevel = ZhenFa:GetZhenJueHoleLevel(me, nIndex)
+      itemGrid:SetLabelSuffixText(tostring(nLevel))
+      itemGrid:SetClickEnable(true, function()
+        Item:ShowItemDetail({
+          nTemplate = tbShowZJId[nIndex],
+          tbItemExtParams = {nPos = nPos, nHole = nIndex}
+        })
+      end)
+    end)
+  end
+end
+
+function tbWnd:UpdateAttrSV()
+  local nPos = self.tbZhenFaData[self.nZFSelect][1]
+  local nSubPos = self.tbZhenFaData[self.nZFSelect][2]
+  local nAttrId = ZhenFa.ZhenFaInfo[nPos][nSubPos][4]
+  PushString("ZFAttrInfo")
+  AppendString(tostring(nAttrId))
+  local szAttr = PopString()
+  local tbZFAttr = ZhenFa[szAttr]
+  local nZhenFaLevel = ZhenFa:GetZhenFaLevel(me)
+  local tbAttrInfo = {}
+  for i = 1, ZhenFa.nMaxTeamMember do
+    local tbAttr = tbZFAttr[i][nZhenFaLevel]
+    for j = 1, #tbAttr do
+      tbAttrInfo[j] = tbAttrInfo[j] or {}
+      tbAttrInfo[j].szMagicName = tbAttrInfo[j].szMagicName or tbAttr[j][1]
+      tbAttrInfo[j][i] = {
+        table.unpack(tbAttr[j], 2)
+      }
+    end
+  end
+  self.tbAttrSV:Reset()
+  for nAttrIndex = 1, #tbAttrInfo do
+    self.tbAttrSV:SetElement(nAttrIndex, function(tbElement, nIndex)
+      for nTeamNum = 1, ZhenFa.nMaxTeamMember do
+        local szAttribMsg, szValue = FightSkill:GetMagicDescSplit(tbAttrInfo[nIndex].szMagicName, tbAttrInfo[nIndex][nTeamNum])
+        tbElement.pPanel:Label_SetText("txtAttrValueNow", szAttribMsg)
+        tbElement.pPanel:Label_SetText("txtPlayerNum0" .. nTeamNum, szValue)
+      end
+    end)
+  end
+end

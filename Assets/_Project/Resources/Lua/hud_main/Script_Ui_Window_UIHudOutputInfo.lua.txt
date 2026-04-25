@@ -1,0 +1,187 @@
+local tbWnd = Ui:CreateWindow("UIHudOutputInfo")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_LEAVE,
+      self.OnLeave,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  ToggleKin = "Root/imgBG/ButtonGroup/ToggleKin",
+  TogglePlayer = "Root/imgBG/ButtonGroup/TogglePlayer",
+  txtRank = "Root/imgBG/OutputInfo/MyInfo/txtRank",
+  txtName = "Root/imgBG/OutputInfo/MyInfo/txtName",
+  txtScore = "Root/imgBG/OutputInfo/MyInfo/txtScore",
+  InfoTemplate = "Root/imgBG/OutputInfo/List/Viewport/Content/InfoTemplate"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbWindowSetting = {
+  TongChallenge = {
+    fnOpen = function(self)
+      self:OnOpen_TongChallenge()
+    end,
+    fnClose = function(self)
+      self:OnClose_TongChallenge()
+    end,
+    fnToggleKin = function(self, isOn)
+      if isOn then
+        self.nRankType = self.nKinRank
+        self:ReqRankInfo(self.nKinRank)
+        self:UpdateSV(self.tbKinRankInfo)
+        self:UpdateMyRank(self.tbMyKinRankInfo)
+      end
+    end,
+    fnTogglePerson = function(self, isOn)
+      if isOn then
+        self.nRankType = self.nPersonalRank
+        self:ReqRankInfo(self.nPersonalRank)
+        self:UpdateSV(self.tbPersonalRankInfo)
+        self:UpdateMyRank(self.tbMyPersonalRankInfo)
+      end
+    end,
+    fnUpdateRank = function(self, nRankType, tbRankInfo)
+      if nRankType ~= self.nRankType then
+        return
+      end
+      if nRankType == self.nKinRank then
+        self.tbKinRankInfo = tbRankInfo.tbRankList
+        self.tbMyKinRankInfo = tbRankInfo.tbOwnRank
+      else
+        self.tbPersonalRankInfo = tbRankInfo.tbRankList
+        self.tbMyPersonalRankInfo = tbRankInfo.tbOwnRank
+      end
+      self:UpdateSV(tbRankInfo.tbRankList)
+      self:UpdateMyRank(tbRankInfo.tbOwnRank)
+    end
+  },
+  GuardXiangYang = {
+    fnOpen = function(self)
+      self:OnOpen_GuardXiangYang()
+    end,
+    fnClose = function(self)
+      self:OnClose_GuardXiangYang()
+    end,
+    fnToggleKin = function(self, isOn)
+    end,
+    fnTogglePerson = function(self, isOn)
+    end,
+    fnUpdateRank = function(self, nRankType, tbRankInfo)
+      self:UpdateSV(tbRankInfo.tbRankList)
+      self:UpdateMyRank(tbRankInfo.tbOwnRank)
+    end
+  }
+}
+tbWnd.nKinRank = 1
+tbWnd.nPersonalRank = 2
+tbWnd.tbOnToggleClick = {
+  ToggleKin = function(self, isOn)
+    self.tbSetting.fnToggleKin(self, isOn)
+  end,
+  TogglePlayer = function(self, isOn)
+    self.tbSetting.fnTogglePerson(self, isOn)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbRankScroll = Ui:NewScrollView(self, self.InfoTemplate)
+  self.szType = nil
+end
+
+function tbWnd:OnOpen(szType)
+  if not self.szType then
+    self.szType = szType
+    self.tbSetting = self.tbWindowSetting[szType]
+  end
+  self.tbSetting.fnOpen(self)
+end
+
+function tbWnd:OnOpen_TongChallenge()
+  self.tbRankScroll:Clear()
+  self.pPanel:SetActive(tbControls.ToggleKin, true)
+  self.pPanel:SetActive(tbControls.TogglePlayer, true)
+  self.pPanel:Toggle_SetChecked(self.ToggleKin, true)
+  self.tbKinRankInfo = {}
+  self.tbMyKinRankInfo = {}
+  self.tbMyPersonalRankInfo = {}
+  self.tbPersonalRankInfo = {}
+  self:ReqRankInfo(self.nPersonalRank)
+  self:ReqRankInfo(self.nKinRank)
+  self.nRankTimer = Timer:Register(Env.GAME_FPS * 3, self.ReqRankInfo, self)
+end
+
+function tbWnd:OnOpen_GuardXiangYang()
+  if not Tong:HasTong() then
+    me.CenterMsg(i18n.EasyGet("\232\175\183\229\133\136\229\138\160\229\133\165\229\184\174\228\188\154"))
+    self:Close()
+    return
+  end
+  self.tbRankScroll:Clear()
+  self.pPanel:Toggle_SetChecked(tbControls.TogglePlayer, true)
+  self.pPanel:SetActive(tbControls.ToggleKin, false)
+  self.pPanel:SetActive(tbControls.TogglePlayer, true)
+  self.tbMyPersonalRankInfo = {}
+  self.tbPersonalRankInfo = {}
+  self:ReqGuardXiangRankInfo()
+  self.nRankTimer = Timer:Register(Env.GAME_FPS * 3, self.ReqGuardXiangRankInfo, self)
+end
+
+function tbWnd:OnClose()
+  self.tbSetting.fnClose(self)
+end
+
+function tbWnd:OnClose_TongChallenge()
+  if self.nRankTimer then
+    Timer:Close(self.nRankTimer)
+    self.nRankTimer = nil
+  end
+end
+
+function tbWnd:OnClose_GuardXiangYang()
+  self:OnClose_TongChallenge()
+end
+
+function tbWnd:ReqRankInfo(nRankType)
+  local bRet, func = FubenUIController:IsShowBtnScore()
+  if func then
+    func(nRankType or self.nRankType)
+  end
+  return true
+end
+
+function tbWnd:ReqGuardXiangRankInfo()
+  GuardXiangYangMgr:ReqRankInfo()
+  return true
+end
+
+function tbWnd:UpdateRank(nRankType, tbRankInfo)
+  self.tbSetting.fnUpdateRank(self, nRankType, tbRankInfo)
+end
+
+function tbWnd:UpdateSV(tbRankList)
+  tbRankList = tbRankList or {}
+  self.tbRankScroll:Clear()
+  for i, v in pairs(tbRankList) do
+    self.tbRankScroll:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtRank", i)
+      pPanel:Label_SetText("txtName", tbRankList[i].szName)
+      pPanel:Label_SetText("txtScore", tbRankList[i].nScore)
+    end)
+  end
+end
+
+function tbWnd:OnLeave()
+  self:Close()
+end
+
+function tbWnd:UpdateMyRank(tbOwnRank)
+  tbOwnRank = tbOwnRank or {}
+  print(self.txtRank, self.txtName, self.txtScore)
+  self.pPanel:Label_SetText(self.txtRank, tbOwnRank.nIndex or "")
+  self.pPanel:Label_SetText(self.txtName, tbOwnRank.szName or "")
+  self.pPanel:Label_SetText(self.txtScore, tbOwnRank.nScore or "")
+end

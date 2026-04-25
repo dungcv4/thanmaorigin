@@ -1,0 +1,665 @@
+local tbWnd = Ui:CreateWindow("UIAuction")
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnWorld = "node/imgBG/btnList/btnWorld",
+  btnKin = "node/imgBG/btnList/btnKin",
+  btnMystery = "node/imgBG/btnList/btnMystery",
+  btnMy = "node/imgBG/btnList/btnMy",
+  txtKin = "node/imgBG/btnList/btnKin/Text",
+  goAuctionPanel = "node/imgBG/Content/Auction",
+  btnTypeTemplate = "node/imgBG/Content/Auction/TypeList/ScrollView/Content/btnTemplate",
+  uiScrollView = "node/imgBG/Content/Auction/UIScrollView",
+  goAuctionElement = "node/imgBG/Content/Auction/UIScrollView/Content/AuctionElement",
+  goKinVoidPanel = "node/imgBG/Content/KinVoidPanel",
+  goWorldVoidPanel = "node/imgBG/Content/WorldVoidPanel",
+  goMysteryVoidPanel = "node/imgBG/Content/MysteryVoidPanel",
+  goListTitle = "node/imgBG/Content/Auction/ListTitle",
+  txtBidOverTitle = "node/imgBG/Content/Auction/ListTitle/txtOnePrice",
+  txtForecast = "node/imgBG/Content/Auction/txtForecast",
+  txtForecastValue = "node/imgBG/Content/Auction/txtForecast/txtForecastValue",
+  txtJoinKin = "node/imgBG/Content/KinVoidPanel/txtNoKin",
+  btnJoinKin = "node/imgBG/Content/KinVoidPanel/txtNoKin/btnJoinKin",
+  btnAuctionRecord = "node/imgBG/Content/Auction/btnAuctionRecord",
+  uiMoneyPanel = "node/UIMoneyPanel",
+  btnHelp = "node/imgBG/txtTitle/btnHelp"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnAuctionRecord = function(self)
+    self:ShowRecord()
+  end,
+  btnJoinKin = function(self)
+    Kin:OpenKinWindow()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("AuctionHelp")
+  end
+}
+tbWnd.szGlobalType = Auction:GetGlobalType()
+tbWnd.szShoperType = Auction:GetShoperType()
+tbWnd.szKinType = "Kin"
+tbWnd.szMyType = "My"
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_AUCTION_DATA,
+      self.OnSyncAuctionData
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.OnChangeMoney
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, self.uiMoneyPanel)
+  self.tbAuctionTypeBtnGroup = Ui:NewButtonGroup(self, {
+    self.btnWorld,
+    self.btnKin,
+    self.btnMystery,
+    self.btnMy
+  }, true, self.SwitchAuctionType)
+  self.tbItemTypeScrollView = Ui:NewScrollView(self, self.btnTypeTemplate, self.SwitchItemType, false)
+  self.tbItemDataScrollView = Ui:NewLoopScrollView(self, self.goAuctionElement)
+end
+
+function tbWnd:OnOpen(bForceShoper)
+  self:RegistRedPoint()
+  self.pPanel:SetActive(self.btnMystery, Auction:IsShoperOpen())
+  self.tbItemData = {
+    [self.szGlobalType] = {},
+    [self.szShoperType] = {},
+    [self.szKinType] = {}
+  }
+  self.tbItemTypeData = {
+    [self.szGlobalType] = {},
+    [self.szShoperType] = {},
+    [self.szKinType] = {}
+  }
+  self.tbMyItemData = {}
+  self.bRefresh = false
+  self.szAuctionType = nil
+  self.szItemType = nil
+  self.nTimer = nil
+  if Tong:HasTong() then
+    self.pPanel:Label_SetText(self.txtKin, i18n.EasyGet("\229\184\174\228\188\154\231\171\158\230\139\141"))
+  else
+    self.pPanel:Label_SetText(self.txtKin, i18n.EasyGet("\229\174\182\230\151\143\231\171\158\230\139\141"))
+  end
+  local nTime = GetTime()
+  if self.nC2sTimer then
+    Timer:Close(self.nC2sTimer)
+    self.nC2sTimer = nil
+  end
+  if not self.nRecordOpenUITime or nTime - self.nRecordOpenUITime > 1 then
+    Auction:Ask4AllAuctionDataAndMonitorUI(true)
+    self.nRecordOpenUITime = GetTime()
+  end
+  if not self.tbMoneyPanel.pPanel then
+    self:OnCreate()
+    LogErr("+_+ UIAuction Open Error!!!!!!!!!!!!!")
+  end
+  self.tbMoneyPanel:SetMoneyValue()
+  self.tbAuctionTypeBtnGroup:Select(1)
+  self.bFirstGrab = false
+  self.bForceShoper = bForceShoper
+end
+
+function tbWnd:OnClose()
+  self:UnRegistRedPoint()
+  local tbCellList = self.tbItemDataScrollView:GetCellList()
+  for _, tbCell in pairs(tbCellList) do
+    if tbCell.tbClass and tbCell.tbClass:IsOpen() then
+      tbCell.tbClass:OnClose()
+    end
+  end
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  if self.nC2sTimer then
+    Timer:Close(self.nC2sTimer)
+    self.nC2sTimer = nil
+  end
+  Auction:ClearAuctionCache()
+  self.nC2sTimer = Timer:Register(Env.GAME_FPS, function()
+    self:SetMonitorUI(false)
+  end, self)
+end
+
+function tbWnd:SetMonitorUI(bMonitor)
+  Auction:AskMonitorUI(bMonitor)
+  if self.nC2sTimer then
+    Timer:Close(self.nC2sTimer)
+    self.nC2sTimer = nil
+  end
+end
+
+function tbWnd:RegistRedPoint()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnMystery, {
+    RedPointMgr.EVENT.ShoperAuctionOpen
+  })
+end
+
+function tbWnd:UnRegistRedPoint()
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.btnMystery)
+end
+
+function tbWnd:SwitchAuctionType(nIndex)
+  local szAuctionType = ""
+  if 1 == nIndex then
+    self.bIsMyAuction = false
+    szAuctionType = self.szGlobalType
+  elseif 2 == nIndex then
+    self.bIsMyAuction = false
+    szAuctionType = self.szKinType
+  elseif 3 == nIndex then
+    self.bIsMyAuction = false
+    szAuctionType = self.szShoperType
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ShoperAuctionOpen)
+  elseif 4 == nIndex then
+    self.szAuctionType = self.szGlobalType
+    self:UpdateMyData()
+    self.bIsMyAuction = true
+    return
+  end
+  self.szAuctionType = szAuctionType
+  self:UpdateData()
+end
+
+function tbWnd:SwitchItemType(nIndex)
+  local szItemType = self.tbItemTypeData[self.szAuctionType][nIndex] or nil
+  if self.bIsMyAuction then
+    if 1 == nIndex then
+      szItemType = nil
+      self.szAuctionType = self.szGlobalType
+    elseif 2 == nIndex then
+      szItemType = nil
+      self.szAuctionType = self.szKinType
+    elseif 3 == nIndex then
+      szItemType = nil
+      self.szAuctionType = self.szShoperType
+    end
+    self.szItemType = szItemType
+    self:UpdateMyData()
+    return
+  end
+  if not szItemType or szItemType == self.szItemType then
+    return
+  end
+  self.szItemType = szItemType
+  self:UpdateData()
+end
+
+function tbWnd:OnSyncAuctionData(szType, szAuctionType, ...)
+  if "Auction" == szType then
+    self:OnSyncAuctionDataByType(szAuctionType, ...)
+  elseif "SyncOneItem" == szType then
+    self:OnSyncAuctionDataByItem(szAuctionType, ...)
+  elseif "ExpectEachGold" == szType then
+    self:OnNotifyExpectEachGold(szAuctionType)
+  end
+end
+
+function tbWnd:OnSyncAuctionDataByType(szAuctionType)
+  self:UpdateData()
+  if not self.bFirstGrab then
+    self.bFirstGrab = true
+    if self.bForceShoper and Auction:IsShoperOpen() then
+      self.tbAuctionTypeBtnGroup:Select(3)
+    elseif not Lib:IsEmptyTB(self.tbItemTypeData[self.szKinType]) then
+      self.tbAuctionTypeBtnGroup:Select(2)
+    else
+      if not Lib:IsEmptyTB(self.tbItemTypeData[self.szShoperType]) and Auction:IsShoperOpen() then
+        self.tbAuctionTypeBtnGroup:Select(3)
+      else
+      end
+    end
+  end
+end
+
+function tbWnd:OnSyncAuctionDataByItem(szRealAuctionType, tbSyncData, nSyncId)
+  if self.bIsMyAuction then
+    self:UpdateOneMyItem(szRealAuctionType, tbSyncData, nSyncId)
+    return
+  end
+  local szAuctionType, szItemType
+  if Auction:IsGlobal(szRealAuctionType) or Auction:IsShoper(szRealAuctionType) then
+    szAuctionType = szRealAuctionType
+    if Auction:IsShoper(szRealAuctionType) then
+      szItemType = i18n.Parse(Auction:GetShoperAuctionItemTypeName(tbSyncData.nOrgId))
+    else
+      szItemType = i18n.Parse(Auction:GetAuctionItemTypeName(tbSyncData.nItemId))
+    end
+  else
+    szAuctionType = self.szKinType
+    szItemType = i18n.Get(Auction.Def.tbTypeToName[szRealAuctionType])
+  end
+  if szAuctionType ~= self.szAuctionType then
+    return
+  end
+  if not self.szItemType or self.szItemType ~= szItemType then
+    return
+  end
+  local tbItemData = self.tbItemData[self.szAuctionType] and self.tbItemData[self.szAuctionType][self.szItemType] or nil
+  if not tbItemData then
+    return
+  end
+  for nId, _ in ipairs(tbItemData) do
+    if nSyncId == tbItemData[nId].nId then
+      if tbSyncData then
+        tbItemData[nId] = tbSyncData
+        if tbSyncData.bSold then
+          tbSyncData.bKeepSoldOut = true
+        end
+      else
+        tbItemData[nId].bKeepSoldOut = true
+      end
+      local tbElement = self.tbItemDataScrollView:GetElement(nId)
+      if tbElement and tbElement.tbCellInfo and tbElement.tbCellInfo.tbClass and tbElement.tbCellInfo.tbClass:IsOpen() then
+        tbElement.tbCellInfo.tbClass:OnClose()
+        tbElement.tbCellInfo.tbClass:OnOpen(szRealAuctionType, tbItemData[nId])
+        tbElement.tbCellInfo.tbClass:Update()
+      end
+      break
+    end
+  end
+end
+
+function tbWnd:OnNotifyExpectEachGold(szRealAuctionType)
+  if i18n.Get(Auction.Def.tbTypeToName[szRealAuctionType]) ~= self.szItemType then
+    return
+  end
+  if not self.pPanel:IsActive(self.txtForecastValue) then
+    return
+  end
+  local tbAuctionData = Auction:GetAuctionData(szRealAuctionType)
+  if tbAuctionData then
+    self.pPanel:Label_SetText(self.txtForecastValue, tbAuctionData.nExpectEachGold)
+  end
+end
+
+function tbWnd:OnChangeMoney()
+  self.tbMoneyPanel:SetMoneyValue()
+end
+
+function tbWnd:UpdateData()
+  if self.bRefresh then
+    return
+  end
+  self.bRefresh = true
+  self:FormatData()
+  self:ShowItemType()
+  self:ShowItem()
+  if self.szAuctionType == self.szKinType then
+    self.pPanel:SetActive(self.goWorldVoidPanel, false)
+    self.pPanel:SetActive(self.goMysteryVoidPanel, false)
+    if Lib:IsEmptyTB(self.tbItemTypeData[self.szAuctionType]) then
+      self.pPanel:SetActive(self.txtForecast, false)
+      self.pPanel:SetActive(self.goKinVoidPanel, true)
+      self.pPanel:SetActive(self.txtJoinKin, not Kin:HasKin())
+      self.pPanel:SetActive(self.goAuctionPanel, false)
+    else
+      self.pPanel:SetActive(self.txtForecast, true)
+      self.pPanel:SetActive(self.goKinVoidPanel, false)
+      self.pPanel:SetActive(self.goAuctionPanel, true)
+    end
+  else
+    self.pPanel:SetActive(self.txtForecast, false)
+    self.pPanel:SetActive(self.goKinVoidPanel, false)
+    if Lib:IsEmptyTB(self.tbItemTypeData[self.szAuctionType]) then
+      self.pPanel:SetActive(self.goWorldVoidPanel, self.szAuctionType == self.szGlobalType)
+      self.pPanel:SetActive(self.goMysteryVoidPanel, self.szAuctionType == self.szShoperType)
+      self.pPanel:SetActive(self.goAuctionPanel, false)
+    else
+      self.pPanel:SetActive(self.goWorldVoidPanel, false)
+      self.pPanel:SetActive(self.goMysteryVoidPanel, false)
+      self.pPanel:SetActive(self.goAuctionPanel, true)
+    end
+  end
+  self.pPanel:SetActive(self.goListTitle, not Lib:IsEmptyTB(self.tbItemTypeData[self.szAuctionType]))
+  self.pPanel:SetActive(self.txtBidOverTitle, self.szAuctionType ~= self.szShoperType)
+  self.bRefresh = false
+end
+
+function tbWnd:FormatData()
+  self.tbItemData = {
+    [self.szGlobalType] = {},
+    [self.szShoperType] = {},
+    [self.szKinType] = {}
+  }
+  self.tbItemTypeData = {
+    [self.szGlobalType] = {},
+    [self.szShoperType] = {},
+    [self.szKinType] = {}
+  }
+  local nNow = GetTime()
+  local tbAllAuctionData = Auction:GetAuctionData()
+  local tbItemData, tbItemTypeData, szItemType
+  for szType, tbAuctionData in pairs(tbAllAuctionData) do
+    tbItemData = nil
+    tbItemTypeData = nil
+    szItemType = nil
+    if Auction:IsGlobal(szType) or Auction:IsShoper(szType) then
+      tbItemData = self.tbItemData[szType]
+      tbItemTypeData = self.tbItemTypeData[szType]
+      for _, tbItem in pairs(tbAuctionData.tbItems) do
+        if not tbItem.bSold and nNow < tbItem.nTimeOut or tbItem.bKeepSoldOut then
+          if Auction:IsShoper(szType) then
+            szItemType = i18n.Parse(Auction:GetShoperAuctionItemTypeName(tbItem.nOrgId))
+          else
+            szItemType = i18n.Parse(Auction:GetAuctionItemTypeName(tbItem.nItemId))
+          end
+          tbItemData[szItemType] = tbItemData[szItemType] or {}
+          table.insert(tbItemData[szItemType], tbItem)
+          tbItemTypeData[szItemType] = true
+        end
+      end
+    elseif tbAuctionData.bOpen then
+      tbItemData = self.tbItemData[self.szKinType]
+      tbItemTypeData = self.tbItemTypeData[self.szKinType]
+      szItemType = i18n.Get(Auction.Def.tbTypeToName[szType])
+      for _, tbItem in pairs(tbAuctionData.tbItems) do
+        if not tbItem.bSold and nNow < tbItem.nTimeOut or tbItem.bKeepSoldOut then
+          tbItemData[szItemType] = tbItemData[szItemType] or {}
+          table.insert(tbItemData[szItemType], tbItem)
+          tbItemTypeData[szItemType] = true
+        end
+      end
+    end
+  end
+  self:SortItemRuleCommon(self.tbItemData[self.szGlobalType])
+  self:SortItemRuleShoper(self.tbItemData[self.szShoperType])
+  self:SortItemRuleCommon(self.tbItemData[self.szKinType])
+  self.tbItemTypeData[self.szGlobalType] = Lib:SetToList(self.tbItemTypeData[self.szGlobalType])
+  self.tbItemTypeData[self.szShoperType] = Lib:SetToList(self.tbItemTypeData[self.szShoperType])
+  self.tbItemTypeData[self.szKinType] = Lib:SetToList(self.tbItemTypeData[self.szKinType])
+  table.sort(self.tbItemTypeData[self.szGlobalType])
+  table.sort(self.tbItemTypeData[self.szShoperType])
+  table.sort(self.tbItemTypeData[self.szKinType])
+end
+
+function tbWnd:SortItemRuleCommon(tbItemData)
+  local function fnSort(a, b)
+    local nOrderA = Auction:GetAuctionItemSort(a.nItemId)
+    
+    local nOrderB = Auction:GetAuctionItemSort(b.nItemId)
+    if nOrderA ~= nOrderB then
+      return nOrderA < nOrderB
+    end
+    return a.nId < b.nId
+  end
+  
+  for szType, tbData in pairs(tbItemData) do
+    table.sort(tbData, fnSort)
+  end
+end
+
+function tbWnd:SortItemRuleShoper(tbItemData)
+  local function fnSort(a, b)
+    local nOrderA = Auction:GetShoperAuctionItemSort(a.nOrgId)
+    
+    local nOrderB = Auction:GetShoperAuctionItemSort(b.nOrgId)
+    if nOrderA ~= nOrderB then
+      return nOrderA < nOrderB
+    end
+    return a.nId < b.nId
+  end
+  
+  for szType, tbData in pairs(tbItemData) do
+    table.sort(tbData, fnSort)
+  end
+end
+
+function tbWnd:ShowItemType()
+  local szOrgItemType = self.szItemType
+  self.tbItemTypeScrollView:Reset()
+  self.szItemType = nil
+  local tbItemTypeData = self.tbItemTypeData[self.szAuctionType]
+  if not tbItemTypeData then
+    return
+  end
+  for nId, szItemType in ipairs(tbItemTypeData) do
+    self.tbItemTypeScrollView:SetElement(nId, function(tbElement)
+      tbElement.pPanel:Label_SetText("Text", szItemType)
+    end)
+  end
+  local nIndex = 1
+  if szOrgItemType then
+    for nId, szItemType in ipairs(tbItemTypeData) do
+      if szItemType == szOrgItemType then
+        nIndex = nId
+        break
+      end
+    end
+  end
+  self.tbItemTypeScrollView:SelectElement(nIndex)
+end
+
+function tbWnd:ShowItem()
+  self.pPanel:SetActive(self.btnAuctionRecord, not Auction:IsShoper(self.szAuctionType))
+  local tbCellList = self.tbItemDataScrollView:GetCellList()
+  for _, tbCell in pairs(tbCellList) do
+    if tbCell.tbClass and tbCell.tbClass:IsOpen() then
+      tbCell.tbClass:OnClose()
+    end
+  end
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  if not self.szItemType then
+    return
+  end
+  local tbItemData = self.tbItemData[self.szAuctionType] and self.tbItemData[self.szAuctionType][self.szItemType] or nil
+  if not tbItemData then
+    return
+  end
+  local szRealAuctionType
+  if Auction:IsGlobal(self.szAuctionType) or Auction:IsShoper(self.szAuctionType) then
+    szRealAuctionType = self.szAuctionType
+  else
+    for szType, szName in pairs(Auction.Def.tbTypeToName) do
+      if self.szItemType == i18n.Get(szName) then
+        szRealAuctionType = szType
+        break
+      end
+    end
+  end
+  self.tbItemDataScrollView:SetElement(Lib:CountTB(tbItemData), function(tbLoopScroll, nIndex, self)
+    local tbElement = tbLoopScroll:GetElement(nIndex)
+    if not tbElement then
+      return
+    end
+    if not tbElement.tbCellInfo.tbClass then
+      tbElement.tbCellInfo.tbClass = Ui:CreateOwnerPanel("UIAuctionItem", tbElement)
+    end
+    if tbItemData[nIndex] then
+      tbElement.tbCellInfo.tbClass:OnOpen(szRealAuctionType, tbItemData[nIndex])
+    end
+  end)
+  self:UpdateItem()
+  self.nTimer = Timer:Register(Env.GAME_FPS, self.UpdateItem, self)
+  if not Auction:IsGlobal(szRealAuctionType) and not Auction:IsShoper(szRealAuctionType) then
+    local tbAuctionData = Auction:GetAuctionData(szRealAuctionType)
+    if tbAuctionData then
+      if tbAuctionData.tbPlayerIds[me.dwID] then
+        self.pPanel:Label_SetText(self.txtForecastValue, tbAuctionData.nExpectEachGold)
+      else
+        self.pPanel:Label_SetText(self.txtForecastValue, 0)
+      end
+    end
+  end
+end
+
+function tbWnd:UpdateItem()
+  local bContinue = false
+  local tbCellList = self.tbItemDataScrollView:GetCellList()
+  for _, tbCell in pairs(tbCellList) do
+    if tbCell.tbClass and tbCell.tbClass:IsOpen() and tbCell.tbClass:Update() then
+      bContinue = true
+    end
+  end
+  if bContinue then
+    return true
+  end
+  self.nTimer = nil
+end
+
+function tbWnd:ShowRecord()
+  if not Auction:IsGlobal(self.szAuctionType) and not Auction:IsShoper(self.szAuctionType) and not Kin:HasKin() then
+    me.CenterMsg(i18n.EasyGet("\228\189\160\232\191\152\230\156\170\229\138\160\229\133\165\229\174\182\230\151\143\239\188\140\230\151\160\230\179\149\230\159\165\231\156\139\230\139\141\229\141\150\232\174\176\229\189\149"))
+    return
+  end
+  Ui:OpenWindow("UIAuctionRecord", self.szAuctionType, self.bIsMyAuction)
+end
+
+function tbWnd:UpdateMyData()
+  if self.bRefresh then
+    return
+  end
+  self.tbItemDataScrollView:Clear()
+  self.bRefresh = true
+  self:FormatData()
+  if not self.bIsMyAuction then
+    self:ShowMyItemType()
+  end
+  self:ShowMyItem()
+  self.pPanel:SetActive(self.txtForecast, false)
+  self.pPanel:SetActive(self.goMysteryVoidPanel, false)
+  self.pPanel:SetActive(self.goWorldVoidPanel, false)
+  self.pPanel:SetActive(self.goKinVoidPanel, false)
+  self.pPanel:SetActive(self.goAuctionPanel, true)
+  self.pPanel:SetActive(self.goListTitle, true)
+  self.pPanel:SetActive(self.txtBidOverTitle, not Auction:IsShoper(self.szAuctionType))
+  self.bRefresh = false
+end
+
+function tbWnd:ShowMyItemType()
+  self.tbItemTypeScrollView:Reset()
+  self.tbItemTypeScrollView:SetElement(1, function(tbElement)
+    tbElement.pPanel:Label_SetText("Text", i18n.EasyGet("\228\184\150\231\149\140"))
+  end)
+  self.tbItemTypeScrollView:SetElement(2, function(tbElement)
+    if Tong:HasTong() then
+      tbElement.pPanel:Label_SetText("Text", i18n.EasyGet("\229\184\174\228\188\154"))
+    else
+      tbElement.pPanel:Label_SetText("Text", i18n.EasyGet("\229\174\182\230\151\143"))
+    end
+  end)
+  if Auction:IsShoperOpen() then
+    self.tbItemTypeScrollView:SetElement(3, function(tbElement)
+      tbElement.pPanel:Label_SetText("Text", i18n.EasyGet("\231\165\158\231\167\152\229\149\134\228\186\186"))
+    end)
+  end
+  if Lib:IsEmptyTB(self.tbItemTypeData[self.szKinType]) then
+    self.tbItemTypeScrollView:SelectElement(1)
+    self.szAuctionType = self.szGlobalType
+  else
+    self.tbItemTypeScrollView:SelectElement(2)
+    self.szAuctionType = self.szKinType
+  end
+end
+
+function tbWnd:ShowMyItem()
+  self.pPanel:SetActive(self.btnAuctionRecord, not Auction:IsShoper(self.szAuctionType))
+  local tbCellList = self.tbItemDataScrollView:GetCellList()
+  for _, tbCell in pairs(tbCellList) do
+    if tbCell.tbClass and tbCell.tbClass:IsOpen() then
+      tbCell.tbClass:OnClose()
+    end
+  end
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  if not self.tbItemData[self.szAuctionType] then
+    return
+  end
+  local szRealAuctionType, szRealAuctionName
+  if Auction:IsGlobal(self.szAuctionType) or Auction:IsShoper(self.szAuctionType) then
+    szRealAuctionType = self.szAuctionType
+  end
+  local tbItemData = {}
+  for szAuctionTypeName, tbItemType in pairs(self.tbItemData[self.szAuctionType]) do
+    for _, tbItem in pairs(tbItemType) do
+      local bNeedShow = false
+      for k, v in pairs(Auction.Def.tbTypeToName) do
+        if szAuctionTypeName == i18n.Get(v) then
+          szRealAuctionName = tostring(k)
+          break
+        end
+      end
+      if tbItem.nBidderId == me.dwID then
+        bNeedShow = true
+      elseif szRealAuctionType then
+        bNeedShow = Auction:IsMyAuctionInfo(szRealAuctionType, tbItem.nId)
+      else
+        bNeedShow = Auction:IsMyAuctionInfo(szRealAuctionName, tbItem.nId)
+      end
+      if bNeedShow then
+        tbItem.szAuctionTypeName = szRealAuctionName
+        table.insert(tbItemData, tbItem)
+      end
+    end
+  end
+  if not tbItemData then
+    return
+  end
+  if 0 == Lib:CountTB(tbItemData) then
+    return
+  end
+  self.tbMyItemData = tbItemData
+  self.tbItemDataScrollView:SetElement(Lib:CountTB(tbItemData), function(tbLoopScroll, nIndex, self)
+    local tbElement = tbLoopScroll:GetElement(nIndex)
+    if not tbElement then
+      return
+    end
+    if not tbElement.tbCellInfo.tbClass then
+      tbElement.tbCellInfo.tbClass = Ui:CreateOwnerPanel("UIAuctionItem", tbElement)
+    end
+    if szRealAuctionType then
+      tbElement.tbCellInfo.tbClass:OnOpen(szRealAuctionType, tbItemData[nIndex])
+    else
+      tbElement.tbCellInfo.tbClass:OnOpen(tbItemData[nIndex].szAuctionTypeName, tbItemData[nIndex])
+    end
+  end)
+  self:UpdateItem()
+  self.nTimer = Timer:Register(Env.GAME_FPS, self.UpdateItem, self)
+end
+
+function tbWnd:UpdateOneMyItem(szRealAuctionType, tbSyncData, nSyncId)
+  if not self.tbMyItemData then
+    return
+  end
+  if 0 == Lib:CountTB(self.tbMyItemData) then
+    return
+  end
+  for nId, _ in ipairs(self.tbMyItemData) do
+    if nSyncId == self.tbMyItemData[nId].nId and szRealAuctionType == self.tbMyItemData[nId].szAuctionTypeName then
+      if tbSyncData then
+        local szAuctionTypeName = self.tbMyItemData[nId].szAuctionTypeName
+        self.tbMyItemData[nId] = tbSyncData
+        if not self.tbMyItemData[nId].szAuctionTypeName then
+          self.tbMyItemData[nId].szAuctionTypeName = szAuctionTypeName
+        end
+        if tbSyncData.bSold then
+          tbSyncData.bKeepSoldOut = true
+        end
+      else
+        self.tbMyItemData[nId].bKeepSoldOut = true
+      end
+      local tbElement = self.tbItemDataScrollView:GetElement(nId)
+      if tbElement and tbElement.tbCellInfo and tbElement.tbCellInfo.tbClass and tbElement.tbCellInfo.tbClass:IsOpen() then
+        tbElement.tbCellInfo.tbClass:OnClose()
+        tbElement.tbCellInfo.tbClass:OnOpen(szRealAuctionType, self.tbMyItemData[nId])
+        tbElement.tbCellInfo.tbClass:Update()
+      end
+      break
+    end
+  end
+end

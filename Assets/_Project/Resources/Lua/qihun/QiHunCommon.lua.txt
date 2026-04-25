@@ -1,0 +1,460 @@
+Require("CommonScript/AttributeModule/AttributeModule.lua")
+Require("CommonScript/Item/QiHun/QiHunCfg.lua")
+local QiHun = Item.QiHun
+QiHun.ComposeType = 1
+QiHun.ReforgeType = 2
+QiHun.RANK_TYPE_NONE = 0
+QiHun.RANK_TYPE_LOW = 1
+QiHun.RANK_TYPE_HIGH = 2
+QiHun.RANK_LOW_NUM = 10
+QiHun.RANK_HIGH_NUM = 10
+QiHun.SAVE_QIHUN_GROUP = GetGroupKey("EquipQiHun")
+QiHun.PutOnLevel = 1
+QiHun.PunchState = 11
+QiHun.GRADE_SCORE_LEVEL = 12
+QiHun.CUR_REFORGE_LEVEL = 13
+QiHun.CUR_REFORGE_INITIAL_LEVEL = 14
+QiHun.CUR_REFORGE_TIMES = 15
+QiHun.TAKEOFF_COUNT = 16
+QiHun.TAKEOFF_TIME = 17
+QiHun.nQiHunComposeNeed = 2
+QiHun.nQiHunReForgeOffsetLevel = 2
+QiHun.nQiHunSplitMinLevel = 2
+QiHun.nQiHunSplitGetNum = 2
+QiHun.MAX_DIRECT_TAKEOFF_LEVEL = 5
+QiHun.WAIT_TAKEOFF_TIME = 10800
+QiHun.DO_TAKEOFF_TIME = 3600
+QiHun.MAX_TAKEOFF_COUNT = 2
+QiHun.nLimitMinHour = 0
+QiHun.nLimitMaxHour = 6
+QiHun.bEnableLimitHour = false
+QiHun.nQiHunPutOnLevelLimit = 20
+
+function QiHun:GetPunchState(pPlayer, nEquipPos)
+  if nEquipPos < Item.EQUIPPOS_HELM or nEquipPos > Item.EQUIPPOS_AMULET then
+    return false
+  end
+  local nState = pPlayer.GetUserValue(self.SAVE_QIHUN_GROUP, self.PunchState)
+  nState = nState >> nEquipPos
+  nState = nState & 1
+  return 1 == nState
+end
+
+function QiHun:GetPutOnLevel(pPlayer, nEquipPos)
+  if nEquipPos < Item.EQUIPPOS_HELM or nEquipPos > Item.EQUIPPOS_AMULET then
+    return 0
+  end
+  return pPlayer.GetUserValue(self.SAVE_QIHUN_GROUP, QiHun.PutOnLevel + nEquipPos)
+end
+
+function QiHun:GetQiHunGradeScoreLevel(pPlayer)
+  return pPlayer.GetUserValue(self.SAVE_QIHUN_GROUP, self.GRADE_SCORE_LEVEL)
+end
+
+function QiHun:GetCurReforgeLevel(pPlayer)
+  return pPlayer.GetUserValue(self.SAVE_QIHUN_GROUP, self.CUR_REFORGE_LEVEL)
+end
+
+function QiHun:GetCurReforgeTimes(pPlayer)
+  return pPlayer.GetUserValue(self.SAVE_QIHUN_GROUP, self.CUR_REFORGE_TIMES)
+end
+
+function QiHun:IsSystemOpen(pPlayer)
+  pPlayer = pPlayer or me
+  if pPlayer.nLevel < self.nQiHunPutOnLevelLimit then
+    return false
+  end
+  if 1 == GetTimeFrameState(self.szOpenTimeframe) then
+    return true
+  end
+  return false
+end
+
+function QiHun:GetLevelByTemplateId(nTemplateId)
+  for i = 1, #self.tbLevelInfo do
+    if nTemplateId == self.tbLevelInfo[i][1] then
+      return i
+    end
+  end
+  return nil
+end
+
+function QiHun:CanPunchingWithReminderWindow(pPlayer, nEquipPos)
+  local bRet, szErrMsg = QiHun:CanPunching(pPlayer, nEquipPos)
+  if bRet then
+    return bRet, szErrMsg
+  elseif szErrMsg and szErrMsg == i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179") then
+    GainCurrency:ReadyForJump("Coin")
+    return bRet
+  else
+    return bRet, szErrMsg
+  end
+end
+
+function QiHun:CanPunching(pPlayer, nEquipPos)
+  if nEquipPos < Item.EQUIPPOS_HELM or nEquipPos > Item.EQUIPPOS_AMULET then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\232\163\133\229\164\135\228\184\141\229\143\175\228\187\165\230\137\147\229\173\148")
+  end
+  if not self:IsSystemOpen(pPlayer) then
+    return false, i18n.EasyGet("\229\153\168\233\173\130\231\179\187\231\187\159\230\156\170\229\188\128\229\144\175")
+  end
+  local pEquip = pPlayer.GetEquipByPos(nEquipPos)
+  if not pEquip then
+    return false, i18n.EasyGet("\230\156\170\231\169\191\230\136\180\232\163\133\229\164\135")
+  end
+  local nHadCoin = pPlayer.GetMoney("Coin")
+  if nHadCoin < self.nPunchingNeedCoin then
+    return false, i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179")
+  end
+  if self:GetPunchState(pPlayer, nEquipPos) then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\232\163\133\229\164\135\229\183\178\230\137\147\229\173\148")
+  end
+  return true
+end
+
+function QiHun:GetMaxPunOnLevel()
+  local nMaxLevel = 0
+  for k, v in ipairs(self.tbTimeFrameMaxLevel) do
+    if 1 == GetTimeFrameState(v.szTimeFrame) then
+      nMaxLevel = v.nLevel
+    end
+  end
+  return nMaxLevel
+end
+
+function QiHun:CanPutOn(pPlayer, nEquipPos, nLevel)
+  if not nEquipPos or nEquipPos < Item.EQUIPPOS_HELM or nEquipPos > Item.EQUIPPOS_AMULET then
+    return false
+  end
+  local pEquip = pPlayer.GetEquipByPos(nEquipPos)
+  if not pEquip then
+    return false, i18n.EasyGet("\230\156\170\231\169\191\230\136\180\232\163\133\229\164\135")
+  end
+  if not self:GetPunchState(pPlayer, nEquipPos) then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\232\163\133\229\164\135\230\156\170\230\137\147\229\173\148")
+  end
+  if pPlayer.IsMaskPlayerAttr() then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\230\151\160\230\179\149\231\169\191\230\136\180\229\153\168\233\173\130")
+  end
+  if not nLevel or nLevel <= 0 or nLevel > #self.tbLevelInfo then
+    return false, i18n.EasyGet("\231\169\191\230\136\180\231\173\137\231\186\167\233\148\153\232\175\175\239\188\154{0}", nLevel)
+  end
+  local nMaxPutOnLevel = self:GetMaxPunOnLevel()
+  if nLevel > nMaxPutOnLevel then
+    return false, i18n.EasyGet("\229\153\168\233\173\130\231\173\137\231\186\167\232\182\133\232\191\135\229\189\147\229\137\141\230\156\128\229\164\167\231\169\191\230\136\180\231\173\137\231\186\167")
+  end
+  local nTemplateId = self.tbLevelInfo[nLevel][1]
+  local nHadNum = pPlayer.GetItemCountByTypeInBag(nTemplateId)
+  if nHadNum < 1 then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\228\184\141\232\182\179")
+  end
+  local tbProp = Item:GetItemBaseProp(nTemplateId)
+  if not tbProp or tbProp.nItemType ~= Item.ITEMTYPE_QIHUN then
+    return false
+  end
+  if pPlayer.nLevel < tbProp.nRequireLevel then
+    return false, i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179\239\188\140\233\156\128{0}\231\186\167\230\150\185\229\143\175\233\149\182\229\181\140", tbProp.nRequireLevel)
+  end
+  return true
+end
+
+function QiHun:CanCompose(pPlayer, nLevel)
+  local nHour = Lib:GetLocalDayHour()
+  if self.bEnableLimitHour and nHour >= self.nLimitMinHour and nHour <= self.nLimitMaxHour then
+    return false, i18n.EasyGet("\229\135\140\230\153\1680\231\130\185\229\136\1766\231\130\185\228\184\141\232\131\189\229\144\136\230\136\144\229\153\168\233\173\130")
+  end
+  if not nLevel or nLevel <= 0 then
+    return false
+  end
+  if nLevel >= #self.tbLevelInfo then
+    return false, i18n.EasyGet("\229\153\168\233\173\130\229\183\178\230\152\175\230\156\128\233\171\152\231\173\137\231\186\167")
+  end
+  local nTemplateId = self.tbLevelInfo[nLevel][1]
+  local nHadNum = pPlayer.GetItemCountByTypeInBag(nTemplateId)
+  if nHadNum < self.nQiHunComposeNeed then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\228\184\141\232\182\179")
+  end
+  if not self.tbComposeInfo[nLevel] then
+    return false
+  end
+  return true
+end
+
+function QiHun:CanReforge(pPlayer, nLevel)
+  local nHour = Lib:GetLocalDayHour()
+  if self.bEnableLimitHour and nHour >= self.nLimitMinHour and nHour <= self.nLimitMaxHour then
+    pPlayer.CenterMsg(i18n.EasyGet("\229\135\140\230\153\1680\231\130\185\229\136\1766\231\130\185\228\184\141\232\131\189\233\135\141\233\147\184\229\153\168\233\173\130"))
+    return
+  end
+  if not nLevel or nLevel < self.nReforgeLevelLimitMin then
+    return false, i18n.EasyGet("\231\173\137\231\186\167\233\156\128\229\136\176\232\190\190{0}\231\186\167", self.nReforgeLevelLimitMin)
+  end
+  if self:GetCurReforgeTimes(pPlayer) >= self.nReforgeMaxCount then
+    return false, i18n.EasyGet("\229\141\149\232\189\174\229\183\178\233\135\141\233\147\184\229\133\171\230\172\161\239\188\140\232\175\183\229\133\136\229\143\150\229\155\158\229\153\168\233\173\130")
+  end
+  local nCurReforgeLevel = self:GetCurReforgeLevel(pPlayer)
+  if 0 == nCurReforgeLevel then
+    if nLevel > self.nReforgeLevelLimitMax then
+      return false, i18n.EasyGet("\231\173\137\231\186\167\233\156\128\229\176\143\228\186\142\231\173\137\228\186\142{0}\231\186\167", self.nReforgeLevelLimitMax)
+    end
+  elseif nCurReforgeLevel ~= nLevel then
+    return false, i18n.EasyGet("\232\175\183\230\177\130\233\135\141\233\147\184\231\154\132\231\173\137\231\186\167\228\184\141\231\173\137\228\186\142\229\189\147\229\137\141\231\130\137\229\173\144\229\153\168\233\173\130\231\173\137\231\186\167")
+  end
+  if nLevel >= #self.tbLevelInfo then
+    return false, i18n.EasyGet("\229\153\168\233\173\130\229\183\178\230\152\175\230\156\128\233\171\152\231\173\137\231\186\167")
+  end
+  local nTemplateId = self.tbLevelInfo[nLevel][1]
+  local nHadNum = pPlayer.GetItemCountByTypeInBag(nTemplateId)
+  if nHadNum < 1 then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\228\184\141\232\182\179")
+  end
+  if not self.tbReforgeInfo[nLevel] then
+    return false
+  end
+  return true
+end
+
+function QiHun:CanSplit(pPlayer, nLevel, nNum)
+  if not (nLevel and nNum) or nNum <= 0 then
+    return false
+  end
+  if nLevel < self.nQiHunSplitMinLevel then
+    return false, i18n.EasyGet("\231\173\137\231\186\167\233\156\128\229\136\176\232\190\190{0}\231\186\167", self.nQiHunSplitMinLevel)
+  end
+  if not self.tbLevelInfo[nLevel] then
+    return false
+  end
+  local nTemplateId = self.tbLevelInfo[nLevel][1]
+  local nHadNum = pPlayer.GetItemCountByTypeInBag(nTemplateId)
+  if nNum > nHadNum then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\228\184\141\232\182\179")
+  end
+  return true
+end
+
+function QiHun:GetQiHunCountLevel(pPlayer)
+  local nCountLevel = 0
+  for i = 1, Item.EQUIPPOS_MAIN_NUM do
+    local nEquipPos = i - 1
+    local nLevel = self:GetPutOnLevel(pPlayer, nEquipPos)
+    nCountLevel = nCountLevel + nLevel
+  end
+  return nCountLevel
+end
+
+function QiHun:ApplyQiHunAttrib(pNpc, nLevel, nPlayerId)
+  pNpc.ApplyMagicAttrib("qihun_level_damage_p", nLevel)
+  if nPlayerId then
+    AttributeHelp:LogAttrApply(nPlayerId, "QiHun", "qihun_level_damage_p", nLevel)
+  end
+  if self.tbLevelInfo[nLevel] then
+    local nPermill = self.tbLevelInfo[nLevel][2]
+    pNpc.ApplyMagicAttrib("allbasepotential_p", nPermill)
+    if nPlayerId then
+      AttributeHelp:LogAttrApply(nPlayerId, "QiHun", "allbasepotential_p", nPermill)
+    end
+  end
+end
+
+function QiHun:RemoveQiHunAttrib(pNpc, nLevel, nPlayerId)
+  pNpc.RemoveMagicAttrib("qihun_level_damage_p", nLevel)
+  if nPlayerId then
+    AttributeHelp:LogAttrRemove(nPlayerId, "QiHun", "qihun_level_damage_p", nLevel)
+  end
+  if self.tbLevelInfo[nLevel] then
+    local nPermill = self.tbLevelInfo[nLevel][2]
+    pNpc.RemoveMagicAttrib("allbasepotential_p", nPermill)
+    if nPlayerId then
+      AttributeHelp:LogAttrRemove(nPlayerId, "QiHun", "allbasepotential_p", nPermill)
+    end
+  end
+end
+
+function QiHun:RefreshQiHunAttrib(pPlayer, nOrgLv, nNewLv)
+  self:RemoveQiHunAttrib(pPlayer.GetNpc(), nOrgLv, pPlayer.dwID)
+  self:ApplyQiHunAttrib(pPlayer.GetNpc(), nNewLv, pPlayer.dwID)
+end
+
+function QiHun:ApplyGradeScoreAttrib(pNpc, nLevel, nPlayerId)
+  if self.tbGradeScoreInfo[nLevel] then
+    for i = 1, #self.tbGradeScoreInfo[nLevel] do
+      pNpc.ApplyMagicAttrib(table.unpack(self.tbGradeScoreInfo[nLevel][i]))
+      if nPlayerId then
+        AttributeHelp:LogAttrApply(nPlayerId, "QiHun", table.unpack(self.tbGradeScoreInfo[nLevel][i]))
+      end
+    end
+  end
+end
+
+function QiHun:RemoveGradeScoreAttrib(pNpc, nLevel, nPlayerId)
+  if self.tbGradeScoreInfo[nLevel] then
+    for i = 1, #self.tbGradeScoreInfo[nLevel] do
+      pNpc.RemoveMagicAttrib(table.unpack(self.tbGradeScoreInfo[nLevel][i]))
+      if nPlayerId then
+        AttributeHelp:LogAttrRemove(nPlayerId, "QiHun", table.unpack(self.tbGradeScoreInfo[nLevel][i]))
+      end
+    end
+  end
+end
+
+function QiHun:OnEquip(pPlayer)
+  local nGradeScoreLevel = self:GetQiHunGradeScoreLevel(pPlayer)
+  if nGradeScoreLevel > 0 then
+    self:ApplyGradeScoreAttrib(pPlayer.GetNpc(), nGradeScoreLevel, pPlayer.dwID)
+  end
+end
+
+function QiHun:OnUnEquip(pPlayer)
+  local nGradeScoreLevel = self:GetQiHunGradeScoreLevel(pPlayer)
+  if nGradeScoreLevel > 0 then
+    self:RemoveGradeScoreAttrib(pPlayer.GetNpc(), nGradeScoreLevel, pPlayer.dwID)
+  end
+end
+
+function QiHun:RefreshGradeScoreAttrib(pPlayer, nOrgLv, nNewLv)
+  self:RemoveGradeScoreAttrib(pPlayer.GetNpc(), nOrgLv, pPlayer.dwID)
+  self:ApplyGradeScoreAttrib(pPlayer.GetNpc(), nNewLv, pPlayer.dwID)
+end
+
+function QiHun:GetQiHunFightPower(pPlayer)
+  local nRet = 0
+  for nPos = Item.EQUIPPOS_HELM, Item.EQUIPPOS_AMULET do
+    local pEquip = pPlayer.GetEquipByPos(nPos)
+    if pEquip then
+      local nQiHunLevel = self:GetPutOnLevel(pPlayer, nPos)
+      if nQiHunLevel > 0 then
+        nRet = nRet + self.tbLevelInfo[nQiHunLevel][3]
+      end
+    end
+  end
+  local nScoreLevel = self:GetQiHunGradeScoreLevel(pPlayer)
+  nRet = nRet + self:GetQiHunScoreGradeFightPower(nScoreLevel)
+  return nRet
+end
+
+function QiHun:GetQiHunScoreGradeNeedLevel(nLevel)
+  local nNeedLevel = self.tbGradeScoreInfo[nLevel][0][1]
+  return nNeedLevel
+end
+
+function QiHun:GetQiHunScoreGradeFightPower(nLevel)
+  if not nLevel or not self.tbGradeScoreInfo[nLevel] then
+    return 0
+  end
+  local nNeedLevel = self.tbGradeScoreInfo[nLevel][0][2]
+  return nNeedLevel
+end
+
+function QiHun:IsWaitTakeOffTime(pPlayer)
+  local nQuestTime = pPlayer.GetUserValue(self.SAVE_QIHUN_GROUP, self.TAKEOFF_TIME)
+  local nPassTime = GetTime() - nQuestTime
+  local nLeftTime = self.WAIT_TAKEOFF_TIME - nPassTime
+  if 0 ~= nQuestTime and nLeftTime > 0 then
+    return true, nLeftTime
+  end
+  return false, 0
+end
+
+function QiHun:IsDoTakeOffTime(pPlayer)
+  local nQuestTime = pPlayer.GetUserValue(self.SAVE_QIHUN_GROUP, self.TAKEOFF_TIME)
+  local nPassTime = GetTime() - nQuestTime
+  local nLeftTime = self.WAIT_TAKEOFF_TIME + self.DO_TAKEOFF_TIME - nPassTime
+  if 0 ~= nQuestTime and nPassTime >= self.WAIT_TAKEOFF_TIME and nLeftTime > 0 then
+    return true, nLeftTime
+  end
+  return false, 0
+end
+
+function QiHun:CheckCanTakeOff(pPlayer)
+  if not pPlayer then
+    return false, i18n.EasyGet("\229\143\130\230\149\176\233\148\153\232\175\175\227\128\130")
+  end
+  if self:IsWaitTakeOffTime(pPlayer) or self:IsDoTakeOffTime(pPlayer) then
+    return false, i18n.EasyGet("\228\189\160\229\183\178\231\187\143\231\148\179\232\175\183\232\191\135\228\186\134\227\128\130")
+  end
+  if pPlayer.GetUserValue(self.SAVE_QIHUN_GROUP, self.TAKEOFF_COUNT) >= self.MAX_TAKEOFF_COUNT then
+    return false, i18n.EasyGet("\228\189\160\228\187\138\229\164\169\231\154\132\231\148\179\232\175\183\230\172\161\230\149\176\229\183\178\231\148\168\229\174\140\227\128\130")
+  end
+  return true
+end
+
+function QiHun:CheckCanCancelPeel(pPlayer)
+  if not pPlayer then
+    return false, i18n.EasyGet("\229\143\130\230\149\176\233\148\153\232\175\175\227\128\130")
+  end
+  if not self:IsWaitTakeOffTime(pPlayer) then
+    return false, i18n.EasyGet("\228\189\160\230\178\161\230\156\137\231\148\179\232\175\183\229\137\165\231\166\187\227\128\130")
+  end
+  return true
+end
+
+function QiHun:CheckCanDoTakeOff(pPlayer, nLevel)
+  if not pPlayer or not nLevel then
+    return false, i18n.EasyGet("\229\143\130\230\149\176\233\148\153\232\175\175\227\128\130")
+  end
+  if nLevel > self.MAX_DIRECT_TAKEOFF_LEVEL and not self:IsDoTakeOffTime(pPlayer) then
+    local szMsg = i18n.EasyGet("\228\184\186\228\186\134\228\191\157\232\175\129\230\130\168\231\154\132\232\180\162\228\186\167\229\174\137\229\133\168\239\188\140\229\137\165\231\166\187<color=#C56D05>\229\164\167\228\186\142{0}\231\186\167</color>\231\154\132\229\153\168\233\173\130\239\188\140\233\156\128\232\166\129\229\133\136<color=#C56D05>\229\137\165\231\166\187</color>\227\128\130\n<color=#C56D05>1\229\164\169</color>\229\143\175\228\187\165\231\148\179\232\175\183<color=#C56D05>{1}</color>\230\172\161\229\153\168\233\173\130\229\137\165\231\166\187\227\128\130\229\164\167\228\190\160\228\187\138\229\164\169\229\183\178\231\187\143\231\148\179\232\175\183\228\186\134<color=#C56D05>{2}</color>\230\172\161\227\128\130", self.MAX_DIRECT_TAKEOFF_LEVEL, self.MAX_TAKEOFF_COUNT, pPlayer.GetUserValue(self.SAVE_QIHUN_GROUP, self.TAKEOFF_COUNT))
+    return false, szMsg
+  end
+  return true
+end
+
+function QiHun:GetEquipQiHunData(pPlayer, pEquip)
+  if pEquip.nEquipPos < Item.EQUIPPOS_HELM or pEquip.nEquipPos > Item.EQUIPPOS_AMULET then
+    return -1
+  end
+  local nRet = 0
+  if pPlayer.GetQiHun then
+    nRet = pPlayer.GetQiHun(pEquip.nEquipPos + 1)
+  else
+    nRet = self:GetPutOnLevel(pPlayer, pEquip.nEquipPos)
+  end
+  return nRet
+end
+
+AttributeModule:Register("QiHun", QiHun)
+
+function QiHun:CheckQiHunConfigValid()
+  for nLevel, tbV in pairs(self.tbComposeInfo) do
+    local nWeight = 0
+    for i = 1, #tbV do
+      nWeight = nWeight + tbV[i][2]
+      if tbV[i][1] > 18 or tbV[i][1] > nLevel + 8 then
+        LogErr(string.format("QiHun tbComposeInfo Error nLevel[%d]", nLevel))
+        return false
+      end
+    end
+    if 1000000 ~= nWeight then
+      LogErr(string.format("QiHun tbComposeInfo Error nLevel[%d],nWeight[%d]", nLevel, nWeight))
+      return false
+    end
+  end
+  for nLevel, tbV in pairs(self.tbReforgeInfo) do
+    local nWeight = 0
+    for i = 1, #tbV do
+      nWeight = nWeight + tbV[i][2]
+      if tbV[i][1] > 18 or tbV[i][1] > nLevel + 3 then
+        LogErr(string.format("QiHun Reforge Error nLevel[%d]", nLevel))
+        return false
+      end
+      if 0 == tbV[i][1] and tbV[i][2] < 450000 then
+        LogErr(string.format("QiHun Reforge Error1 nWeight[%d]", tbV[i][2]))
+        return false
+      end
+    end
+    if 1000000 ~= nWeight then
+      LogErr(string.format("QiHun Reforge Error nLevel[%d],nWeight[%d]", nLevel, nWeight))
+      return false
+    end
+  end
+  return true
+end
+
+Validator:Register(QiHun.CheckQiHunConfigValid, QiHun)
+
+function QiHun:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  local nQiHuneGradeScoreLevel = pPlayerAsync.GetQiHunGradeScore()
+  if nQiHuneGradeScoreLevel and nQiHuneGradeScoreLevel > 0 then
+    Item.QiHun:ApplyGradeScoreAttrib(pNpc, nQiHuneGradeScoreLevel)
+  end
+end

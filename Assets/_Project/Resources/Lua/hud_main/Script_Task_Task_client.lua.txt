@@ -1,0 +1,386 @@
+Require("CommonScript/lib.lua")
+Require("CommonScript/Task/TaskAction_public.lua")
+
+function Task:OnSyncData(tbData)
+  self.tbTaskData = tbData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UPDATE_TASK, tbData)
+end
+
+function Task:GetSingleTaskData(nTaskId)
+  if not (self.tbTaskData and self.tbTaskData.tbCurTaskList) or not self.tbTaskData.tbCurTaskList[nTaskId] then
+    return
+  end
+  return self.tbTaskData.tbCurTaskList[nTaskId]
+end
+
+function Task:GetTitle(nTaskId)
+  local tbTaskCfg = self:GetTaskCfg(nTaskId)
+  if tbTaskCfg then
+    local nTaskType = self:GetTaskType(nTaskId)
+    return string.format("%s", i18n.Parse(tbTaskCfg.szTaskName))
+  end
+  return ""
+end
+
+function Task:GetTitleWithPrefix(nTaskId)
+  local tbTaskCfg = self:GetTaskCfg(nTaskId)
+  if tbTaskCfg then
+    local nTaskType = self:GetTaskType(nTaskId)
+    local szTaskType = nTaskType == self.TASK_TYPE_MAIN and i18n.EasyGet("\228\184\187") or i18n.EasyGet("\230\148\175")
+    return string.format("[%s] %s", szTaskType, i18n.Parse(tbTaskCfg.szTaskName))
+  end
+  return ""
+end
+
+function Task:GetTitleIncludeColor(szSourceTitle, nTaskType, szUseUIType)
+  return string.format("<color=#%s>%s</color>", Ui.tbColor:GetColorHexByDefineName(Task.TitleColor[nTaskType][szUseUIType]), szSourceTitle)
+end
+
+function Task:GetCurStepAndTotalStep(nTaskId)
+  local tbTaskCfg = self:GetTaskCfg(nTaskId)
+  if not tbTaskCfg then
+    return nil, nil
+  end
+  if not (self.tbTaskData and self.tbTaskData.tbCurTaskList) or not self.tbTaskData.tbCurTaskList[nTaskId] then
+    return nil, nil
+  end
+  local tbCurTask = self.tbTaskData.tbCurTaskList[nTaskId]
+  local nCurStep = tbCurTask.nStep
+  local nTotalStep = self:GetTaskShowStepNum(nTaskId)
+  nCurStep = nCurStep > nTotalStep and nTotalStep or nCurStep
+  return nCurStep, nTotalStep
+end
+
+function Task:GetStepText(nTaskId)
+  local nCurStep, nTotalStep = self:GetCurStepAndTotalStep(nTaskId)
+  if nil ~= nCurStep and nil ~= nTotalStep then
+    return string.format("(%s/%s)", nCurStep, nTotalStep)
+  else
+    return ""
+  end
+end
+
+function Task:GetTarget(nTaskId)
+  if not (self.tbTaskData and self.tbTaskData.tbCurTaskList) or not self.tbTaskData.tbCurTaskList[nTaskId] then
+    return ""
+  end
+  local tbCurTask = self.tbTaskData.tbCurTaskList[nTaskId]
+  local tbDetailCfg = self:GetDetailCfg(nTaskId, tbCurTask.nStep, tbCurTask.nBranch)
+  if not tbDetailCfg then
+    return ""
+  end
+  if tbCurTask.bNeedGetAward then
+    return i18n.EasyGet("\233\162\134\229\143\150\229\165\150\229\138\177")
+  elseif not tbCurTask.bStarted then
+    local tbTaskCfg = self:GetTaskCfg(nTaskId)
+    return i18n.Parse(self:GetCondTarget(tbTaskCfg.tbCondition))
+  elseif tbDetailCfg.szTarget and "" ~= tbDetailCfg.szTarget then
+    return i18n.Parse(tbDetailCfg.szTarget)
+  else
+    local szAction = tbDetailCfg.szAction
+    local tbLogic = self:GetLogic(szAction)
+    return i18n.Parse(tbLogic:GetTarget(tbDetailCfg))
+  end
+end
+
+function Task:CheckCondition_Client(pPlayer, nTaskId)
+  if not (self.tbTaskData and self.tbTaskData.tbCurTaskList) or not self.tbTaskData.tbCurTaskList[nTaskId] then
+    return false
+  end
+  local tbCurTask = self.tbTaskData.tbCurTaskList[nTaskId]
+  return tbCurTask.bStarted
+end
+
+function Task:IsEmptyTask(nTaskId)
+  if not (self.tbTaskData and self.tbTaskData.tbCurTaskList) or not self.tbTaskData.tbCurTaskList[nTaskId] then
+    return true
+  end
+  local tbCurTask = self.tbTaskData.tbCurTaskList[nTaskId]
+  local tbDetailCfg = self:GetDetailCfg(nTaskId, tbCurTask.nStep, tbCurTask.nBranch)
+  if not tbDetailCfg then
+    return true
+  end
+  local szAction = tbDetailCfg.szAction
+  local tbLogic = self:GetLogic(szAction)
+  return tbLogic:IsEmpty(tbDetailCfg)
+end
+
+function Task:AutoStart(nTaskId)
+  if not self:CheckCondition(me, nTaskId) then
+    return
+  end
+  AFK:Stop()
+  self:DoAction_Client(me, nTaskId)
+end
+
+function Task:DoAction_Client(pPlayer, nTaskId)
+  if 0 == IsAlone() and Map:IsTransForbid(pPlayer.nMapTemplateId) then
+    pPlayer.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\229\156\176\229\155\190\228\184\141\229\143\175\228\188\160\233\128\129"))
+    return
+  end
+  if not (self.tbTaskData and self.tbTaskData.tbCurTaskList) or not self.tbTaskData.tbCurTaskList[nTaskId] then
+    return
+  end
+  local tbCurTask = self.tbTaskData.tbCurTaskList[nTaskId]
+  if tbCurTask.bNeedGetAward then
+    if pPlayer.GetFreeBagCount() <= 0 then
+      pPlayer.CenterMsg(i18n.EasyGet("\229\140\133\232\163\185\229\183\178\230\187\161\239\188\140\232\175\183\232\135\179\229\176\145\230\184\133\231\144\134\229\135\1861\230\160\188\229\140\133\232\163\185\231\169\186\233\151\180\227\128\130"))
+    else
+      local SEND_CD = 1
+      local nNowTime = GetTime()
+      if self.nLastSendApplyGetAwardTime == nil or SEND_CD <= nNowTime - self.nLastSendApplyGetAwardTime then
+        self.nLastSendApplyGetAwardTime = nNowTime
+        RemoteServer.TaskCmd("ApplyGetAward", nTaskId)
+      end
+    end
+    return
+  end
+  local tbDetailCfg = self:GetDetailCfg(nTaskId, tbCurTask.nStep, tbCurTask.nBranch)
+  if not tbDetailCfg then
+    return
+  end
+  TeamMgr:StopFollowMember()
+  AFK:Stop()
+  local szAction = tbDetailCfg.szAction
+  local tbLogic = self:GetLogic(szAction)
+  return tbLogic:DoAction_Client(pPlayer, tbDetailCfg)
+end
+
+function Task:GetNearestNpc(nNpcTemplateId, nMapTemplateId)
+  if me.nMapTemplateId == nMapTemplateId then
+    return KNpc.GetNearestNpcByTemplateId(me.GetNpc(), nNpcTemplateId, AFK:GetSetting():GetFightSetting().nSearchRadius)
+  end
+  return nil
+end
+
+function Task:GotoNpc(nTaskId, nNpcTemplateId, nMapTemplateId, bAutoFight)
+  if nNpcTemplateId > 0 and nMapTemplateId > 0 then
+    local nPosX, nPosY, nWalkNearLength
+    local pNpc = Task:GetNearestNpc(nNpcTemplateId, nMapTemplateId)
+    if not pNpc then
+      nPosX, nPosY, nWalkNearLength = Npc:GetNpcPos(nNpcTemplateId, nMapTemplateId, true)
+    else
+      nWalkNearLength = GetNpcDialogDistance(nNpcTemplateId)
+      _, nPosX, nPosY = pNpc.GetWorldPos()
+    end
+    
+    local function fnCallback()
+      local function __timer_Callback()
+        if bAutoFight then
+          AFK:Start()
+        else
+          local pNpc = Task:GetNearestNpc(nNpcTemplateId, nMapTemplateId)
+          if pNpc then
+            local nNpcId = pNpc.nId
+            if nNpcId then
+              Task:CloseToNpc(nTaskId, nNpcTemplateId)
+              Operation:SimpleTap(nNpcId, false)
+            end
+          else
+            Task:GotoNpc(nTaskId, nNpcTemplateId, nMapTemplateId, bAutoFight)
+          end
+        end
+      end
+      
+      AFK:Stop()
+      Timer:Register(5, __timer_Callback)
+    end
+    
+    AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, fnCallback, nWalkNearLength, nil, nNpcTemplateId)
+  else
+    Task:CloseToNpc(nTaskId, 0)
+  end
+end
+
+function Task:GotoPos(nTaskId, nMapTemplateId, nPosX, nPosY, bAutoFight)
+  local function fnCallback()
+    local function __timer_Callback()
+      if bAutoFight then
+        AFK:Start()
+      end
+      Task:ClostToPos(nTaskId)
+    end
+    
+    AFK:Stop()
+    Timer:Register(5, __timer_Callback)
+  end
+  
+  AFK:Stop()
+  AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, fnCallback)
+end
+
+function Task:GotoPosUseItem(nTaskId, nMapTemplateId, nPosX, nPosY, nItemTemplateId)
+  local function fnCallback()
+    local function __timer_Callback()
+      Task:UseItem(nTaskId, nItemTemplateId)
+    end
+    
+    AFK:Stop()
+    Timer:Register(5, __timer_Callback)
+  end
+  
+  AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, fnCallback)
+end
+
+function Task:GotoPosSit(nTaskId, nMapTemplateId, nPosX, nPosY)
+  local function fnCallback()
+    local function __timer_Callback()
+      Task:ClostToPos(nTaskId)
+    end
+    
+    AFK:Stop()
+    me.UseSkill(101, -1, me.GetNpc().nId)
+    Timer:Register(5, __timer_Callback)
+  end
+  
+  AFK:Stop()
+  AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, fnCallback)
+end
+
+function Task:UseItem(nTaskId, nItemTemplateId)
+  RemoteServer.TaskCmd("UseItem_GS", nTaskId, nItemTemplateId)
+end
+
+function Task:ClostToPos(nTaskId)
+  RemoteServer.TaskCmd("CloseToPos_GS", nTaskId)
+end
+
+function Task:CloseToNpc(nTaskId, nNpcTemplateId)
+  RemoteServer.TaskCmd("CloseToNpc_GS", nTaskId)
+end
+
+function Task:GetAward(nTaskId)
+  RemoteServer.TaskCmd("ApplyGetAward", nTaskId)
+end
+
+function Task:GetCondTarget(tbCond)
+  local szType = tbCond.szType
+  local tbCLogic = self:GetConditonLogic(szType)
+  if not tbCLogic then
+    return ""
+  end
+  return tbCLogic:GetTarget(tbCond)
+end
+
+function Task:GetCondGuideMsg(nTaskId)
+  local tbTaskCfg = self:GetTaskCfg(nTaskId)
+  local tbCond = tbTaskCfg.tbCondition
+  local szType = tbCond.szType
+  local tbCLogic = self:GetConditonLogic(szType)
+  if not tbCLogic then
+    return ""
+  end
+  return tbCLogic:GetGuideMsg(tbCond)
+end
+
+function Task:OnFinishTask(nTaskId)
+  local tbTaskCfg = self:GetTaskCfg(nTaskId)
+  if not tbTaskCfg then
+    return
+  end
+  Sdk:onMissionSuccess(nTaskId, tostring(nTaskId), 1, Stronger.nFightPower, "")
+  EventNotify.OnNotify(EventNotify.emNOTIFY_FINISH_TASK, nTaskId)
+end
+
+function Task:OnFinishTaskStep(nTaskId, nStepID)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_FINISH_TASK_STEP, nTaskId, nStepID)
+end
+
+function Task:FinishCustomEventReq(szEvent)
+  RemoteServer.TaskCmd("FinishCustomEvent", szEvent)
+end
+
+function Task:OnAcceptTask(nTaskId)
+  local tbTaskCfg = self:GetTaskCfg(nTaskId)
+  if not tbTaskCfg then
+    return
+  end
+  Sdk:onMissionBegin(nTaskId, tostring(nTaskId), 1, Stronger.nFightPower, "")
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ACCEPT_TASK, nTaskId)
+end
+
+function Task:HasTask(nTaskId)
+  return self.tbTaskData.tbCurTaskList[nTaskId] ~= nil
+end
+
+function Task:IsFinished(nTaskId)
+  for i, id in pairs(self.tbTaskData.tbFinishedTaskIdList) do
+    if id == nTaskId then
+      return true
+    end
+  end
+  return false
+end
+
+function Task:StartConvoy(nTaskId)
+  if not (self.tbTaskData and self.tbTaskData.tbCurTaskList) or not self.tbTaskData.tbCurTaskList[nTaskId] then
+    return
+  end
+  local tbCurTask = self.tbTaskData.tbCurTaskList[nTaskId]
+  if tbCurTask.bNeedGetAward then
+    return
+  end
+  local tbDetailCfg = self:GetDetailCfg(nTaskId, tbCurTask.nStep, tbCurTask.nBranch)
+  if not tbDetailCfg then
+    return
+  end
+  local szAction = tbDetailCfg.szAction
+  if "convoy" ~= szAction then
+    return
+  end
+  local tbLogic = self:GetLogic(szAction)
+  return tbLogic:StartConvoy(tbDetailCfg)
+end
+
+function Task:CompareRecommedTaskId(pPlayer, nTaskId1, nTaskId2)
+  local function funGetCfg(nTaskId)
+    for _, tbInfo in pairs(self.CFG_TASK_RECOMMED) do
+      if tbInfo.nTaskId == nTaskId then
+        return tbInfo
+      end
+    end
+  end
+  
+  local tbInfo1 = funGetCfg(nTaskId1)
+  local tbInfo2 = funGetCfg(nTaskId2)
+  if not tbInfo1 and not tbInfo2 then
+    return 0
+  end
+  if not tbInfo1 and tbInfo2 then
+    local nRecommendLevel = tbInfo2.nRecommendLevel
+    return nRecommendLevel >= pPlayer.nLevel and nTaskId2 or 0
+  end
+  if not tbInfo2 and tbInfo1 then
+    local nRecommendLevel = tbInfo1.nRecommendLevel
+    return nRecommendLevel >= pPlayer.nLevel and nTaskId1 or 0
+  end
+  local bRecommendLevel1 = pPlayer.nLevel <= tbInfo1.nRecommendLevel
+  local bRecommendLevel2 = pPlayer.nLevel <= tbInfo2.nRecommendLevel
+  if not bRecommendLevel1 and bRecommendLevel2 then
+    return nTaskId2
+  end
+  if not bRecommendLevel2 and bRecommendLevel1 then
+    return nTaskId1
+  end
+  return tbInfo1.nIndex < tbInfo2.nIndex and nTaskId1 or nTaskId2
+end
+
+function Task:GetRecommedTaskId(pPlayer)
+  if not self.tbTaskData or not self.tbTaskData.tbCurTaskList then
+    return 0
+  end
+  local nReommedMainTaskId = 0
+  local nReommedSubTaskId = 0
+  for nTaskId, tbCurTask in pairs(self.tbTaskData.tbCurTaskList) do
+    local nTaskType = self:GetTaskType(nTaskId)
+    if nTaskType == self.TASK_TYPE_MAIN then
+      if tbCurTask.bStarted then
+        nReommedMainTaskId = nTaskId
+      end
+    else
+      nReommedSubTaskId = self:CompareRecommedTaskId(pPlayer, nReommedSubTaskId, nTaskId)
+    end
+  end
+  local nReommedTaskId = nReommedMainTaskId > 0 and nReommedMainTaskId or nReommedSubTaskId
+  return nReommedTaskId
+end

@@ -1,0 +1,296 @@
+Marry.tbMarryData = Marry.tbMarryData or {}
+Marry.nSelectMapLevel = 0
+Marry.nSelectYear = 0
+Marry.nSelectMonth = 0
+Marry.nSelectDay = 0
+Marry.nSelectTimePoint = 0
+Marry.nSelectRingLevel = 0
+Marry.nSelectClothingLevel = 0
+Marry.tbHaveClothes = {}
+Marry.tbBookTime = {}
+Marry.tbAsyncData = {}
+Marry.tbInvite = {}
+Marry.tbNewInvite = {}
+Marry.tbActionFunc = {
+  GotoNpc = function(...)
+    AutoPath:GotoStaticNpc(...)
+  end,
+  DoCollect = function()
+    Marry:DoCollect()
+  end,
+  SendInvitation = function(...)
+    Marry:TryGetInviteInfo()
+  end,
+  BookWeeding = function(...)
+    if not TeamMgr:HasTeam() then
+      me.CenterMsg(i18n.Get(Marry.Cfg.Msg.LESS_MEMBER))
+      return
+    end
+    local tbMembers = TeamMgr:GetMembers()
+    if #tbMembers < 1 then
+      me.CenterMsg(i18n.Get(Marry.Cfg.Msg.LESS_MEMBER))
+      return
+    end
+    RemoteServer.RequestMarry("RequestSyncBookInfo")
+  end,
+  ReBookWeeding = function(...)
+    RemoteServer.RequestMarry("RequestSyncReBookInfo")
+  end
+}
+
+function Marry:GetTitle()
+  local nCurState = self.tbMarryData.nTaskState
+  local szTitle = i18n.Get(Marry.Cfg.Task[nCurState].szTitle)
+  return szTitle
+end
+
+function Marry:GetTitleWithPrefix()
+  local nCurState = self.tbMarryData.nTaskState
+  local szTitle = i18n.Get(Marry.Cfg.Task[nCurState].szTitle)
+  return szTitle
+end
+
+function Marry:GetStepText()
+  return ""
+end
+
+function Marry:GetTarget()
+  local nCurState = self.tbMarryData.nTaskState
+  local szTarget = ""
+  local tbTarget = {}
+  if nCurState == Marry.TASK_STATE.COLLECT then
+    for nIndex, tbInfo in ipairs(Marry.Cfg.Collect) do
+      local szTemp = i18n.Get(tbInfo.szDesc, self.tbMarryData.tbCollect[tbInfo.nNpcID], tbInfo.nNums)
+      table.insert(tbTarget, szTemp)
+    end
+    szTarget = table.concat(tbTarget, "\n")
+  else
+    szTarget = i18n.Get(Marry.Cfg.Task[nCurState].szTarget)
+  end
+  return szTarget
+end
+
+function Marry:IsDoingTask()
+  if me.nLevel < Marry.Cfg.nLimitLevel then
+    return false
+  end
+  if not self.tbMarryData or not self.tbMarryData.nTaskState then
+    return false
+  end
+  if self.tbMarryData.nTaskState == Marry.TASK_STATE.COMPLETE or 0 == self.tbMarryData.nTaskState then
+    return false
+  end
+  return self.tbMarryData.nTaskState > Marry.TASK_STATE.NOGET
+end
+
+function Marry:DoAction_Client()
+  local nCurState = self.tbMarryData.nTaskState
+  local szAction = Marry.Cfg.Task[nCurState].szCallBack
+  local tbParam = Marry.Cfg.Task[nCurState].tbParam
+  Marry.tbActionFunc[szAction](table.unpack(tbParam))
+end
+
+function Marry:GetShowTarget()
+  return {}
+end
+
+function Marry:OnSyncData(tbData)
+  self.tbMarryData = tbData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_MARRY_DATA)
+end
+
+function Marry:DoCollect()
+  if not self.tbMarryData or not self.tbMarryData.tbCollect then
+    return
+  end
+  for nIndex, tbInfo in ipairs(Marry.Cfg.Collect) do
+    local nCurNums = self.tbMarryData.tbCollect[tbInfo.nNpcID]
+    if nCurNums < tbInfo.nNums then
+      AutoPath:GotoStaticNpc(tbInfo.nMapID, tbInfo.nNpcID)
+      return
+    end
+  end
+end
+
+function Marry:OnSyncBookInfo(tbHaveClothes, tbBookTime)
+  self.tbHaveClothes = tbHaveClothes
+  self:ParseBookTime(tbBookTime)
+  Marry.bReBook = false
+  Ui:OpenWindow("UISwordsmen")
+end
+
+function Marry:TryBookWedding()
+  if not TeamMgr:IsCaptain(me.dwID) then
+    me.CenterMsg(i18n.Get(Marry.Cfg.Msg.CAPTAIN_LIMIT))
+    return
+  end
+  local tbMembers = TeamMgr:GetMembers()
+  if #tbMembers < 1 then
+    me.CenterMsg(i18n.Get(Marry.Cfg.Msg.PAYFAIL_LESS_MEMBER))
+    return
+  end
+  local szWeddingTime = Marry.Cfg.TimePoint[Marry.nSelectTimePoint].szWeedingTime
+  local tbHour = Lib:SplitStrTry2Num(szWeddingTime, ":")
+  local tbParam = {
+    year = Marry.nSelectYear,
+    month = Marry.nSelectMonth,
+    day = Marry.nSelectDay,
+    hour = tbHour[1],
+    min = tbHour[2],
+    sec = tbHour[3]
+  }
+  local nTime = os.time(tbParam)
+  local nFinalDay = Lib:GetLocalDay(nTime)
+  RemoteServer.RequestMarry("RequestBookWedding", nFinalDay, Marry.nSelectTimePoint, Marry.nSelectMapLevel, Marry.nSelectRingLevel, Marry.nSelectClothingLevel)
+end
+
+function Marry:TryGetInviteInfo()
+  if me.dwTongId > 0 then
+    Tong:UpdateMemberList()
+  elseif me.dwKinId > 0 then
+    Kin:UpdateMemberList()
+  end
+  FriendShip:RequestUpdateFriendInfo()
+  RemoteServer.RequestMarry("RequestSyncInvitationInfo")
+end
+
+function Marry:OnSyncInviteInfo(nInviteTimes, tbInvite)
+  if nInviteTimes <= 0 then
+    me.CenterMsg(i18n.EasyGet("\230\151\160\229\143\175\233\130\128\232\175\183\230\172\161\230\149\176"))
+    return
+  end
+  self.nInviteTimes = nInviteTimes
+  self.tbInvite = tbInvite
+  self.tbNewInvite = {}
+  if not Ui:WindowVisible("UIWeddingInvitation") then
+    Ui:OpenWindow("UIWeddingInvitation")
+  else
+    Ui:GetWindow("UIWeddingInvitation"):Refresh()
+  end
+end
+
+function Marry:TrySendInvitation()
+  if 0 == Lib:CountTB(self.tbNewInvite) then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\156\170\233\128\137\230\139\169\233\130\128\232\175\183\231\154\132\231\142\169\229\174\182"))
+    return
+  end
+  RemoteServer.RequestMarry("RequestSendInvitation", self.tbNewInvite)
+end
+
+function Marry:OnSyncReBokInfo(tbInfo, tbBookTime)
+  Marry.nSelectMapLevel = tbInfo.nMapLevel
+  Marry.nSelectRingLevel = tbInfo.nRingLevel
+  Marry.nSelectClothingLevel = tbInfo.nClothingLevel
+  self:ParseBookTime(tbBookTime)
+  Marry.bReBook = true
+  Ui:OpenWindow("UISwordsmen", 2)
+end
+
+function Marry:TryReBook()
+  local szWeddingTime = Marry.Cfg.TimePoint[Marry.nSelectTimePoint].szWeedingTime
+  local tbHour = Lib:SplitStrTry2Num(szWeddingTime, ":")
+  local tbParam = {
+    year = Marry.nSelectYear,
+    month = Marry.nSelectMonth,
+    day = Marry.nSelectDay,
+    hour = tbHour[1],
+    min = tbHour[2],
+    sec = tbHour[3]
+  }
+  local nTime = os.time(tbParam)
+  local nFinalDay = Lib:GetLocalDay(nTime)
+  RemoteServer.RequestMarry("RequestReBookWedding", nFinalDay, self.nSelectTimePoint)
+end
+
+function Marry:ParseBookTime(tbBookTime)
+  Marry.tbBookTime = {}
+  for _, nLevel in pairs(Marry.WEDDING_LEVEL) do
+    Marry.tbBookTime[nLevel] = {}
+  end
+  for nDay, tbLevel in pairs(tbBookTime) do
+    for nLevel, tbTimePoint in pairs(tbLevel) do
+      local nOriginTime = nDay * 3600 * 24
+      local tbTime = os.date("*t", nOriginTime)
+      self.tbBookTime[nLevel][tbTime.year] = self.tbBookTime[nLevel][tbTime.year] or {}
+      self.tbBookTime[nLevel][tbTime.year][tbTime.month] = self.tbBookTime[nLevel][tbTime.year][tbTime.month] or {}
+      self.tbBookTime[nLevel][tbTime.year][tbTime.month][tbTime.day] = tbTimePoint
+    end
+  end
+end
+
+function Marry:OnLogoutC()
+  Marry.nSelectMapLevel = 0
+  Marry.nSelectYear = 0
+  Marry.nSelectMonth = 0
+  Marry.nSelectDay = 0
+  Marry.nSelectTimePoint = 0
+  Marry.nSelectRingLevel = 0
+  Marry.nSelectClothingLevel = 0
+  Marry.tbNewInvite = {}
+  Marry.nInviteTimes = 0
+  Marry.tbInvite = {}
+  Marry.bReBook = false
+end
+
+function Marry:RequstGetAsyncData(dwPlayerId)
+  if self.tbAsyncData[dwPlayerId] then
+    return self.tbAsyncData[dwPlayerId]
+  end
+  RemoteServer.RequestMarry("RequestGetAsyncData", dwPlayerId)
+end
+
+function Marry:OnGetAsyncData(dwPlayerId, tbData)
+  self.tbAsyncData[dwPlayerId] = tbData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_MARRY_ASYNCDATA, dwPlayerId)
+end
+
+function Marry:RequestSynSelect2Lover_Helper(nIndex)
+  local nFinalDay = 0
+  if Marry.nSelectYear > 0 and Marry.nSelectMonth > 0 and Marry.nSelectDay > 0 and Marry.nSelectTimePoint > 0 then
+    local szWeddingTime = Marry.Cfg.TimePoint[Marry.nSelectTimePoint].szWeedingTime
+    local tbHour = Lib:SplitStrTry2Num(szWeddingTime, ":")
+    local tbParam = {
+      year = Marry.nSelectYear,
+      month = Marry.nSelectMonth,
+      day = Marry.nSelectDay,
+      hour = tbHour[1],
+      min = tbHour[2],
+      sec = tbHour[3]
+    }
+    local nTime = os.time(tbParam)
+    nFinalDay = Lib:GetLocalDay(nTime)
+  end
+  RemoteServer.RequestMarry("RequestSynSelect", nIndex, Marry.nSelectMapLevel, Marry.nSelectRingLevel, nFinalDay, Marry.nSelectTimePoint, Marry.nSelectClothingLevel)
+  self.nSynTimer = nil
+end
+
+function Marry:RequestSynSelect2Lover(nIndex)
+  if not TeamMgr:IsCaptain(me.dwID) then
+    return
+  end
+  if self.nSynTimer then
+    Timer:Close(self.nSynTimer)
+    self.nSynTimer = nil
+  end
+  Timer:Register(Env.GAME_FPS, self.RequestSynSelect2Lover_Helper, self, nIndex)
+end
+
+function Marry:OnSyncSelect(nIndex, nLevel, nRingLevel, nDay, nTimePoint, nClothingLevel)
+  local nOriginTime = nDay * 3600 * 24
+  local tbTime = os.date("*t", nOriginTime)
+  Marry.nSelectMapLevel = nLevel
+  Marry.nSelectYear = tbTime.year
+  Marry.nSelectMonth = tbTime.month
+  Marry.nSelectDay = tbTime.day
+  Marry.nSelectTimePoint = nTimePoint
+  Marry.nSelectRingLevel = nRingLevel
+  Marry.nSelectClothingLevel = nClothingLevel
+  if not Ui:WindowVisible("UISwordsmen") then
+    RemoteServer.RequestMarry("RequestSyncBookInfo")
+  else
+    Ui:OpenWindow("UISwordsmen", nIndex)
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Marry)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Marry.OnLogoutC, Marry)

@@ -1,0 +1,347 @@
+Require("Script/Common/AFK_Setting.lua")
+Require("Script/EventSystem/EventNotify.lua")
+Require("Script/Common/MedicineMgr.lua")
+AFK.AFKAutoMedicine = {}
+local AFKMedicineSetting = AFK:GetSetting():GetMedicineSetting()
+local AFKAutoMedicine = AFK.AFKAutoMedicine
+AFKAutoMedicine.ProtectTriggerInterval = 27
+AFKAutoMedicine.UseItemTriggerInterval = 90
+AFKAutoMedicine.ChangXiaoTemplateId = 50005
+
+function AFK:GetAutoMedicine()
+  return AFKAutoMedicine
+end
+
+function AFKAutoMedicine:Init()
+  self.nProtectMainTimer = nil
+  self.nUseItemMainTimer = nil
+  self.tbJiuClass = nil
+  self.tbJiuBaseInfo = nil
+  self.nJiuTemplateId = nil
+  self.nJiuRequireLevel = nil
+  self.bHaveNoJiuItem = nil
+  self.tbGouHuoNpcClass = nil
+  self.tbChangXiaoBaseInfo = nil
+  self.nChangXiaoRequireLevel = nil
+  self.nChangXiaoSkillId = nil
+  self.bHaveNoChangXiaoItem = nil
+end
+
+function AFKAutoMedicine:SetThresholdValue(nIndex, nValue)
+  if 1 == nIndex then
+    AFKMedicineSetting.tbLifeProtect[1].nThresholdValue = nValue
+    return
+  end
+  AFKMedicineSetting.tbManaProtect[1].nThresholdValue = nValue
+end
+
+function AFKAutoMedicine:OpenProtect(bOpenFlag)
+  AFKMedicineSetting.bOpenProtect = bOpenFlag
+  if AFKMedicineSetting.bOpenProtect then
+    self:_StartProtect()
+  else
+    self:_StopProtect()
+  end
+end
+
+function AFKAutoMedicine:OpenUseItem(bOpenFlag)
+  AFKMedicineSetting.bOpenUseItem = bOpenFlag
+  if AFKMedicineSetting.bOpenUseItem then
+    self:_StartUseItem()
+  else
+    self:_StopUseItem()
+  end
+end
+
+function AFKAutoMedicine:OpenReply(bOpenFlag)
+  AFKMedicineSetting.bOpenReplyMedicine = bOpenFlag
+end
+
+function AFKAutoMedicine:_StartProtect()
+  self:_StopProtect()
+  self.nProtectMainTimer = Timer:Register(self.ProtectTriggerInterval, self._ActivateProtectShell, self)
+end
+
+function AFKAutoMedicine:_StopProtect()
+  if self.nProtectMainTimer then
+    Timer:Close(self.nProtectMainTimer)
+  end
+  self.nProtectMainTimer = nil
+end
+
+function AFKAutoMedicine:_StartUseItem()
+  self:_StopUseItem()
+  self.nUseItemMainTimer = Timer:Register(self.UseItemTriggerInterval, self._ActivateUseItemShell, self)
+  self.tbJiuClass = Item:GetClass("Jiu")
+  if self.tbJiuClass then
+    self.nJiuTemplateId = self.tbJiuClass.nTemplateId
+  end
+  if self.nJiuTemplateId then
+    self.tbJiuBaseInfo = Item:GetItemBaseProp(self.nJiuTemplateId)
+  end
+  if self.tbJiuBaseInfo then
+    self.nJiuRequireLevel = self.tbJiuBaseInfo.nRequireLevel
+  end
+  self.tbGouHuoNpcClass = Npc:GetClass("GouHuoNpc")
+  self.tbChangXiaoBaseInfo = Item:GetItemBaseProp(self.ChangXiaoTemplateId)
+  if self.tbChangXiaoBaseInfo then
+    self.nChangXiaoRequireLevel = self.tbChangXiaoBaseInfo.nRequireLevel
+  end
+  self.nChangXiaoSkillId = KItem.GetItemExtParam(self.ChangXiaoTemplateId, 1)
+end
+
+function AFKAutoMedicine:_StopUseItem()
+  if self.nUseItemMainTimer then
+    Timer:Close(self.nUseItemMainTimer)
+  end
+  self.tbJiuClass = nil
+  self.tbJiuBaseInfo = nil
+  self.nJiuTemplateId = nil
+  self.nJiuRequireLevel = nil
+  self.tbGouHuoNpcClass = nil
+  self.bHaveNoJiuItem = nil
+  self.tbChangXiaoBaseInfo = nil
+  self.nChangXiaoRequireLevel = nil
+  self.nChangXiaoSkillId = nil
+  self.bHaveNoChangXiaoItem = nil
+  self.nUseItemMainTimer = nil
+end
+
+function AFKAutoMedicine:_ActivateProtectShell()
+  self:_ActivateProtect()
+  return true
+end
+
+function AFKAutoMedicine:_ActivateUseItemShell()
+  self:_ActivateUseItem()
+  return true
+end
+
+function AFKAutoMedicine:_ActivateProtect()
+  local pNpc = me.GetNpc()
+  if not pNpc then
+    return
+  end
+  local doing = pNpc.GetAction()
+  if doing == Npc.Doing.death or doing == Npc.Doing.revive then
+    return
+  end
+  if me.nFightMode == Npc.FIGHT_MODE.emFightMode_None then
+    return
+  end
+  if not MedicineMgr:CheckUseMedicine() then
+    return
+  end
+  local nLifePercent = pNpc.i64CurLife / pNpc.i64MaxLife * 100
+  local nManaPercent = pNpc.i64CurMana / pNpc.i64MaxMana * 100
+  local nCount = MedicineMgr:GetCurUsedMedicineCount() or 0
+  local bIsLeadFightRunning = AFK:IsLeadFightRunning()
+  local bIsFuBen = Map:IsFuben(me.nMapTemplateId)
+  for _, v in pairs(AFKMedicineSetting.tbLifeProtect) do
+    if v.nThresholdValue and v.nThresholdValue > 0 and v.nMedicineCount and v.nMedicineCount > 0 and nLifePercent < v.nThresholdValue then
+      local nEatCount = nCount >= v.nMedicineCount and v.nMedicineCount or nCount
+      if nEatCount > 0 then
+        nCount = nCount - nEatCount
+        for i = 1, nEatCount do
+          MedicineMgr:UseMedicine()
+        end
+      else
+      end
+    end
+  end
+  for _, v in pairs(AFKMedicineSetting.tbManaProtect) do
+    if v.nThresholdValue and v.nThresholdValue > 0 and v.nMedicineCount and v.nMedicineCount > 0 and nManaPercent < v.nThresholdValue then
+      local nEatCount = nCount >= v.nMedicineCount and v.nMedicineCount or nCount
+      if nEatCount > 0 then
+        nCount = nCount - nEatCount
+        for i = 1, nEatCount do
+          MedicineMgr:UseMedicine()
+        end
+      else
+      end
+    end
+  end
+end
+
+function AFKAutoMedicine:_ActivateUseItem()
+  local szMapClass = Map:GetClassDesc(me.nMapTemplateId)
+  if not szMapClass or "fight" ~= szMapClass and "city" ~= szMapClass then
+    return
+  end
+  self:_ActivateUseJiu()
+  self:_ActivateUseChangXiao()
+  self:_ActivateReplyRemindMsg()
+end
+
+function AFKAutoMedicine:_ActivateUseJiu()
+  if not AFKMedicineSetting.bOpenUseJiu then
+    return
+  end
+  if not (self.tbJiuClass and self.nJiuTemplateId and self.tbJiuBaseInfo) or not self.nJiuRequireLevel then
+    return
+  end
+  if me.nLevel < self.nJiuRequireLevel then
+    return
+  end
+  if not self.tbGouHuoNpcClass or not self.tbGouHuoNpcClass.nGouhuoSkillId then
+    return
+  end
+  local pMeNpc = me.GetNpc()
+  if not pMeNpc then
+    return
+  end
+  local tbGouHuoSkillState = pMeNpc.GetSkillState(self.tbGouHuoNpcClass.nGouhuoSkillId)
+  if not tbGouHuoSkillState then
+    return
+  end
+  local tbJiuSkillState = pMeNpc.GetSkillState(self.tbJiuClass.nJiuSkillId)
+  if tbJiuSkillState then
+    return
+  end
+  local tbJiusItem = me.GetItemListInBag("Jiu")
+  if not next(tbJiusItem) then
+    self.bHaveNoJiuItem = true
+    if AFKMedicineSetting.bOpenUseJiu and AFKMedicineSetting.bOpenBuyJiuNotice then
+      EventNotify.OnNotify(EventNotify.emNOTIFY_AFK_BUY_JIU_NOTICE)
+    end
+    return
+  end
+  self.bHaveNoJiuItem = false
+  if GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    RemoteServer.Zone_UseItem(tbJiusItem[1].dwId)
+  else
+    RemoteServer.UseItem(tbJiusItem[1].dwId)
+  end
+end
+
+function AFKAutoMedicine:_ActivateUseChangXiao()
+  if not AFKMedicineSetting.bOpenUseChangXiao then
+    return
+  end
+  if not (self.tbChangXiaoBaseInfo and self.nChangXiaoRequireLevel) or not self.nChangXiaoSkillId then
+    return
+  end
+  if me.nLevel < self.nChangXiaoRequireLevel then
+    return
+  end
+  local pMeNpc = me.GetNpc()
+  if not pMeNpc then
+    return
+  end
+  local tbChangXiaoSkillState = pMeNpc.GetSkillState(self.nChangXiaoSkillId)
+  if tbChangXiaoSkillState then
+    return
+  end
+  local tbChangXiaoItem = me.FindItem(self.ChangXiaoTemplateId)
+  if not next(tbChangXiaoItem) then
+    self.bHaveNoChangXiaoItem = true
+    return
+  end
+  self.bHaveNoChangXiaoItem = false
+  RemoteServer.UseItem(tbChangXiaoItem[1].dwId)
+end
+
+function AFKAutoMedicine:_ActivateReplyRemindMsg()
+  if not AFKMedicineSetting.bOpenReplyRemindMsg then
+    return
+  end
+  if self.bHaveNoChangXiaoItem then
+    local bUIItemBuyAndUseVisible = Ui:WindowVisible("UIItemBuyAndUse")
+    local bUIShopVisible = Ui:WindowVisible("UIShop")
+    if bUIItemBuyAndUseVisible or bUIShopVisible then
+      return
+    end
+    
+    local function fnBuy()
+      Ui:OpenWindow("UIShop", Shop.ShopType2ViewIndex.YuanBao, self.ChangXiaoTemplateId)
+      Ui:CloseWindow("UIItemBuyAndUse")
+    end
+    
+    local tbBtns = {
+      [2] = {
+        szDesc = i18n.EasyGet("\232\180\173\228\185\176"),
+        fnOnClick = fnBuy
+      }
+    }
+    if not Ui:WindowVisible("UIItemBuyAndUse") then
+      Ui:OpenWindow("UIItemBuyAndUse", self.ChangXiaoTemplateId, i18n.EasyGet("\233\149\191\230\149\136\231\142\137\233\156\178\228\184\184\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\232\180\173\228\185\176"), tbBtns)
+    end
+    return
+  end
+end
+
+function AFKAutoMedicine:ReplyMedicineDirectly()
+  self:_ReplyMedicineDirectly()
+end
+
+function AFKAutoMedicine:_ReplyMedicineDirectly()
+  if not AFKMedicineSetting.bOpenReplyMedicine then
+    return
+  end
+  if 0 ~= me.nFightMode then
+    return
+  end
+  local nTemplateId = MedicineMgr:GetCurMedicineTId(me)
+  local tbBase = Item:GetItemBaseProp(nTemplateId)
+  local nMoney = me.GetMoney(MedicineMgr.szMoneyType)
+  local nCountThatMoneyCanBuy = math.floor(nMoney / tbBase.nPrice)
+  local nCurCount = MedicineMgr:GetCurUsedMedicineCount()
+  local nBuyCount = MedicineMgr.nMaxMedicineCount - nCurCount
+  if nBuyCount < 0 then
+    nBuyCount = 0
+  elseif nBuyCount > MedicineMgr.nMaxMedicineCount then
+    nBuyCount = MedicineMgr.nMaxMedicineCount
+  end
+  nBuyCount = math.min(nBuyCount, nCountThatMoneyCanBuy)
+  if nBuyCount <= 0 then
+    return
+  end
+  if nBuyCount > MedicineMgr.nMaxMedicineCount then
+    nBuyCount = MedicineMgr.nMaxMedicineCount
+  end
+  MedicineMgr:BuyMedicineDirectly(nTemplateId, nBuyCount)
+end
+
+function AFKAutoMedicine:_OnSyncPlayerDataEnd(bReconnect)
+  AFK:GetSetting():LoadMedicineSetting()
+  if AFKMedicineSetting.bOpenProtect then
+    self:_StartProtect()
+  else
+    self:_StopProtect()
+  end
+  if AFKMedicineSetting.bOpenReplyMedicine then
+    self:_ReplyMedicineDirectly()
+  end
+end
+
+function AFKAutoMedicine:_OnMapLoaded()
+  AFK:GetSetting():LoadMedicineSetting()
+  if AFKMedicineSetting.bOpenProtect then
+    self:_StartProtect()
+  else
+    self:_StopProtect()
+  end
+  if AFKMedicineSetting.bOpenReplyMedicine then
+    self:_ReplyMedicineDirectly()
+  end
+end
+
+function AFKAutoMedicine:_OnSyncPlayerFightState()
+  if not Login.bEnterGame then
+    return
+  end
+  if AFKMedicineSetting.bOpenReplyMedicine then
+    self:_ReplyMedicineDirectly()
+  end
+  if 0 ~= me.nFightMode then
+    Ui:CloseWindow("UIMedicineShop")
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_PLAYER_DATA_END, AFKAutoMedicine)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_PLAYER_DATA_END, AFKAutoMedicine._OnSyncPlayerDataEnd, AFKAutoMedicine)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_LOADED, AFKAutoMedicine)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LOADED, AFKAutoMedicine._OnMapLoaded, AFKAutoMedicine)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_FIGHT_STATE, AFKAutoMedicine)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_FIGHT_STATE, AFKAutoMedicine._OnSyncPlayerFightState, AFKAutoMedicine)
+AFKAutoMedicine:Init()

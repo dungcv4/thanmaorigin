@@ -1,0 +1,126 @@
+SafeLock.nMainTimer = nil
+SafeLock.nTipsCD = 14400
+SafeLock.tbTipType = {ForGet = 1, Cancel = 2}
+
+function SafeLock:OnSyncSafeLockData(tbData, bLogin)
+  self.tbSafeLockData = tbData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SAFELOCK_SYNDATA)
+  if bLogin and self.nMainTimer then
+    Timer:Close(self.nMainTimer)
+    self.nMainTimer = nil
+  end
+  if not self.nMainTimer then
+    if SafeLock.tbSafeLockData.nForgetEndTime and SafeLock.tbSafeLockData.nForgetEndTime > GetTime() then
+      self.nMainTimer = Timer:Register(Env.GAME_FPS * SafeLock.nTipsCD, self.SendTips, self, SafeLock.tbTipType.ForGet)
+      return
+    end
+    if SafeLock.tbSafeLockData.nCancelEndTime and SafeLock.tbSafeLockData.nCancelEndTime > GetTime() then
+      self.nMainTimer = Timer:Register(Env.GAME_FPS * SafeLock.nTipsCD, self.SendTips, self, SafeLock.tbTipType.Cancel)
+      return
+    end
+  elseif not SafeLock.tbSafeLockData.nForgetEndTime and not SafeLock.tbSafeLockData.nCancelEndTime then
+    Timer:Close(self.nMainTimer)
+    self.nMainTimer = nil
+  end
+end
+
+function SafeLock:SendTips(nType)
+  if nType == SafeLock.tbTipType.ForGet then
+    local nDiff = SafeLock.tbSafeLockData.nForgetEndTime - GetTime()
+    me.Msg(i18n.Get(SafeLock.Msg.INFO_FORGETPASSWORDTIPS, Lib:TimeDesc12(nDiff)))
+    return true
+  end
+  if nType == SafeLock.tbTipType.Cancel then
+    local nDiff = SafeLock.tbSafeLockData.nCancelEndTime - GetTime()
+    me.Msg(i18n.Get(SafeLock.Msg.INFO_CANCELPASSWORDTIPS, Lib:TimeDesc12(nDiff)))
+    return true
+  end
+end
+
+function SafeLock:AfterUnLock()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SAFELOCK_UNLOCK)
+end
+
+function SafeLock:UnLockFailed()
+  local tbWnd = Ui:GetWindow("UILock")
+  if tbWnd then
+    tbWnd:ResetInput()
+  end
+end
+
+function SafeLock:TrySetModuleOnOff(tbState)
+  RemoteServer.RequestSafeLock("RequestSetModuleOnOff", tbState)
+end
+
+function SafeLock:OnInputPassWord(nType, szInput, bInSetPanel)
+  if nType == SafeLock.OperationTypeDef.SetPassWord then
+    RemoteServer.RequestSafeLock("RequestCheckInput", nType, szInput, bInSetPanel, self.szOldPassWord)
+    self.szOldPassWord = nil
+  end
+  if nType == SafeLock.OperationTypeDef.UnLock then
+    RemoteServer.RequestSafeLock("RequestCheckInput", nType, szInput, bInSetPanel)
+  end
+  if nType == SafeLock.OperationTypeDef.ChangePassWord then
+    self.szOldPassWord = szInput
+    RemoteServer.RequestSafeLock("RequestCheckInput", nType, szInput, bInSetPanel)
+  end
+  if nType == SafeLock.OperationTypeDef.CancelPassWord then
+    self.szOldPassWord = szInput
+    RemoteServer.RequestSafeLock("RequestSetCancelPassWord", szInput)
+  end
+end
+
+function SafeLock:TrySetPassWord(nType)
+  if SafeLock.tbSafeLockData then
+    if SafeLock.tbSafeLockData.szPassword and not Lib:IsEmptyStr(SafeLock.tbSafeLockData.szPassword) then
+      if not self:IsLock(me) then
+        me.CenterMsg(i18n.Get(self.Msg.INFO_INUNLOCK))
+      end
+      return
+    end
+  else
+    return
+  end
+  Ui:OpenWindow("UILock", nType, true)
+end
+
+function SafeLock:TryUnLock()
+  if not SafeLock:IsLock(me) then
+    return
+  end
+  Ui:OpenWindow("UILock", self.OperationTypeDef.UnLock, true)
+end
+
+function SafeLock:TryChangePassWord(bRepeat)
+  if not bRepeat then
+    Ui:OpenWindow("UILock", self.OperationTypeDef.ChangePassWord, true)
+  else
+    Ui:OpenWindow("UILock", self.OperationTypeDef.SetPassWord, true)
+  end
+end
+
+function SafeLock:OnReturnLogin()
+  if self.nMainTimer then
+    Timer:Close(self.nMainTimer)
+    self.nMainTimer = nil
+  end
+end
+
+function SafeLock:CheckIsNeedUnLock(nModule)
+  if not self.tbSafeLockData then
+    return false
+  end
+  if not self.tbSafeLockData.tbModuleOnOff[nModule] then
+    return false
+  end
+  if not self.tbSafeLockData.szPassword then
+    return false
+  end
+  if not self:IsLock(me) then
+    return false
+  end
+  self:TryUnLock()
+  return true
+end
+
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, SafeLock.OnReturnLogin, SafeLock)

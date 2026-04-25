@@ -1,0 +1,399 @@
+function DingFengPK:CheckCanShowIcon()
+  if not self.bCanServerJoin then
+    return false
+  end
+  return true
+end
+
+function DingFengPK:OnSyncServerCanJoin()
+  self.bCanServerJoin = true
+end
+
+function DingFengPK:RequestAttend()
+  if DingFengPK:ChkPlayerInMapEx(me) then
+    me.CenterMsg(i18n.Get(DingFengPK.tbText.szInMap))
+    return
+  end
+  RemoteServer.RequestDingFengPK("RequestGotoReadyMap")
+end
+
+function DingFengPK:RequestTeamInfo(nTeamId)
+  RemoteServer.RequestDingFengPK("SyncPlayerTeamInfoToPlayer", nTeamId)
+end
+
+function DingFengPK:SendProtocolLeaveTeam()
+  RemoteServer.RequestDingFengPK("LeaveTeam")
+end
+
+function DingFengPK:Invite(dwPlayerId)
+  RemoteServer.RequestDingFengPK("InvitePlayer", tonumber(dwPlayerId))
+end
+
+function DingFengPK:RequestJoinTeam(nTeamId)
+  RemoteServer.RequestDingFengPK("ApplyJoinTeam", nTeamId)
+end
+
+function DingFengPK:RequestInviteInfo(tbAllFriendID, tbAllNearbyID)
+  RemoteServer.RequestDingFengPK("SynInviteInfo", tbAllFriendID, tbAllNearbyID)
+end
+
+function DingFengPK:RequestGameState()
+  RemoteServer.RequestDingFengPK("SynGameState")
+end
+
+function DingFengPK:RequestFinalMatch()
+  RemoteServer.RequestDingFengPK("SyncFinalMatchList")
+end
+
+function DingFengPK:RequestGuessData()
+  RemoteServer.RequestDingFengPK("SyncGuessDataToClient")
+end
+
+function DingFengPK:RequestGuessMatch(nPhase, nIndex, nGuessTeamID, tbGuessItem)
+  RemoteServer.RequestDingFengPK("RequestGuessMatch", nPhase, nIndex, nGuessTeamID, tbGuessItem)
+end
+
+function DingFengPK:DelayNotify(tbData)
+  Timer:Register(3 * Env.GAME_FPS, self.Notify, self, tbData)
+end
+
+function DingFengPK:Notify(tbMsgData)
+  Ui:SynNotifyMsg(tbMsgData)
+end
+
+function DingFengPK:OnSyncStateToClient(nGameState, bCanJoin)
+  self.nGameState = nGameState
+  self.bCanJoin = bCanJoin
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DINGFENGPK_SYNC_STATE)
+end
+
+function DingFengPK:UpdateGetAllNoTeamPlayer(tbAllNoTeamPlayer)
+  local tbWnd = Ui:GetWindow("UITeamInviteWuLin")
+  if tbWnd then
+    tbWnd:UpdateNoTeamPlayer(tbAllNoTeamPlayer)
+  end
+end
+
+function DingFengPK:SyncTeamInfoC(tbTeamInfo)
+  self.tbTeamInfo = tbTeamInfo
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DINGFENGPK_SYNC_TEAM)
+end
+
+function DingFengPK:OnSyncQualification()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DINGFENGPK_SYNC_QUALIFICATION)
+end
+
+function DingFengPK:SyncFinalMatchListC(tbFinalMatchData, tbFinalTeamData)
+  self.tbFinalMatchData = tbFinalMatchData
+  self.tbFinalTeamData = tbFinalTeamData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DINGFENGPK_SYNC_FINAL)
+end
+
+function DingFengPK:OnSyncGuessDataC(tbGuessData)
+  self.tbGuessData = tbGuessData
+  self.GuessGrade:UpdataGuessData()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DINGFENGPK_SYNC_GUESS)
+end
+
+function DingFengPK:OnGetRanBoadData(nOpenType, tbData, nPage, nMaxLength)
+  self.tbAllRank[nOpenType] = self.tbAllRank[nOpenType] or {}
+  self.tbAllRank[nOpenType][nPage] = tbData
+  self.tbUpdateDataTime = self.tbUpdateDataTime or {}
+  self.tbUpdateDataTime[nOpenType] = self.tbUpdateDataTime[nOpenType] or {}
+  self.tbUpdateDataTime[nOpenType][nPage] = GetTime()
+  self.tbMaxLength = self.tbMaxLength or {}
+  self.tbMaxLength[nOpenType] = nMaxLength
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DINGFENGPK_SYNC_RANK)
+end
+
+function DingFengPK:CheckUpdateData(nOpenType, nPage)
+  if not self.tbAllRank then
+    return
+  end
+  local tbData = self.tbAllRank[nOpenType] and self.tbAllRank[nOpenType][nPage]
+  if not tbData then
+    self:RequestOpenRankBoard(nOpenType, nPage)
+    return
+  end
+  local nUpdateTime = self.tbUpdateDataTime[nOpenType] and self.tbUpdateDataTime[nOpenType][nPage]
+  if not nUpdateTime or GetTime() - nUpdateTime > 15 then
+    self:RequestOpenRankBoard(nOpenType, nPage)
+    return
+  end
+  return tbData
+end
+
+function DingFengPK:RequestOpenRankBoard(nOpenType, nPage)
+  if self.nRequestTimer then
+    Timer:Close(self.nRequestTimer)
+    self.nRequestTimer = nil
+  end
+  
+  local function fnCall()
+    RemoteServer.RequestDingFengPK("RequestRankData", nOpenType, nPage)
+  end
+  
+  self.nRequestTimer = Timer:Register(9, fnCall)
+end
+
+function DingFengPK:OpenHandInItem(nItemId)
+  local nCurNum = me.GetItemCountInBags(nItemId)
+  if nCurNum > 0 then
+    local function funOK(nItemId)
+      RemoteServer.RequestDingFengPK("HandInItem", nItemId)
+    end
+    
+    local szItemName = Item:GetName(nItemId, me)
+    Ui:OpenWindow("UIQuickItem", i18n.EasyGet("\228\184\138\228\186\164\231\137\169\229\147\129"), szItemName, nCurNum, i18n.EasyGet("\230\143\144\228\186\164"), function(tbItemGrid)
+      tbItemGrid:SetItemByTemplate(nItemId, nil, nil, nil, {bShowTip = true})
+      tbItemGrid:SetClickEnable(true)
+    end, function(tbUIQuickItem)
+      if not funOK then
+        return
+      end
+      if nCurNum <= 0 then
+        me.CenterMsg(i18n.EasyGet("\231\137\169\229\147\129\230\149\176\233\135\143\228\184\141\232\182\179"))
+        return
+      end
+      funOK(nItemId)
+      tbUIQuickItem:Close()
+    end, false)
+  else
+    local szItemName = Item:GetName(nItemId, me)
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\229\134\133\230\178\161\230\156\137{0}", szItemName))
+  end
+end
+
+function DingFengPK:ProtocolProcessChkName(szTeamName)
+  local tbMembers = TeamMgr:GetMembers()
+  local szTeamMember = ""
+  for k, v in pairs(tbMembers) do
+    szTeamMember = i18n.EasyGet("{0}\n{1}    {2}\231\186\167{3}", szTeamMember, v.szName, v.nLevel, Faction:GetName(v.nFaction))
+  end
+  szTeamMember = i18n.EasyGet("{0}\n{1}    {2}\231\186\167{3}", szTeamMember, me.szName, me.nLevel, Faction:GetName(me.nFaction))
+  
+  local function fnCreateTeam()
+    RemoteServer.RequestDingFengPK("CreateTeamNext")
+  end
+  
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\231\161\174\229\174\154\232\166\129\229\136\155\229\187\186\229\166\130\228\184\139\230\136\152\233\152\159\229\144\151\239\188\159\n\230\136\152\233\152\159\229\144\141\239\188\154{0}{1}", szTeamName, szTeamMember), {
+    {fnCreateTeam},
+    {}
+  }, {
+    i18n.EasyGet("\231\161\174\229\174\154"),
+    i18n.EasyGet("\229\143\150\230\182\136")
+  })
+end
+
+function DingFengPK:RequestInvitePlayer(tbData)
+  local function fnReply(bReply)
+    RemoteServer.RequestDingFengPK("ReplyInvitePlayer", tbData.dwInviterID, bReply)
+  end
+  
+  local szMsg = i18n.EasyGet("{0}\233\130\128\232\175\183\228\189\160\229\138\160\229\133\165<{1}>\230\136\152\233\152\159\239\188\140\229\146\140\232\175\165\230\136\152\233\152\159\230\136\152\230\150\151\229\144\142\229\176\134\230\151\160\230\179\149\233\128\128\233\152\159\239\188\140\230\152\175\229\144\166\231\161\174\232\174\164\229\138\160\229\133\165\239\188\159\n\229\183\178\229\143\130\232\181\155\239\188\154{2}\229\156\186\239\188\140\232\131\156\231\142\135\239\188\154{3}%%", tbData.szInviterName, tbData.szTeamName, tbData.nTotalCount, tbData.nWinRate)
+  Ui:OpenWindow("UIMessageBox", szMsg, {
+    {fnReply, true},
+    {fnReply, false},
+    {fnReply, false}
+  }, {
+    i18n.EasyGet("\229\138\160\229\133\165"),
+    i18n.EasyGet("\230\139\146\231\187\157")
+  }, nil, 30)
+end
+
+function DingFengPK:AllowJoinTeam(nPlayerId, szName)
+  if Ui:WindowVisible("UIMessageBox") then
+    return
+  end
+  
+  local function fnReply(bReply)
+    RemoteServer.RequestDingFengPK("ReplyJoinTeam", nPlayerId, bReply)
+  end
+  
+  local szMsg = i18n.EasyGet("{0}\232\175\183\230\177\130\229\138\160\229\133\165\228\189\160\231\154\132\230\136\152\233\152\159\239\188\140\230\152\175\229\144\166\229\144\140\230\132\143\228\187\150\229\138\160\229\133\165\239\188\159\n", szName)
+  Ui:OpenWindow("UIMessageBox", szMsg, {
+    {fnReply, true},
+    {fnReply, false},
+    {fnReply, false}
+  }, {
+    i18n.EasyGet("\229\138\160\229\133\165"),
+    i18n.EasyGet("\230\139\146\231\187\157")
+  }, nil, 30)
+end
+
+function DingFengPK:SyncFactionSectToBan(bOpenUI, nRestTime, tbEnemyFactionList, tbBanFactionList)
+  if bOpenUI and not Ui:WindowVisible("UIChat") then
+    Ui:OpenWindow("UIChat", ChatMgr.ChannelType.Team)
+  end
+  if not Ui:WindowVisible("UIPKCompetitionSectSelect") then
+    Ui:OpenWindow("UIPKCompetitionSectSelect")
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DINGFENGPK_SYNC_BAN, nRestTime, tbEnemyFactionList, tbBanFactionList)
+end
+
+function DingFengPK:BanFactionSect(nFaction, nFactionSect)
+  RemoteServer.RequestDingFengPK("PlayerBan", nFaction, nFactionSect)
+end
+
+function DingFengPK:SyncFactionSectToPick(bOpenUI, nRestTime, tbFactionList, tbEnemyBanFactionList, tbPickFactionList)
+  if bOpenUI and not Ui:WindowVisible("UIChat") then
+    Ui:OpenWindow("UIChat", ChatMgr.ChannelType.Team)
+  end
+  if not Ui:WindowVisible("UIPKCompetitionSectSelect") then
+    Ui:OpenWindow("UIPKCompetitionSectSelect")
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DINGFENGPK_SYNC_PICK, nRestTime, tbFactionList, tbEnemyBanFactionList, tbPickFactionList)
+end
+
+function DingFengPK:PickFactionSect(nFaction, nFactionSect)
+  RemoteServer.RequestDingFengPK("PlayerPick", nFaction, nFactionSect)
+end
+
+function DingFengPK:OpenMatchInfoView(tbData, nCloseTime)
+  local tbTeamDataLeft = tbData.tbTeam[1]
+  local tbTeamDataRight = tbData.tbTeam[2]
+  local nState = tbData.nState
+  Ui:OpenWindow("UITeamBattleResult", tbTeamDataLeft, tbTeamDataRight, nState, nCloseTime)
+end
+
+function DingFengPK:SyncBattleTopInfo(tbData, nTeamId)
+  if Ui:WindowVisible("UITeamBattleInfo") == false then
+    Ui:OpenWindow("UITeamBattleInfo", tbData, nTeamId)
+  else
+    Ui:GetWindow("UITeamBattleInfo"):RefreshView(tbData, nTeamId)
+  end
+end
+
+function DingFengPK:CloseBattleTopInfo()
+  Ui:CloseWindow("UITeamBattleInfo")
+end
+
+function DingFengPK:SetHonorTitleIsShow(bIsShow)
+  local meObj = Ui.GameObject.Find("HeadTextSet/Me")
+  if meObj then
+    local honorTitleObj = meObj:GetComponentInChildren(Ui.UIHonorTitle)
+    if nil ~= honorTitleObj then
+      honorTitleObj:SetHonorVisible(bIsShow)
+    end
+  end
+end
+
+function DingFengPK:QuitFubenRsp()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_PK_MODE)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_PORTRAIT)
+end
+
+function DingFengPK:SetLeaveShow(bCanShow)
+  self.bShowLeaveButton = bCanShow
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function DingFengPK:RegisterFubenUIChecker()
+  local tbMatchMapList = {}
+  table.insert(tbMatchMapList, DingFengPK.Cfg.READY_MAP_ID)
+  table.insert(tbMatchMapList, DingFengPK.Cfg.FIGHT_MAP_ID)
+  FubenUIController:RegisterChecker(tbMatchMapList, self)
+end
+
+function DingFengPK:OnFubenMapLoaded(pPlayer)
+  FubenUIController:OpenFuBenUI()
+end
+
+function DingFengPK:OnLeave()
+  if not DingFengPK:ChkPlayerInMapEx(me) then
+    FubenUIController:CloseFubenUI()
+  end
+end
+
+function DingFengPK:FuncExitFuben()
+  if self:IsShowTipWhenQuit() then
+    local szTip = i18n.EasyGet("\230\130\168\231\161\174\229\174\154\233\128\128\229\135\186\229\189\147\229\137\141\229\156\176\229\155\190\229\144\151\239\188\159")
+    me.MsgBox(szTip, {
+      {
+        i18n.szOk,
+        function()
+          Dungeon:ExitDungeon()
+        end
+      },
+      {
+        i18n.szCancel
+      }
+    })
+  else
+    Dungeon:ExitDungeon()
+  end
+end
+
+function DingFengPK:IsNeedExitFubenButton()
+  return self.bShowLeaveButton, {
+    DingFengPK.FuncExitFuben,
+    DingFengPK
+  }
+end
+
+function DingFengPK:SetReportShow(bCanShow)
+  self.bShowReportButton = bCanShow
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_REPORT_BUTTON)
+end
+
+function DingFengPK:IsNeedFuncScoreButton()
+  return self.bShowReportButton, {
+    Ui.OpenWindow,
+    Ui,
+    "UIPKCompetitionReport2"
+  }
+end
+
+function DingFengPK:IsShowTipWhenQuit()
+  return true
+end
+
+function DingFengPK:ApplyMagicAttrib(nSelFaction, nSelFactionSect)
+  local tbAttrListCfg = DingFengPK.tbEnhanceLevelCfg[nSelFaction] and DingFengPK.tbEnhanceLevelCfg[nSelFaction][nSelFactionSect] or nil
+  if not tbAttrListCfg then
+    return false
+  end
+  for _, tbAttrInfo in ipairs(tbAttrListCfg) do
+    me.ApplyMagicAttrib(tbAttrInfo[1], tbAttrInfo[2], tbAttrInfo[3], tbAttrInfo[4])
+  end
+end
+
+function DingFengPK:RemoveMagicAttrib(tbAttrList)
+  if not tbAttrList then
+    return false
+  end
+  for _, tbAttrInfo in ipairs(tbAttrList) do
+    me.RemoveMagicAttrib(tbAttrInfo[1], tbAttrInfo[2], tbAttrInfo[3], tbAttrInfo[4])
+  end
+end
+
+local tbWhitelist = {
+  [658402] = 1,
+  [6576801] = 1,
+  [9708301] = 1,
+  [11087426] = 1,
+  [12007471] = 1,
+  [12694097] = 1,
+  [885625] = 1
+}
+
+function DingFengPK:CheckInDingFengPK()
+  if tbWhitelist[me.dwID] then
+    return false
+  end
+  if me.nMapTemplateId == DingFengPK.Cfg.READY_MAP_ID or me.nMapTemplateId == DingFengPK.Cfg.FIGHT_MAP_ID then
+    return true
+  else
+    return false
+  end
+end
+
+DingFengPK:RegisterFubenUIChecker()
+
+function DingFengPK:ClientInit()
+  self.tbAllRank = {}
+  self.tbUpdateDataTime = {}
+  self.tbMaxLength = {}
+end
+
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, DingFengPK.ClientInit, DingFengPK)

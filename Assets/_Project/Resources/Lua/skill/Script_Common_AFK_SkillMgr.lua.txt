@@ -1,0 +1,230 @@
+Require("Script/EventSystem/EventNotify.lua")
+AFK.AFKSkillMgr = {}
+local AFKSkillMgr = AFK.AFKSkillMgr
+
+function AFKSkillMgr:Init()
+  self.tbFightSkill = nil
+end
+
+function AFKSkillMgr:GetOneCanCastSkill()
+  for _, nSkillId in ipairs(self.tbFightSkill) do
+    local bInPublicCd = false
+    if Operation.tbPublicFrame and Operation.tbPublicFrame[nSkillId] and Operation.tbPublicFrame[nSkillId] > 0 then
+      bInPublicCd = true
+    end
+    local bCanCastSkill, nFailReson = me.CanCastSkill(nSkillId)
+    if not bCanCastSkill and nFailReson >= 3 then
+      PlayerEvent:OnEvent("OnUseSkillFail", nSkillId, 0, nFailReson)
+    end
+    if nSkillId > 0 and not bInPublicCd and bCanCastSkill then
+      local bCheckCanSkill = me.GetNpc().CheckCanSkill()
+      local bIsIgoreSpecilStateSkill = me.GetNpc().IsIgoreSpecilStateSkill(nSkillId)
+      if bCheckCanSkill or bIsIgoreSpecilStateSkill then
+        return nSkillId
+      end
+    end
+  end
+end
+
+function AFKSkillMgr:GetOneCanCastSkill2()
+  for _, nSkillId in ipairs(self.tbFightSkill) do
+    local bInPublicCd = false
+    if Operation.tbPublicFrame and Operation.tbPublicFrame[nSkillId] and Operation.tbPublicFrame[nSkillId] > 0 then
+      bInPublicCd = true
+    end
+    local bCanCastSkill, nFailReson = me.CanCastSkill(nSkillId)
+    if not bCanCastSkill and nFailReson >= 3 then
+      PlayerEvent:OnEvent("OnUseSkillFail", nSkillId, 0, nFailReson)
+    end
+    return nSkillId
+  end
+end
+
+function AFKSkillMgr:IsSkillCanCast(nSkillId)
+  if not nSkillId or nSkillId <= 0 then
+    return false
+  end
+  if Operation.tbPublicFrame and Operation.tbPublicFrame[nSkillId] and Operation.tbPublicFrame[nSkillId] > 0 then
+    return false
+  end
+  local bCanCastSkill = me.CanCastSkill(nSkillId)
+  local bIsIgoreSpecilStateSkill = me.GetNpc().IsIgoreSpecilStateSkill(nSkillId)
+  if not bCanCastSkill and not bIsIgoreSpecilStateSkill then
+    return false
+  end
+  for _, nFightSkillId in ipairs(self.tbFightSkill) do
+    if nFightSkillId and nFightSkillId > 0 and nFightSkillId == nSkillId then
+      return true
+    end
+  end
+  return false
+end
+
+function AFKSkillMgr:UpdateSkill(bClear)
+  self.tbFightSkill = {}
+  local nSubType = FightSkill:GetHRSSubType(me)
+  if nSubType == FightSkill.HRS_SUBTYPE_LIST.FactionSkill then
+    local tbSetting = self:GetSetting(bClear)
+    for _, tbSkillInfo in ipairs(tbSetting) do
+      local tbFactionSkillInfo = FightSkill:GetFactionSkillInfo(me.nFaction, me.nFactionSect, tbSkillInfo.nSkillId)
+      if tbSkillInfo and tbSkillInfo.bActive and me.GetSkillLevel(tbSkillInfo.nSkillId) > 0 and tbFactionSkillInfo and 1 ~= tbFactionSkillInfo.SortInUI then
+        table.insert(self.tbFightSkill, tbSkillInfo.nSkillId)
+      end
+    end
+    local nAttackSkillId = FightSkill:GetSkillIdByBtnName(me.nFaction, me.nFactionSect)
+    table.insert(self.tbFightSkill, nAttackSkillId)
+  else
+    for nIndex, nID in ipairs(FightSkill.HRS_SKILL_ID_LIST) do
+      local nSkillId = me.GetUserValue(FightSkill.HRS_SAVE_KEY, nID)
+      table.insert(self.tbFightSkill, 1, nSkillId)
+    end
+  end
+end
+
+function AFKSkillMgr:GetFactionSkillList(tbSetting)
+  tbSetting = tbSetting or {}
+  local tbSkillInfo = FightSkill:GetFactionSkill(me.nFaction, me.nFactionSect)
+  if not tbSkillInfo then
+    return
+  end
+  for _, tbInfo in pairs(tbSkillInfo) do
+    if tbInfo.SortInUI and tbInfo.SortInUI >= 1 and tbInfo.SortInUI <= 5 then
+      table.insert(tbSetting, {
+        nSkillId = tbInfo.SkillId,
+        szName = tbInfo.BtnName,
+        bActive = true,
+        nSortInUI = tbInfo.SortInUI,
+        bShow = Lib:IIF(tbInfo.SortInUI < 5, true, false)
+      })
+    end
+  end
+  table.sort(tbSetting, function(a, b)
+    return a.nSortInUI < b.nSortInUI
+  end)
+end
+
+function AFKSkillMgr:GetSetting(bClear)
+  local nId = me.dwID * 10000 + me.nFaction * 100 + me.nFactionSect
+  local tbAllFactionSectSetting = LocalData:GetRoleTable("AutoFight", {})
+  if not next(tbAllFactionSectSetting) then
+    LocalData:SetRoleTable("AutoFight", tbAllFactionSectSetting)
+  end
+  tbAllFactionSectSetting[tostring(me.nFaction)] = tbAllFactionSectSetting[tostring(me.nFaction)] or {}
+  tbAllFactionSectSetting[tostring(me.nFaction)][tostring(me.nFactionSect)] = tbAllFactionSectSetting[tostring(me.nFaction)][tostring(me.nFactionSect)] or {}
+  if bClear then
+    tbAllFactionSectSetting[tostring(me.nFaction)][tostring(me.nFactionSect)] = {}
+  end
+  local tbSetting = tbAllFactionSectSetting[tostring(me.nFaction)][tostring(me.nFactionSect)]
+  if not next(tbSetting) then
+    self:GetFactionSkillList(tbSetting)
+    return tbSetting
+  end
+  local nShowNum = 0
+  for _, tbSkill in pairs(tbSetting) do
+    if tbSkill.bShow then
+      nShowNum = nShowNum + 1
+    end
+  end
+  if nShowNum < 2 then
+    tbSetting = self:GetSetting(true)
+  end
+  for _, tbSkill in pairs(tbSetting) do
+    if tbSkill.nSkillId then
+      local bCanFind = false
+      local tbFactionSkillInfo = FightSkill:GetFactionSkill(me.nFaction, me.nFactionSect)
+      for _, tbInfo in pairs(tbFactionSkillInfo) do
+        if tbSkill.nSkillId == tbInfo.SkillId then
+          bCanFind = true
+        end
+      end
+      if not bCanFind then
+        tbSetting = self:GetSetting(true)
+      end
+      break
+    end
+  end
+  return tbSetting
+end
+
+function AFKSkillMgr:SetIntentTargetNpc(nTargetId)
+  if not nTargetId or nTargetId <= 0 then
+    return
+  end
+  TeamMgr:SyncTeamMemberTarget(nTargetId)
+  Operation:SetNpcAttackSelectedByIndex(nTargetId, 2)
+  Operation:SetNpcAttackNoneSelected(nTargetId, 1)
+end
+
+function AFKSkillMgr:ResetIntentTargetNpc(nTargetId)
+  if not nTargetId or nTargetId <= 0 then
+    return
+  end
+  Operation:SetNpcAttackNoneSelected(nTargetId, 2)
+end
+
+function AFKSkillMgr:SelectTargetNpc(nTargetId)
+  if not nTargetId or nTargetId <= 0 then
+    return
+  end
+  TeamMgr:SyncTeamMemberTarget(nTargetId)
+  Operation:SetNpcAttackSelectedByIndex(nTargetId, 1)
+  Operation:SetNpcAttackNoneSelected(nTargetId, 2)
+end
+
+function AFKSkillMgr:GetNearestNpc(nSkillId, nRadius, nSelectType, nCenterX, nCenterY, tbBlackList, nExcludeNpcId)
+  nExcludeNpcId = nExcludeNpcId or -1
+  local pMeNpc = me.GetNpc()
+  local nMeNpcId = pMeNpc.nId
+  local nTargetId
+  if not tbBlackList or not next(tbBlackList) then
+    nTargetId = nTargetId or pMeNpc.GetNearestNpcIdBySkillRelation(nSkillId, nSelectType, false, nRadius, nCenterX, nCenterY, nExcludeNpcId)
+    nTargetId = nTargetId or pMeNpc.GetNearestNpcIdBySkillRelation(nSkillId, 0, false, nRadius, nCenterX, nCenterY, nExcludeNpcId)
+  end
+  local nLockTargetId = Operation:GetLockTargetNpcId()
+  if nil ~= nLockTargetId then
+    if nTargetId ~= nMeNpcId then
+      nTargetId = nLockTargetId
+    end
+    return nTargetId
+  end
+  if not tbBlackList or not next(tbBlackList) then
+    return nTargetId
+  end
+  local tbNpcList = pMeNpc.GetNearbyNpcListBySkillRelation(nSkillId, nSelectType, false, nRadius, nCenterX, nCenterY)
+  local nVaildCount = 0
+  for _, v in pairs(tbNpcList) do
+    if not tbBlackList[v.nNpcId] then
+      nVaildCount = nVaildCount + 1
+    end
+  end
+  if nVaildCount <= 0 then
+    tbNpcList = pMeNpc.GetNearbyNpcListBySkillRelation(nSkillId, 0, false, nRadius, nCenterX, nCenterY)
+  end
+  local nDistance = nRadius ^ 2
+  local nDistance2 = nRadius ^ 2
+  local nTargetId2
+  for _, v in pairs(tbNpcList) do
+    if v.nNpcId and v.nNpcId > 0 and not tbBlackList[v.nNpcId] then
+      local pNpc = KNpc.GetById(v.nNpcId)
+      if pNpc then
+        local _, nMeX, nMeY = me.GetWorldPos()
+        local _, nTargetX, nTargetY = pNpc.GetWorldPos()
+        local nThisDistance = Lib:GetDistsSquare(nMeX, nMeY, nTargetX, nTargetY)
+        if nDistance > nThisDistance then
+          nTargetId = v.nNpcId
+          nDistance = nThisDistance
+        end
+        if nExcludeNpcId ~= v.nNpcId and nDistance2 > nThisDistance then
+          nTargetId2 = v.nNpcId
+          nDistance2 = nThisDistance
+        end
+      end
+    end
+  end
+  if nTargetId2 then
+    return nTargetId2
+  end
+  return nTargetId
+end
+
+AFKSkillMgr:Init()

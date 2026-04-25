@@ -1,0 +1,104 @@
+local tbItem = Item:GetClass("LuckyStarBox")
+tbItem.PARAM_PARAM_ID = 1
+tbItem.nOpenNumKey = 1
+tbItem.nMinimumShowKey = 2
+tbItem.nVersionKey = 3
+
+function tbItem:OnUse(it)
+  return self:OnUseMany(it, 1)
+end
+
+function tbItem:OnUseMany(it, nCount)
+  local pPlayer = me
+  local nLeftBag = pPlayer.GetFreeBagCount()
+  if nLeftBag <= 0 then
+    pPlayer.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\231\169\186\233\151\180\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\228\189\191\231\148\168\239\188\129"))
+    return 0
+  end
+  if nCount > it.nCount then
+    pPlayer.CenterMsg(i18n.EasyGet("\233\129\147\229\133\183\230\149\176\233\135\143\228\184\141\232\182\179"))
+    return 0
+  end
+  local nParamId = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_PARAM_ID)
+  local tbCfg = Item.LuckyStarBox:GetCfgById(nParamId)
+  if not tbCfg then
+    LogErr(string.format("LuckyStarBox:OpenBox config is not exist, dwTemplateId=%d, nParamId=%d", it.dwTemplateId, nParamId or 0))
+    pPlayer.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\233\129\147\229\133\183\230\154\130\230\151\182\228\184\141\229\143\175\228\189\191\231\148\168"))
+    return 0
+  end
+  local nOpenNum, nShowNum
+  local nSaveKey = GetGroupKey(tbCfg.szSaveKey)
+  local nVersionNum = pPlayer.GetUserValue(nSaveKey, self.nVersionKey)
+  if nVersionNum ~= tbCfg.nVersion then
+    pPlayer.SetUserValue(nSaveKey, self.nOpenNumKey, 0)
+    pPlayer.SetUserValue(nSaveKey, self.nMinimumShowKey, 0)
+    pPlayer.SetUserValue(nSaveKey, self.nVersionKey, tbCfg.nVersion)
+    nOpenNum, nShowNum = 0, 0
+  else
+    nOpenNum = pPlayer.GetUserValue(nSaveKey, self.nOpenNumKey)
+    nShowNum = pPlayer.GetUserValue(nSaveKey, self.nMinimumShowKey)
+  end
+  local nNum = 0
+  local bSuccess, bSpecial, tbTmpAward
+  for i = 1, nCount do
+    bSuccess, bSpecial, tbTmpAward = self:OpenBox(it, tbCfg, nOpenNum + i, nShowNum)
+    if not bSuccess then
+      break
+    end
+    if bSpecial then
+      nShowNum = nShowNum + 1
+      pPlayer.SetUserValue(nSaveKey, self.nMinimumShowKey, nShowNum)
+    end
+    nNum = nNum + 1
+    pPlayer.SendAward(tbTmpAward, true, true, Env.LogWay_LuckyStarBox)
+  end
+  if nNum > 0 then
+    pPlayer.SetUserValue(nSaveKey, self.nOpenNumKey, nOpenNum + nNum)
+  end
+  return nNum
+end
+
+function tbItem:OpenBox(it, tbCfg, nOpenNum, nShowNum)
+  if nOpenNum >= tbCfg.nMaxTime and 0 == nShowNum then
+    local tbAward = {
+      {
+        Player.AwardType2Name[Player.award_type_item],
+        tbCfg.nItemTemplateId,
+        1
+      }
+    }
+    return true, true, tbAward
+  end
+  local nAwardKey = self:GenAwardKey(tbCfg, nOpenNum, nShowNum)
+  if not nAwardKey then
+    return false
+  end
+  local bSpecial = false
+  local tbAward = Award:GetAward(tbCfg.nAwardId, nAwardKey)
+  for _, tbInfo in ipairs(tbAward) do
+    if tbInfo[1] == Player.AwardType2Name[Player.award_type_item] and tbCfg.nItemTemplateId == tbInfo[2] then
+      bSpecial = true
+      break
+    end
+  end
+  return true, bSpecial, tbAward
+end
+
+function tbItem:GenAwardKey(tbCfg, nOpenNum, nShowNum)
+  local nSize = #tbCfg.tbKeyList
+  for nIndex, tbInfo in ipairs(tbCfg.tbKeyList) do
+    if nIndex == nSize then
+      if nShowNum > 0 then
+        if nSize < 2 then
+          LogErr(string.format("LuckyStarBox:OpenBox config is invalid"))
+          return nil
+        end
+        return tbCfg.tbKeyList[nIndex - 1][2]
+      end
+      return tbInfo[2]
+    end
+    if nOpenNum < tbCfg.tbKeyList[nIndex + 1][1] then
+      return tbInfo[2]
+    end
+  end
+end

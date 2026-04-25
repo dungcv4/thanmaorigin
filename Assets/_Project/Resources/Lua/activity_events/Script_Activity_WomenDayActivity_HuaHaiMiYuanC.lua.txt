@@ -1,0 +1,222 @@
+Require("CommonScript/Activity/WomenDayActivity/HuaHaiMiYuan.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.HuaHaiMiYuan)
+
+function tbActivity:OnOpen()
+  self.nSaveId = GetGroupKey(self.tbConfig.szSaveKey)
+  self:ClearFindYuanData()
+  self:ReqFindYuanDataSync()
+  self:TryLightRedPoint()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, tbActivity.OnAddItem, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_DEL_ITEM, tbActivity.OnDelItem, self)
+end
+
+function tbActivity:OnClose()
+  self.tbCache = nil
+  self.nSaveId = nil
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_DEL_ITEM, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+  local nRedPointEventId = self:GetRedPointEventList()[1]
+  if RedPointMgr:CheckEvent(nRedPointEventId) then
+    RedPointMgr:FadeRedPoint(nRedPointEventId)
+  end
+end
+
+function tbActivity:OnLogin()
+  if GetTime() < self.nStartTime then
+    self:ClearFindYuanData()
+    self:ReqFindYuanDataSync()
+  end
+  self:OnPlayerLogin()
+end
+
+function tbActivity:ClearFindYuanData()
+  self.tbCache = {
+    ServerScoreCount = 0,
+    nServerTime = GetTime()
+  }
+end
+
+local Protocol = {
+  [tbActivity.Protocol.FindYuanDataSyncResp] = "OnFindYuanDataSyncResp"
+}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    LogErr("[HuaHaiMiYuanC] ServerRequest protocol is wrong", nProtocol)
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:ReqFindYuanDataSync()
+  ActivityMgr:CallServerScriptV2(self.nId, self.Protocol.ReqFindYuanDataSync)
+end
+
+function tbActivity:ReqFindYuan(nFindTypeIndex)
+  if not self.FindType[nFindTypeIndex] then
+    return
+  end
+  if me.nLevel < self.tbConfig.nJoinLevel then
+    me.CenterMsg(i18n.EasyGet("\229\175\185\228\184\141\232\181\183\239\188\140\230\130\168\231\154\132\231\173\137\231\186\167\228\184\141\232\182\179{0}", self.tbConfig.nJoinLevel))
+    return
+  end
+  local nCost = self.FindType[nFindTypeIndex].nConsumeCount
+  local nHasFlowerCount = me.GetItemCountInBags(self.tbConfig.nFlowerTemplateId)
+  if nCost > nHasFlowerCount then
+    local function funcOK()
+      local tbYuanBaoWare = Shop:GetAWare(self.tbConfig.nYuanBaoWareId)
+      
+      local nRemainCount = 0
+      if tbYuanBaoWare then
+        nRemainCount = Shop:GetShopRemainCount(tbYuanBaoWare, me)
+        if nRemainCount > 0 then
+          Ui:OpenWindow("UIShopBuy", tbYuanBaoWare, true, nRemainCount, nil, nil, nCost - nHasFlowerCount)
+          return
+        end
+      end
+      for nIndex, nGoldWareId in ipairs(self.tbConfig.tbnGoldWareId) do
+        local tbGoldWare = Shop:GetAWare(nGoldWareId)
+        if tbGoldWare then
+          nRemainCount = Shop:GetShopRemainCount(tbGoldWare, me)
+          if nRemainCount > 0 then
+            Ui:OpenWindow("UIShopBuy", tbGoldWare, true, nRemainCount, nil, nil)
+            return
+          end
+        end
+      end
+      me.CenterMsg(i18n.EasyGet("\229\175\185\228\184\141\232\181\183\239\188\140\230\130\168\232\180\173\228\185\176{0}\231\154\132\230\149\176\233\135\143\229\183\178\232\190\190\229\136\176\228\184\138\233\153\144", Item:GetName(self.tbConfig.nFlowerTemplateId, me)))
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\232\180\173\228\185\176\239\188\159", Item:GetName(self.tbConfig.nFlowerTemplateId, me)), {
+      {funcOK},
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+    return
+  else
+    ActivityMgr:CallServerScriptV2(self.nId, self.Protocol.ReqFindYuan, nFindTypeIndex)
+  end
+end
+
+function tbActivity:OnFindYuanDataSyncResp(tbData)
+  if tbData then
+    self.tbCache = tbData
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_HUAHAIMIYUAN_DATA_SYNC)
+end
+
+function tbActivity:GetDisplayAwardList()
+  local tbAwards = Award:GetAward(self.tbConfig.nAwardId, self.tbConfig.nDisplayAwardKey, {bNotMerge = true})
+  return tbAwards
+end
+
+function tbActivity:GetPlayerScoreInfo()
+  local nPlayerCurScore = me.GetMoney(Currency.TYPE.XunYuan)
+  local nPlayerHasFindCount = me.GetUserValue(self.nSaveId, self.SaveKey.nFindCount)
+  local nPlayerTotalScore = me.GetUserValue(self.nSaveId, self.SaveKey.nTotalScore)
+  return nPlayerCurScore, nPlayerHasFindCount, nPlayerTotalScore
+end
+
+function tbActivity:GetServerScore()
+  if self.tbCache then
+    return self.tbCache.ServerScoreCount or 0
+  else
+    return 0
+  end
+end
+
+function tbActivity:DoCommonJump(nJumpId)
+  Ui:CloseWindow("UIBag")
+  Ui:CloseWindow("UIItemTips")
+  if 1 == nJumpId then
+    local tbParam = Lib:SplitStrTry2Num(self.tbConfig.szExtraParam, "|")
+    local pFunc = ActivityMgr.tbJumpFunc[self.tbConfig.szJumpType]
+    pFunc(self.nId, table.unpack(tbParam))
+  elseif 2 == nJumpId then
+    local nRedPointEventId = self:GetShopRedPointEvent()[1]
+    if RedPointMgr:CheckEvent(nRedPointEventId) then
+      RedPointMgr:FadeRedPoint(nRedPointEventId)
+    end
+    local tbParam = Lib:SplitStrTry2Num(self.tbConfig.szExtraParam, "|")
+    Ui:OpenWindow("UINpcShop", tbParam[4], nil, nil, nil, nil, Currency.TYPE.XunYuan)
+  elseif 3 == nJumpId then
+    Ui:OpenWindow("UITemporaryActivityCompose", 85)
+  elseif 4 == nJumpId then
+    Ui:OpenWindow("UIYingchunhuashiActivity", 145, 146)
+  end
+end
+
+function tbActivity:TryLightRedPoint()
+  local nXunYuanNum = me.GetMoney(Currency.TYPE.XunYuan)
+  if nXunYuanNum > 0 then
+    if not RedPointMgr:CheckEvent(self:GetShopRedPointEvent()[1]) then
+      RedPointMgr:LightRedPoint(self:GetShopRedPointEvent()[1])
+    end
+  elseif RedPointMgr:CheckEvent(self:GetShopRedPointEvent()[1]) then
+    RedPointMgr:FadeRedPoint(self:GetShopRedPointEvent()[1])
+  end
+  local nHasFlowerCount = me.GetItemCountInBags(self.tbConfig.nFlowerTemplateId)
+  if nHasFlowerCount > 0 then
+    if not RedPointMgr:CheckEvent(self:GetItemRedPointEvent()[1]) then
+      RedPointMgr:LightRedPoint(self:GetItemRedPointEvent()[1])
+    end
+  elseif RedPointMgr:CheckEvent(self:GetItemRedPointEvent()[1]) then
+    RedPointMgr:FadeRedPoint(self:GetItemRedPointEvent()[1])
+  end
+end
+
+function tbActivity:OnAddItem(nItemId)
+  if nItemId then
+    local pItem = KItem.GetItemObj(nItemId)
+    if not pItem then
+      return false
+    end
+    if pItem.dwTemplateId ~= self.tbConfig.nFlowerTemplateId then
+      return
+    end
+    self:TryLightRedPoint()
+  end
+end
+
+function tbActivity:OnDelItem(_, dwTemplateId)
+  if dwTemplateId ~= self.tbConfig.nFlowerTemplateId then
+    return
+  end
+  self:TryLightRedPoint()
+end
+
+function tbActivity:GetRedPointEventList()
+  return {
+    RedPointMgr.EVENT.HuaHaiMiYuanShop,
+    RedPointMgr.EVENT.ExtXunYuanAchieve,
+    RedPointMgr.EVENT.HuaHaiMiYuanItem
+  }
+end
+
+function tbActivity:GetShopRedPointEvent()
+  return {
+    RedPointMgr.EVENT.HuaHaiMiYuanShop
+  }
+end
+
+function tbActivity:GetExtRedPointEvent()
+  return {
+    RedPointMgr.EVENT.ExtXunYuanAchieve
+  }
+end
+
+function tbActivity:GetItemRedPointEvent()
+  return {
+    RedPointMgr.EVENT.HuaHaiMiYuanItem
+  }
+end
+
+function tbActivity:OnPlayerLogin()
+  self:TryLightRedPoint()
+end
+
+function tbActivity:OnCrossDay()
+  self:TryLightRedPoint()
+end

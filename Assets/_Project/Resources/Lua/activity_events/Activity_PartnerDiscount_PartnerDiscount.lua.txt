@@ -1,0 +1,142 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+ActivityMgr.szPartnerDiscountClassName = "PartnerDiscount"
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.szPartnerDiscountClassName)
+tbActivity.LastStartTimeKey = 1
+tbActivity.SSCountKey = 2
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/PartnerDiscount/PartnerDiscount.tab"
+  local tbField = {
+    "nConfigId",
+    "nMaxTime",
+    "nSubsidySSCount",
+    "szSaveKey"
+  }
+  local tbActivityConfig = Lib:LoadTabFileEx(szFilepath, "ddds", "nConfigId", tbField)
+  self.ACTIVITY_CONFIG = {}
+  for nConfigId, tbConfig in pairs(tbActivityConfig or {}) do
+    self.ACTIVITY_CONFIG[nConfigId] = tbConfig
+  end
+  self.bLoadConfig = true
+end
+
+function tbActivity:OnOpen()
+  if MODULE_GAMESERVER then
+    self:CheckAllReset()
+    self:SyncAllModify()
+  end
+end
+
+function tbActivity:OnClose()
+  if MODULE_GAMESERVER then
+    local tbPlayer = KPlayer.GetAllPlayer()
+    for _, pPlayer in pairs(tbPlayer) do
+      pPlayer.CallClientScript("ActivityMgr:OnClose", {
+        self.nId
+      })
+    end
+  end
+end
+
+function tbActivity:OnModify(tbScheduleCfg)
+  self.bLoadConfig = false
+  if not self:CheckConfig(tbScheduleCfg.nConfigId) then
+    return
+  end
+  self:InitMetaData(tbScheduleCfg)
+  self.nId = tbScheduleCfg.nId
+  self.nStartTime = tbScheduleCfg.nStartTime
+  self.nEndTime = tbScheduleCfg.nEndTime
+  self.nConfigId = tbScheduleCfg.nConfigId
+  self.tbConfig = self.ACTIVITY_CONFIG[tbScheduleCfg.nConfigId]
+  self.SaveKey = GetGroupKey(self.tbConfig.szSaveKey)
+  if MODULE_GAMESERVER then
+    self:CheckAllReset()
+    self:SyncAllModify()
+  end
+end
+
+function tbActivity:InitData(pPlayer)
+  pPlayer.SetUserValue(self.SaveKey, self.LastStartTimeKey, self.nStartTime)
+  pPlayer.SetUserValue(self.SaveKey, self.SSCountKey, 0)
+end
+
+function tbActivity:GetSubsidySSCount()
+  return self.tbConfig.nSubsidySSCount
+end
+
+function tbActivity:GetSSCount(pPlayer)
+  return pPlayer.GetUserValue(self.SaveKey, self.SSCountKey)
+end
+
+function tbActivity:SetSSCount(pPlayer, nNum)
+  pPlayer.SetUserValue(self.SaveKey, self.SSCountKey, nNum)
+end
+
+function tbActivity:HasSubsidySSCount(pPlayer)
+  if not self:IsOpen() then
+    return false
+  end
+  return self.tbConfig.nMaxTime - self:GetSSCount(pPlayer) > 0
+end
+
+function tbActivity:AddSSCount(pPlayer)
+  local nNum = pPlayer.GetUserValue(self.SaveKey, self.SSCountKey)
+  pPlayer.SetUserValue(self.SaveKey, self.SSCountKey, nNum + 1)
+end
+
+function tbActivity:CheckAllReset()
+  local tbPlayer = KPlayer.GetAllPlayer()
+  for _, pPlayer in pairs(tbPlayer) do
+    self:CheckReset(pPlayer)
+  end
+end
+
+function tbActivity:CheckReset(pPlayer)
+  local nLastStartTime = pPlayer.GetUserValue(self.SaveKey, self.LastStartTimeKey)
+  if ActivityMgr:CheckExpired(nLastStartTime, self.nStartTime) then
+    self:InitData(pPlayer)
+  end
+end
+
+function tbActivity:SyncData(pPlayer)
+  pPlayer.CallClientScript("ActivityMgr:OnSyncActivityData", {
+    {
+      self:GetScheduleCfg()
+    }
+  })
+end
+
+function tbActivity:SyncAllModify()
+  local tbPlayer = KPlayer.GetAllPlayer()
+  for _, pPlayer in pairs(tbPlayer) do
+    self:SyncData(pPlayer)
+  end
+end
+
+function tbActivity:OnDailyEvent(pPlayer)
+  if not self:IsOpen() then
+    return
+  end
+  self:CheckReset(pPlayer)
+  pPlayer.SetUserValue(self.SaveKey, self.SSCountKey, 0)
+end
+
+function tbActivity:OnLogin(pPlayer)
+  if not self:IsOpen() then
+    return
+  end
+  self:CheckReset(pPlayer)
+  self:SyncData(pPlayer)
+end
+
+function ActivityMgr:GetPartnerDiscountInstance()
+  for _, pInstance in pairs(self.tbInstance) do
+    if pInstance.szClassName == ActivityMgr.szPartnerDiscountClassName and pInstance:IsOpen() then
+      return pInstance
+    end
+  end
+end

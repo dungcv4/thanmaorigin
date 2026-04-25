@@ -1,0 +1,370 @@
+local tbWnd = Ui:CreateWindow("UIMartialArtsStrengthen")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_WXHUSHI_ENHANCE,
+      self.OnEnghanceRsp,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  TemplateWuXing = "node/imgBG/Content/Left/Scroll View/Viewport/Content/Template",
+  HuShiTemplate = "node/imgBG/Content/Center/Scroll View/Viewport/Content/Template",
+  CurBaseAttrTemplate = "node/imgBG/Content/Right/Info/InfoGrid/ContNow/ValueList/Viewport/Content/Regular/Template",
+  CurExtAttrTemplate = "node/imgBG/Content/Right/Info/InfoGrid/ContNow/ValueList/Viewport/Content/Add/Template",
+  txtCurLV = "node/imgBG/Content/Right/Info/InfoGrid/ContNow/txtLV",
+  txtMaxLevel = "node/imgBG/Content/Right/Info/InfoGrid/ContNow/txt ",
+  NextBaseAttrTemplate = "node/imgBG/Content/Right/Info/InfoGrid/ContSelect/ValueList/Viewport/Content/Regular/Template",
+  NextExtAttrTemplate = "node/imgBG/Content/Right/Info/InfoGrid/ContSelect/ValueList/Viewport/Content/Add/Template",
+  txtNextLV = "node/imgBG/Content/Right/Info/InfoGrid/ContSelect/txtLV",
+  Right = "node/imgBG/Content/Right",
+  btnUp = "node/imgBG/Content/Right/Info/btnUp",
+  btnRecycle = "node/imgBG/Content/Right/Info/btnRecycle",
+  ContAdd = "node/imgBG/Content/Right/ContAdd",
+  txtCost = "node/imgBG/Content/Right/ContAdd/txtCost",
+  btnAdd = "node/imgBG/Content/Right/ContAdd/btnAdd",
+  UIItemGrid = "node/imgBG/Content/Right/ContAdd/UIItemGrid",
+  TemplateJump = "wndJumpTo/imgBG/List/Viewport/Content/Template",
+  wndJumpTo = "wndJumpTo",
+  txtHuShiName = "node/imgBG/Content/Right/Info/txtTittle"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnAdd = function(self)
+  end,
+  btnRecycle = function(self)
+  end,
+  btnUp = function(self)
+    if not self.nBagHuShiIndex then
+      return
+    end
+    local nTemplateId = self.tbPutOnHuShiData[1]
+    if nTemplateId > 0 and 1 == self.nBagHuShiIndex then
+      WXHuShi:CSPutOnHSEnhanceReqC(self.nWXIndex, self.nHSSlotIndex)
+    else
+      local nHuShiId = self.tbBagHuShi[self.nBagHuShiIndex].dwId
+      WXHuShi:CSItemEnhanceReqC(nHuShiId)
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbWuXingScrollView = Ui:NewScrollView(self, tbControls.TemplateWuXing, self.OnClickSlot)
+  self.tbHuShiScrollView = Ui:NewSuperListView(self, tbControls.HuShiTemplate, self.SetHuShiList, nil, self.OnClickHuShiItem)
+  self.tbHuShiItemGridGo = {}
+  self:InitAttrObj()
+  self.tbConsumeItemGrid = Ui:NewExistItemGrid(self, tbControls.UIItemGrid)
+  self.tbConsumeItemGrid:SetClickEnable(true)
+end
+
+function tbWnd:OnDestroy()
+end
+
+function tbWnd:OnOpen(nWXIndex, nHSSlotIndex, nSelectItemId)
+  self.nWXIndex = nWXIndex or 1
+  self.nHSSlotIndex = nHSSlotIndex or 1
+  self.nOpenSelectItemId = nSelectItemId
+  self:UpdateWuXingSV()
+  self.tbWuXingScrollView:SelectElement(self.nHSSlotIndex)
+  local nOpenIndex = -1
+  if nSelectItemId then
+    for nIndex, tbData in ipairs(self.tbBagHuShi) do
+      if tbData.dwId and tbData.dwId == nSelectItemId then
+        nOpenIndex = nIndex
+        break
+      end
+    end
+  end
+  if -1 ~= nOpenIndex then
+    self.tbHuShiScrollView:_OnClickElement(nOpenIndex)
+  end
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:UpdateWuXingSV()
+  self.tbWuXingScrollView:Clear()
+  local tbData = {}
+  for nIndex = 1, #WXHuShi.tbSeriesText do
+    self.tbWuXingScrollView:SetElement(nIndex, function(tbElement)
+      tbElement.pPanel:Label_SetText("Text", WXHuShi.tbSeriesText[nIndex]())
+    end)
+  end
+end
+
+function tbWnd:OnEnghanceRsp()
+  self.tbPutOnHuShiData = WXHuShi:GetWXHuShiData(me, self.nWXIndex, self.nHSSlotIndex)
+  self.tbHuShiScrollView:_OnClickElement(self.nBagHuShiIndex)
+  local tbElement, tbData = self.tbHuShiScrollView:GetElement(self.nBagHuShiIndex)
+  if tbElement then
+    self:SetHuShiList(tbElement, tbData, self.nBagHuShiIndex)
+  end
+  self:UpdateAttrInfo()
+end
+
+function tbWnd:UpdateView()
+  self.tbPutOnHuShiData = WXHuShi:GetWXHuShiData(me, self.nWXIndex, self.nHSSlotIndex)
+  self:UpdateBagHuShiItemInfo()
+  self:UpdateAttrInfo()
+end
+
+function tbWnd:OnClickSlot(nIndex, tbElement)
+  self.nHSSlotIndex = nIndex
+  self.nBagHuShiIndex = nil
+  self.tbHuShiScrollView:ClearSelected()
+  self:UpdateView()
+end
+
+function tbWnd:UpdateBagHuShiItemInfo()
+  self.tbBagHuShi = WXHuShi:GetHuShiList(self.nHSSlotIndex)
+  local nTemplateId = self.tbPutOnHuShiData[1]
+  if nTemplateId > 0 then
+    table.insert(self.tbBagHuShi, 1, self.tbPutOnHuShiData)
+  end
+  self.tbHuShiScrollView:SetAllElement(self.tbBagHuShi)
+  if #self.tbBagHuShi > 0 then
+    self.tbHuShiScrollView:_OnClickElement(1)
+    self.tbHuShiScrollView:MovePanelToItemIndex(self.nBagHuShiIndex or 1)
+  end
+  if #self.tbBagHuShi > 0 then
+    self.pPanel:SetActive(tbControls.Right, true)
+  else
+    self.pPanel:SetActive(tbControls.Right, false)
+  end
+end
+
+function tbWnd:SetHuShiList(tbElement, pHuShi, nIndex)
+  local pPanel = tbElement.pPanel
+  local tbGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  local nFightPower = 0
+  local nItemLevel
+  local nEnhanceLevel = 0
+  local nTemplateId = self.tbPutOnHuShiData[1]
+  if nTemplateId > 0 and 1 == nIndex then
+    pPanel:SetActive("imgMark", true)
+    nEnhanceLevel = self.tbPutOnHuShiData[3]
+    tbGrid:SetItemByTemplate(nTemplateId)
+    nItemLevel = Item:GetLevel(nTemplateId)
+    local szItemName = Item:GetName(nTemplateId)
+    pPanel:Label_SetText("txtName", szItemName)
+    nFightPower = WXHuShi.tbHuShiItemCfg[nTemplateId].nFightPower
+  else
+    nItemLevel = pHuShi.nLevel
+    local szItemName = i18n.Parse(pHuShi.szName)
+    pPanel:Label_SetText("txtName", szItemName)
+    tbGrid:SetItemByTemplate(pHuShi.dwTemplateId)
+    nEnhanceLevel = Item:GetClass("WXHuShiItem"):GetEnhanceLevel(pHuShi)
+    pPanel:SetActive("imgMark", false)
+    nFightPower = WXHuShi.tbHuShiItemCfg[pHuShi.dwTemplateId].nFightPower
+  end
+  pPanel:Label_SetText("txtAdd", i18n.EasyGet("\229\188\186\229\140\150\239\188\154{0}", nEnhanceLevel))
+  if nEnhanceLevel > 0 then
+    nFightPower = nFightPower + WXHuShi.Cfg.tbEnhanceFight[nEnhanceLevel][nItemLevel]
+  end
+  pPanel:Label_SetText("ZhenwuValueList/Template/txtValueName/txtValue", nFightPower)
+end
+
+function tbWnd:OnClickHuShiItem(tbElement, tbMsg, nIndex)
+  if self.nBagHuShiIndex == nIndex then
+    return
+  end
+  local szName = ""
+  self.nBagHuShiIndex = nIndex
+  local nTemplateId = self.tbPutOnHuShiData[1]
+  if nTemplateId > 0 and 1 == nIndex then
+    local szItemName = Item:GetName(nTemplateId)
+    self.pPanel:Label_SetText(tbControls.txtHuShiName, szItemName)
+  else
+    local szItemName = i18n.Parse(self.tbBagHuShi[nIndex].szName)
+    self.pPanel:Label_SetText(tbControls.txtHuShiName, szItemName)
+  end
+  self:UpdateAttrInfo()
+end
+
+function tbWnd:UpdateAttrInfo()
+  local nTemplateId = self.tbPutOnHuShiData[1]
+  local nEnhanceLevel = self.tbPutOnHuShiData[3]
+  local tbBaseAttr = self.tbPutOnHuShiData[4]
+  local tbExtAttr = self.tbPutOnHuShiData[5]
+  local nItemLevel, nNextEnhanceLevel
+  if not self.nBagHuShiIndex or not self.tbBagHuShi[self.nBagHuShiIndex] then
+    return
+  end
+  if 1 == self.nBagHuShiIndex and nTemplateId > 0 then
+    local tbMaxUpgradeData = WXHuShi:GetEnhanceMaxUpgradeData(me, self.nWXIndex, self.nHSSlotIndex)
+    local nQuality = Item:GetQuality(nTemplateId)
+    nItemLevel = Item:GetLevel(nTemplateId)
+    self.pPanel:Label_SetText(tbControls.txtCurLV, nEnhanceLevel)
+    local nAttrLevel = 0
+    if nEnhanceLevel > 0 then
+      nAttrLevel = WXHuShi.Cfg.tbEnhanceAttr[nQuality][nEnhanceLevel][nItemLevel]
+    end
+    self:UpdateAttrByAttrData(nTemplateId, nAttrLevel, tbMaxUpgradeData, tbBaseAttr, self.tbCurBaseAttrObj, tbExtAttr, self.tbCurExtAttrObj)
+    nNextEnhanceLevel = nEnhanceLevel + 1
+    if nNextEnhanceLevel > WXHuShi.nMaxEnhanceLevel then
+      nNextEnhanceLevel = WXHuShi.nMaxEnhanceLevel
+      local nNextAttrLevel = WXHuShi.Cfg.tbEnhanceAttr[nQuality][nNextEnhanceLevel][nItemLevel]
+      self:UpdateAttrByAttrData(nTemplateId, nNextAttrLevel, tbMaxUpgradeData, tbBaseAttr, self.tbNextBaseAttrObj, tbExtAttr, self.tbNextExtAttrObj)
+    else
+      local nNextAttrLevel = WXHuShi.Cfg.tbEnhanceAttr[nQuality][nNextEnhanceLevel][nItemLevel]
+      self:UpdateAttrByAttrData(nTemplateId, nNextAttrLevel, tbMaxUpgradeData, tbBaseAttr, self.tbNextBaseAttrObj, tbExtAttr, self.tbNextExtAttrObj, nNextEnhanceLevel)
+    end
+  else
+    local pHuShi = self.tbBagHuShi[self.nBagHuShiIndex]
+    nTemplateId = pHuShi.dwTemplateId
+    local tbItem = Item:GetClass("WXHuShiItem")
+    tbBaseAttr = tbItem:GetRandomBaseAttrInfo(pHuShi)
+    tbExtAttr = tbItem:GetRandomExtAttrInfo(pHuShi)
+    nEnhanceLevel = tbItem:GetEnhanceLevel(pHuShi)
+    self.pPanel:Label_SetText(tbControls.txtCurLV, nEnhanceLevel)
+    local tbMaxUpgradeData = tbItem:GetEnhanceMaxUpgradeData(pHuShi)
+    local nQuality = Item:GetQuality(nTemplateId)
+    nItemLevel = pHuShi.nLevel
+    local nAttrLevel = 0
+    if nEnhanceLevel > 0 then
+      nAttrLevel = WXHuShi.Cfg.tbEnhanceAttr[nQuality][nEnhanceLevel][nItemLevel]
+    end
+    self:UpdateAttrByAttrData(nTemplateId, nAttrLevel, tbMaxUpgradeData, tbBaseAttr, self.tbCurBaseAttrObj, tbExtAttr, self.tbCurExtAttrObj)
+    nNextEnhanceLevel = nEnhanceLevel + 1
+    if nNextEnhanceLevel > WXHuShi.nMaxEnhanceLevel then
+      nNextEnhanceLevel = WXHuShi.nMaxEnhanceLevel
+      local nNextAttrLevel = WXHuShi.Cfg.tbEnhanceAttr[nQuality][nNextEnhanceLevel][nItemLevel]
+      self:UpdateAttrByAttrData(nTemplateId, nNextAttrLevel, tbMaxUpgradeData, tbBaseAttr, self.tbNextBaseAttrObj, tbExtAttr, self.tbNextExtAttrObj)
+    else
+      local nNextAttrLevel = WXHuShi.Cfg.tbEnhanceAttr[nQuality][nNextEnhanceLevel][nItemLevel]
+      self:UpdateAttrByAttrData(nTemplateId, nNextAttrLevel, tbMaxUpgradeData, tbBaseAttr, self.tbNextBaseAttrObj, tbExtAttr, self.tbNextExtAttrObj, nNextEnhanceLevel)
+    end
+  end
+  self.pPanel:Label_SetText(tbControls.txtNextLV, nNextEnhanceLevel)
+  local nNeedItemId = WXHuShi.Cfg.tbEnhanceInfo[nNextEnhanceLevel][1]
+  local nNeedItemNum = WXHuShi.Cfg.tbEnhanceInfo[nNextEnhanceLevel][nItemLevel + 1]
+  self.tbConsumeItemGrid:SetItemByTemplate(nNeedItemId)
+  local nCurNum = me.GetItemCountByTypeInBag(nNeedItemId)
+  if nNeedItemNum <= nCurNum then
+    self.pPanel:Label_SetColorByName(tbControls.txtCost, "Enough")
+  else
+    self.pPanel:Label_SetColorByName(tbControls.txtCost, "NotEnough")
+  end
+  self.pPanel:Label_SetText(tbControls.txtCost, nCurNum .. "/" .. nNeedItemNum)
+  if nEnhanceLevel == nNextEnhanceLevel then
+    self.pPanel:SetActive(tbControls.ContAdd, false)
+    self.pPanel:SetActive(tbControls.btnUp, false)
+  else
+    self.pPanel:SetActive(tbControls.ContAdd, true)
+    self.pPanel:SetActive(tbControls.btnUp, true)
+  end
+end
+
+function tbWnd:UpdateAttrByAttrData(nTemplateId, nAttrLevel, tbMaxUpgradeData, tbBaseAttr, tbBasePath, tbExtAttr, tbExtPath, nNextEnhanceLevel)
+  local nQuality = Item:GetQuality(nTemplateId)
+  local nItemLevel = Item:GetLevel(nTemplateId)
+  for i = 1, WXHuShi.nMaxBaseAttrCount do
+    if i <= #tbBaseAttr then
+      local nAttrId = tbBaseAttr[i][1]
+      local tbEnhanceAttrValue
+      if nAttrLevel > 0 then
+        tbEnhanceAttrValue = WXHuShi.tbEnhanceAttrPoolCfg[nAttrId][nAttrLevel]
+      else
+        tbEnhanceAttrValue = {
+          0,
+          0,
+          0
+        }
+      end
+      local szAttrType = WXHuShi.Cfg.tbAttrId2AttrType[nAttrId]
+      if not szAttrType then
+        LogErr("UpdateAttrInfo tbBaseAttr Can't find AttrType by attrId = ", nAttrId)
+      end
+      local szAttribMsg, szValue = FightSkill:GetMagicDescSplit(szAttrType, tbEnhanceAttrValue)
+      PushString(tbBasePath[i])
+      AppendString("/txtValueName")
+      local szAttrTypePath = PopString()
+      PushString(tbBasePath[i])
+      AppendString("/txtValue")
+      local szAttrValuePath = PopString()
+      self.pPanel:Label_SetText(szAttrTypePath, szAttribMsg)
+      self.pPanel:Label_SetText(szAttrValuePath, szValue)
+      self.pPanel:SetActive(tbBasePath[i], true)
+    else
+      self.pPanel:SetActive(tbBasePath[i], false)
+    end
+  end
+  for nAttrIndex = 1, WXHuShi.nMaxExtAttrCount do
+    if nAttrIndex <= #tbExtAttr then
+      local nAttrId = tbExtAttr[nAttrIndex][1]
+      local tbEnhanceAttrValue
+      if nAttrLevel > 0 then
+        tbEnhanceAttrValue = WXHuShi.tbEnhanceAttrPoolCfg[nAttrId][nAttrLevel]
+      else
+        tbEnhanceAttrValue = {
+          0,
+          0,
+          0
+        }
+      end
+      local szAttrType = WXHuShi.Cfg.tbAttrId2AttrType[nAttrId]
+      if not szAttrType then
+        LogErr("UpdateAttrInfo tbExtAttr Can't find AttrType by attrId = ", nAttrId)
+      end
+      local szAttribMsg, szValue1 = FightSkill:GetMagicDescSplit(szAttrType, tbEnhanceAttrValue)
+      local nMaxAddTimes = tbMaxUpgradeData[nAttrIndex]
+      local nCfgIndex = nMaxAddTimes * WXHuShi.nEnhanceMaxUpgradeLevel
+      local szValue = szValue1
+      if WXHuShi.Cfg.tbEnhanceAttrExt[nQuality][nCfgIndex] then
+        local nMaxAttrLevel = WXHuShi.Cfg.tbEnhanceAttrExt[nQuality][nCfgIndex][nItemLevel]
+        local tbMaxEnhanceAttrValue = WXHuShi.tbEnhanceAttrPoolCfg[nAttrId][nMaxAttrLevel]
+        local _, szValue2 = FightSkill:GetMagicDescSplit(szAttrType, tbMaxEnhanceAttrValue)
+        szValue = FightSkill:StringValueAddResult(szValue1, szValue2)
+      end
+      PushString(tbExtPath[nAttrIndex])
+      AppendString("/txtValueName")
+      local szAttrTypePath = PopString()
+      PushString(tbExtPath[nAttrIndex])
+      AppendString("/txtValue")
+      local szAttrValuePath = PopString()
+      self.pPanel:Label_SetText(szAttrTypePath, szAttribMsg)
+      self.pPanel:Label_SetText(szAttrValuePath, szValue)
+      self.pPanel:SetActive(tbExtPath[nAttrIndex], true)
+      local szColor = WXHuShi.tbMaxUpgradeAttrColor[nMaxAddTimes]
+      self.pPanel:Label_SetColorByName(szAttrTypePath, szColor)
+      self.pPanel:Label_SetColorByName(szAttrValuePath, szColor)
+      if nNextEnhanceLevel and 0 == math.floor(nNextEnhanceLevel % WXHuShi.nEnhanceMaxUpgradeLevel) then
+        if 1 == nAttrIndex then
+          self.pPanel:Label_SetText(szAttrTypePath, i18n.EasyGet("\233\154\143\230\156\186\228\184\128\230\157\161\229\177\158\230\128\167\229\164\167\229\185\133\230\143\144\229\141\135"))
+        else
+          self.pPanel:Label_SetText(szAttrTypePath, "")
+        end
+        self.pPanel:Label_SetText(szAttrValuePath, "")
+      end
+    else
+      self.pPanel:SetActive(tbExtPath[nAttrIndex], false)
+    end
+  end
+end
+
+function tbWnd:InitAttrObj()
+  self.tbCurBaseAttrObj = {}
+  self.tbCurExtAttrObj = {}
+  self.tbNextBaseAttrObj = {}
+  self.tbNextExtAttrObj = {}
+  for i = 1, WXHuShi.nMaxBaseAttrCount do
+    self.tbCurBaseAttrObj[i] = self.pPanel:CloneObject(tbControls.CurBaseAttrTemplate, "CurBaseAttr" .. i)
+    self.tbNextBaseAttrObj[i] = self.pPanel:CloneObject(tbControls.NextBaseAttrTemplate, "SelectBaseAttr" .. i)
+  end
+  for i = 1, WXHuShi.nMaxExtAttrCount do
+    self.tbCurExtAttrObj[i] = self.pPanel:CloneObject(tbControls.CurExtAttrTemplate, "CurExtAttr" .. i)
+    self.tbNextExtAttrObj[i] = self.pPanel:CloneObject(tbControls.NextExtAttrTemplate, "SelectExtAttr" .. i)
+  end
+  self.pPanel:SetActive(tbControls.CurBaseAttrTemplate, false)
+  self.pPanel:SetActive(tbControls.NextBaseAttrTemplate, false)
+  self.pPanel:SetActive(tbControls.CurExtAttrTemplate, false)
+  self.pPanel:SetActive(tbControls.NextExtAttrTemplate, false)
+end

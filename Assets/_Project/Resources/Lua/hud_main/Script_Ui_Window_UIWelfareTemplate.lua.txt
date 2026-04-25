@@ -1,0 +1,168 @@
+local tbWnd = Ui:CreateClass("UIWelfareTemplate", "UIPanel")
+local tbControls = {
+  txtTitle = "Tex/txtTitle",
+  Template = "Scroll View/Viewport/Content/Template",
+  btnHelp = "Tex/txtTitle/btnHelp",
+  txtTime = "Tex/txtCell/txtTime01",
+  txtLV = "Tex/txtCell/txtLV"
+}
+tbWnd.tbControls = tbControls
+tbWnd.ElementPath = {
+  txtNameNormal = "info/txtNameNormal",
+  txtTime = "info/txtTime01",
+  txtCont = "info/txtCont",
+  btnGo = "info/btnGo",
+  imgFinish = "info/img_Have",
+  imgWelfareIcon = "info/imgWelfareIcon",
+  btnGet = "info/btnGet"
+}
+tbWnd.tbOnClick = {
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.szHelpKey)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.Template)
+end
+
+function tbWnd:OnOpen(nEntranceIndex, nIndex)
+  self.nEntranceIndex = nEntranceIndex or self.nEntranceIndex
+  if self.nEntranceIndex then
+    self:UpdateInfo(self.nEntranceIndex, nIndex)
+  end
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_OBACTIVITY_UPDATE, self.OnChangeOBReward, self)
+end
+
+function tbWnd:OnChangeOBReward(nActId)
+  self:UpdateInfo()
+end
+
+function tbWnd:UpdateInfo(nEntranceIndex, nIndex)
+  self.nEntranceIndex = nEntranceIndex or self.nEntranceIndex
+  self.nIndex = nIndex or self.nIndex
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(self.nEntranceIndex)
+  local tbInfo = self.tbActivityList[self.nIndex]
+  if not tbInfo then
+    return
+  end
+  self.szHelpKey = tbInfo.szHelpKey
+  local bHideBtnHelp = not self.szHelpKey or self.szHelpKey == ""
+  self.pPanel:SetActive(self.btnHelp, not bHideBtnHelp)
+  self.pPanel:Label_SetText(tbControls.txtTitle, tbInfo.szName)
+  self:UpdateTimeInfo(tbInfo)
+  self:UpdateViewList()
+end
+
+function tbWnd:UpdateTimeInfo(tbInfo)
+  local bStart, bEnd = self:CheckOpenState(tbInfo.nId)
+  local tbInstConfig = ActivityMgr:GetConfigById(tbInfo.nId)
+  local tbConfig = ActivityMgr.EntranceSchedule:BuildInstanceConfig(tbInfo.nId, ActivityMgr.Def.ClassNameList.CommonEntry)
+  local szShowTime
+  if not bStart then
+    local nDiff = tbInstConfig.nStartTime - GetTime()
+    szShowTime = i18n.EasyGet("<color=#1FFB24>{0}</color> {1}\229\144\142\229\188\128\229\144\175", i18n.Parse(tbConfig.szShowTime), Lib:TimeDesc2(nDiff))
+  elseif bEnd then
+    szShowTime = i18n.EasyGet("<color=#1FFB24>{0}</color> \230\180\187\229\138\168\229\183\178\231\187\147\230\157\159", i18n.Parse(tbConfig.szShowTime))
+  else
+    local nDiff = tbInstConfig.nEndTime - GetTime()
+    szShowTime = i18n.EasyGet("<color=#1FFB24>{0}</color> {1}\229\144\142\231\187\147\230\157\159", i18n.Parse(tbConfig.szShowTime), Lib:TimeDesc2(nDiff))
+  end
+  self.pPanel:Label_SetText(tbControls.txtTime, szShowTime)
+  self.pPanel:Label_SetText(tbControls.txtLV, i18n.EasyGet("\231\173\137\231\186\167\233\153\144\229\136\182: {0}", tbInfo.nLevel))
+end
+
+function tbWnd:UpdateViewList()
+  self.tbScrollView:Reset()
+  local tbBtnList = ActivityMgr.EntranceSchedule:GetExtraBtnList(self.nEntranceIndex, self.nIndex)
+  for index, tbBtnData in ipairs(tbBtnList) do
+    self.tbScrollView:SetElement(index, function(tbElement)
+      local szName = tbBtnData.szName and i18n.Get(tbBtnData.szName) or ""
+      tbElement.pPanel:Label_SetText(self.ElementPath.txtNameNormal, szName)
+      tbElement.pPanel:Sprite_SetSprite(self.ElementPath.imgWelfareIcon, tbBtnData.szImgInfo)
+      if not Lib:IsEmptyStr(tbBtnData.szRedPoint) and RedPointMgr.EVENT[tbBtnData.szRedPoint] then
+        RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, self.ElementPath.btnGo, {
+          RedPointMgr.EVENT[tbBtnData.szRedPoint]
+        })
+      end
+      local bOpening = false
+      local szTime = i18n.EasyGet("{0}\n\230\180\187\229\138\168\229\183\178\231\187\147\230\157\159", i18n.Get(tbBtnData.szShowTime))
+      tbElement.pPanel:Label_SetText(self.ElementPath.txtTime, szTime)
+      local nStartTime = Lib:ParseConfigDateTime(tbBtnData.szStartTime) or 0
+      local nEndTime = Lib:ParseConfigDateTime(tbBtnData.szEndTime) or 0
+      if nStartTime > GetTime() then
+        local nDiff = nStartTime - GetTime()
+        szTime = i18n.EasyGet("{0}\n{1}\229\144\142\229\188\128\229\144\175", i18n.Get(tbBtnData.szShowTime), Lib:TimeDesc2(nDiff))
+        tbElement.pPanel:Label_SetText(self.ElementPath.txtTime, szTime)
+      elseif nEndTime < GetTime() then
+        szTime = i18n.EasyGet("{0}\n\230\180\187\229\138\168\229\183\178\231\187\147\230\157\159", i18n.Get(tbBtnData.szShowTime))
+        tbElement.pPanel:Label_SetText(self.ElementPath.txtTime, szTime)
+      else
+        bOpening = true
+        local nDiff = nEndTime - GetTime()
+        szTime = i18n.EasyGet("{0}\n{1}\229\144\142\231\187\147\230\157\159", i18n.Get(tbBtnData.szShowTime), Lib:TimeDesc2(nDiff))
+        tbElement.pPanel:Label_SetText(self.ElementPath.txtTime, szTime)
+      end
+      tbElement.pPanel:Label_SetText(self.ElementPath.txtCont, i18n.Get(tbBtnData.szDesc))
+      if bOpening and tbBtnData.szCallBack and not Lib:IsEmptyStr(tbBtnData.szCallBack) then
+        tbElement.pPanel:SetActive(self.ElementPath.btnGo, true)
+        Ui:Button_BindEvent(tbElement.pPanel, self.ElementPath.btnGo, self.OnClickGo, self, tbBtnData.szCallBack, tbBtnData.szParam, tbBtnData.szRedPoint)
+      else
+        tbElement.pPanel:SetActive(self.ElementPath.btnGo, false)
+      end
+      tbElement.pPanel:SetActive(self.ElementPath.btnGet, false)
+      tbElement.pPanel:SetActive(self.ElementPath.imgFinish, false)
+      tbElement.pPanel:Label_SetText(string.format("%s%s", self.ElementPath.btnGo, "/Text"), i18n.EasyGet("\229\137\141\229\190\128"))
+      if tbBtnData.szCallBack == "GetOBReward" then
+        local nGetOBRewardActId = tonumber(tbBtnData.szParam)
+        local tbGetOBRewardInstConfig = ActivityMgr:GetInstanceById(nGetOBRewardActId)
+        tbElement.pPanel:Label_SetText(string.format("%s%s", self.ElementPath.btnGo, "/Text"), i18n.EasyGet("\233\162\134\229\143\150"))
+        if tbGetOBRewardInstConfig:HasGotten(nGetOBRewardActId) then
+          tbElement.pPanel:SetActive(self.ElementPath.btnGo, false)
+          tbElement.pPanel:SetActive(self.ElementPath.imgFinish, true)
+        end
+      end
+    end)
+  end
+end
+
+function tbWnd:OnClickGo(szCallBack, szParam, szRedPoint)
+  if "TypeRank" == szParam then
+    if not self.tbEntranceRankData then
+      self.tbEntranceRankData = ActivityMgr.EntranceSchedule:GetEntranceRankData(self.nEntranceIndex)
+    end
+    Ui:OpenWindow("UITemporaryActivityRank", self.tbEntranceRankData, 1)
+  else
+    self:OnWelfareGoBtnClick(szCallBack, szParam, szRedPoint)
+  end
+end
+
+function tbWnd:OnWelfareGoBtnClick(szCallBack, szParam, szRedPoint)
+  if not szCallBack or Lib:IsEmptyStr(szCallBack) then
+    return
+  end
+  local fn = ActivityMgr.tbJumpFunc[szCallBack]
+  local tbParam = Lib:SplitStrTry2Num(szParam, "|")
+  fn(self.tbActivityList[self.nIndex].nId, table.unpack(tbParam))
+  if "GotoPos" == szCallBack or "GotoNPC" == szCallBack then
+    Ui:CloseWindow("UIBaDaoActivity")
+  end
+end
+
+function tbWnd:OnClose()
+  self.tbScrollView:Reset()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_OBACTIVITY_UPDATE, self)
+end
+
+function tbWnd:CheckOpenState(nActId)
+  local bStart = false
+  local bEnd = false
+  local tbInstConfig = ActivityMgr:GetConfigById(nActId)
+  if GetTime() >= tbInstConfig.nStartTime then
+    bStart = true
+  end
+  if GetTime() > tbInstConfig.nEndTime then
+    bEnd = true
+  end
+  return bStart, bEnd
+end

@@ -1,0 +1,167 @@
+Require("CommonScript/Partner/PartnerDef.lua")
+Require("CommonScript/Partner/PartnerCommon.lua")
+
+function Partner:InitPartnerSkillBookMagicAttrib(pPlayer)
+  pPlayer = pPlayer or me
+  local tbCurPartnerPosInfo = pPlayer.GetPartnerPosInfo()
+  for nCount, nPartnerId in pairs(tbCurPartnerPosInfo) do
+    if nPartnerId > 0 then
+      local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+      for i = 1, self.nMaxSkillNum do
+        local nSkillId, nSkillLevel, nSkillExp = pPartner.GetSkillInfo(i)
+        if nSkillId > 0 then
+          self:ApplyPartnerSkillBookMagicAttrib(pPlayer.GetNpc(), nSkillId, nSkillLevel, true, false, pPlayer.dwID)
+        end
+      end
+    end
+  end
+end
+
+function Partner:ApplyPartnerSkillBookMagicAttrib(pNpc, nSkillId, nSkillLevel, bActive, bLevelup, nPlayerId)
+  pNpc = pNpc or me
+  local szAttribValueLevel = "szAttribValue" .. tostring(nSkillLevel)
+  local tbSkillAttrib = Lib:SplitStr(self.tbPartnerSkillSetting[nSkillId].szAttrib, "|")
+  local tbSkillAttribValue = Lib:SplitStr(self.tbPartnerSkillSetting[nSkillId][szAttribValueLevel], "|")
+  for i = 1, #tbSkillAttrib do
+    local tbInfo = {}
+    tbInfo.szName = tbSkillAttrib[i]
+    tbInfo.tbValue = Lib:SplitStr2Num(tbSkillAttribValue[i], ",")
+    if bActive and bLevelup then
+      local szLastAttribValueLevel = "szAttribValue" .. tostring(nSkillLevel - 1)
+      local tbLastSkillAttribValue = Lib:SplitStr(self.tbPartnerSkillSetting[nSkillId][szLastAttribValueLevel], "|")
+      local tbLastValue = Lib:SplitStr2Num(tbLastSkillAttribValue[i], ",")
+      pNpc.RemoveMagicAttrib(tbInfo.szName, table.unpack(tbLastValue))
+    end
+    if bActive then
+      pNpc.ApplyMagicAttrib(tbInfo.szName, table.unpack(tbInfo.tbValue))
+      if nPlayerId then
+        AttributeHelp:LogAttrApply(nPlayerId, "Partner", tbInfo.szName, table.unpack(tbInfo.tbValue))
+      end
+    else
+      pNpc.RemoveMagicAttrib(tbInfo.szName, table.unpack(tbInfo.tbValue))
+      if nPlayerId then
+        AttributeHelp:LogAttrRemove(nPlayerId, "Partner", tbInfo.szName, table.unpack(tbInfo.tbValue))
+      end
+    end
+  end
+end
+
+function Partner:InitPosPartnerProtectSkill(pPlayer)
+  local tbPartnerPos = pPlayer.GetPartnerPosInfo()
+  for nIndex, nPartnerId in pairs(tbPartnerPos) do
+    if 0 ~= nPartnerId then
+      local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+      if pPartner then
+        local nProtectSkillId = self.tbAllPartnerInfo[pPartner.nTemplateId].nProtectSkillId
+        local nFightPower = pPartner.nFightPower
+        local nQualityLevel = self.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+        local nSkillLevel = self:GetProtectSkillLevel(nQualityLevel, nFightPower)
+        if not pPlayer.nPartnerProtectExtraLevel then
+          pPlayer.nPartnerProtectExtraLevel = 0
+          Log("pPlayer.nPartnerProtectExtraLevel == nil error", pPlayer.dwID)
+        end
+        nSkillLevel = nSkillLevel + pPlayer.nPartnerProtectExtraLevel
+        self:ApplyPartnerProtectSkill(pPlayer.GetNpc(), nProtectSkillId, nSkillLevel, true, pPlayer.dwID)
+      end
+    end
+  end
+end
+
+function Partner:ApplyPartnerProtectSkill(pNpc, nProtectSkillId, nLevel, bActive, nPlayerId)
+  pNpc = pNpc or me
+  if nLevel <= 0 then
+    return
+  end
+  local tbProtectSkillInfo = self.tbProtectSkillSetting[nProtectSkillId]
+  for i = 1, 3 do
+    local szAttribName = tbProtectSkillInfo["Attrib" .. i .. "Type"]
+    local tbAttribValue = Lib:SplitStr2Num(tbProtectSkillInfo["Attrib" .. i .. "Value1"], ",")
+    local tbLevelupSection = Lib:SplitStr2Num(tbProtectSkillInfo["szLevelupSection" .. i], ",")
+    if "" ~= szAttribName then
+      for _, nLevelupSection in pairs(tbLevelupSection) do
+        tbAttribValue[nLevelupSection] = tbAttribValue[nLevelupSection] * nLevel
+      end
+      if bActive then
+        pNpc.ApplyMagicAttrib(szAttribName, table.unpack(tbAttribValue))
+        if nPlayerId then
+          AttributeHelp:LogAttrApply(nPlayerId, "Partner", szAttribName, table.unpack(tbAttribValue))
+        end
+      else
+        pNpc.RemoveMagicAttrib(szAttribName, table.unpack(tbAttribValue))
+        if nPlayerId then
+          AttributeHelp:LogAttrRemove(nPlayerId, "Partner", szAttribName, table.unpack(tbAttribValue))
+        end
+      end
+    end
+  end
+end
+
+function Partner:GetPartnerProtectSkillNameAndIconPath(pPlayer, nProtectSkillId)
+  pPlayer = pPlayer or me
+  local tbProtectSkillInfo = self.tbProtectSkillSetting[nProtectSkillId]
+  local szName = tbProtectSkillInfo.szName
+  local szIconPath = tbProtectSkillInfo.szIconPath
+  return szName, szIconPath
+end
+
+function Partner:GetPartnerAwakeningSkillNameAndIconPath(pPlayer, nAwakeningSkillId)
+  pPlayer = pPlayer or me
+  local tbAwakeningSkillInfo = self.tbJueXingSkillSetting[nAwakeningSkillId]
+  if not tbAwakeningSkillInfo then
+    return "", ""
+  end
+  local szName = tbAwakeningSkillInfo.szName
+  local szIconPath = tbAwakeningSkillInfo.szIconPath
+  return szName, szIconPath
+end
+
+function Partner:InitPosPartnerJueXingSkill(pPlayer)
+  local tbPartnerPos = pPlayer.GetPartnerPosInfo()
+  for nIndex, nPartnerId in pairs(tbPartnerPos) do
+    if 0 ~= nPartnerId then
+      local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+      if pPartner then
+        local nJueXingSkillId = self.tbAllPartnerInfo[pPartner.nTemplateId].nJueXingSkillId
+        local nSkillLevel = self:GetPartnerJueXingLevel(pPlayer, nPartnerId)
+        self:ApplyPartnerJueXingSkill(pPlayer.GetNpc(), nJueXingSkillId, nSkillLevel, true, pPlayer.dwID)
+      end
+    end
+  end
+end
+
+function Partner:ApplyPartnerJueXingSkill(pNpc, nJueXingSkillId, nLevel, bActive, nPlayerId)
+  pNpc = pNpc or me
+  if nLevel <= 0 then
+    return
+  end
+  local tbJueXingSkillInfo = self.tbJueXingSkillSetting[nJueXingSkillId]
+  for i = 1, 3 do
+    local szAttribName = tbJueXingSkillInfo["Attrib" .. i .. "Type"]
+    local tbAttribValue = Lib:SplitStr2Num(tbJueXingSkillInfo["Attrib" .. i .. "Value1"], ",")
+    local tbLevelupSection = Lib:SplitStr2Num(tbJueXingSkillInfo["szLevelupSection" .. i], ",")
+    if "" ~= szAttribName then
+      for _, nLevelupSection in pairs(tbLevelupSection) do
+        tbAttribValue[nLevelupSection] = tbAttribValue[nLevelupSection] * nLevel
+      end
+      if bActive then
+        pNpc.ApplyMagicAttrib(szAttribName, table.unpack(tbAttribValue))
+        if nPlayerId then
+          AttributeHelp:LogAttrApply(nPlayerId, "Partner", szAttribName, table.unpack(tbAttribValue))
+        end
+      else
+        pNpc.RemoveMagicAttrib(szAttribName, table.unpack(tbAttribValue))
+        if nPlayerId then
+          AttributeHelp:LogAttrRemove(nPlayerId, "Partner", szAttribName, table.unpack(tbAttribValue))
+        end
+      end
+    end
+  end
+end
+
+function Partner:GetPartnerJueXingSkillNameAndIconPath(pPlayer, nJueXingSkillId)
+  pPlayer = pPlayer or me
+  local tbJueXingSkillInfo = self.tbJueXingSkillSetting[nJueXingSkillId]
+  local szName = tbJueXingSkillInfo.szName
+  local szIconPath = tbJueXingSkillInfo.szIconPath
+  return szName, szIconPath
+end

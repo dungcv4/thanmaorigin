@@ -1,0 +1,65 @@
+Loading.tbLoadingInfo = {}
+
+function Loading:ClearDstMaptemplateId()
+  self.tbLoadingInfo.nDstMaptemplateId = nil
+  self.nCurMapTemplateId = nil
+end
+
+function Loading:CloseLoadWindow()
+  Ui:DestroyWindow("UIMapLoading")
+end
+
+function Loading:StartLoadData(nMapTemplateId, nType, bRecycle)
+  self.bLoadMapFinish = false
+  if self.nUpdateTimerId then
+    Timer:Close(self.nUpdateTimerId)
+    self.nUpdateTimerId = nil
+  end
+  local tbLoadingInfo = self.tbLoadingInfo
+  tbLoadingInfo.nDstMaptemplateId = nMapTemplateId
+  tbLoadingInfo.nType = nType
+  tbLoadingInfo.bRecycle = bRecycle
+  Ui:OpenWindow("UIMapLoading", nMapTemplateId)
+  ClientUtil:StartLoadMap()
+  DoLoadMap(self.tbLoadingInfo.nDstMaptemplateId, self.tbLoadingInfo.nType, 0, self.tbLoadingInfo.bRecycle)
+end
+
+function Loading:StartLoadScene()
+  if self.nUpdateTimerId then
+    Timer:Close(self.nUpdateTimerId)
+    self.nUpdateTimerId = nil
+  end
+  self.nRealPercent = 0
+  
+  local function fnUpdatePercent()
+    local fMapPercent = 0
+    if self.nRealPercent < 1.0 then
+      fMapPercent = Ui.ToolFunction.GetLoadMapPercent()
+      self.nRealPercent = math.max(fMapPercent, self.nRealPercent)
+      local fPreloadPer = (1 - PreloadResource:GetLoadPercent()) * 0.3
+      self.nRealPercent = self.nRealPercent - fPreloadPer
+      if fPreloadPer >= 0.001 and self.nRealPercent > 1.0 then
+        self.nRealPercent = 0.99
+      end
+    end
+    if fMapPercent >= 1 then
+      self.nRealPercent = 1
+    end
+    if self.nRealPercent >= 1.0 and Login.bEnterGame then
+      self.nUpdateTimerId = nil
+      ResetLogicFrame()
+      if 0 ~= self.tbLoadingInfo.nDstMaptemplateId then
+        Operation:OnMapLoaded()
+      end
+      Map:OnMapLoaded(self.tbLoadingInfo.nDstMaptemplateId, self.nCurMapTemplateId)
+      self.bLoadMapFinish = true
+      self.nCurMapTemplateId = self.tbLoadingInfo.nDstMaptemplateId
+      Ui:DestroyWindow("UIMapLoading")
+      self.nUpdateTimerId = nil
+      return
+    end
+    return true
+  end
+  
+  self.nUpdateTimerId = Timer:Register(1, fnUpdatePercent)
+end

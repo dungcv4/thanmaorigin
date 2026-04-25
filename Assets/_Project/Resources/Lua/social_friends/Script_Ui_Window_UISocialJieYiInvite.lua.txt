@@ -1,0 +1,109 @@
+local tbWnd = Ui:CreateWindow("UISocialJieYiInvite")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_JIEYI_DATA,
+      self.Refresh
+    },
+    {
+      EventNotify.emNoTIFY_SYNC_FRIEND_DATA,
+      self.Refresh
+    },
+    {
+      EventNotify.emNOTIFY_MAP_SWITCH,
+      self.Close
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  Template = "node/imgBG/Content/imgInviteList/InviteList/Template",
+  imgInviteList = "node/imgBG/Content/imgInviteList",
+  NotInfo = "node/imgBG/Content/NotInfo"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbInvitedList = Ui:NewLoopScrollView(self, tbControls.Template)
+end
+
+function tbWnd:OnOpen()
+  self:Refresh()
+end
+
+function tbWnd:Refresh()
+  if not self:Visible() then
+    return
+  end
+  local tbJieYiData = SocialJieYi:GetJieYiData()
+  if not tbJieYiData then
+    self:Close()
+    return
+  end
+  SocialJieYi:Log("UISocialJieYiInvite tbJieYiData", tbJieYiData)
+  local tbAllFriend = FriendShip:GetAllFriendData()
+  local tbCanJieYiFriend = {}
+  for i = 1, #tbAllFriend do
+    local tbFriend = FriendShip:GetFriendDataInfo(tbAllFriend[i].dwRoleId)
+    if not tbJieYiData.tbBrothers[tbFriend.dwID] and tbFriend.nLevel >= SocialJieYi.Cfg.PLAYER_LEVEL_LIMIT then
+      local nIntimacy = FriendShip:GetFriendImityLevel(me.dwID, tbFriend.dwID) or 0
+      if nIntimacy >= SocialJieYi.Cfg.FRIEND_IMITITY_LEVEL_MIN then
+        tbCanJieYiFriend[#tbCanJieYiFriend + 1] = tbFriend
+      end
+    end
+  end
+  SocialJieYi:Log("UISocialJieYiInvite tbCanJieYiFriend", tbCanJieYiFriend)
+  local bHaveList = #tbCanJieYiFriend > 0
+  self.pPanel:SetActive(tbControls.imgInviteList, bHaveList)
+  self.pPanel:SetActive(tbControls.NotInfo, not bHaveList)
+  if bHaveList then
+    self.tbInvitedList:SetElement(#tbCanJieYiFriend, function(tbLoopScroll, i)
+      local tbElement = tbLoopScroll:GetElement(i)
+      if not tbElement then
+        return
+      end
+      local tbRoleData = tbCanJieYiFriend[i]
+      if not tbRoleData then
+        return
+      end
+      local pPanel = tbElement.pPanel
+      local tbPortraitObjPanel = Ui:NewExistPortraitObjPanel(tbElement, "PortraitObj")
+      tbPortraitObjPanel:SetRoleIcon(tbRoleData.nPortrait)
+      tbPortraitObjPanel:SetPortraitFrame(tbRoleData.nPortraitFrame)
+      tbPortraitObjPanel:SetFactionIcon(tbRoleData.nFaction)
+      tbPortraitObjPanel:SetLevel(tbRoleData.nLevel)
+      tbPortraitObjPanel:SetOutlineObjActive(tbRoleData.nState ~= Player.emPLAYER_STATE_NORMAL)
+      tbPortraitObjPanel:SetOutlineText(Lib:IIF(tbRoleData.nState == Player.emPLAYER_STATE_ZONE, i18n.EasyGet("\232\183\168\230\156\141"), i18n.EasyGet("\231\166\187\231\186\191")))
+      Ui:Button_BindEvent(pPanel, "PortraitObj", function()
+        local tbData = {
+          dwRoleId = tbRoleData.dwID,
+          szName = tbRoleData.szName,
+          nPortrait = tbRoleData.nPortrait,
+          nFaction = tbRoleData.nFaction,
+          nLevel = tbRoleData.nLevel,
+          dwKinId = tbRoleData.dwKinId,
+          szKinOrTongName = tbRoleData.szKinOrTongName,
+          tbChuanGong = tbRoleData.tbChuanGong,
+          nVipLevel = tbRoleData.nVipLevel
+        }
+        Ui:OpenWindow("UIRightPopUpMenu", "friend", tbData, tbElement, 420, -200)
+      end, self)
+      pPanel:Label_SetText("txtName", tbRoleData.szName)
+      Ui:Button_BindEvent(pPanel, "btnInvite", self.InvitedMember, self, tbRoleData.dwID)
+    end)
+  end
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:InvitedMember(dwRoleId)
+  SocialJieYi:ApplyInvited(dwRoleId)
+end

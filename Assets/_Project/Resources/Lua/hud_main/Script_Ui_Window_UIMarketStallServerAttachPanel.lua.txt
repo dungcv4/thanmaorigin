@@ -1,0 +1,145 @@
+Require("Script/TreasureShop/TreasureShopMgr.lua")
+local tbWnd = Ui:CreateClass("UIMarketStallServerAttachPanel", "UIPanel")
+local tbControls = {
+  btnKindBuy = "btnList/btnBuy",
+  btnKindGiveBack = "btnList/btnSoldOut",
+  goAttachTemplate = "ExtractList/Viewport/Extractcent/ElementTemplate",
+  imgMoneyIcon = "panelYuanBao/imgYuanBao",
+  txtMoneyValue = "panelYuanBao/txtYuanBaoValue",
+  btnFetchMoney = "btnGetBack",
+  btnFetchAllItem = "btnExtractAll",
+  txtRemainTime = "timeRemaining/txtTime"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnFetchMoney = function(self)
+    TreasureShop:FetchMoneyReq(self.WALLET_CURRENCY, TreasureShop.tbMailbox.tbWallet[self.WALLET_CURRENCY] or 0)
+  end,
+  btnFetchAllItem = function(self)
+    TreasureShop:FetchAllItemReq(self.WALLET_CURRENCY, TreasureShop.tbMailbox.tbWallet[self.WALLET_CURRENCY] or 0)
+  end
+}
+tbWnd.WALLET_CURRENCY = "Gold"
+tbWnd.KIND_INDEX = {BUY = 1, GIVEBACK = 2}
+tbWnd.KIND_TO_ATTACH_TYPE = {
+  [tbWnd.KIND_INDEX.BUY] = TreasureShop.ATTACH_TYPE.BUY,
+  [tbWnd.KIND_INDEX.GIVEBACK] = TreasureShop.ATTACH_TYPE.GIVEBACK
+}
+
+function tbWnd:OnCreate()
+  self.tbKindBtnGroup = Ui:NewButtonGroup(self, {
+    self.btnKindBuy,
+    self.btnKindGiveBack
+  }, true, self.OnSwitchKind)
+  self.tbAttachScrollView = Ui:NewScrollView(self, tbControls.goAttachTemplate)
+  self.pPanel:Sprite_SetSprite(tbControls.imgMoneyIcon, Currency:GetIcon(self.WALLET_CURRENCY))
+end
+
+function tbWnd:OnOpen()
+  TreasureShop:QueryMailboxReq()
+  TreasureShop:QueryPlayerInfoReq()
+  self:RegistRedPoint()
+  self.nKindIndex = nil
+  self.tbKindBtnGroup:Select(self.KIND_INDEX.BUY)
+  self:ShowWallet()
+  self:AddExpireTimer()
+end
+
+function tbWnd:OnClose()
+  self:UnRegistRedPoint()
+  self:DelExpireTimer()
+end
+
+function tbWnd:RegistRedPoint()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnKindGiveBack, {
+    RedPointMgr.EVENT.TreasureShopAttachTypeGiveback
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnKindBuy, {
+    RedPointMgr.EVENT.TreasureShopAttachTypeBuy
+  })
+end
+
+function tbWnd:UnRegistRedPoint()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnKindGiveBack)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnKindBuy)
+end
+
+function tbWnd:ShowAttach()
+  local nAttachType = self.nKindIndex and self.KIND_TO_ATTACH_TYPE[self.nKindIndex] or nil
+  if not nAttachType then
+    self.tbAttachScrollView:Reset()
+    return
+  end
+  local nIndex = 0
+  for nItemTid, tbInfo in pairs(TreasureShop.tbMailbox.tbAttach[nAttachType]) do
+    nIndex = nIndex + 1
+    self.tbAttachScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      if not tbElement.tbItemGrid then
+        tbElement.tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      end
+      local tbWareSetting = TreasureShop:GetWareSettingByItemTid(nItemTid)
+      tbElement.tbItemGrid:SetItemByTemplate(nItemTid, tbInfo.nNum)
+      pPanel:Label_SetText("txtName", i18n.Parse(KItem.GetItemShowInfo(nItemTid)))
+      pPanel:Label_SetText("txtSale", tostring(tbInfo.nNum))
+      pPanel:Sprite_SetSprite("PriceObj/imgMoney", Currency:GetIcon(tbWareSetting.szCurrency))
+      pPanel:Label_SetText("PriceObj/txtSale", tostring(tbInfo.nPrice))
+      Ui:Button_BindEvent(pPanel, "btnExtract", self.OnFetchItem, self, nAttachType, nItemTid)
+    end)
+  end
+  self.tbAttachScrollView:ResetFrom(nIndex + 1)
+end
+
+function tbWnd:ShowWallet()
+  self.pPanel:Label_SetText(tbControls.txtMoneyValue, TreasureShop.tbMailbox.tbWallet[self.WALLET_CURRENCY] or 0)
+end
+
+function tbWnd:AddExpireTimer()
+  self:DelExpireTimer()
+  self.nExpireTimer = Timer:Register(Env.GAME_FPS, self.OnExpireTimer, self)
+end
+
+function tbWnd:DelExpireTimer()
+  if not self.nExpireTimer then
+    return
+  end
+  Timer:Close(self.nExpireTimer)
+  self.nExpireTimer = nil
+end
+
+function tbWnd:OnExpireTimer()
+  local nOperTime = TreasureShop.tbPlayerInfo.nOperTime
+  local nLeftTime = nOperTime + TreasureShop.CFG.MAILBOX_RECYCLE_TIME - GetTime()
+  local szDesc = ""
+  if nOperTime > 0 then
+    if nLeftTime > 0 then
+      local nLeftDay = math.floor(nLeftTime / 86400)
+      if nLeftDay >= 1 then
+        szDesc = i18n.EasyGet("{0}\229\164\169", nLeftDay)
+      else
+        szDesc = i18n.EasyGet("\229\141\179\229\176\134\232\191\135\230\156\159")
+      end
+    else
+      szDesc = i18n.EasyGet("\229\141\179\229\176\134\232\191\135\230\156\159")
+    end
+  end
+  self.pPanel:Label_SetText(tbControls.txtRemainTime, szDesc)
+  return true
+end
+
+function tbWnd:OnSwitchKind(nIndex)
+  if self.nKindIndex == nIndex then
+    return
+  end
+  self.nKindIndex = nIndex
+  self:ShowAttach()
+end
+
+function tbWnd:OnFetchItem(nAttachType, nItemTid)
+  TreasureShop:FetchItemReq(nAttachType, nItemTid)
+end
+
+function tbWnd:OnUpdateMailbox()
+  self:ShowAttach()
+  self:ShowWallet()
+end

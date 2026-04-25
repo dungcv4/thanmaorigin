@@ -1,0 +1,104 @@
+local tbWnd = Ui:CreateClass("UIPartnerNew_ZFEnhance", "UIPanel")
+local tbControls = {
+  txtAttr = "Attribute/attributeCell%d/txtAttribute",
+  txtEnhanceLv = "Attribute/attributeCell%d/txtEnhanceLv",
+  txtEnhanceBefore = "Attribute/attributeCell%d/txtEnhanceValueBefore",
+  txtEnhanceNew = "Attribute/attributeCell%d/txtEnhanceValueNew",
+  imgselected = "Attribute/attributeCell%d/imgselected",
+  btnAttr = "Attribute/attributeCell%d",
+  enhanceBtn = "enhanceBtn",
+  btnEnhance = "enhanceBtn/btnEnhance",
+  btnAdd = "enhanceBtn/costCell1/btnAdd",
+  txtEnhanceCost = "enhanceBtn/costCell1/txtPotentialUpCost",
+  UIItemGrid = "enhanceBtn/costCell1/UIItemGrid"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnEnhance = function(self)
+    local tbParam = {
+      self.nSelectIndex
+    }
+    PartnerZhenFa:SendClientReq(PartnerZhenFa.Protocol.ReqFixAttrEnhance, tbParam, tbParam)
+  end
+}
+
+function tbWnd:OnOpen()
+  self.nSelectIndex = PartnerZhenFa:GetCanEnhanceFixAttrIndex() or 1
+  self:UpdateView()
+end
+
+function tbWnd:UpdateView()
+  local nMaxLevel = PartnerZhenFa:GetCurMaxFixAttrLevel(me)
+  for nIndex = 1, PartnerZhenFa.nFixAttrCount do
+    local nLevel, szName, szValue = PartnerZhenFa:GetFixAttrEnhanceDescInfo(nIndex)
+    if nMaxLevel <= nLevel then
+      self.pPanel:Label_SetText(string.format(tbControls.txtEnhanceNew, nIndex), i18n.EasyGet("\229\183\178\230\187\161\231\186\167"))
+    else
+      local nNextLevel = nLevel + 1
+      local tbNextAttr = PartnerZhenFa:GetZFEnhanceFixAttr(me, nil, nNextLevel, nIndex)
+      if not tbNextAttr then
+        LogErr("UIPartnerNew_ZFEnhance:UpdateView Error. GetZFEnhanceFixAttr is nil by ", nNextLevel, nIndex)
+        return
+      end
+      local _, szNextValue = FightSkill:GetMagicDescSplit(tbNextAttr[1], {
+        tbNextAttr[2],
+        tbNextAttr[3],
+        tbNextAttr[4]
+      })
+      self.pPanel:Label_SetText(string.format(tbControls.txtEnhanceNew, nIndex), szNextValue)
+    end
+    self.pPanel:Label_SetText(string.format(tbControls.txtAttr, nIndex), szName)
+    self.pPanel:Label_SetText(string.format(tbControls.txtEnhanceBefore, nIndex), szValue)
+    self.pPanel:Label_SetText(string.format(tbControls.txtEnhanceLv, nIndex), i18n.EasyGet("lv.{0}/{1}", nLevel, nMaxLevel))
+    Ui:Button_BindEvent(self.pPanel, string.format(tbControls.btnAttr, nIndex), function()
+      self.nSelectIndex = nIndex
+      self:UpdateSelectShow()
+    end)
+  end
+  if self.nSelectIndex then
+    self:UpdateSelectShow()
+  end
+end
+
+function tbWnd:UpdateSelectShow()
+  for nIndex = 1, PartnerZhenFa.nFixAttrCount do
+    self.pPanel:SetActive(string.format(tbControls.imgselected, nIndex), self.nSelectIndex == nIndex)
+  end
+  local nCurLevel = me.GetUserValue(PartnerZhenFa.FixAttrLevelSaveGroup, self.nSelectIndex)
+  if nCurLevel >= PartnerZhenFa:GetCurMaxFixAttrLevel(me) then
+    self.pPanel:SetActive(tbControls.enhanceBtn, false)
+    return
+  end
+  self.pPanel:SetActive(tbControls.enhanceBtn, true)
+  local tbNeedCfg = PartnerZhenFa:GetFixAttrEnhanceCfg(self.nSelectIndex, nCurLevel + 1)
+  local nNeedCount = tbNeedCfg.nLevelUpCostCount
+  local nHasCount = me.GetItemCountByTypeInBag(tbNeedCfg.nLevelUpCostId)
+  if nNeedCount > nHasCount then
+    self.pPanel:Label_SetText(tbControls.txtEnhanceCost, i18n.EasyGet("<color=#c50505>{0}/{1}</color>", nHasCount, nNeedCount))
+  else
+    self.pPanel:Label_SetText(tbControls.txtEnhanceCost, i18n.EasyGet("{0}/{1}", nHasCount, nNeedCount))
+  end
+  local pGrid = Ui:NewExistItemGrid(self, tbControls.UIItemGrid)
+  pGrid:SetItemByTemplate(tbNeedCfg.nLevelUpCostId, 0)
+  pGrid:SetClickEnable(true)
+  Ui:Button_BindEvent(self.pPanel, tbControls.btnAdd, function()
+    local tbWindow = Ui:GetWindow("UIPartnerNew")
+    if tbWindow then
+      tbWindow:UpdateJumpToWnd(tbNeedCfg.nLevelUpCostId)
+    end
+  end)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnEnhance)
+  if PartnerZhenFa:CheckCanFixAttrEnhance(me, self.nSelectIndex) then
+    RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnEnhance, {
+      RedPointMgr.EVENT.PartnerZFEnhance
+    })
+  end
+end
+
+function tbWnd:OnZhenFaRefresh(nRefreshType)
+  if nRefreshType == PartnerZhenFa.tbUIRefreshType.FIXATTR_ENHANCE then
+    self:UpdateView()
+  elseif nRefreshType == PartnerZhenFa.tbUIRefreshType.SYNCITEM and self.nSelectIndex then
+    self:UpdateSelectShow()
+  end
+end

@@ -1,0 +1,264 @@
+function Item:LoadEquipMaxLevelInfo()
+  self.tbEquipMaxLevelInfo = {}
+  
+  local tbFileName = {
+    [Item.EQUIPPOS_HELM] = "Helm.tab",
+    [Item.EQUIPPOS_ARMOR] = "Armor.tab",
+    [Item.EQUIPPOS_BELT] = "Belt.tab",
+    [Item.EQUIPPOS_WEAPON] = "Weapon.tab",
+    [Item.EQUIPPOS_BOOTS] = "Boots.tab",
+    [Item.EQUIPPOS_CUFF] = "Cuff.tab",
+    [Item.EQUIPPOS_RING] = "Ring.tab",
+    [Item.EQUIPPOS_AMULET] = "Amulet.tab",
+    [Item.EQUIPPOS_NECKLACE] = "Necklace.tab",
+    [Item.EQUIPPOS_PENDANT] = "Pendant.tab",
+    [Item.EQUIPPOS_MASK] = "Mask.tab",
+    [Item.EQUIPPOS_WUXINGYIN] = "WuXingYin.tab",
+    [Item.EQUIPPOS_GUANYIN] = "GuanYin.tab",
+    [Item.EQUIPPOS_MANTLE] = "Mantle.tab"
+  }
+  local szFilePath = "Setting/Item/Equip/"
+  for nEquipPos, szTabName in pairs(tbFileName) do
+    local szFileName = string.format("%s%s", szFilePath, szTabName)
+    local tbEquipCfg = Lib:LoadTabFile(szFileName, {Level = 1, RequireLevel = 1})
+    if tbEquipCfg then
+      local tbMaxLevelMap = {}
+      for i, v in pairs(tbEquipCfg) do
+        tbMaxLevelMap[v.RequireLevel] = v.Level
+      end
+      self.tbEquipMaxLevelInfo[nEquipPos] = tbMaxLevelMap
+    end
+  end
+  self.tbEquipMaxLevelInfo = SetReadOnly(self.tbEquipMaxLevelInfo)
+end
+
+Item:LoadEquipMaxLevelInfo()
+
+function Item:GetCanEquipMaxLevel(nEquipPos, nCanEquipLevel)
+  if not nEquipPos or nEquipPos < Item.EQUIPPOS_HELM or nEquipPos > Item.EQUIPPOS_PENDANT or not nCanEquipLevel then
+    return -1
+  end
+  local nMaxLevel = 0
+  local tbMaxLevelMap = self.tbEquipMaxLevelInfo[nEquipPos]
+  for nReqLevel, nLevel in pairs(tbMaxLevelMap) do
+    if nReqLevel <= nCanEquipLevel and nLevel > nMaxLevel then
+      nMaxLevel = nLevel
+    end
+  end
+  return nMaxLevel
+end
+
+function Item:IsCurMaxLevelEquip(pEquip)
+  if not pEquip then
+    return false
+  end
+  if not pEquip.nLevel then
+    return false
+  end
+  local nMaxLevel = self:GetCanEquipMaxLevel(pEquip.nEquipPos, Client.nServerMaxLevel)
+  if pEquip.nLevel == nMaxLevel then
+    return true
+  end
+  return false
+end
+
+function Item:RequestExpandBagCount()
+  local function funcOK()
+    RemoteServer.AddBagExpandCount()
+  end
+  
+  local function funcCancel()
+  end
+  
+  local moneyCost = 100
+  local expandCount = 5
+  if me.GetBagExpandCount() > 20 then
+    moneyCost = 200
+  end
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\182\136\232\128\151{0}\229\133\131\229\174\157\229\143\175\230\137\169\229\133\133{1}\230\160\188\232\131\140\229\140\133\230\160\188\230\149\176", moneyCost, expandCount), {
+    {funcOK},
+    {funcCancel}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function Item:RequestExpandBoxCount()
+  local function funcOK()
+    RemoteServer.AddBoxExpandCount()
+  end
+  
+  local function funcCancel()
+  end
+  
+  local moneyCost = 100
+  local expandCount = 5
+  if me.GetBoxExpandCount() > 60 then
+    moneyCost = 200
+  end
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\182\136\232\128\151{0}\229\133\131\229\174\157\229\143\175\230\137\169\229\133\133{1}\230\160\188\228\187\147\229\186\147\230\160\188\230\149\176", moneyCost, expandCount), {
+    {funcOK},
+    {funcCancel}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function Item:ExpandBagCountSucc(bSuccess, szMsg, nAdd, nAllCount, nOrgCount)
+  me.UpdateBagCount()
+  if szMsg then
+    me.CenterMsg(szMsg)
+  end
+  if bSuccess then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_EXPAND_BAG_COUNT, nAdd, nAllCount, nOrgCount)
+  end
+end
+
+function Item:ExpandBoxCountSucc(bSuccess, szMsg, nAdd, nAllCount, nOrgCount)
+  me.UpdateBoxCount()
+  if szMsg then
+    me.CenterMsg(szMsg)
+  end
+  if bSuccess then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_EXPAND_BOX_COUNT, nAdd, nAllCount, nOrgCount)
+  end
+end
+
+function Item:UseGoldShellSucc(tbIndex)
+  if Ui:WindowVisible("UIGoldenShell") == true then
+    Ui:GetWindow("UIGoldenShell"):ShowEffect(tbIndex)
+  end
+end
+
+function Item:OnSyncQuickUseItem(nItemTemplateId, nItemId, nCount)
+  local nBagCount = me.GetItemCountInBags(nItemTemplateId)
+  if nBagCount and nBagCount > 0 then
+    local tbInfo = Item:GetItemBaseProp(nItemTemplateId)
+    local pItemClass = Item:GetClass(tbInfo.szClass, true)
+    if pItemClass and pItemClass.OpenQuickUseItem then
+      pItemClass:OpenQuickUseItem(nItemId)
+    else
+      Ui:OpenQuickUseItem(nItemId, i18n.EasyGet("\228\189\191\231\148\168"))
+    end
+  else
+    local tbWnd = Ui:GetWindow("UIQuickUseItem")
+    if tbWnd and Ui:WindowVisible("UIQuickUseItem") then
+      tbWnd:TryClose(nItemId)
+    end
+  end
+end
+
+function Item:OnQuickUseItem(nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  local tbClass = self.tbClass[pItem.szClass]
+  if pItem.nCount > 1 and Item:GetItemUseManyLimit(pItem.szClass) and tbClass.OnUseMany and Item:CheckIsOpenManyUseUi(pItem.szClass) then
+    self:UseMany(pItem)
+  else
+    Item:ClientUseItem(pItem.dwId)
+  end
+end
+
+function Item:UseMany(pItem)
+  local nMaxCanUse
+  local tbClass = Item.tbClass[pItem.szClass]
+  if tbClass and tbClass.GetClientDefaultUseCount then
+    nMaxCanUse = tbClass:GetClientDefaultUseCount(pItem.dwId)
+    if nMaxCanUse and nMaxCanUse <= 0 then
+      if tbClass.HandleCanUseCallBack ~= nil and nil ~= tbClass.GetUseNeedItemTemplateId then
+        local nExpendItemId = tbClass:GetUseNeedItemTemplateId(pItem.dwTemplateId)
+        tbClass:HandleCanUseCallBack(nExpendItemId, pItem.dwId)
+      end
+      return
+    end
+  end
+  Ui:OpenWindow("UIItemBatchPanel", pItem.dwId, pItem.dwTemplateId, "Item", nMaxCanUse)
+end
+
+function Item:ClientUseItem(nItemId)
+  if not nItemId then
+    return
+  end
+  local pItem = me.GetItemInAllSpace(nItemId)
+  if not pItem then
+    return
+  end
+  local szClassName = pItem.szClass
+  local tbClass = self.tbClass[szClassName]
+  if tbClass and tbClass.OnClientUse then
+    local nRetCode = tbClass:OnClientUse(pItem)
+    if nRetCode <= 0 then
+      return
+    end
+  end
+  if Ui.bInZone then
+    RemoteServer.Zone_UseItem(nItemId)
+  else
+    RemoteServer.UseItem(nItemId)
+  end
+end
+
+function Item:ClientUseManyItem(nItemId, nCount)
+  if not nItemId then
+    return
+  end
+  if 1 == nCount then
+    Item:ClientUseItem(nItemId)
+    return
+  end
+  local pItem = me.GetItemInAllSpace(nItemId)
+  if not pItem then
+    return
+  end
+  if nCount < 0 or nCount > pItem.nCount then
+    return
+  end
+  local szClassName = pItem.szClass
+  local nUseLimit = Item:GetItemUseManyLimit(pItem.szClass)
+  if not nUseLimit then
+    me.CenterMsg(i18n.EasyGet("\228\184\141\229\143\175\230\137\185\233\135\143\228\189\191\231\148\168"))
+    return
+  end
+  if nUseLimit > 0 and nCount > nUseLimit then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\233\129\147\229\133\183\228\184\128\230\172\161\230\156\128\229\164\154\228\189\191\231\148\168{0}\228\184\170", nUseLimit))
+    return
+  end
+  local tbClass = self.tbClass[szClassName]
+  if tbClass and tbClass.OnClientUse then
+    local nRetCode = tbClass:OnClientUse(pItem)
+    if nRetCode <= 0 then
+      return
+    end
+  end
+  self:CloseUseManyItemTimer()
+  if "RandItem" == szClassName or "GoldFuDai" == szClassName then
+    self.nClientUseNum = nCount
+    if Item:OnClientUseManyItem(nItemId) then
+      self.nUseManyItemTimer = Timer:Register(9, self.OnClientUseManyItem, self, nItemId)
+    end
+  else
+    RemoteServer.UseManyItem(nItemId, nCount)
+  end
+end
+
+function Item:OnClientUseManyItem(nItemId)
+  local nUseItemNum = math.min(self.nClientUseNum, Item.PROTOCOL_USEITEM)
+  self.nClientUseNum = self.nClientUseNum - nUseItemNum
+  RemoteServer.UseManyItem(nItemId, nUseItemNum)
+  if self.nClientUseNum > 0 then
+    return true
+  end
+  self.nUseManyItemTimer = nil
+  return false
+end
+
+function Item:CloseUseManyItemTimer()
+  if self.nUseManyItemTimer then
+    Timer:Close(self.nUseManyItemTimer)
+    self.nUseManyItemTimer = nil
+  end
+end

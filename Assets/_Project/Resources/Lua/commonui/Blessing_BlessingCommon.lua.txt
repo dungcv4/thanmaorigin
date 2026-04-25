@@ -1,0 +1,294 @@
+Blessing = Blessing or {}
+Blessing.KEY_GROUP = GetGroupKey("Blessing")
+Blessing.KEY_DEGREE_CTRL_VALUE = 1
+Blessing.KEY_DEGREE_CTRL_TIME = 2
+Blessing.KEY_BLESSING_ID = 3
+Blessing.KEY_BLESSING_END_TIME = 4
+Blessing.KEY_BLESSING_TEMP_ID = 5
+Blessing.KEY_HAD_5A_TIME = 6
+Blessing.KEY_PLAYER_LEVEL = 7
+
+function Blessing:GetBlessingId(pPlayer)
+  if not pPlayer then
+    return
+  end
+  return pPlayer.GetUserValue(self.KEY_GROUP, self.KEY_BLESSING_ID)
+end
+
+function Blessing:HasEverBlessed(pPlayer)
+  return 0 ~= DegreeCtrl:GetUpdateTime(pPlayer, "Blessing")
+end
+
+function Blessing:ParseBlessingId2Table(nBlessingId)
+  local szBlessingId = tostring(nBlessingId)
+  local tbRes = {}
+  for i = 1, string.len(szBlessingId) do
+    local szId = string.sub(szBlessingId, i, i)
+    table.insert(tbRes, tonumber(szId))
+  end
+  return tbRes
+end
+
+function Blessing:GetMaxBlessingCount()
+  return #Blessing.tbProbConfig
+end
+
+function Blessing:GetTempBlessingId(pPlayer)
+  if not pPlayer then
+    return
+  end
+  return pPlayer.GetUserValue(self.KEY_GROUP, self.KEY_BLESSING_TEMP_ID)
+end
+
+function Blessing:GetBlessingEndTime(pPlayer)
+  if not pPlayer then
+    return
+  end
+  return pPlayer.GetUserValue(self.KEY_GROUP, self.KEY_BLESSING_END_TIME)
+end
+
+function Blessing:CheckFreeBlessing(pPlayer)
+  local nLeftTime = self:GetLeftCount(pPlayer)
+  return nLeftTime == self.Cfg.DAILY_MAX_TIME
+end
+
+function Blessing:GetLeftCount(pPlayer)
+  return DegreeCtrl:GetDegree(pPlayer, "Blessing")
+end
+
+function Blessing:GetBlessingAttrib(nBlessingId, nLevel)
+  if not self.tbConfig[nBlessingId] then
+    return
+  end
+  nLevel = self:GetValidLevel(nBlessingId, nLevel)
+  if not self.tbConfig[nBlessingId].tbAttr[nLevel] then
+    return
+  end
+  return self.tbConfig[nBlessingId].tbAttr[nLevel].tbAttribConfig, self.tbConfig[nBlessingId].tbAttr[nLevel].tbAttribSuitConfig
+end
+
+function Blessing:GetValidLevel(nBlessingId, nLevel)
+  if not self.tbConfig[nBlessingId] then
+    return
+  end
+  local nLowerLevel = 0
+  for nLv, _ in pairs(self.tbConfig[nBlessingId].tbAttr) do
+    if nLv == nLevel then
+      return nLv
+    elseif nLv < nLevel and nLv > nLowerLevel then
+      nLowerLevel = nLv
+    end
+  end
+  return nLowerLevel
+end
+
+function Blessing:GetBlessingFightPower(nBlessingId, nLevel)
+  nLevel = self:GetValidLevel(nBlessingId, nLevel)
+  if not self.tbConfig[nBlessingId] or not self.tbConfig[nBlessingId].tbAttr[nLevel] then
+    return 0
+  end
+  return self.tbConfig[nBlessingId].tbAttr[nLevel].nFightPower
+end
+
+function Blessing:GetBlessingConfig(nBlessingId)
+  return self.tbConfig[nBlessingId]
+end
+
+function Blessing:GetNextDayBlessTime()
+  local nNextBlessTime = 14400 - Lib:GetLocalDayTime()
+  if nNextBlessTime <= 0 then
+    nNextBlessTime = nNextBlessTime + 86400
+  end
+  return nNextBlessTime
+end
+
+function Blessing:CheckBlessingTimeOut(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  if 0 == self:GetBlessingId(pPlayer) then
+    return false
+  end
+  local nEndTime = pPlayer.GetUserValue(self.KEY_GROUP, self.KEY_BLESSING_END_TIME)
+  if 0 == nEndTime then
+    return false
+  end
+  return nEndTime < GetTime()
+end
+
+function Blessing:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  if not pNpc then
+    return
+  end
+  local nBlessingId = pPlayerAsync.GetBlessingId()
+  if not nBlessingId or 0 == nBlessingId then
+    return
+  end
+  local nBlessingTimeOut = pPlayerAsync.GetBlessingTimeOut()
+  if not nBlessingTimeOut or nBlessingTimeOut < GetTime() then
+    return
+  end
+  self:ApplyAttrib(pNpc, nBlessingId)
+end
+
+function Blessing:ApplyAttrib(pNpc, nBlessingId, nLevel, nPlayerId)
+  if not pNpc then
+    return
+  end
+  if 0 == nBlessingId then
+    return
+  end
+  nLevel = nLevel or pNpc.nLevel
+  local tbAttribInfo, tbAttribSuitInfo = self:GetBlessingAttrib(nBlessingId, nLevel)
+  if tbAttribInfo then
+    for k, v in ipairs(tbAttribInfo) do
+      local szAttribType = v.szAttribType
+      pNpc.ApplyMagicAttrib(szAttribType, table.unpack(v.tbValue))
+      if nPlayerId then
+        AttributeHelp:LogAttrApply(nPlayerId, "Blessing", szAttribType, table.unpack(v.tbValue))
+      end
+    end
+  end
+  if tbAttribSuitInfo then
+    for k, v in ipairs(tbAttribSuitInfo) do
+      local szAttribType = v.szAttribType
+      pNpc.ApplyMagicAttrib(szAttribType, table.unpack(v.tbValue))
+      if nPlayerId then
+        AttributeHelp:LogAttrApply(nPlayerId, "Blessing", szAttribType, table.unpack(v.tbValue))
+      end
+    end
+  end
+end
+
+function Blessing:RemoveAttrib(pNpc, nBlessingId, nLevel, nPlayerId)
+  if not pNpc then
+    return
+  end
+  if 0 == nBlessingId then
+    return
+  end
+  nLevel = nLevel or pNpc.nLevel
+  local tbAttribInfo, tbAttribSuitInfo = self:GetBlessingAttrib(nBlessingId, nLevel)
+  if tbAttribInfo then
+    for k, v in ipairs(tbAttribInfo) do
+      local szAttribType = v.szAttribType
+      pNpc.RemoveMagicAttrib(szAttribType, table.unpack(v.tbValue))
+      if nPlayerId then
+        AttributeHelp:LogAttrRemove(nPlayerId, "Blessing", szAttribType, table.unpack(v.tbValue))
+      end
+    end
+  end
+  if tbAttribSuitInfo then
+    for k, v in ipairs(tbAttribSuitInfo) do
+      local szAttribType = v.szAttribType
+      pNpc.RemoveMagicAttrib(szAttribType, table.unpack(v.tbValue))
+      if nPlayerId then
+        AttributeHelp:LogAttrRemove(nPlayerId, "Blessing", szAttribType, table.unpack(v.tbValue))
+      end
+    end
+  end
+end
+
+function Blessing:OnEquip(pPlayer)
+  if not pPlayer then
+    return
+  end
+  local nBlessingId = pPlayer.GetUserValue(self.KEY_GROUP, self.KEY_BLESSING_ID)
+  self:ApplyAttrib(pPlayer.GetNpc(), nBlessingId, nil, pPlayer.dwID)
+end
+
+function Blessing:OnUnEquip(pPlayer)
+  if not pPlayer then
+    return
+  end
+  local nBlessingId = pPlayer.GetUserValue(self.KEY_GROUP, self.KEY_BLESSING_ID)
+  local nLevel = pPlayer.GetUserValue(self.KEY_GROUP, self.KEY_PLAYER_LEVEL)
+  self:RemoveAttrib(pPlayer.GetNpc(), nBlessingId, nLevel, pPlayer.dwID)
+end
+
+function Blessing:GetBlessingCost(nCount)
+  return self.tbProbConfig[nCount] and self.tbProbConfig[nCount].nCost or 0
+end
+
+function Blessing:GetBlessingProbType(nCount)
+  return self.tbProbConfig[nCount].nBlessingProbType
+end
+
+function Blessing:InitConfig()
+  self.tbConfig = Lib:EasyLoadTabFile("Setting/Blessing/Blessing.tab", {
+    "nBlessingId"
+  }, nil, nil, false)
+  self.tbProbConfig = Lib:EasyLoadTabFile("Setting/Blessing/BlessingProb.tab", {
+    "nBlessingCount"
+  }, nil, nil, false)
+  local tbAttribConfig = Lib:EasyLoadTabFile("Setting/Blessing/BlessingAttrib.tab", {
+    "nBlessingId",
+    "nLevel"
+  }, {
+    "nBlessingId",
+    "nLevel",
+    "nFightPower",
+    "szAttrib1Type",
+    "nAttrib1Value1",
+    "nAttrib1Value2",
+    "nAttrib1Value3",
+    "szAttrib2Type",
+    "nAttrib2Value1",
+    "nAttrib2Value2",
+    "nAttrib2Value3",
+    "szAttrib3Type",
+    "nAttrib3Value1",
+    "nAttrib3Value2",
+    "nAttrib3Value3",
+    "szAttrib4Type",
+    "nAttrib4Value1",
+    "nAttrib4Value2",
+    "nAttrib4Value3",
+    "szAttribSuit1Type",
+    "nAttribSuit1Value1",
+    "nAttribSuit1Value2",
+    "nAttribSuit1Value3",
+    "szAttribSuit2Type",
+    "nAttribSuit2Value1",
+    "nAttribSuit2Value2",
+    "nAttribSuit2Value3"
+  })
+  for nBlessingId, tbConfig in pairs(tbAttribConfig) do
+    self.tbConfig[nBlessingId].tbAttr = {}
+    for nLevel, tbInfo in pairs(tbConfig) do
+      local tbAttribCfg = {}
+      local tbAttribSuitCfg = {}
+      for i = 1, 4 do
+        local szAttribType = tbInfo[string.format("%s%d%s", "szAttrib", i, "Type")]
+        if "" ~= szAttribType then
+          local tbValue = {
+            tbInfo[string.format("%s%d%s", "nAttrib", i, "Value1")],
+            tbInfo[string.format("%s%d%s", "nAttrib", i, "Value2")],
+            tbInfo[string.format("%s%d%s", "nAttrib", i, "Value3")]
+          }
+          table.insert(tbAttribCfg, {szAttribType = szAttribType, tbValue = tbValue})
+        end
+      end
+      for i = 1, 2 do
+        local szAttribType = tbInfo[string.format("%s%d%s", "szAttribSuit", i, "Type")]
+        if "" ~= szAttribType then
+          local tbValue = {
+            tbInfo[string.format("%s%d%s", "nAttribSuit", i, "Value1")],
+            tbInfo[string.format("%s%d%s", "nAttribSuit", i, "Value2")],
+            tbInfo[string.format("%s%d%s", "nAttribSuit", i, "Value3")]
+          }
+          table.insert(tbAttribSuitCfg, {szAttribType = szAttribType, tbValue = tbValue})
+        end
+      end
+      self.tbConfig[nBlessingId].tbAttr[nLevel] = {}
+      self.tbConfig[nBlessingId].tbAttr[nLevel].tbAttribConfig = tbAttribCfg
+      self.tbConfig[nBlessingId].tbAttr[nLevel].tbAttribSuitConfig = tbAttribSuitCfg
+      self.tbConfig[nBlessingId].tbAttr[nLevel].nFightPower = tbInfo.nFightPower
+    end
+  end
+  self.tbConfig = SetReadOnly(self.tbConfig)
+end
+
+Blessing:InitConfig()
+AttributeModule:Register("Blessing", Blessing)
+FightPower:RegisterFPSystemModule({"Blessing"}, Blessing)

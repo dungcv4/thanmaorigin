@@ -1,0 +1,191 @@
+local tbWnd = Ui:CreateClass("UIOnlineAward", "UIPanel")
+local tbControls = {
+  TemplateTeammate1 = "Detail/TemplateTeammate1",
+  btnActiate = "btnActiate",
+  btnTotalAwardCanNotGet = "ItemTemplate/imgBoxClose",
+  btnTotalAwardOpen = "ItemTemplate/imgBoxOpen",
+  btnPreview = "btnPreview",
+  btnTotalAwardCanGet = "ItemTemplate/imgBox_Activate"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnActiate = function(self)
+    self:OnClickReceiveAllAwardBtn()
+  end,
+  btnTotalAwardCanNotGet = function(self)
+    self:OnClickReceiveTatalAwardBtn()
+  end,
+  btnTotalAwardOpen = function(self)
+    self:OnClickReceiveTatalAwardBtn()
+  end,
+  btnTotalAwardCanGet = function(self)
+    self:OnClickReceiveTatalAwardBtn()
+  end,
+  btnPreview = function(self)
+    self:OnClickPreviewTatalAwardBtn()
+  end
+}
+
+function tbWnd:OnClose()
+  if self.nRemainingTimeTimer then
+    Timer:Close(self.nRemainingTimeTimer)
+    self.nRemainingTimeTimer = nil
+  end
+end
+
+function tbWnd:OnCreate()
+  self.pAwardScorllView = Ui:NewScrollView(self, self.TemplateTeammate1, function(_, nIndex, tbElement)
+  end, false, false)
+end
+
+function tbWnd:OnOpen()
+  self.onlineAwardData = OnlineAward:GetOnlineAwardData()
+  if self.onlineAwardData == nil then
+    me.CenterMsg(i18n.EasyGet("\229\138\159\232\131\189\230\156\170\229\188\128\229\144\175"))
+    return
+  end
+  self.tbStageIdList = {}
+  for nStageId, onlineAwardCfgData in pairs(OnlineAward.tbOnlineAwardCfg) do
+    if nStageId <= self.onlineAwardData.nCurStageId and self.onlineAwardData.tbStageStateTable[nStageId] == false then
+      table.insert(self.tbStageIdList, nStageId)
+    end
+  end
+  self:SetReceiveAllAwardBtnState()
+  self:InitAwardScorllView()
+  self:SetTotalAward()
+end
+
+function tbWnd:UpdateView()
+  self.onlineAwardData = OnlineAward:GetOnlineAwardData()
+  if self.onlineAwardData == nil then
+    LogErr("[OnlineAward]tbOnlineAwardData is nil")
+    return
+  end
+  self.tbStageIdList = {}
+  for nStageId, onlineAwardCfgData in pairs(OnlineAward.tbOnlineAwardCfg) do
+    if nStageId <= self.onlineAwardData.nCurStageId and self.onlineAwardData.tbStageStateTable[nStageId] == false then
+      table.insert(self.tbStageIdList, nStageId)
+    end
+  end
+  self:SetReceiveAllAwardBtnState()
+  self:InitAwardScorllView()
+  self:SetTotalAward()
+end
+
+function tbWnd:SetTotalAward()
+  self.pPanel:SetActive(self.btnTotalAwardOpen, self.onlineAwardData.bIsReceiveTotalAward)
+  local bIsCanGet = not self.onlineAwardData.bIsReceiveTotalAward and 0 ~= self.onlineAwardData.nLastDayStageId
+  self.pPanel:SetActive(self.btnTotalAwardCanNotGet, not bIsCanGet)
+  self.pPanel:SetActive(self.btnTotalAwardCanGet, bIsCanGet)
+end
+
+function tbWnd:InitAwardScorllView()
+  self.pAwardScorllView:Clear()
+  for nStageId, onlineAwardCfgData in pairs(OnlineAward.tbOnlineAwardCfg) do
+    self.pAwardScorllView:SetElement(nStageId, function(tbElement)
+      self:SetElementInfo(tbElement, onlineAwardCfgData)
+    end)
+  end
+end
+
+function tbWnd:SetElementInfo(tbElement, onlineAwardCfgData)
+  local nStageId = onlineAwardCfgData.StageId
+  local nTargetTimeSecond = onlineAwardCfgData.Time
+  local nTargetTimeMinute = math.floor(nTargetTimeSecond / 60)
+  tbElement.pPanel:Label_SetText("imgTitleBg/txtName", i18n.EasyGet("{0}\229\136\134\233\146\159", nTargetTimeMinute))
+  local tbAwards = Award:GetAward(onlineAwardCfgData.AwardListId, onlineAwardCfgData.DayAwardKey, {})
+  local tbItemGrid = tbElement.tbItemGrid
+  tbItemGrid = tbItemGrid or Ui:NewExistItemGrid(tbElement, "ItemTemplate/UIItemGrid")
+  tbItemGrid:SetGenericItem(tbAwards[1])
+  tbItemGrid:SetClickEnable(true)
+  if nStageId == self.onlineAwardData.nCurStageId + 1 then
+    self.nRemainingTime = OnlineAward:GetRemainingTime(nStageId)
+    tbElement.pPanel:SetActive("txtTime", true)
+    local nHour, nMinute, nSecond = Lib:TransferSecond2NormalTime(self.nRemainingTime)
+    if nHour > 0 then
+      tbElement.pPanel:Label_SetText("txtTime", string.format("%02d:%02d:%02d", nHour, nMinute, nSecond))
+    else
+      tbElement.pPanel:Label_SetText("txtTime", string.format("%02d:%02d", nMinute, nSecond))
+    end
+    if self.nRemainingTimeTimer then
+      Timer:Close(self.nRemainingTimeTimer)
+    end
+    self.nRemainingTimeTimer = Timer:Register(Env.GAME_FPS, function()
+      local nHour, nMinute, nSecond = Lib:TransferSecond2NormalTime(self.nRemainingTime)
+      if nHour > 0 then
+        tbElement.pPanel:Label_SetText("txtTime", string.format("%02d:%02d:%02d", nHour, nMinute, nSecond))
+      else
+        tbElement.pPanel:Label_SetText("txtTime", string.format("%02d:%02d", nMinute, nSecond))
+      end
+      self.nRemainingTime = self.nRemainingTime > 0 and self.nRemainingTime - 1 or 0
+      if 0 == self.nRemainingTime then
+        return false
+      end
+      return true
+    end)
+    tbElement.pPanel:SetActive("txtTime", true)
+  else
+    tbElement.pPanel:SetActive("txtTime", false)
+  end
+  if nStageId <= self.onlineAwardData.nCurStageId then
+    local bIsShowBtn = not self.onlineAwardData.tbStageStateTable[nStageId]
+    tbElement.pPanel:SetActive("btnActiate", bIsShowBtn)
+    tbElement.pPanel:SetActive("txtRecievedBg", not bIsShowBtn)
+  else
+    tbElement.pPanel:SetActive("btnActiate", false)
+    tbElement.pPanel:SetActive("txtRecievedBg", false)
+  end
+  Ui:Button_BindEvent(tbElement.pPanel, "btnActiate", function()
+    self:OnClickReceiveAwardBtn(nStageId)
+  end)
+end
+
+function tbWnd:OnClickReceiveAwardBtn(nStageId)
+  local tbStageIdList = {}
+  table.insert(tbStageIdList, nStageId)
+  OnlineAward:ReqReceiveAward(tbStageIdList)
+end
+
+function tbWnd:CheckCanReceiveAllAward()
+  if self.onlineAwardData == nil then
+    LogErr("[OnlineAward]tbOnlineAwardData is nil")
+    return false
+  end
+  if (self.onlineAwardData.bIsReceiveTotalAward == true or 0 == self.onlineAwardData.nLastDayStageId) and 0 == #self.tbStageIdList then
+    return false
+  end
+  return true
+end
+
+function tbWnd:SetReceiveAllAwardBtnState()
+  local bIsCanReceiveAllAward = self:CheckCanReceiveAllAward()
+  self.pPanel:Button_SetEnable(self.btnActiate, bIsCanReceiveAllAward)
+end
+
+function tbWnd:OnClickReceiveAllAwardBtn()
+  local bIsCanReceiveAllAward = self:CheckCanReceiveAllAward()
+  if true == bIsCanReceiveAllAward then
+    OnlineAward:ReqReceiveAward(self.tbStageIdList)
+    OnlineAward:ReqReceiveTotalAward()
+  end
+end
+
+function tbWnd:OnClickReceiveTatalAwardBtn()
+  if self.onlineAwardData ~= nil then
+    if self.onlineAwardData.bIsReceiveTotalAward == false and 0 ~= self.onlineAwardData.nLastDayStageId then
+      OnlineAward:ReqReceiveTotalAward()
+    else
+      if self.onlineAwardData.bIsReceiveTotalAward == true then
+        me.CenterMsg(i18n.EasyGet("\230\130\168\229\183\178\233\162\134\229\143\150\232\191\135\229\165\150\229\138\177\239\188\140\232\175\183\230\152\142\230\151\165\229\134\141\230\157\165"))
+        return
+      end
+      if 0 == self.onlineAwardData.nLastDayStageId then
+        me.CenterMsg(i18n.EasyGet("\230\152\168\230\151\165\230\156\170\233\162\134\229\143\150\228\187\187\228\189\149\229\156\168\231\186\191\229\165\150\229\138\177\239\188\140\230\156\172\230\151\165\230\151\160\231\180\175\232\174\161\229\165\150\229\138\177\239\188\129"))
+      end
+    end
+  end
+end
+
+function tbWnd:OnClickPreviewTatalAwardBtn()
+  OnlineAward:OpenOnlineRewardPreview()
+end

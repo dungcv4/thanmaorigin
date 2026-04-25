@@ -1,0 +1,602 @@
+MarketStallBase.tbMgr = MarketStallBase.tbMgr or GetMarketStallMgr()
+MarketStallBase.tbItemStates = {TimeOut = 2, Normal = 3}
+MarketStallBase.tbUIName = {
+  [MarketStallBase.tbReqItemDataCbType.SELL_INFO_PANEL] = "UIMarketStallSell",
+  [MarketStallBase.tbReqItemDataCbType.BUY_INFO_PANEL] = "UIMarketStallBuy"
+}
+MarketStallBase.rpc = RemoteServer.CallMarketStallFunc
+
+function MarketStallBase:initBase()
+  self.szClassName = "MarketStallBase"
+  self.tbAvaliableItems = {}
+  self.nLastUpdateTime = nil
+  self.tbMyItems = {}
+  self.tbMySellItemsIndex = {}
+  self.tbAllStall = {}
+  self.nStallType = 0
+  self.szMoneyTip = ""
+  self.tbTypeDefSettings = {}
+  self.tbTypeTreeData = {}
+  self.tbSavedPrice = {}
+  self.eventHandlers = {
+    [self.emEvent_OnItemSelled] = "OnItemSelled",
+    [self.emEvent_OnItemTimeout] = "OnItemTimeout",
+    [self.emEvent_OnNewSellItem] = "OnNewSellItem",
+    [self.emEvent_OnUpdateMyItemPrice] = "OnUpdateMyItemPrice",
+    [self.emEvent_OnCancelSellItem] = "OnCancelSellItem",
+    [self.emEvent_OnGetCacheMoney] = "OnGetCacheMoney",
+    [self.emEvent_OnGetMySellItemInfo] = "OnGetMySellItemInfo",
+    [self.emEvent_OnGetItemList] = "OnGetItemList",
+    [self.emEvent_OnUpdateAllStall] = "OnUpdateAllStall",
+    [self.emEvent_OnBuyItem] = "OnBuyItem",
+    [self.emEvent_OnGetAvaragePrice] = "OnGetAvaragePrice",
+    [self.emEvent_OnUpdateItemList] = "OnUpdateItemList",
+    [self.emEvent_OnAddStar] = "OnAddStar",
+    [self.emEvent_OnDelStar] = "OnDelStar",
+    [self.emEvent_OnSyncStar] = "OnSyncStar",
+    [self.emEvent_OnGetShowDetailInfo] = "OnGetShowDetailInfo",
+    [self.emEvent_OnAllCancelSellItem] = "OnAllCancelSellItem",
+    [self.emEvent_OnUpdateNP2PItem] = "OnUpdateNP2PItem"
+  }
+end
+
+function MarketStallBase:BuidTypeTreeData()
+  local tbExistMap = {}
+  local tbAvaliableSeType = {}
+  self.tbTypeTreeData = {}
+  local tbStallItemSettings
+  if self.nStallType == self.tbStallType.YuanBao then
+    tbStallItemSettings = self.tbYuanBaoStallItemSettings
+  elseif self.nStallType == self.tbStallType.Gold then
+    tbStallItemSettings = self.tbGoldStallItemSettings
+  else
+    return
+  end
+  for nItemId, tbInfo in pairs(tbStallItemSettings) do
+    if not tbAvaliableSeType[tbInfo.nSeType] and 1 == GetTimeFrameState(tbInfo.szOpenTimeFrame) and (Lib:IsEmptyStr(tbInfo.szEndTimeFrame) or 1 ~= GetTimeFrameState(tbInfo.szEndTimeFrame)) then
+      tbAvaliableSeType[tbInfo.nSeType] = 1
+    end
+  end
+  for _, tbInfo in pairs(self.tbTypeDefSettings) do
+    if tbAvaliableSeType[tbInfo.nSeTypeId] then
+      if not tbExistMap[tbInfo.nTypeId] then
+        table.insert(self.tbTypeTreeData, {
+          nTypeId = tbInfo.nTypeId,
+          szTypeName = tbInfo.szTypeName,
+          tbKind = {}
+        })
+        tbExistMap[tbInfo.nTypeId] = {
+          nIndex = #self.tbTypeTreeData,
+          tbSub = {}
+        }
+      end
+      if not tbExistMap[tbInfo.nTypeId].tbSub[tbInfo.nSeTypeId] then
+        table.insert(self.tbTypeTreeData[tbExistMap[tbInfo.nTypeId].nIndex].tbKind, {
+          nSeTypeId = tbInfo.nSeTypeId,
+          nTypeId = tbInfo.nTypeId,
+          szSeTypeName = tbInfo.szSeTypeName,
+          nSeTypeSort = tbInfo.nSeTypeSort
+        })
+        tbExistMap[tbInfo.nTypeId].tbSub[tbInfo.nSeTypeId] = 1
+      end
+    end
+  end
+  for nIndex, tbInfo in ipairs(self.tbTypeTreeData) do
+    table.sort(tbInfo.tbKind, function(a, b)
+      if a.nSeTypeSort ~= b.nSeTypeSort then
+        return a.nSeTypeSort > b.nSeTypeSort
+      end
+      return a.nSeTypeId < b.nSeTypeId
+    end)
+  end
+  table.sort(self.tbTypeTreeData, function(a, b)
+    return a.nTypeId < b.nTypeId
+  end)
+end
+
+function MarketStallBase:GetTypeTreeData()
+  local nToday = Lib:GetLocalDay(GetTime() - 14400)
+  if not self.nRefreshTypeTreeTime or self.nRefreshTypeTreeTime ~= nToday then
+    self:BuidTypeTreeData()
+    self.nRefreshTypeTreeTime = nToday
+  end
+  return self.tbTypeTreeData
+end
+
+function MarketStallBase:OnEvent(nEvent, ...)
+  local handlerName = self.eventHandlers[nEvent]
+  assert(handlerName, string.format("nEvent=%s", nEvent))
+  local handler = self[handlerName]
+  assert(handler, string.format("nEvent=%s, handlerName=%s", nEvent, handlerName))
+  handler(self, ...)
+end
+
+function MarketStallBase:ClearData()
+  MarketStallBase:ClearPageTimeData(me.dwID)
+  if not self.tbMyItems or 0 == #self.tbMyItems then
+    return
+  end
+  self.tbMyItems = {}
+end
+
+function MarketStallBase:TryBuyStallItemBase(nSeType, nStallItemTempId, tbData, nCount)
+  if nSeType == self.nStarType then
+    nSeType = self:GetItemType(nStallItemTempId)
+  elseif self.nSeType ~= nSeType then
+    return false
+  end
+  if not nSeType then
+    return false
+  end
+  if nCount <= 0 then
+    me.CenterMsg(i18n.EasyGet("\232\180\173\228\185\176\230\149\176\233\135\143\228\184\141\232\131\189\228\184\1860"))
+    return false
+  end
+  if nCount > tbData.nCount then
+    me.CenterMsg(i18n.EasyGet("\229\149\134\229\147\129\230\149\176\233\135\143\229\183\178\229\143\152\229\138\168\239\188\140\232\175\183\233\135\141\230\150\176\231\161\174\232\174\164"))
+    return false
+  end
+  local cost = nCount * tbData.nPrice
+  if cost > me.GetMoney(self.tbMoneyType[self.nStallType]) then
+    GainCurrency:ReadyForJump(self.tbMoneyType[self.nStallType])
+    return false
+  end
+  local nCanAddCount = me.GetCanAddItemCount(nStallItemTempId)
+  if nCount > nCanAddCount then
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\233\129\147\229\133\183\230\149\176\233\135\143\232\191\135\229\164\154\239\188\140\232\175\183\230\149\180\231\144\134\228\184\128\228\184\139\239\188\129"))
+    return false
+  end
+  self.tbMgr.DelStallItem(tbData.nStallId)
+  if self.nStallType == self.tbStallType.YuanBao then
+    self.rpc(self.nStallType, "RPC_BuyStallItem", nSeType, nStallItemTempId, nCount, tbData.nPrice)
+  else
+    self.rpc(self.nStallType, "RPC_BuyStallItem", nSeType, tbData.nStallId, nCount, tbData.nPrice)
+  end
+  return true
+end
+
+function MarketStallBase:NewSell(nShowType, nIndex, nPrice, nCount)
+  local tbData = self.tbAvaliableItems[nShowType] and self.tbAvaliableItems[nShowType][nIndex]
+  if not tbData then
+    return
+  end
+  local nStallItemTempId = tbData.nStallItemTempId
+  local can, err = self:CheckCanNewSellItem(me, tbData.dwItemId, nCount, nPrice)
+  local tbItemBase = Item:GetItemBaseProp(nStallItemTempId)
+  local nMaxCount = tbItemBase.nStackMax
+  if nMaxCount < 1 then
+    nMaxCount = 1
+  end
+  if nCount > nMaxCount then
+    local szMsg = i18n.EasyGet("\229\141\149\230\172\161\230\156\128\229\164\154\229\143\170\229\143\175\228\184\138\230\158\182{0}\228\184\170", nMaxCount)
+    can, err = false, szMsg
+  end
+  if not can then
+    me.CenterMsg(err)
+    return false
+  end
+  self:SetSavedPrice(nStallItemTempId, nPrice)
+  self.rpc(self.nStallType, "RPC_NewSellItem", tbData.dwItemId, nCount, nPrice)
+  return true
+end
+
+function MarketStallBase:CancelSell(nIndex)
+  local tbData = self.tbMyItems[nIndex]
+  if not tbData then
+    return true
+  end
+  local nCanAddCount = me.GetCanAddItemCount(tbData.nStallItemTempId)
+  if nCanAddCount < tbData.nCount then
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\233\129\147\229\133\183\230\149\176\233\135\143\232\191\135\229\164\154\239\188\140\232\175\183\230\149\180\231\144\134\228\184\128\228\184\139\239\188\129"))
+    return false
+  end
+  self.tbMgr.DelStallItem(tbData.nStallId)
+  self.rpc(self.nStallType, "RPC_CancelSellItem", tbData.nStallId)
+  return true
+end
+
+function MarketStallBase:UpdateSell(nIndex, nPrice)
+  local tbData = self.tbMyItems[nIndex]
+  local can, err = self:CheckCanUpdateItemPrice(me, tbData.nStallItemTempId, tbData.nCount, nPrice)
+  if not can then
+    me.CenterMsg(err)
+    return false
+  end
+  self.rpc(self.nStallType, "RPC_UpdateMyItemPrice", tbData.nStallId, nPrice)
+  return true
+end
+
+function MarketStallBase:GetAvgPrice(nStallItemTempId)
+  self.rpc(self.nStallType, "RPC_GetAvaragePrice", nStallItemTempId)
+  return true
+end
+
+function MarketStallBase:GetTotalCachedMoney()
+  local total = 0
+  for _, v in ipairs(self.tbMyItems) do
+    total = total + v.nCacheMoney
+  end
+  return total
+end
+
+function MarketStallBase:RefreshMine()
+  self.rpc(self.nStallType, "RPC_GetMySellItemInfo")
+end
+
+function MarketStallBase:GetItemName(nStallItemTempId)
+  return KItem.GetItemShowInfo(nStallItemTempId)
+end
+
+function MarketStallBase:ClearNotifyStates()
+  self:ClearRedPoint()
+end
+
+function MarketStallBase:GetDetailTypeList(tbItems)
+  local tbList = {}
+  local tbRet = {}
+  for nIndex = 1, #tbItems do
+    local tbItem = tbItems[nIndex]
+    tbRet[tbItem.nDetailTypeId] = tbRet[tbItem.nDetailTypeId] or {}
+    tbRet[tbItem.nDetailTypeId].nCount = 0
+    tbRet[tbItem.nDetailTypeId].tbItems = {}
+  end
+  for nIndex = 1, #tbItems do
+    local tbItem = tbItems[nIndex]
+    local nDetailTypeId = tbItem.nDetailTypeId
+    local tbDetailInfo = self.tbTypeDefSettings[nDetailTypeId]
+    local nCurCount = tbRet[nDetailTypeId].nCount + tbItem.nCount
+    for n = 1, #tbItem.tbItems do
+      table.insert(tbRet[nDetailTypeId].tbItems, tbItem.tbItems[n])
+    end
+    local tbData = {
+      nDetailTypeId = nDetailTypeId,
+      szDetailTypeName = tbDetailInfo.szDetailTypeName,
+      nIcon = tbDetailInfo.nIcon,
+      szShowType = tbDetailInfo.szShowType,
+      nCount = nCurCount,
+      tbItems = tbRet[nDetailTypeId].tbItems,
+      nSort = tbDetailInfo.nSort
+    }
+    tbRet[nDetailTypeId] = tbData
+  end
+  for _, tb in pairs(tbRet) do
+    table.insert(tbList, tb)
+  end
+  table.sort(tbList, function(a, b)
+    if a.nSort ~= b.nSort then
+      return a.nSort > b.nSort
+    end
+    return a.nDetailTypeId < b.nDetailTypeId
+  end)
+  return tbList
+end
+
+function MarketStallBase:SortMyItems()
+  local tbItems = self.tbMyItems
+  table.sort(tbItems, function(a, b)
+    local sa = self:GetItemState(a)
+    local sb = self:GetItemState(b)
+    return sa < sb or sa == sb and a.nTime > b.nTime
+  end)
+  self.tbMyItems = tbItems
+end
+
+function MarketStallBase:OnUpdateAllStall()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MARKET_STALL_REFRESH_ALL)
+end
+
+function MarketStallBase:OnGetMySellItemInfo(tbItems)
+  self.tbMyItems = tbItems
+  self:SortMyItems()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MS_MY_ITEM_LIST_CHANGE)
+end
+
+function MarketStallBase:OnNewSellItem(bResult, tb)
+  if not bResult then
+    return
+  end
+  table.insert(self.tbMyItems, tb)
+  self:SortMyItems()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MS_MY_ITEM_LIST_CHANGE)
+  local name = self:GetItemName(tb.nStallItemTempId)
+  Timer:Register(10, function()
+    me.CenterMsg(i18n.EasyGet("\230\136\144\229\138\159\228\184\138\230\158\182\228\186\134{0}", name))
+  end)
+end
+
+function MarketStallBase:OnCancelSellItem(bResult, tb)
+  if not bResult then
+    return
+  end
+  for i, v in ipairs(self.tbMyItems) do
+    if v.nStallId == tb.nStallId then
+      table.remove(self.tbMyItems, i)
+      EventNotify.OnNotify(EventNotify.emNOTIFY_MS_MY_ITEM_LIST_CHANGE)
+      local name = self:GetItemName(tb.nStallItemTempId)
+      Timer:Register(10, function()
+        me.CenterMsg(i18n.EasyGet("\228\189\160\228\184\139\230\158\182\228\186\134{0}", name))
+      end)
+      break
+    end
+  end
+end
+
+function MarketStallBase:OnAllCancelSellItem(bResult, tbStallIdList)
+  if not bResult then
+    me.CenterMsg(i18n.EasyGet("\228\184\139\230\158\182\229\164\177\232\180\165"))
+    return
+  end
+  for _, nStallId in ipairs(tbStallIdList) do
+    for i, v in ipairs(self.tbMyItems) do
+      if v.nStallId == nStallId then
+        table.remove(self.tbMyItems, i)
+      end
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MS_MY_ITEM_LIST_CHANGE)
+end
+
+function MarketStallBase:OnUpdateMyItemPrice(bResult, tb)
+  if not bResult then
+    return
+  end
+  for i, v in ipairs(self.tbMyItems) do
+    if v.nStallId == tb.nStallId then
+      self.tbMyItems[i] = tb
+      self:SortMyItems()
+      local name = self:GetItemName(tb.nStallItemTempId)
+      Timer:Register(10, function()
+        me.CenterMsg(i18n.EasyGet("\228\189\160\233\135\141\230\150\176\228\184\138\230\158\182\228\186\134{0}", name))
+      end)
+      break
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MS_MY_ITEM_LIST_CHANGE)
+end
+
+function MarketStallBase:OnGetCacheMoney(bResult, nMoney)
+  if not bResult then
+    return
+  end
+  me.CenterMsg(i18n.EasyGet("\228\189\160\233\162\134\229\143\150\228\186\134\230\148\182\231\155\138{0}\233\135\145\229\184\129", nMoney))
+  self:RefreshMine()
+end
+
+function MarketStallBase:OnBuyItemBase(bResult, nStallItemTempId, nRes)
+  if not bResult then
+    local err = i18n.EasyGet("\228\189\160\230\157\165\230\153\154\228\184\128\230\173\165\239\188\140\229\183\178\231\187\143\232\162\171\229\133\182\228\187\150\228\186\186\228\185\176\232\181\176")
+    if not nRes then
+      err = i18n.EasyGet("\230\148\175\228\187\152\229\164\177\232\180\165\239\188\140\232\175\183\233\135\141\232\175\149")
+    elseif 0 == nRes then
+      err = i18n.EasyGet("\229\189\147\229\137\141\230\145\138\228\189\141\228\184\173\230\156\137\228\187\183\230\160\188\230\155\180\228\189\142\231\154\132\231\137\169\229\147\129")
+    elseif 1 == nRes then
+      err = i18n.EasyGet("\229\149\134\229\147\129\228\184\173\229\140\133\229\144\171\228\190\160\229\174\162\228\189\160\228\184\138\230\158\182\231\154\132\229\149\134\229\147\129\239\188\140\230\151\160\230\179\149\232\180\173\228\185\176")
+    end
+    me.CenterMsg(err)
+  end
+  if bResult then
+    local name = self:GetItemName(nStallItemTempId)
+    me.CenterMsg(i18n.EasyGet("\228\189\160\232\180\173\228\185\176\228\186\134{0}", name))
+  end
+end
+
+function MarketStallBase:OnItemTimeout()
+  self:UpdateRedPoint()
+end
+
+function MarketStallBase:OnItemSelled()
+end
+
+local function GetSavedPriceKey(nStallItemTempId)
+  return string.format("%d", nStallItemTempId)
+end
+
+function MarketStallBase:SetSavedPrice(nStallItemTempId, nPrice)
+  local szKey = GetSavedPriceKey(nStallItemTempId)
+  self.tbSavedPrice[szKey] = nPrice
+end
+
+function MarketStallBase:GetSavedPrice(nStallItemTempId)
+  local szKey = GetSavedPriceKey(nStallItemTempId)
+  return self.tbSavedPrice[szKey]
+end
+
+function MarketStallBase:OnGetAvaragePrice(nPrice)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MS_GET_AVG_PRICE, nPrice)
+end
+
+function MarketStallBase:OnSyncItemData(nStallId, dwItemId, nCbType)
+  Ui:CloseWindow("UILoadingTips")
+  for i, v in ipairs(self.tbMyItems) do
+    self.tbMySellItemsIndex[v.nStallId] = i
+    self.tbAllStall[v.nStallId] = v
+  end
+  for _, tbPriceInfo in pairs(self.tbFetchedStallItems or {}) do
+    for _, tbInfo in pairs(tbPriceInfo) do
+      if tbInfo.nStallId then
+        self.tbAllStall[tbInfo.nStallId] = tbInfo
+      end
+    end
+  end
+  if dwItemId and dwItemId > 0 then
+    local tbInfo = {
+      szItemOpt = "Market_ItemBox",
+      dwItemId = dwItemId
+    }
+    Item:ShowItemDetail(tbInfo)
+  elseif self.tbAllStall[nStallId] then
+    local tbInfo = {
+      szItemOpt = "Market_ItemBox",
+      dwItemId = dwItemId,
+      nTemplate = self.tbAllStall[nStallId].nStallItemTempId,
+      nFaction = me.nFaction,
+      nFactionSect = me.nFactionSect,
+      nSex = me.nSex
+    }
+    Item:ShowItemDetail(tbInfo)
+  end
+end
+
+function MarketStallBase:OnSyncItemDataList(nCbType)
+  Ui:CloseWindow("UILoadingTips")
+  if nCbType == self.tbReqItemDataCbType.BUY_INFO_PANEL then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_ITEM_CHANGE)
+  elseif nCbType == self.tbReqItemDataCbType.SELL_INFO_PANEL then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_MARKET_STALL_MYSTALLLIST)
+  end
+end
+
+function MarketStallBase:RequestItemData(nStallId, nCbType)
+  self.rpc(self.nStallType, "RPC_SyncStallItemData", nStallId, nCbType)
+end
+
+function MarketStallBase:SetStallItemGrid(itemGrid, tbStallInfo, nCbType)
+  if not tbStallInfo.dwItemId or tbStallInfo.dwItemId <= 0 then
+    local tb = self:GetStallAward(tbStallInfo.nStallItemTempId, tbStallInfo.nCount)
+    itemGrid:SetGenericItem(tb)
+    
+    function itemGrid.fnClick(itemGrid)
+      self:OnSyncItemData(tbStallInfo.nStallId, tbStallInfo.dwItemId, nCbType)
+    end
+    
+    return
+  end
+  local pItem = KItem.GetItemObj(tbStallInfo.dwItemId)
+  if pItem then
+    itemGrid:SetItem(tbStallInfo.dwItemId)
+    
+    function itemGrid.fnClick(itemGrid)
+      self:OnSyncItemData(tbStallInfo.nStallId, tbStallInfo.dwItemId, nCbType)
+    end
+    
+    return
+  end
+  local tbInfo = Item:GetItemBaseProp(tbStallInfo.nStallItemTempId)
+  itemGrid:SetItemByTemplate(tbStallInfo.nStallItemTempId, tbStallInfo.nCount, nil, nil, {bShowCDLayer = true}, nil, nil, tbStallInfo)
+  itemGrid:CDLabyer_SetActive(me.nTotalLevel < tbInfo.nRequireLevel)
+  itemGrid:SetClickEnable(true, function()
+    self:ItemGridClickCallBack(itemGrid, nCbType)
+  end)
+end
+
+function MarketStallBase:ItemGridClickCallBack(itemGrid, nCbType)
+  if itemGrid.tbItemExtParams and itemGrid.tbItemExtParams.nStallId and itemGrid.tbItemExtParams.nStallId > 0 and itemGrid.tbItemExtParams.dwItemId and itemGrid.tbItemExtParams.dwItemId > 0 and not KItem.GetItemObj(itemGrid.tbItemExtParams.dwItemId) then
+    self:RequestItemData(itemGrid.tbItemExtParams.nStallId, nCbType)
+    Ui:OpenWindow("UILoadingTips", i18n.EasyGet("\230\149\176\230\141\174\229\138\160\232\189\189\228\184\173..."), 5, function()
+      me.CenterMsg(i18n.EasyGet("\233\157\158\229\184\184\230\138\177\230\173\137\239\188\140\230\149\176\230\141\174\229\138\160\232\189\189\229\164\177\232\180\165\239\188\140\232\175\183\230\163\128\230\159\165\231\189\145\231\187\156"))
+    end)
+    return
+  end
+  if itemGrid.tbItemExtParams and itemGrid.tbItemExtParams.dwItemId and itemGrid.tbItemExtParams.dwItemId > 0 then
+    self:OnSyncItemData(itemGrid.tbItemExtParams.nStallId, itemGrid.tbItemExtParams.dwItemId, nCbType)
+  end
+end
+
+function MarketStallBase:SetStallItemPanel(itemPanel, itemObj, nCbType, tbWndData)
+  Ui:Button_BindEvent(itemPanel, "Main", function()
+    Ui:OpenWindow(self.tbUIName[nCbType], tbWndData)
+  end, itemObj)
+end
+
+function MarketStallBase:OpenWindowByItemTempId(nStallType, nTemplateId)
+  local tbStallInfo, tbTypeSetting
+  if nStallType == MarketStallBase.tbStallType.YuanBao then
+    tbStallInfo = self.tbYuanBaoStallItemSettings
+    tbTypeSetting = self.tbYuanBaoTypeSetting
+  else
+    tbStallInfo = self.tbGoldStallItemSettings
+    tbTypeSetting = self.tbGoldTypeSetting
+  end
+  local tbInfo = tbStallInfo[nTemplateId]
+  if not tbInfo then
+    return false
+  end
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(nStallType)
+  local nTypeId = tbTypeSetting[tbInfo.nDetailType] and tbTypeSetting[tbInfo.nDetailType].nTypeId
+  local nSeTypeId = tbTypeSetting[tbInfo.nDetailType] and tbTypeSetting[tbInfo.nDetailType].nSeTypeId
+  local tbTypeTreeData = MarketStallClass:GetTypeTreeData()
+  local nBigIndex = 0
+  local nSmallIndex = 0
+  local bFind = false
+  if tbTypeTreeData then
+    for nIndex, tbInfo in ipairs(tbTypeTreeData) do
+      if tbInfo.nTypeId == nTypeId then
+        nBigIndex = nIndex
+        break
+      elseif #tbInfo.tbKind > 1 then
+        nSmallIndex = nSmallIndex + #tbInfo.tbKind
+      end
+    end
+    if nBigIndex > 0 then
+      if #tbTypeTreeData[nBigIndex].tbKind > 1 then
+        for nIndex, tbInfo in ipairs(tbTypeTreeData[nBigIndex].tbKind) do
+          if tbInfo.nSeTypeId == nSeTypeId then
+            bFind = true
+            nSmallIndex = nSmallIndex + nIndex
+            break
+          end
+        end
+      else
+        bFind = true
+        nSmallIndex = 0
+      end
+    end
+  end
+  if not bFind then
+    return false
+  end
+  Ui:OpenWindow("UIMarketStall", nStallType, Ui.UIMarketStall.tbSelectTypeIndex.SELECT_TYPE_BUY, nBigIndex + 1, nSmallIndex)
+  return true
+end
+
+function MarketStallBase:QuickSell(nMarketType, nItemId)
+  local pItem, nPos = me.GetItemInAllSpace(nItemId)
+  if not pItem or nPos ~= Item.EITEMPOS_BAG then
+    me.CenterMsg(i18n.EasyGet("\230\137\190\228\184\141\229\136\176\230\173\164\233\129\147\229\133\183\230\136\150\233\129\147\229\133\183\228\184\141\229\156\168\232\131\140\229\140\133\229\134\133"))
+    return
+  end
+  Ui:OpenWindow("UIMarketStall", nMarketType, Ui.UIMarketStall.tbSelectTypeIndex.SELECT_TYPE_SELL)
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(nMarketType)
+  if not MarketStallClass then
+    return
+  end
+  local tbAvaliableItems = MarketStallClass:GetAvaliableItems()
+  local tbItems = tbAvaliableItems[Ui.tbToggle.TogAll]
+  local nIndex = 0
+  local tbItem
+  if tbItems and #tbItems > 0 then
+    for index, tbItemInfo in ipairs(tbItems) do
+      if tbItemInfo.dwItemId == nItemId then
+        nIndex = index
+        tbItem = tbItemInfo
+        break
+      end
+    end
+  end
+  if nIndex > 0 then
+    local tbWndData = {
+      dwItemId = tbItem.dwItemId,
+      nItemTemplateId = tbItem.nStallItemTempId,
+      szWndType = MarketStallBase.tbUIName[MarketStallBase.tbReqItemDataCbType.SELL_INFO_PANEL],
+      nShowType = Ui.tbToggle.TogAll,
+      index = nIndex,
+      bBag = true,
+      nStallType = nMarketType,
+      nCount = tbItem.nCount,
+      nPrice = tbItem.nPrice,
+      tbItem = tbItem
+    }
+    Ui:OpenWindow(MarketStallBase.tbUIName[MarketStallBase.tbReqItemDataCbType.SELL_INFO_PANEL], tbWndData)
+  end
+end
+
+function MarketStallBase:CheckCanOpenUi()
+  if 0 == GetTimeFrameState(self.szCheckTimeFrame) then
+    return true
+  end
+  local tbInfo = Calendar:GetPreviewInfo()
+  if tbInfo and me.nLevel >= tbInfo.nCurMaxLevel - self.nMaxLevelDiff then
+    return true
+  end
+  return false, tbInfo.nCurMaxLevel - self.nMaxLevelDiff
+end

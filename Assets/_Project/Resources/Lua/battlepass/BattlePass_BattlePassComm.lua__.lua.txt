@@ -1,0 +1,215 @@
+BattlePass.RestCycle = 30
+BattlePass.REF_TIME = 14400
+BattlePass.nMaxQuickCompleteCount = 8
+BattlePass.AwardListId = 1073
+BattlePass.OpenFuncLv = 20
+BattlePass.emTagStrength = 1
+BattlePass.emTagSocialize = 2
+BattlePass.emTagFuben = 3
+BattlePass.emTagPvP = 4
+BattlePass.Recharge = {
+  Elite = 31,
+  Legend = 33,
+  PriceDifference = 32
+}
+BattlePass.AwardTag = {
+  Normal = 1,
+  Elite = 2,
+  Legend = 3
+}
+BattlePass.RechargeMapping = {
+  [BattlePass.AwardTag.Elite] = BattlePass.Recharge.Elite,
+  [BattlePass.AwardTag.Legend] = BattlePass.Recharge.Legend
+}
+BattlePass.CanBuyMapping = {
+  [BattlePass.Recharge.Elite] = BattlePass.AwardTag.Normal,
+  [BattlePass.Recharge.PriceDifference] = BattlePass.AwardTag.Elite,
+  [BattlePass.Recharge.Legend] = BattlePass.AwardTag.Normal
+}
+BattlePass.TaskTag = {
+  Primary = 1,
+  Middle = 2,
+  Advanced = 3,
+  Legend = 4
+}
+BattlePass.TaskClass = {
+  BattlePass.emTagStrength,
+  BattlePass.emTagSocialize,
+  BattlePass.emTagFuben,
+  BattlePass.emTagPvP
+}
+BattlePass.Protocol = {
+  C2SReqCompleteTask = 1,
+  C2SReqReceiveAward = 2,
+  C2SReqReceiveAllAward = 3,
+  C2SReqQuickCompleteTask = 4,
+  C2SReqCompleteAllTask = 5,
+  C2SReqBuyBattlePass = 6,
+  C2SReqBattlePassAwardData = 7,
+  C2SReqBattlePassTaskData = 8
+}
+BattlePass.tbTagNameFun = {
+  [BattlePass.emTagStrength] = function()
+    return i18n.EasyGet("\229\143\152\229\188\186")
+  end,
+  [BattlePass.emTagSocialize] = function()
+    return i18n.EasyGet("\231\164\190\228\186\164")
+  end,
+  [BattlePass.emTagFuben] = function()
+    return i18n.EasyGet("\229\137\175\230\156\172")
+  end,
+  [BattlePass.emTagPvP] = function()
+    return i18n.EasyGet("\231\171\158\230\138\128")
+  end
+}
+
+function BattlePass:LoadSetting()
+  self.tbBattlePassLvCfg = Lib:LoadTabFileEx("Setting/Activity/BattlePass/BattlePassExp.tab", "ddddddd", "nLevel", {
+    "nLevel",
+    "nExp",
+    "nAwardKeyN",
+    "nAwardKeyM",
+    "nAwardKeyH",
+    "nShow",
+    "nHard"
+  })
+  self.tbBattlePassTypeCfg = Lib:LoadTabFileEx("Setting/Activity/BattlePass/BattlePassType.tab", "ssssddd", "szTaskType", {
+    "szTaskType",
+    "szTaskDesc",
+    "szTaskName",
+    "szTimeFrameEvent",
+    "nStartSeason",
+    "nEndSeason",
+    "nIsClose"
+  })
+  self.tbBattlePassTaskCfg = Lib:EasyLoadTabFile("Setting/Activity/BattlePass/BattlePassTask.tab", {"nTaskId", "nTag"}, {
+    "nTaskId",
+    "nTag",
+    "szTaskType",
+    "nFinishCount",
+    "nTaskClass",
+    "nAddExp",
+    "nCostGold",
+    "nExtraParam",
+    "szGuideFunc",
+    "szGuideParam",
+    "nNotExtraConcat"
+  })
+  self.tbBattlePassBuyAwardCfg = Lib:LoadTabFileEx("Setting/Activity/BattlePass/BattlePassBuyAward.tab", "ddd", "nProductId", {
+    "nProductId",
+    "nAwardId",
+    "nAwardKey"
+  })
+  self.tbPreviewbBattlePassAward = {}
+  for nLevel, battlePassLvCfgData in ipairs(self.tbBattlePassLvCfg) do
+    if 1 == battlePassLvCfgData.nShow then
+      table.insert(self.tbPreviewbBattlePassAward, battlePassLvCfgData)
+    end
+  end
+  
+  local function SortFunc(battlePassLvCfgDataA, battlePassLvCfgDataB)
+    local nLvA = battlePassLvCfgDataA.nLevel
+    local nLvB = battlePassLvCfgDataB.nLevel
+    return nLvA <= nLvB
+  end
+  
+  table.sort(self.tbPreviewbBattlePassAward, SortFunc)
+  self.tbBattlePassLvNeedTotalExp = {}
+  local nTotalExp = 0
+  for nLevel, battlePassLvCfgData in ipairs(self.tbBattlePassLvCfg) do
+    self.tbBattlePassLvNeedTotalExp[nLevel] = nTotalExp + battlePassLvCfgData.nExp
+    nTotalExp = self.tbBattlePassLvNeedTotalExp[nLevel]
+  end
+  Validator:Register(BattlePass.CheckBuyAwardCfg, BattlePass)
+end
+
+function BattlePass:CheckBuyAwardCfg()
+  for nProductId, _ in pairs(self.tbBattlePassBuyAwardCfg) do
+    if not Recharge:GetProductSettingById(nProductId) then
+      LogErr(string.format("load BattlePassBuyAward.tab failed, nProductId %d not found in RechargeProducts.tab", nProductId))
+      return false
+    end
+  end
+  return true
+end
+
+function BattlePass:IsOpen(pPlayer)
+  if pPlayer.nLevel < self.nMinLevel then
+    return
+  end
+end
+
+function BattlePass:GetSeason()
+  local nTimestamp = GetTime() - self.REF_TIME
+  local nTimeNum = Lib:GetTimeNum(nTimestamp)
+  return math.floor(nTimeNum / 100)
+end
+
+function BattlePass:GetBattlePassTypeCfgData(szTaskType)
+  return self.tbBattlePassTypeCfg[szTaskType]
+end
+
+function BattlePass:GetBattlePassLvCfgData(nLv)
+  if self.tbBattlePassLvCfg[nLv] == nil then
+    return
+  end
+  return self.tbBattlePassLvCfg[nLv]
+end
+
+function BattlePass:GetBattlePassMaxLv()
+  return #self.tbBattlePassLvCfg
+end
+
+function BattlePass:GetCurLvMaxExp(nLv)
+  if self.tbBattlePassLvCfg[nLv] == nil then
+    return
+  end
+  return self.tbBattlePassLvCfg[nLv].nExp
+end
+
+function BattlePass:GetBattlePassTaskCfgData(nTaskId, nTag)
+  if not self.tbBattlePassTaskCfg[nTaskId] then
+    return
+  elseif not self.tbBattlePassTaskCfg[nTaskId][nTag] then
+    return
+  end
+  return self.tbBattlePassTaskCfg[nTaskId][nTag]
+end
+
+function BattlePass:GetCurLvNeedExp(nLv)
+  if self.tbBattlePassLvCfg[nLv] == nil then
+    return
+  end
+  return self.tbBattlePassLvNeedTotalExp[nLv]
+end
+
+function BattlePass:GetBattlePassBuyAwardCfgData(nProductId)
+  return self.tbBattlePassBuyAwardCfg[nProductId]
+end
+
+function BattlePass:GenInitTaskData()
+  return {nCurCount = 0, bIsCompleted = false}
+end
+
+function BattlePass:CheckBattlePassTaskTypeIsValid(nTaskId, nTag)
+  local battlePassTaskCfgData = self:GetBattlePassTaskCfgData(nTaskId, nTag)
+  if nil == battlePassTaskCfgData then
+    return false
+  end
+  local szTaskType = battlePassTaskCfgData.szTaskType
+  local battlePassTypeCfgData = self.tbBattlePassTypeCfg[szTaskType]
+  if nil == battlePassTypeCfgData then
+    return false
+  end
+  if 1 == battlePassTypeCfgData.nIsClose then
+    return false
+  end
+  local nServerOpenDay = Lib:GetServerOpenDay_4AM()
+  local nSeason = math.ceil(nServerOpenDay / BattlePass.RestCycle)
+  if nSeason < battlePassTypeCfgData.nStartSeason or nSeason > battlePassTypeCfgData.nEndSeason then
+    return false
+  end
+  return true
+end
+
+BattlePass:LoadSetting()

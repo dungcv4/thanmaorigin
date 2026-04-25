@@ -1,0 +1,188 @@
+local tbWnd = Ui:CreateClass("UIWeddingInvite_Tong", "UIPanel")
+local tbControls = {
+  MemberTemplate = "imgList/Viewport/Content/Template"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self.tbMemberScrollView = Ui:NewLoopScrollView(self, tbControls.MemberTemplate)
+end
+
+local tbSrotWeight = {
+  Online_NotInvite = 1,
+  Online_Invite = 2,
+  NotOnline_Invite = 3,
+  NotOnline_NotInvite = 4
+}
+
+local function FnSort(tbMemberA, tbMemberB)
+  if tbMemberA.nSort ~= tbMemberB.nSort then
+    return tbMemberA.nSort < tbMemberB.nSort
+  end
+  if tbMemberA.nCareer ~= tbMemberB.nCareer then
+    return tbMemberA.nCareer < tbMemberB.nCareer
+  end
+  return tbMemberA.nMemberId < tbMemberB.nMemberId
+end
+
+function tbWnd:OnOpen()
+  self:Refresh()
+end
+
+function tbWnd:Refresh()
+  if 0 ~= me.dwTongId then
+    self:RefreshTong()
+  elseif 0 ~= me.dwKinId then
+    self:RefreshKin()
+  else
+    self.tbMemberScrollView:Clear()
+  end
+end
+
+function tbWnd:RefreshTong()
+  local tbMemberList = Lib:CopyTB(Tong:GetMemberList() or {})
+  self.tbOnlineMembers = Lib:CopyTB(Tong:GetMemberState() or {})
+  local tbTongBaseInfo = Lib:CopyTB(Tong:GetBaseInfo() or {})
+  for i = #tbMemberList, 1, -1 do
+    local bOnLine = self.tbOnlineMembers[tbMemberList[i].nMemberId]
+    local bInvite = Marry.tbInvite[tbMemberList[i].nMemberId]
+    if bOnLine then
+      if bInvite then
+        tbMemberList[i].nSort = tbSrotWeight.Online_Invite
+      else
+        tbMemberList[i].nSort = tbSrotWeight.Online_NotInvite
+      end
+    elseif bInvite then
+      tbMemberList[i].nSort = tbSrotWeight.NotOnline_Invite
+    else
+      tbMemberList[i].nSort = tbSrotWeight.NotOnline_NotInvite
+    end
+    if tbMemberList[i].nMemberId == me.dwID or tbMemberList[i].nMemberId == Marry.tbMarryData.dwLoverID then
+      table.remove(tbMemberList, i)
+    end
+  end
+  table.sort(tbMemberList, FnSort)
+  self.tbMemberList = tbMemberList
+  if 0 == #tbMemberList then
+    return
+  end
+  self.tbMemberScrollView:Clear()
+  self.tbMemberScrollView:SetElement(#tbMemberList, function(tbLoopScroll, nIndex)
+    local tbMember = tbMemberList[nIndex]
+    local tbElem = tbLoopScroll:GetElement(nIndex)
+    local pPanel = tbElem.pPanel
+    local bOnLine = self.tbOnlineMembers[tbMember.nMemberId]
+    pPanel:Sprite_SetSprite("imgFaction", Faction:GetIcon(tbMember.nFaction))
+    pPanel:Label_SetText("txtName", tbMember.szName)
+    local szHonorName, szHonorColor = HonorLevel:GetHonorNameByStarLevel(tbMember.nHonorStarLevel, false)
+    local obj = pPanel:GetObject("HonorTitle")
+    local pHonorTitle = obj:GetComponent(Ui.UIHonorTitle)
+    pHonorTitle:SetHonorTitle(i18n.Parse(szHonorName), szHonorColor)
+    Ui:SetVipLevelEffect(pPanel, tbMember.nVipLevel, "txtName")
+    pPanel:Label_SetText("txtLevel", Lib:GetLevelShortText(tbMember.nTotalLevel))
+    local szCareer = i18n.Get(Tong.Def.CareerName[tbMember.nCareer])
+    if tbMember.nCareer == Tong.Def.Career_Leader and tbTongBaseInfo.nMasterId == tbMember.nMemberId then
+      szCareer = szCareer .. "/" .. i18n.Get(Tong.Def.CareerName[Tong.Def.Career_Master])
+    end
+    pPanel:Label_SetText("txtJob", szCareer)
+    local bInAlready = Marry.tbInvite[tbMemberList[nIndex].nMemberId] ~= nil
+    local bInNewInvite = nil ~= Marry.tbNewInvite[tbMemberList[nIndex].nMemberId]
+    pPanel:SetActive("txtFinish", bInAlready or not bOnLine)
+    pPanel:Label_SetText("txtFinish", i18n.EasyGet("\229\183\178\233\130\128\232\175\183"))
+    pPanel:SetActive("ToggleColthes", not bInAlready and bOnLine)
+    if not bOnLine then
+      pPanel:Label_SetText("txtFinish", i18n.EasyGet("\229\183\178\231\166\187\231\186\191"))
+    end
+    Ui:Toggle_BindEvent(pPanel, "ToggleColthes", function(this, isOn)
+      self:OnSelect(nIndex, isOn)
+    end, self)
+    pPanel:Toggle_SetChecked("ToggleColthes", bInNewInvite)
+  end)
+end
+
+function tbWnd:RefreshKin()
+  local tbMemberList = Lib:CopyTB(Kin:GetMemberList() or {})
+  self.tbOnlineMembers = Lib:CopyTB(Kin:GetMemberState() or {})
+  for i = #tbMemberList, 1, -1 do
+    local bOnLine = self.tbOnlineMembers[tbMemberList[i].nMemberId]
+    local bInvite = Marry.tbInvite[tbMemberList[i].nMemberId]
+    if bOnLine then
+      if bInvite then
+        tbMemberList[i].nSort = tbSrotWeight.Online_Invite
+      else
+        tbMemberList[i].nSort = tbSrotWeight.Online_NotInvite
+      end
+    elseif bInvite then
+      tbMemberList[i].nSort = tbSrotWeight.NotOnline_Invite
+    else
+      tbMemberList[i].nSort = tbSrotWeight.NotOnline_NotInvite
+    end
+    if tbMemberList[i].nMemberId == me.dwID or tbMemberList[i].nMemberId == Marry.tbMarryData.dwLoverID then
+      table.remove(tbMemberList, i)
+    end
+  end
+  table.sort(tbMemberList, FnSort)
+  self.tbMemberList = tbMemberList
+  if 0 == #tbMemberList then
+    return
+  end
+  self.tbMemberScrollView:Clear()
+  self.tbMemberScrollView:SetElement(#tbMemberList, function(tbLoopScroll, nIndex)
+    local tbMember = tbMemberList[nIndex]
+    local tbElem = tbLoopScroll:GetElement(nIndex)
+    local pPanel = tbElem.pPanel
+    local bOnLine = self.tbOnlineMembers[tbMember.nMemberId]
+    pPanel:Sprite_SetSprite("imgFaction", Faction:GetIcon(tbMember.nFaction))
+    pPanel:Label_SetText("txtName", tbMember.szName)
+    local szHonorName, szHonorColor = HonorLevel:GetHonorNameByStarLevel(tbMember.nHonorStarLevel, false)
+    local obj = pPanel:GetObject("HonorTitle")
+    local pHonorTitle = obj:GetComponent(Ui.UIHonorTitle)
+    pHonorTitle:SetHonorTitle(i18n.Parse(szHonorName), szHonorColor)
+    Ui:SetVipLevelEffect(pPanel, tbMember.nVipLevel, "txtName")
+    pPanel:Label_SetText("txtLevel", Lib:GetLevelShortText(tbMember.nTotalLevel))
+    pPanel:Label_SetText("txtJob", i18n.Get(Kin.Def.Career_Name[tbMember.nCareer]))
+    local bInAlready = Marry.tbInvite[tbMemberList[nIndex].nMemberId] ~= nil
+    local bInNewInvite = nil ~= Marry.tbNewInvite[tbMemberList[nIndex].nMemberId]
+    pPanel:SetActive("txtFinish", bInAlready or not bOnLine)
+    pPanel:Label_SetText("txtFinish", i18n.EasyGet("\229\183\178\233\130\128\232\175\183"))
+    pPanel:SetActive("ToggleColthes", not bInAlready and bOnLine)
+    if not bOnLine then
+      pPanel:Label_SetText("txtFinish", i18n.EasyGet("\229\183\178\231\166\187\231\186\191"))
+    end
+    Ui:Toggle_BindEvent(pPanel, "ToggleColthes", function(this, isOn)
+      self:OnSelect(nIndex, isOn)
+    end, self)
+    pPanel:Toggle_SetChecked("ToggleColthes", bInNewInvite)
+  end)
+end
+
+function tbWnd:OnSelect(nIndex, bSelect)
+  local dwID = self.tbMemberList[nIndex].nMemberId
+  if bSelect then
+    Marry.tbNewInvite[dwID] = 1
+  else
+    Marry.tbNewInvite[dwID] = nil
+  end
+  local nSelect = Lib:CountTB(Marry.tbNewInvite)
+  self.tbOwner:InitInfo(Marry.nInviteTimes, Marry.nInviteTimes - nSelect, nSelect)
+end
+
+function tbWnd:SelectOnline(isOn)
+  for nIndex, tbInfo in ipairs(self.tbMemberList) do
+    local bInAlready = Marry.tbInvite[tbInfo.nMemberId] ~= nil
+    local bInNewInvite = nil ~= Marry.tbNewInvite[tbInfo.nMemberId]
+    if isOn then
+      if self.tbOnlineMembers[tbInfo.nMemberId] and not bInAlready and not bInNewInvite then
+        local tbElement = self.tbMemberScrollView:GetElement(nIndex)
+        if tbElement then
+          tbElement.pPanel:Toggle_SetChecked("ToggleColthes", true)
+        end
+      end
+    elseif bInNewInvite then
+      local tbElement = self.tbMemberScrollView:GetElement(nIndex)
+      if tbElement then
+        tbElement.pPanel:Toggle_SetChecked("ToggleColthes", false)
+      end
+    end
+  end
+end

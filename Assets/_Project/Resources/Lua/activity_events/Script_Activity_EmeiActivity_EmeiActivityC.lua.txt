@@ -1,0 +1,143 @@
+Require("CommonScript/Activity/EmeiActivity/EmeiActivity/EmeiActivityCfg.lua")
+ActivityMgr.EmeiActivity = ActivityMgr.EmeiActivity or {}
+local EmeiActivity = ActivityMgr.EmeiActivity
+EmeiActivity.ActivityType = {}
+local tbJumpFunc = {
+  [ActivityMgr.Def.ClassNameList.TaoYuanJieYi] = function(nId)
+    local pObj = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.TaoYuanJieYi)
+    if pObj then
+      pObj:ClickGoOrGetAwardBtn()
+    end
+  end,
+  [ActivityMgr.Def.ClassNameList.EmeiPastEvent] = function(nId)
+    local pObj = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.EmeiPastEvent)
+    if pObj then
+      pObj:OnClickButton()
+    end
+  end,
+  [ActivityMgr.Def.ClassNameList.EMeiFireWork] = function(nId)
+    EmeiActivity:CheckGotoFireWorkMap(nId)
+  end,
+  [ActivityMgr.Def.ClassNameList.ShopSale] = function(nId)
+    if RedPointMgr:CheckEvent(RedPointMgr.EVENT.ShopSale) then
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ShopSale)
+    end
+    Ui:OpenWindow("UIShop", Shop.ShopType2ViewIndex.LimitBuy)
+  end
+}
+
+function EmeiActivity:CheckGotoFireWorkMap(nId)
+  local pInstance = ActivityMgr:GetInstanceById(nId)
+  if pInstance and pInstance.tbConfig and pInstance.tbConfig.tbMapList then
+    if me.nLevel < pInstance.tbConfig.nLevel then
+      me.CenterMsg(i18n.EasyGet("\232\175\183\229\133\136\230\143\144\229\141\135\231\173\137\231\186\167\232\135\17912\231\186\167"))
+      return
+    end
+    local nMapId, _ = me.GetWorldPos()
+    if nMapId and pInstance.tbConfig.tbMapList[nMapId] then
+      me.CenterMsg(i18n.EasyGet("\229\183\178\229\156\168\230\180\187\229\138\168\229\156\176\229\155\190\228\184\173"))
+    else
+      local nRandMapId
+      local nRand = MathRandom(Lib:GetTableLength(pInstance.tbConfig.tbMapList))
+      local nCount = 1
+      for nMapTmpId, _ in pairs(pInstance.tbConfig.tbMapList) do
+        if nCount == nRand then
+          nRandMapId = nMapTmpId
+          break
+        end
+        nCount = nCount + 1
+      end
+      local tbMapDefaultPosInfo = Map.tbMapListEx[nRandMapId].tbDefaultPos
+      if not tbMapDefaultPosInfo then
+        return
+      end
+      if TeamMgr:IsFollowTeammate() then
+        TeamMgr:StopFollowMember()
+      end
+      if AFK:IsLeadFightRunning() then
+        AFK:Stop()
+      end
+      local nX, nY
+      for _, tbPos in pairs(tbMapDefaultPosInfo) do
+        if tbPos.PosX and tbPos.PosY then
+          nX = tbPos.PosX
+          nY = tbPos.PosY
+          break
+        end
+      end
+      AutoPath:GotoAndCallEx(nRandMapId, nX, nY)
+    end
+    if Ui:WindowVisible("UIEmeiActivity") then
+      local ui = Ui:GetWindow("UIEmeiActivity")
+      if ui then
+        ui:Close()
+      end
+    end
+  else
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\229\176\154\230\156\170\229\188\128\229\167\139"))
+  end
+end
+
+function EmeiActivity:GetActivityCfg(szType)
+  local tbActivityList = self:GetActivityList()
+  if not tbActivityList then
+    Log(" EmeiActivity:GetActivity() data nil ")
+    return nil
+  end
+  for nId in pairs(ActivityMgr:GetIdListByClassName(szType)) do
+    local tbConfig = self:BuildInstanceConfig(nId, szType)
+    return tbConfig
+  end
+  return nil
+end
+
+function EmeiActivity:GetActivityList()
+  local tbList = {}
+  local tbConfig, szName, pInstance
+  for _, szType in ipairs(ActivityMgr.EmeiActivityCfg.ActivityList) do
+    for nId in pairs(ActivityMgr:GetIdListByClassName(szType)) do
+      tbConfig, pInstance = self:BuildInstanceConfig(nId, szType)
+      if tbConfig then
+        szName = tbConfig.szName and i18n.Parse(tbConfig.szName) or ""
+        table.insert(tbList, {
+          szClassName = szType,
+          nId = nId,
+          szName = szName,
+          szDesc = i18n.Parse(tbConfig.szDesc),
+          nLevel = tbConfig.nLevel or tbConfig.nJoinLevel,
+          tbAward = Award:GetAward(tbConfig.nShowAwardId or tbConfig.nAwardId or -1, tbConfig.nShowAwardKey or tbConfig.nAwardKey or -1) or {},
+          pFunc = tbJumpFunc[szType],
+          szShowTime = i18n.Parse(tbConfig.szShowTime or ""),
+          nSortValue = ActivityMgr.EmeiActivityCfg.SortList[nId] or 0,
+          tbRedPointEventId = pInstance and pInstance.GetRedPointEventId and pInstance:GetRedPointEventId(),
+          bDirectJump = Lib:IIF(tbConfig.nDirectJump and 1 == tbConfig.nDirectJump, true, false)
+        })
+      end
+    end
+  end
+  table.sort(tbList, function(tbFirst, tbSecond)
+    return tbFirst.nSortValue > tbSecond.nSortValue
+  end)
+  return tbList
+end
+
+function EmeiActivity:BuildInstanceConfig(nId, szType)
+  local pInstance = ActivityMgr:GetInstanceById(nId)
+  if pInstance then
+    return pInstance:GetConfig(), pInstance
+  end
+  local tmpInstance = ActivityMgr:Create(szType)
+  if not tmpInstance then
+    return
+  end
+  tmpInstance:OnInit(ActivityMgr:GetConfigById(nId))
+  return tmpInstance:GetConfig()
+end
+
+function EmeiActivity:OnActive(nId)
+  local pInstance = ActivityMgr:GetInstanceById(nId)
+  if not pInstance then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return
+  end
+end

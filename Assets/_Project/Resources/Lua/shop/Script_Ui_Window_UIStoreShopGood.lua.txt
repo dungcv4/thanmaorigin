@@ -1,0 +1,252 @@
+Ui.UIStoreGood = {}
+Ui.UIStoreGood.tbHunShiSubPanelIndex = {Mantle = 1, SecretBook = 2}
+local tbWnd = Ui:CreateClass("UIStoreShopGood", "UIPanel")
+tbWnd.tbControls = {
+  ElementTemplate = "GoodsList/pnlMask/pnlContant/ElementTemplate",
+  btnTemplate = "TypeList/ScrollView/Content/btnTemplate",
+  pnlContant = "GoodsList/pnlMask/pnlContant",
+  NotInfo = "GoodsList/pnlMask/NotInfo",
+  ItemCell = "GoodsList/pnlMask/pnlContant/ItemCell",
+  DropdownQuality = "DropdownQuality",
+  DropdownEquip = "DropdownEquip"
+}
+tbWnd.tbOnClick = {}
+
+function tbWnd:OnCreate()
+  self.tbWareScroll = Ui:NewLoopScrollView(self, self.ItemCell, "Item")
+  self.nRow = 4
+  self.tbSubTypeScroll = Ui:NewScrollView(self, self.btnTemplate, function(self, nIndex, tbElement)
+    self.nSubIndex = nIndex
+    self:InitDropDownInfo()
+  end)
+  self.pPanel:Dropdown_BindEvent(self.DropdownEquip, function(index)
+    self.nDropEquipIndex = index
+    self:UpdateShopItemList()
+  end)
+  self.pPanel:Dropdown_BindEvent(self.DropdownQuality, function(index)
+    self.nDropEquipLevelIndex = index
+    self:UpdateShopItemList()
+  end)
+end
+
+function tbWnd:OnOpen(szShopType, nSubType)
+  self.szShopType = szShopType
+  self.nSubIndex = nSubType or 1
+  self:UpdateBtnTypeSV()
+  self.tbSubTypeScroll:SelectElement(self.nSubIndex)
+  self:InitDropDownInfo()
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:UpdateShopItemList()
+  if self.szShopType == "Repute" then
+    self:GetReputeShopWares()
+  elseif self.szShopType == "HunShi" then
+    self:GetHunShiShopWares()
+  end
+  self:UpdateItemSV()
+end
+
+function tbWnd:UpdateItemSV()
+  local nCount = Lib:CountTB(self.tbWareList)
+  self:SetItemSVActive(nCount > 0)
+  
+  local function fnSetItem(tbLoopScroll, nIndex)
+    local nCol = nCount - self.nRow * (nIndex - 1)
+    if nCol > self.nRow then
+      nCol = self.nRow
+    end
+    for i = 1, self.nRow do
+      if i <= nCol then
+        local tbElement = tbLoopScroll:GetGridElement(nIndex, i)
+        local curIndex = (nIndex - 1) * self.nRow + i
+        local tbInfo = self.tbWareList[curIndex]
+        tbElement.pPanel:SetActive("Main", true)
+        local pPanel = tbElement.pPanel
+        local tbWare = Shop:GetAWare(tbInfo.nWareId)
+        tbElement.tbData = tbWare
+        local nPrice = Shop:GetPrice(tbWare)
+        pPanel:Label_SetText("txtMoneyNum", nPrice)
+        local szName = KItem.GetItemShowInfo(tbWare.nItemId, me.nFaction, me.nFactionSect, me.nSex)
+        local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        itemGrid:SetItemByTemplate(tbWare.nItemId)
+        itemGrid:SetClickEnable(true, function()
+          self:OnItemClick(tbWare)
+        end)
+        pPanel:Label_SetText("txtTitle", i18n.Parse(szName))
+        local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+        if -1 == nRemainCount then
+          pPanel:SetActive("Limit", false)
+          pPanel:Label_SetText("Limit/txtLimitNum", "")
+        else
+          pPanel:SetActive("Limit", true)
+          pPanel:Label_SetText("Limit/txtLimitNum", tostring(nRemainCount))
+        end
+        if 0 == nRemainCount then
+          pPanel:SetActive("imgSoldOutBg", true)
+          pPanel:SetActive("imgSoldOutMark", true)
+        else
+          pPanel:SetActive("imgSoldOutBg", false)
+          pPanel:SetActive("imgSoldOutMark", false)
+        end
+        local szMoney, szMoneyAtlas = Currency:GetIcon(tbWare.szCurrencyType)
+        pPanel:Sprite_SetSprite("imgMoney", szMoney)
+        Ui:Button_BindEvent(pPanel, "", function()
+          self:OnItemClick(tbWare)
+        end, self)
+      else
+        tbLoopScroll:GetGridElement(nIndex, i).pPanel:SetActive("Main", false)
+      end
+    end
+  end
+  
+  self.tbWareScroll:SetElement(math.ceil(nCount / self.nRow), fnSetItem)
+end
+
+function tbWnd:SetItemSVActive(bStatus)
+  if bStatus then
+    self.pPanel:SetActive(self.pnlContant, true)
+    self.pPanel:SetActive(self.NotInfo, false)
+  else
+    self.pPanel:SetActive(self.pnlContant, false)
+    self.pPanel:SetActive(self.NotInfo, true)
+  end
+end
+
+function tbWnd:OnItemClick(tbData)
+  local nRemainCount = Shop:GetShopRemainCount(tbData, me)
+  if 0 == nRemainCount then
+    me.CenterMsg(i18n.Get(Shop.Terms.InsufficientRemainInventory))
+    return
+  end
+  Ui:OpenWindow("UIShopBuy", tbData, true)
+end
+
+function tbWnd:UpdateBtnTypeSV()
+  if self.szShopType == "Repute" then
+    self:GetReputeShopBtnType()
+  elseif self.szShopType == "HunShi" then
+    self:GetHunShiShopBtnType()
+  end
+  
+  local function fnSetItem(index, tbElement)
+    local pPanel = tbElement.pPanel
+    local szName = i18n.Get(self.tbBtnType[index])
+    pPanel:Label_SetText("Text", szName)
+  end
+  
+  self.tbSubTypeScroll:Reset()
+  for i = 1, #self.tbBtnType do
+    self.tbSubTypeScroll:SetElement(i, function(tbElement)
+      fnSetItem(i, tbElement)
+    end)
+  end
+end
+
+function tbWnd:InitDropDownInfo()
+  self.nDropEquipIndex = 0
+  if self.szShopType == "Repute" then
+    self:GetReputeShopEquipDropDown()
+    self:GetReputeShopQualityDropDown()
+    local szReputeType = Repute.tbReputeType2CurrencyType[self.nSubIndex]
+    if Ui:WindowVisible("UIStore") then
+      Ui:GetWindow("UIStore"):SetDynamicCurrencyPanel(szReputeType)
+    end
+  elseif self.szShopType == "HunShi" then
+    self.pPanel:SetActive(self.DropdownEquip, false)
+    self.pPanel:SetActive(self.DropdownQuality, false)
+  end
+  self:UpdateShopItemList()
+end
+
+function tbWnd:GetReputeShopBtnType()
+  self.tbBtnType = {}
+  for i, v in ipairs(Repute.tbCfgReputeInfo) do
+    self.tbBtnType[i] = v.szName
+  end
+end
+
+function tbWnd:GetReputeShopEquipDropDown()
+  local tbEquipOptions = {
+    i18n.EasyGet("\229\133\168\233\131\168")
+  }
+  for i, v in ipairs(Repute.tbReputeType2EquipPos[self.nSubIndex]) do
+    for k, value in ipairs(Repute.tbDropdownEquip) do
+      if value.nEquipPos == v then
+        table.insert(tbEquipOptions, i18n.Get(value.szEquipName))
+        break
+      end
+    end
+  end
+  self.pPanel:SetActive(self.DropdownEquip, true)
+  self.pPanel:Dropdown_ResetOptions(self.DropdownEquip, tbEquipOptions)
+end
+
+function tbWnd:GetReputeShopQualityDropDown()
+  local tbEquipLevelOptions = {
+    i18n.EasyGet("\229\133\168\233\131\168")
+  }
+  local nMaxEquipLevel = Repute:GetMaxShowEquipLevel()
+  self.nDropEquipLevelIndex = nMaxEquipLevel
+  for i = 1, nMaxEquipLevel do
+    table.insert(tbEquipLevelOptions, i18n.EasyGet("{0}\233\152\182", i))
+  end
+  self.pPanel:SetActive(self.DropdownQuality, true)
+  self.pPanel:Dropdown_ResetOptions(self.DropdownQuality, tbEquipLevelOptions)
+  self.pPanel:Dropdown_SetValue(self.DropdownQuality, nMaxEquipLevel)
+end
+
+function tbWnd:GetReputeShopWares()
+  local szReputeType = Repute.tbReputeType2CurrencyType[self.nSubIndex]
+  local tbWares = Shop:GetReputeWareAvaliableList(szReputeType)
+  self.tbWareList = {}
+  local nMaxLevl = Repute:GetMaxShowEquipLevel()
+  for k, v in pairs(tbWares) do
+    local tbWare = Shop:GetAWare(v.nWareId)
+    if tbWare then
+      local tbEquipPosList = Repute.tbReputeType2EquipPos[self.nSubIndex]
+      local nEquipPos, nLevel = v.nEquipPos, v.nLevel
+      if self.nDropEquipIndex > 0 and self.nDropEquipLevelIndex > 0 then
+        local nSelectEquipPos = tbEquipPosList[self.nDropEquipIndex]
+        if nEquipPos == nSelectEquipPos and nLevel == self.nDropEquipLevelIndex then
+          table.insert(self.tbWareList, v)
+        end
+      elseif self.nDropEquipIndex > 0 then
+        local nSelectEquipPos = tbEquipPosList[self.nDropEquipIndex]
+        if nEquipPos == nSelectEquipPos and nMaxLevl >= nLevel then
+          table.insert(self.tbWareList, v)
+        end
+      elseif self.nDropEquipLevelIndex > 0 then
+        for _, nPos in ipairs(tbEquipPosList) do
+          if nEquipPos == nPos and nLevel == self.nDropEquipLevelIndex or -1 == nLevel then
+            table.insert(self.tbWareList, v)
+            break
+          end
+        end
+      elseif -1 == nEquipPos or -1 == nLevel then
+        table.insert(self.tbWareList, v)
+      else
+        for _, nPos in ipairs(tbEquipPosList) do
+          if nEquipPos == nPos and nMaxLevl >= nLevel then
+            table.insert(self.tbWareList, v)
+            break
+          end
+        end
+      end
+    end
+  end
+end
+
+function tbWnd:GetHunShiShopBtnType()
+  self.tbBtnType = Lib:CopyTB(Shop.tbHunShiShopButtonText)
+end
+
+function tbWnd:GetHunShiShopWares()
+  if self.nSubIndex == Ui.UIStoreGood.tbHunShiSubPanelIndex.Mantle then
+    self.tbWareList = Shop:GetMantleWares()
+  elseif self.nSubIndex == Ui.UIStoreGood.tbHunShiSubPanelIndex.SecretBook then
+    self.tbWareList = Shop:GetSecretBookWares()
+  end
+end

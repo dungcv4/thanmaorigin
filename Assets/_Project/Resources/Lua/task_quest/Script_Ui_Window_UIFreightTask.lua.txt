@@ -1,0 +1,303 @@
+Require("Script/Kin/KinFreightTaskC.lua")
+local tbWnd = Ui:CreateWindow("UIFreightTask")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnSyncItemEvent
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  TemplateTask = "node/imgBG/Content/TaskList/ScrollViewTaskList/Viewport/Content/TemplateTask",
+  btnComplete = "node/imgBG/Content/btnComplete",
+  btnAccept = "node/imgBG/Content/btnAccept",
+  txtBtnAccept = "node/imgBG/Content/btnAccept/Text",
+  txtFinshNum = "node/imgBG/Content/FinishCount/txtFinshNum",
+  btnHelpOther = "node/imgBG/Content/btnHelpOther",
+  txtHelpNum = "node/imgBG/Content/btnHelpOther/Text",
+  btnShop = "node/imgBG/Content/btnShop",
+  wndJumpTo = "wndJumpTo",
+  TemplateObtain = "wndJumpTo/imgBG/List/Viewport/Content/Template",
+  Empty4Raycast = "wndJumpTo/Empty4Raycast",
+  ItemTemplate = "node/imgBG/Content/AwardList/Content/ItemTemplate"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  Empty4Raycast = function(self)
+    self.pPanel:SetActive(self.wndJumpTo, false)
+  end,
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnComplete = function(self)
+    local nCount = KinFreightTask:GetFillingTaskCount(me)
+    if nCount == self.tbFTCfg.nFreightCount then
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\189\147\229\137\141\229\183\178\232\163\133\229\161\171{0}\228\184\170\232\180\167\231\137\169\239\188\140\230\143\144\228\186\164\229\144\142\229\143\175\232\142\183\229\190\151\229\159\186\231\161\128\229\165\150\229\138\177\229\146\140\229\133\168\229\174\140\230\136\144\229\165\150\229\138\177\239\188\140\230\152\175\229\144\166\230\143\144\228\186\164\239\188\159", nCount), {
+        {
+          function()
+            KinFreightTask:CSCommitTask()
+          end
+        },
+        {}
+      })
+    elseif nCount >= self.tbFTCfg.nFreightMinCount then
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\189\147\229\137\141\229\183\178\232\163\133\229\161\171{0}\228\184\170\232\180\167\231\137\169\239\188\140\230\143\144\228\186\164\229\144\142\229\143\175\232\142\183\229\190\151\229\159\186\231\161\128\229\165\150\229\138\177\239\188\140\230\152\175\229\144\166\230\143\144\228\186\164\239\188\159", nCount), {
+        {
+          function()
+            KinFreightTask:CSCommitTask()
+          end
+        },
+        {}
+      })
+    end
+  end,
+  btnAccept = function(self)
+    local tbTask = KinFreightTask:GetKinFreightTask()
+    if Lib:CountTB(tbTask) > 0 then
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\148\190\229\188\131\228\187\187\229\138\161\230\151\160\230\179\149\232\142\183\229\190\151\228\187\187\229\138\161\231\154\132\229\159\186\231\161\128\229\165\150\229\138\177\229\146\140\229\174\140\230\136\144\229\165\150\229\138\177\239\188\140\229\183\178\232\163\133\229\161\171\231\154\132\232\180\167\231\137\169\230\151\160\230\179\149\233\128\128\229\155\158\239\188\140\231\161\174\229\174\154\232\166\129\230\148\190\229\188\131\228\187\187\229\138\161\229\144\151\239\188\159"), {
+        {
+          function()
+            KinFreightTask:CSGiveUpTask()
+          end
+        },
+        {}
+      })
+    else
+      KinFreightTask:CSAcceptTask()
+    end
+  end,
+  btnHelpOther = function(self)
+    Ui:OpenWindow("UIFreightTaskHelp")
+  end,
+  btnShop = function(self)
+    Ui:OpenWindow("UIStore", Shop.ShopTypeStr.DrugShop)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbTaskScrollView = Ui:NewScrollView(self, tbControls.TemplateTask)
+  self.tbAwardsList = Ui:NewItemGridView(self, tbControls.ItemTemplate)
+  self.tbObtainScrollView = Ui:NewScrollView(self, tbControls.TemplateObtain)
+end
+
+function tbWnd:OnOpen()
+  self.tbFTCfg = KinFreightTask.KinFreightTaskCfg
+  self.tbTaskScrollView:Clear()
+  self:UpdateReward()
+  self:UpdateView()
+end
+
+function tbWnd:UpdateView()
+  self:UpdateTaskSV()
+  self:UpdateAssistCount()
+  self:UpdateFillingCount()
+  self:UpdateBtnStatus()
+end
+
+function tbWnd:AddTaskData(tbTask, tbTData, nType)
+  for i, tbData in ipairs(tbTData) do
+    if 1 == nType then
+      if 0 ~= tbData.nFilling then
+        table.insert(tbTask, {nIndex = i, tbData = tbData})
+      end
+    elseif 2 == nType then
+      if tbData.nSeekHelpId > 0 then
+        table.insert(tbTask, {nIndex = i, tbData = tbData})
+      end
+    elseif 3 == nType then
+      local nHadNum = me.GetItemCountByTypeInBag(tbData.nId)
+      local tbCfg = KinFreightTask.tbKinFreight[tbData.nId]
+      if tbData.nSeekHelpId <= 0 and nHadNum < tbCfg.nNum and 0 == tbData.nFilling then
+        table.insert(tbTask, {nIndex = i, tbData = tbData})
+      end
+    else
+      local nHadNum = me.GetItemCountByTypeInBag(tbData.nId)
+      local tbCfg = KinFreightTask.tbKinFreight[tbData.nId]
+      if tbData.nSeekHelpId <= 0 and nHadNum >= tbCfg.nNum and 0 == tbData.nFilling then
+        table.insert(tbTask, {nIndex = i, tbData = tbData})
+      end
+    end
+  end
+end
+
+function tbWnd:UpdateTaskSV()
+  local tbTaskList = {}
+  local tbTData = KinFreightTask:GetKinFreightTask()
+  self:AddTaskData(tbTaskList, tbTData, 4)
+  self:AddTaskData(tbTaskList, tbTData, 3)
+  self:AddTaskData(tbTaskList, tbTData, 2)
+  self:AddTaskData(tbTaskList, tbTData, 1)
+  
+  local function fnSetItem(i, tbElement)
+    local pPanel = tbElement.pPanel
+    local itemGrid = Ui:NewExistItemGrid(tbElement, "Item/ItemGrid")
+    if tbTaskList[i] then
+      local nIndex = tbTaskList[i].nIndex
+      local tbTask = tbTaskList[i].tbData
+      pPanel:SetActive("txtEmpty", false)
+      pPanel:SetActive("Item", true)
+      local nId = tbTask.nId
+      local szName = KItem.GetItemShowInfo(nId, me.nFaction, me.nFactionSect, me.nSex)
+      itemGrid:SetItemByTemplate(nId)
+      itemGrid:SetClickEnable(true)
+      pPanel:Label_SetText("txtItem", i18n.Parse(szName))
+      local tbCfg = KinFreightTask.tbKinFreight[nId]
+      if not tbCfg then
+        LogErr("Error in UIFreightTaskHelp not cfg: " .. nId)
+        return
+      end
+      if 0 == tbTask.nFilling then
+        pPanel:SetActive("imgFinish", false)
+        pPanel:SetActive("btnCommit", true)
+        local nHadNum = me.GetItemCountByTypeInBag(nId)
+        if nHadNum >= tbCfg.nNum then
+          pPanel:Button_SetText("btnCommit", i18n.EasyGet("\228\184\138\228\186\164\232\180\167\231\137\169"), "Text")
+          Ui:Button_BindEvent(pPanel, "btnCommit", function()
+            KinFreightTask:CSFillingTask(nIndex, nId)
+          end)
+        else
+          pPanel:Button_SetText("btnCommit", i18n.EasyGet("\232\142\183\229\143\150"), "Text")
+          Ui:Button_BindEvent(pPanel, "btnCommit", function()
+            self.pPanel:SetActive(tbControls.wndJumpTo, true)
+            self:UpdateObtainSV(tbCfg, nId)
+          end)
+        end
+        pPanel:Label_SetText("txtItemCount", i18n.EasyGet("{0}/{1}", nHadNum, tbCfg.nNum))
+        if tbTask.nSeekHelpId > 0 then
+          pPanel:SetActive("btnGetHelp", true)
+          pPanel:Button_SetEnable("btnGetHelp", false)
+          pPanel:Label_SetText("btnGetHelp/Text", i18n.EasyGet("\229\183\178\230\177\130\229\138\169"))
+        else
+          local nRemainSeekHelpNum = KinFreightTask:GetRemainSeekHelpNum()
+          if nRemainSeekHelpNum <= 0 then
+            pPanel:SetActive("btnGetHelp", false)
+          else
+            pPanel:SetActive("btnGetHelp", true)
+            pPanel:Button_SetEnable("btnGetHelp", true)
+            pPanel:Label_SetText("btnGetHelp/Text", i18n.EasyGet("\230\177\130\229\138\169({0}/{1})", nRemainSeekHelpNum, KinFreightTask:GetFreightMaxSeekHelp(me)))
+          end
+        end
+        Ui:Button_BindEvent(pPanel, "btnGetHelp", function()
+          KinFreightTask:CSSeekHelp(nIndex)
+        end)
+      else
+        pPanel:Label_SetText("txtItemCount", "")
+        pPanel:SetActive("btnGetHelp", false)
+        pPanel:SetActive("btnCommit", false)
+        pPanel:SetActive("imgFinish", true)
+      end
+    else
+      pPanel:Label_SetText("txtItemCount", "")
+      pPanel:Label_SetText("txtItem", "")
+      pPanel:SetActive("txtEmpty", true)
+      pPanel:SetActive("Item", false)
+      pPanel:SetActive("btnGetHelp", false)
+      pPanel:SetActive("btnCommit", false)
+      pPanel:SetActive("imgFinish", false)
+    end
+  end
+  
+  self.tbTaskScrollView:Reset()
+  for i = 1, self.tbFTCfg.nFreightCount do
+    self.tbTaskScrollView:SetElement(i, function(tbElement)
+      fnSetItem(i, tbElement)
+    end)
+  end
+end
+
+function tbWnd:UpdateReward()
+  local nFillingCount = KinFreightTask:GetFillingTaskCount()
+  if nFillingCount < KinFreightTask.KinFreightTaskCfg.nFreightMinCount then
+    nFillingCount = KinFreightTask.KinFreightTaskCfg.nFreightMinCount
+  end
+  local tbAwards = Award:GetAward(KinFreightTask.nAwardId, nFillingCount)
+  for i = 1, #tbAwards do
+    self.tbAwardsList:SetItem(i, tbAwards[i], true)
+  end
+  self.tbAwardsList:ResetFrom(#tbAwards + 1)
+end
+
+function tbWnd:UpdateAssistCount()
+  local nAssistCount = KinFreightTask:GetAssistTaskCout()
+  local nMaxAssist = KinFreightTask:GetFreightMaxAssist(me)
+  self.pPanel:Label_SetText(tbControls.txtHelpNum, i18n.EasyGet("\229\141\143\229\138\169({0}/{1})", nMaxAssist - nAssistCount, nMaxAssist))
+  if nAssistCount >= nMaxAssist then
+    self.pPanel:Button_SetEnable(tbControls.btnHelpOther, false)
+  else
+    self.pPanel:Button_SetEnable(tbControls.btnHelpOther, true)
+  end
+end
+
+function tbWnd:UpdateFillingCount()
+  local nFillingCount = KinFreightTask:GetFillingTaskCount()
+  self.pPanel:Label_SetText(tbControls.txtFinshNum, i18n.EasyGet("{0}/{1}", nFillingCount, self.tbFTCfg.nFreightCount))
+  self:UpdateReward()
+end
+
+function tbWnd:UpdateBtnStatus()
+  local nCount = KinFreightTask:GetFillingTaskCount(me)
+  if nCount < self.tbFTCfg.nFreightMinCount then
+    self.pPanel:SetActive(tbControls.btnAccept, true)
+    self.pPanel:SetActive(tbControls.btnComplete, false)
+  else
+    self.pPanel:SetActive(tbControls.btnAccept, false)
+    self.pPanel:SetActive(tbControls.btnComplete, true)
+  end
+  local tbTask = KinFreightTask:GetKinFreightTask()
+  if Lib:CountTB(tbTask) > 0 then
+    self.pPanel:Button_SetEnable(tbControls.btnAccept, true)
+    self.pPanel:Label_SetText(tbControls.txtBtnAccept, i18n.EasyGet("\230\148\190\229\188\131\228\187\187\229\138\161"))
+  else
+    self.pPanel:Label_SetText(tbControls.txtBtnAccept, i18n.EasyGet("\233\162\134\229\143\150\228\187\187\229\138\161"))
+    local bRet = KinFreightTask:CanAcceptTask(me)
+    if bRet then
+      self.pPanel:Button_SetEnable(tbControls.btnAccept, true)
+    else
+      self.pPanel:Button_SetEnable(tbControls.btnAccept, false)
+    end
+  end
+end
+
+function tbWnd:OnSyncItemEvent(nItemId, bUpdateAll)
+  self:UpdateTaskSV()
+end
+
+function tbWnd:UpdateObtainSV(tbCfg, nItemTempId)
+  local tbData = {
+    [1] = {
+      "OpenDrugShop",
+      KinFreightTask.tbObtainExplain.OpenDrugShop
+    },
+    [2] = {
+      "OpenMarketStall",
+      KinFreightTask.tbObtainExplain.OpenMarketStall
+    }
+  }
+  if tbCfg and tbCfg.szObtainFunc and tbCfg.szObtainFunc ~= "" then
+    table.insert(tbData, {
+      tbCfg.szObtainFunc,
+      KinFreightTask.tbObtainExplain[tbCfg.szObtainFunc]
+    })
+  end
+  
+  local function fnSetItem(tbValue, tbElement)
+    local pPanel = tbElement.pPanel
+    pPanel:Label_SetText("txtName", tbValue[2].szTitle())
+    pPanel:Label_SetText("txtDesc", tbValue[2].szDesc())
+    Ui:Button_BindEvent(pPanel, "Main", function()
+      KinFreightTask.tbObtainButtonFuncs[tbValue[1]](nItemTempId)
+      self.pPanel:SetActive(tbControls.wndJumpTo, false)
+    end)
+  end
+  
+  self.tbObtainScrollView:Reset()
+  for i, tbValue in ipairs(tbData) do
+    self.tbObtainScrollView:SetElement(i, function(tbElement)
+      fnSetItem(tbValue, tbElement)
+    end)
+  end
+end

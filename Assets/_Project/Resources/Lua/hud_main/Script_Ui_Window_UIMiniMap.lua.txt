@@ -1,0 +1,645 @@
+local tbWnd = Ui:CreateWindow("UIMiniMap")
+local tbControls = {
+  btnClose = "imgBG/btnClose",
+  btnWorldMap = "imgBG/btnMapGroup/btnWorldMap",
+  btnTong = "imgBG/btnMapGroup/btnTong",
+  btnDomain = "imgBG/btnMapGroup/btnDomain",
+  btnLeaveZone = "imgBG/btnMapGroup/btnLeaveZone",
+  miniMap = "imgBG/MapFrame/Map",
+  arrow = "imgBG/MapFrame/Map/Arrow",
+  txtCurPos = "imgBG/Pos/txtCurPos",
+  txtMapName = "imgBG/Image/txtMapName",
+  flagObj = "imgBG/MapFrame/Map/Flag",
+  mapObj = "imgBG/MapFrame/Map",
+  mapFrame = "imgBG/MapFrame",
+  btnHelp = "imgBG/Image/txtMapName/btnHelp",
+  TeamRoot = "imgBG/MapFrame/Map/Team",
+  PlayerRoot = "imgBG/MapFrame/Map/Player",
+  Template = "imgBG/MapFrame/Map/Template",
+  NpcList = "imgBG/NpcList",
+  btnNpc = "imgBG/btnFuncGroup/btnNpc",
+  NpcTemplate = "imgBG/NpcList/Content/TemplateElement",
+  MonsterShow = "imgBG/MonsterShow",
+  MonsterPoint = "imgBG/MapFrame/Map/MonsterPoint",
+  MonsterSwitch = "imgBG/MonsterShow/ViewSwitch",
+  PathLine = "imgBG/MapFrame/Map/PathLine",
+  MapPoint = "imgBG/MapFrame/MapPoint",
+  btnGoldBoss = "imgBG/btnGoldBoss",
+  dropdownChooseLine = "imgBG/ChooseLine",
+  panelLouLanArea = "imgBG/MapFrame/ContLoulan",
+  imgLouLanArea = "imgBG/MapFrame/ContLoulan/Img_0%d"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnToggleClick = {
+  MonsterSwitch = function(self, isOn)
+    self:ShowMonsterNode(isOn)
+    self.bShowMonster = isOn
+  end
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnWorldMap = function(self)
+    Ui:OpenWindow("UIWorldMap")
+    self:Close()
+  end,
+  btnTong = function(self)
+    if Tong:ReqEnterTongMap() then
+      self:Close()
+    end
+  end,
+  btnDomain = function(self)
+    if not GlobalDomainBattle.bMeetTimeFrame then
+      Ui:OpenWindow("UITong", "ACTIVITY")
+      self:Close()
+    else
+      Ui:OpenWindow("UILegion", "ACTIVITY")
+      self:Close()
+    end
+  end,
+  btnLeaveZone = function(self)
+    self:OnClickLeaveZone()
+    self:Close()
+  end,
+  btnNpc = function(self)
+    self:SetNpcList()
+  end,
+  btnGoldBoss = function(self)
+    self:Close()
+    WuLinGaoShou:OnJoinWuLinGaoShou("Boss")
+  end,
+  btnHelp = function(self)
+    local nMapTemplateId = me.nMapTemplateId
+    if nMapTemplateId == GlobalHangUp.KongQueHeMapTemplateID then
+      Ui:OnHelpClicked("KongQueHe")
+    end
+  end
+}
+tbWnd.tbScene2UiPosScale = {X = 8, Y = 16}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.lastDir = -1
+  self.arrowTransform = self.pPanel:GetRectTransform(tbControls.arrow)
+  self.arrowRectTransform = self.pPanel:GetRectTransform(tbControls.arrow)
+  self:SetAutoPathFlagVisible(false)
+  self.flagTransform = self.pPanel:GetRectTransform(tbControls.flagObj)
+  self.mapTransform = self.pPanel:GetRectTransform(tbControls.mapObj)
+  local listener = Ui.UIEventListener.Get(self.pPanel:GetObject(tbControls.mapObj))
+  
+  function listener.PointerDown(obj, eventData)
+    self:onPointerDownMiniMap(eventData)
+  end
+  
+  local mapFrameRectTransform = self.pPanel:GetRectTransform(tbControls.mapFrame)
+  self.nMapFrameWidth = mapFrameRectTransform.rect.width
+  self.nMapFrameHeight = mapFrameRectTransform.rect.height
+  self.nLastShowOther = nil
+  self.tbMPList = {}
+  self.nLastMapId = nil
+  self.bShowMonster = false
+  self.tbMapPoint = Ui:CreatePanel("UIMiniMapPoint", tbControls.MapPoint, self)
+  self.tbPlayerObjList = {}
+  self.tbTeamObjList = {}
+  self.tbNpcScroll = Ui:NewScrollView(self, tbControls.NpcTemplate, function(self, nIndex, tbElement)
+    self:NpcElementOnClick(nIndex, tbElement)
+  end)
+  self.pPanel:Dropdown_BindEvent(tbControls.dropdownChooseLine, function(value)
+    TieFuCheng.nCurSelectMap = value
+    local tbMapList = TieFuCheng:GetMapList()
+    if tbMapList and tbMapList[TieFuCheng.nCurSelectMap + 1] ~= me.nMapId then
+      Ui:CloseWindow("UIMiniMap")
+      TieFuCheng:SwitchMap(tbMapList[TieFuCheng.nCurSelectMap + 1])
+    end
+  end)
+end
+
+function tbWnd:OnOpen()
+  Client.QualityModule._ShowPlayerInMiniMap = Map:IsMiniMapShowFriend(me.nMapTemplateId)
+  Client.QualityModule._NotShowTeamInMiniMap = Map:IsMiniMapNotShowTeam(me.nMapTemplateId)
+  self:ChangeMiniMap()
+  self.bNpcListActive = false
+  self:InitNpcList()
+  self:SetNpcList()
+  self:ShowMonsterNode(self.bShowMonster)
+  local bIsZoneHangUpMap = Map:IsZoneHangUpMap(me.nMapTemplateId)
+  if not me.CanTranOpt(false) or TieFuCheng:IsGameMap(me.nMapTemplateId) or bIsZoneHangUpMap then
+    self.pPanel:SetActive(tbControls.btnWorldMap, false)
+    self.pPanel:SetActive(tbControls.btnTong, false)
+  else
+    self.pPanel:SetActive(tbControls.btnWorldMap, true)
+    self.pPanel:SetActive(tbControls.btnTong, true)
+    if Tong:HasTong() then
+      self.pPanel:Button_SetEnable(tbControls.btnTong, true)
+    else
+      self.pPanel:Button_SetEnable(tbControls.btnTong, false)
+    end
+    if GlobalDomainBattle.bMeetTimeFrame and GlobalDomainBattle:IsGameMap(me.nMapTemplateId) then
+      self.pPanel:SetActive(tbControls.btnTong, false)
+    else
+      self.pPanel:SetActive(tbControls.btnTong, true)
+    end
+  end
+  if GlobalDomainBattle.bMeetTimeFrame and GlobalDomainBattle:IsGameMap(me.nMapTemplateId) or not GlobalDomainBattle.bMeetTimeFrame and DomainBattle:IsGameMap(me.nMapTemplateId) then
+    self.pPanel:SetActive(tbControls.btnDomain, true)
+  else
+    self.pPanel:SetActive(tbControls.btnDomain, false)
+  end
+  self.pPanel:SetActive(tbControls.btnLeaveZone, bIsZoneHangUpMap)
+  if bIsZoneHangUpMap then
+    self.pPanel:Label_SetText(tbControls.btnLeaveZone .. "/Text", i18n.EasyGet("\231\166\187\229\188\128{0}", Map:GetMapName(me.nMapTemplateId)))
+  end
+  self.pPanel:SetActive(tbControls.dropdownChooseLine, TieFuCheng:IsGameMap(me.nMapTemplateId))
+  self.tbMapPoint:ShowMapPoints(me.nMapTemplateId, 0, 0)
+  WuLinGaoShou:RequestActivityStatus()
+  self:UpdateGoldBoss()
+  self:UpdateChooseLine()
+  self.pPanel:SetActive(tbControls.btnHelp, me.nMapTemplateId == GlobalHangUp.KongQueHeMapTemplateID)
+  self:HideArea()
+end
+
+function tbWnd:ChangeMiniMap()
+  local tbMiniMapSize, szMiniMap, tbMiniMapRawInfo = Map:GetMiniMapInfo(me.nMapTemplateId)
+  self.pPanel:Sprite_SetSprite(tbControls.mapFrame, szMiniMap)
+  self.pPanel:Label_SetText(tbControls.txtMapName, i18n.Parse(Map:GetMapSetting(me.nMapTemplateId).MapName))
+  self:UpdateMiniMapSuffix()
+  self.tbMapRawInfo = {
+    RawWidth = tbMiniMapRawInfo.RawWidth,
+    RawHeight = tbMiniMapRawInfo.RawHeight,
+    Scene2MiniScale = tbMiniMapRawInfo.RawScale,
+    PadWidth = tbMiniMapRawInfo.PadWidth,
+    PadHeight = tbMiniMapRawInfo.PadHeight
+  }
+  self.pPanel:Sprite_SetSize(tbControls.miniMap, self.tbMapRawInfo.RawWidth, self.tbMapRawInfo.RawHeight)
+  self.pPanel:Object_SetSize(tbControls.MapPoint, self.tbMapRawInfo.RawWidth, self.tbMapRawInfo.RawHeight)
+  local pathRenderObj = self.pPanel:GetObject(tbControls.PathLine)
+  if pathRenderObj then
+    self.pathRender = pathRenderObj:GetComponent(Ui.MapPathLine)
+    if self.pathRender then
+      self.pathRender:SetMapData(self.tbMapRawInfo.RawWidth, self.tbMapRawInfo.RawHeight, self.tbMapRawInfo.Scene2MiniScale)
+    end
+  end
+  if AutoPath:IsPathing() then
+    local x, y = AutoPath:GetTargetPos()
+    local posX = x / self.tbMapRawInfo.Scene2MiniScale / self.tbScene2UiPosScale.X - self.tbMapRawInfo.RawWidth / 2
+    local posY = y / self.tbMapRawInfo.Scene2MiniScale / self.tbScene2UiPosScale.Y - self.tbMapRawInfo.RawHeight / 2
+    self:SetTargetPos(Ui.Vector2(posX, posY))
+  else
+    self:SetAutoPathFlagVisible(false)
+    self:SetTargetPos(nil)
+  end
+  self:ShowMySelf()
+  self.tbMapPoint:ShowMapPoints(me.nMapTemplateId, 0, 0)
+end
+
+function tbWnd:SyncMiniMapPoint(nMapTemplateId)
+  if nMapTemplateId == me.nMapTemplateId then
+    self.tbMapPoint:ShowMapPoints(me.nMapTemplateId, 0, 0)
+  end
+end
+
+function tbWnd:OnFixedUpdate()
+  self:ShowMySelf()
+  self:ShowOthers()
+end
+
+function tbWnd:ShowMySelf()
+  local nDir = me.GetNpc().GetDir()
+  if self.lastDir ~= nDir then
+    self.arrowTransform.localEulerAngles = Ui.Vector3(0, 0, nDir / 255 * 360 - 90)
+  end
+  if self.tbMapRawInfo then
+    local _, nMyPosX, nMyPosY = me.GetWorldPos()
+    self:ShowPos(self.arrowRectTransform, nMyPosX, nMyPosY, true)
+  end
+  if AutoPath:IsPathing() then
+    if self.targetPos then
+      self:SetAutoPathFlagVisible(true)
+      self.flagTransform.anchoredPosition = self.targetPos
+    end
+  else
+    self:SetAutoPathFlagVisible(false)
+    self:SetTargetPos(nil)
+  end
+end
+
+function tbWnd:SetAutoPathFlagVisible(bVisible)
+  self.pPanel:SetActive(tbControls.flagObj, bVisible)
+  if not bVisible then
+    self:SetTargetPos(nil)
+  end
+end
+
+function tbWnd:GetPlayerObjPoint(index)
+  if index > #self.tbPlayerObjList and index <= Client.QualityModule._MaxShowPlayerCount then
+    local objKey = self.pPanel:CloneObject(tbControls.Template, "player" .. index, "Player")
+    self.pPanel:SetActive(objKey, false)
+    self.tbPlayerObjList[index] = {
+      key = objKey,
+      trans = self.pPanel:GetObject(objKey).transform,
+      rect = self.pPanel:GetRectTransform(objKey)
+    }
+  end
+  return self.tbPlayerObjList[index]
+end
+
+function tbWnd:GetTeamObjPoint(index)
+  if index > #self.tbTeamObjList and index <= TeamMgr.Cfg.MAX_MEMBER_COUNT - 1 then
+    local objKey = self.pPanel:CloneObject(tbControls.Template, "team" .. index, "Team")
+    self.pPanel:SetActive(objKey, false)
+    self.tbTeamObjList[index] = {
+      key = objKey,
+      trans = self.pPanel:GetObject(objKey).transform,
+      rect = self.pPanel:GetRectTransform(objKey)
+    }
+  end
+  return self.tbTeamObjList[index]
+end
+
+function tbWnd:ResetOnSwitchMap()
+  for i = 1, #self.tbPlayerObjList do
+    self.pPanel:DeleteObject(self.tbPlayerObjList[i].objKey)
+  end
+  self.tbPlayerObjList = {}
+  for i = 1, #self.tbTeamObjList do
+    self.pPanel:DeleteObject(self.tbTeamObjList[i].objKey)
+  end
+  self.tbTeamObjList = {}
+end
+
+function tbWnd:ShowOthers()
+  local nNow = GetTime()
+  if nNow == self.nLastShowOther then
+    return
+  end
+  self.nLastShowOther = nNow
+  local tbTeamMemberNpcID = {}
+  if Client.QualityModule._NotShowTeamInMiniMap then
+    if self.pPanel:IsActive(tbControls.TeamRoot) then
+      self.pPanel:SetActive(tbControls.TeamRoot, false)
+    end
+  elseif not self.pPanel:IsActive(tbControls.TeamRoot) then
+    self.pPanel:SetActive(tbControls.TeamRoot, true)
+  end
+  if not Client.QualityModule._NotShowTeamInMiniMap then
+    local tbTeamMembers = TeamMgr:GetMembers()
+    local tbTeamMatesPos = TeamMgr:GetTeamMatesPos()
+    for i = 1, TeamMgr.Cfg.MAX_MEMBER_COUNT - 1 do
+      if tbTeamMembers[i] then
+        tbTeamMemberNpcID[tbTeamMembers[i].nNpcID] = true
+      end
+      if tbTeamMatesPos[i] then
+        local objPoint = self:GetTeamObjPoint(i)
+        if objPoint then
+          self.pPanel:Sprite_SetSprite(objPoint.key, "UI/atlas/common/teammate2.png", true)
+          self:ShowPos(objPoint.trans, tbTeamMatesPos[i][1], tbTeamMatesPos[i][2])
+          self.pPanel:SetActive(objPoint.key, true)
+        end
+      elseif i <= #self.tbTeamObjList then
+        local objPoint = self:GetTeamObjPoint(i)
+        if objPoint then
+          self.pPanel:SetActive(objPoint.key, false)
+        end
+      end
+    end
+  end
+  if not Client.QualityModule._ShowPlayerInMiniMap then
+    if self.pPanel:IsActive(tbControls.PlayerRoot) then
+      self.pPanel:SetActive(tbControls.PlayerRoot, false)
+    end
+  elseif not self.pPanel:IsActive(tbControls.PlayerRoot) then
+    self.pPanel:SetActive(tbControls.PlayerRoot, true)
+  end
+  if Client.QualityModule._ShowPlayerInMiniMap then
+    local nCount = 1
+    local playerInfo = Client.NpcManager.m_ShowingPlayer
+    local iter = playerInfo:GetEnumerator()
+    while iter:MoveNext() do
+      local v = iter.Current.Value
+      if v and not tbTeamMemberNpcID[v.m_nNpcID] then
+        local trans = v.gameObject.transform
+        if v._IsFriend then
+          local objPoint = self:GetPlayerObjPoint(nCount)
+          if objPoint then
+            self.pPanel:Sprite_SetSprite(objPoint.key, "UI/atlas/common/teammate.png", true)
+            self:ShowPos(objPoint.trans, trans.position.x * 800, trans.position.y * 1600)
+            self.pPanel:SetActive(objPoint.key, true)
+            nCount = nCount + 1
+          end
+        else
+          local objPoint = self:GetPlayerObjPoint(nCount)
+          if objPoint then
+            self.pPanel:Sprite_SetSprite(objPoint.key, "UI/atlas/common/enemy.png", true)
+            self:ShowPos(objPoint.trans, trans.position.x * 800, trans.position.y * 1600)
+            self.pPanel:SetActive(objPoint.key, true)
+            nCount = nCount + 1
+          end
+        end
+      end
+    end
+    for i = nCount, #self.tbPlayerObjList do
+      self.pPanel:SetActive(self.tbPlayerObjList[i].key, false)
+    end
+  end
+end
+
+function tbWnd:ShowPos(rectTrans, nLogicX, nLogicY, IsMe)
+  local posX = nLogicX / self.tbMapRawInfo.Scene2MiniScale / self.tbScene2UiPosScale.X
+  local posY = nLogicY / self.tbMapRawInfo.Scene2MiniScale / self.tbScene2UiPosScale.Y
+  if not IsMe then
+    posX = posX + 6
+    posY = posY + 6
+  end
+  rectTrans.anchoredPosition = Ui.Vector2(posX, posY)
+  if IsMe then
+    if EDITOR then
+      self.pPanel:Label_SetText(tbControls.txtCurPos, string.format("(%d,%d)", nLogicX, nLogicY))
+    else
+      self.pPanel:Label_SetText(tbControls.txtCurPos, string.format("(%d,%d)", math.floor(nLogicX * Map.nShowPosScale), math.floor(nLogicY * Map.nShowPosScale)))
+    end
+  end
+end
+
+function tbWnd:SetTargetPos(pos)
+  self.targetPos = pos
+end
+
+function tbWnd:onPointerDownMiniMap(eventData)
+  local pos = Client.UIModule.ScreenPointToLocalPointInRectangle(self.mapTransform, eventData.position)
+  local posX = pos.x + self.mapTransform.rect.width / 2
+  local posY = pos.y + self.mapTransform.rect.height / 2
+  local logicX = posX * self.tbMapRawInfo.Scene2MiniScale * self.tbScene2UiPosScale.X
+  local logicY = posY * self.tbMapRawInfo.Scene2MiniScale * self.tbScene2UiPosScale.Y
+  self.bIsClickMapPathing = true
+  local bFollowFight = AFK:IsFollowFightRunning()
+  if bFollowFight then
+    TeamMgr:StopFollowMember()
+  end
+  local bLeadFight = AFK:IsLeadFightRunning()
+  if bLeadFight then
+    AFK:Stop()
+  end
+  AutoPath:StopGoto()
+  local bNeedRideHorse = false
+  local _, nMeX, nMeY = me.GetWorldPos()
+  local nDisSquare = (logicX - nMeX) ^ 2 + (logicY - nMeY) ^ 2
+  local nDisRequired = 6553600.0
+  if nDisSquare > nDisRequired * 2 then
+    bNeedRideHorse = true
+  end
+  AFK:SetRideHorse(bNeedRideHorse)
+  AutoPath:GotoAndCallEx(me.nMapId, logicX, logicY, function()
+    self.bIsClickMapPathing = false
+    AFK:SetRideHorse(false)
+    if me.nFightMode == Npc.FIGHT_MODE.emFightMode_Fight then
+      AFK:Start()
+    end
+  end, Npc.MIN_DISTANCE, nil, nil, nil, nil, function()
+    self.bIsClickMapPathing = false
+    AFK:SetRideHorse(false)
+  end, function()
+    self.bIsClickMapPathing = false
+    AFK:SetRideHorse(false)
+  end, AutoPath.PathReason.emMiniMap_GoToTargetPos)
+  self:SetTargetPos(pos)
+end
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_LOADED,
+      self.ChangeMiniMap
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_MAP_POINT,
+      self.SyncMiniMapPoint
+    },
+    {
+      EventNotify.EMNOTIFY_WULINGAOSHOU_STATUS_REPLY,
+      self.UpdateGoldBoss
+    }
+  }
+end
+
+function tbWnd:InitNpcList()
+  if Map:IsFuben(me.nMapTemplateId) then
+    self.bShowMonster = false
+    self.bNpcListActive = false
+    self.nLastMapId = me.nMapTemplateId
+    self.pPanel:SetActive(tbControls.MonsterShow, false)
+    self.pPanel:SetActive(tbControls.NpcList, false)
+    self.pPanel:SetActive(tbControls.btnNpc, false)
+    self.pPanel:Toggle_SetChecked(tbControls.MonsterSwitch, false)
+    return
+  end
+  if self.nLastMapId and self.nLastMapId == me.nMapTemplateId then
+    return
+  end
+  self.nLastMapId = me.nMapTemplateId
+  local tbNpcs = Map:GetMapNpcInfo(me.nMapTemplateId)
+  self.tbItems = {}
+  self.tbMonsterPoint = {}
+  if tbNpcs then
+    for _, tbNpc in pairs(tbNpcs) do
+      if 1 == tbNpc.CanAutoPath and tbNpc.NpcTemplateId ~= me.dwID then
+        local szNpcName = ""
+        if tbNpc.ShowName and "" ~= tbNpc.ShowName then
+          szNpcName = i18n.Parse(tbNpc.ShowName)
+        else
+          szNpcName = Npc:GetNameByTemplateId(tbNpc.NpcTemplateId)
+        end
+        local tbItem = {
+          nIdx = tbNpc.Index or 0,
+          szName = szNpcName,
+          nNpcTemplateId = tbNpc.NpcTemplateId,
+          nPosX = tbNpc.XPos,
+          nPosY = tbNpc.YPos,
+          nNearLength = tbNpc.WalkNearLength,
+          nX = tbNpc.XPos,
+          nY = tbNpc.YPos,
+          XUiPos = tbNpc.XUiPos,
+          YUiPos = tbNpc.YUiPos
+        }
+        if tbNpc.TitleID then
+          tbItem.szTitle, tbItem.nColorId = KNpc.GetTitleById(tbNpc.TitleID)
+        end
+        table.insert(self.tbItems, tbItem)
+      end
+      if 1 == tbNpc.IsMapMonster then
+        local tbItem = {
+          nX = tbNpc.XPos,
+          nY = tbNpc.YPos,
+          szName = Npc:GetNameByTemplateId(tbNpc.NpcTemplateId)
+        }
+        if 0 ~= tbNpc.XUiPos then
+          tbItem.nX = tbNpc.XUiPos
+        end
+        if 0 ~= tbNpc.YUiPos then
+          tbItem.nY = tbNpc.YUiPos
+        end
+        table.insert(self.tbMonsterPoint, tbItem)
+      end
+    end
+    table.sort(self.tbItems, function(a, b)
+      return a.nIdx > b.nIdx
+    end)
+    self.pPanel:SetActive(tbControls.MonsterShow, Lib:CountTB(self.tbMonsterPoint) > 0)
+  end
+  self.pPanel:SetActive(tbControls.btnNpc, Lib:CountTB(self.tbItems) > 0)
+end
+
+function tbWnd:ShowMonsterNode(bShow)
+  for _, szKey in pairs(self.tbMPList) do
+    self.pPanel:SetActive(szKey, false)
+  end
+  if bShow then
+    local newKey
+    for nIdx, pMonsterPoint in pairs(self.tbMonsterPoint) do
+      if not self.tbMPList[nIdx] then
+        newKey = self.pPanel:CloneObject(tbControls.MonsterPoint, "MP" .. nIdx)
+        self.tbMPList[nIdx] = newKey
+      else
+        newKey = self.tbMPList[nIdx]
+      end
+      local mpTransform = self.pPanel:GetRectTransform(newKey)
+      local posX = pMonsterPoint.nX / self.tbMapRawInfo.Scene2MiniScale / self.tbScene2UiPosScale.X
+      local posY = pMonsterPoint.nY / self.tbMapRawInfo.Scene2MiniScale / self.tbScene2UiPosScale.Y
+      mpTransform.anchoredPosition = Ui.Vector2(posX, posY)
+      self.pPanel:SetActive(newKey, true)
+    end
+  end
+end
+
+function tbWnd:SetNpcList()
+  if Map:IsFuben(me.nMapTemplateId) then
+    self.bNpcListActive = false
+    self.pPanel:SetActive(tbControls.NpcList, self.bNpcListActive)
+    return
+  end
+  if not self.tbItems or Lib:IsEmptyTB(self.tbItems) then
+    self.bNpcListActive = false
+    self.pPanel:SetActive(tbControls.NpcList, self.bNpcListActive)
+    return
+  end
+  self.bNpcListActive = not self.bNpcListActive
+  self.pPanel:SetActive(tbControls.NpcList, self.bNpcListActive)
+  if self.bNpcListActive then
+    local function fnSetNpc(tbElement, tbData)
+      local pPanel = tbElement.pPanel
+      
+      pPanel:Label_SetText("txtName", tbData.szName)
+    end
+    
+    for i = 1, #self.tbItems do
+      self.tbNpcScroll:SetElement(i, function(tbElement)
+        fnSetNpc(tbElement, self.tbItems[i])
+      end)
+    end
+    self.tbNpcScroll:ResetFrom(#self.tbItems + 1)
+  else
+    self.tbNpcScroll:Reset()
+  end
+end
+
+function tbWnd:NpcElementOnClick(nIndex, tbElement)
+  local tbData = self.tbItems[nIndex]
+  AutoPath:StopGoto()
+  AutoPath:GotoAndCallEx(me.nMapId, tbData.nPosX, tbData.nPosY, function()
+    if tbData.nNpcTemplateId then
+      self:SetAutoPathFlagVisible(false)
+      Ui:CloseWindow("UIWorldMap")
+      self:Close()
+      local tbNpcList = KNpc.GetAroundNpcList(me.GetNpc(), GetNpcDialogDistance(tbData.nNpcTemplateId))
+      for _, pNpc in pairs(tbNpcList or {}) do
+        if pNpc.nTemplateId == tbData.nNpcTemplateId then
+          Operation:SimpleTap(pNpc.nId)
+          return
+        end
+      end
+    end
+  end, GetNpcDialogDistance(tbData.nNpcTemplateId), nil, tbData.nNpcTemplateId)
+  local x, y = AutoPath:GetTargetPos()
+  local posX = x / self.tbMapRawInfo.Scene2MiniScale / self.tbScene2UiPosScale.X - self.tbMapRawInfo.RawWidth / 2
+  local posY = y / self.tbMapRawInfo.Scene2MiniScale / self.tbScene2UiPosScale.Y - self.tbMapRawInfo.RawHeight / 2
+  self:SetTargetPos(Ui.Vector2(posX, posY))
+end
+
+function tbWnd:OnClose()
+  self.tbMapPoint:OnClose()
+end
+
+function tbWnd:UpdateGoldBoss()
+  self.pPanel:SetActive(tbControls.btnGoldBoss, WuLinGaoShou.bCanEnterWuLinGaoShou or false)
+end
+
+function tbWnd:UpdateChooseLine()
+  if tbControls.dropdownChooseLine then
+    local tbMapList = TieFuCheng:GetMapList()
+    local tbMapOptions = {}
+    if tbMapList then
+      for nIndex, nMapID in pairs(tbMapList) do
+        table.insert(tbMapOptions, i18n.EasyGet("{0}\231\186\191", nIndex))
+      end
+    end
+    self.pPanel:Dropdown_ResetOptions(self.dropdownChooseLine, tbMapOptions)
+    local nIndex = TieFuCheng:GetMapIndex() - 1
+    self.pPanel:Dropdown_SetValue(self.dropdownChooseLine, nIndex)
+  end
+end
+
+function tbWnd:UpdateMiniMapSuffix()
+  local txtName = i18n.Parse(Map:GetMapSetting(me.nMapTemplateId).MapName)
+  local suffix = TieFuCheng:GetCurrentLineName() or HanHaiMiCheng:GetCurrentLineName()
+  if suffix then
+    txtName = txtName .. suffix
+  end
+  self.pPanel:Label_SetText(self.txtMapName, txtName)
+end
+
+function tbWnd:OnClickLeaveZone()
+  if GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    return GlobalHangUp:OnClickLeaveZone()
+  end
+  RemoteServer.LeaveZonePublicMap()
+end
+
+local tbUnExploreColor = {
+  nR = 0,
+  nG = 0,
+  nB = 0,
+  nA = 130
+}
+local tbClearColor = {
+  nR = 19,
+  nG = 148,
+  nB = 70,
+  nA = 100
+}
+
+function tbWnd:HideArea()
+  if LouLanMiZong:IsInFubenMap(me) then
+    self.pPanel:SetActive(self.panelLouLanArea, true)
+    local tbAreaList = LouLanMiZong.tbAreaList or {}
+    local nAreaNum = 7
+    LouLanMiZong.AREA_TYPE = {
+      eUnexplore = 0,
+      eExplore = 1,
+      eClear = 2
+    }
+    for nIndex = 1, nAreaNum do
+      local szSprite = string.format(self.imgLouLanArea, nIndex)
+      if tbAreaList[nIndex] and tbAreaList[nIndex] == LouLanMiZong.AREA_TYPE.eClear then
+        self.pPanel:SetActive(szSprite, true)
+        self.pPanel:Sprite_SetColor(szSprite, tbClearColor.nR, tbClearColor.nG, tbClearColor.nB, tbClearColor.nA)
+      elseif tbAreaList[nIndex] then
+        self.pPanel:SetActive(szSprite, false)
+      else
+        self.pPanel:SetActive(szSprite, true)
+        self.pPanel:Sprite_SetColor(szSprite, tbUnExploreColor.nR, tbUnExploreColor.nG, tbUnExploreColor.nB, tbUnExploreColor.nA)
+      end
+    end
+  else
+    self.pPanel:SetActive(self.panelLouLanArea, false)
+  end
+end

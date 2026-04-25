@@ -1,0 +1,159 @@
+Require("CommonScript/Activity/ActivityMgrDef.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.SummonNpc)
+tbActivity.SaveID = {
+  LastStartTimeKey = 1,
+  KillAwardTimeKey = 2,
+  LastHitAwardTimeKey = 3
+}
+
+function tbActivity:LoadConfig()
+  self.ACTIVITY_CONFIG = Lib:EasyLoadTabFile("Setting/Activity/SummonNpc/SummonNpc.tab", {"nConfigId"})
+  local tbMap = Lib:EasyLoadTabFile("Setting/Activity/SummonNpc/SummonMap.tab")
+  for _, tbInfo in ipairs(tbMap) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("SummonNpc:LoadConfig SummonMap nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMap = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMap or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMap[tbInfo.nMapTemplateId] = true
+  end
+  local tbNpcLevel = Lib:EasyLoadTabFile("Setting/Activity/SummonNpc/NpcLevel.tab")
+  for _, tbInfo in ipairs(tbNpcLevel) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("SummonNpc:LoadConfig NpcLevel nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbNpcLevel = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbNpcLevel or {}
+    table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbNpcLevel, tbInfo)
+  end
+  self:SortNpcLevel()
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  if not tbActCfg then
+    LogErr(string.format("tbActivity:LoadConfigWithGroup ERROR tbActCfg is nil szGroupName = %s, szGroupSubType = %s", szGroupName, szGroupSubType))
+  end
+  self.tbConfig = tbActCfg.Cfg
+  self.tbConfig.szName = i18n.Encode(self.tbConfig.szName)
+  self.tbConfig.szDesc = i18n.Encode(self.tbConfig.szDesc)
+  self.tbConfig.szHasTeam = i18n.Encode(self.tbConfig.szHasTeam)
+  self.tbConfig.szShowTime = i18n.Encode(self.tbConfig.szShowTime)
+  self.tbConfig.tbMap = {}
+  for _, tbInfo in ipairs(tbActCfg.tbMap) do
+    self.tbConfig.tbMap[tbInfo.nMapTemplateId] = true
+  end
+  self.tbConfig.tbNpcLevel = {}
+  for _, tbInfo in ipairs(tbActCfg.tbNpcLevel) do
+    table.insert(self.tbConfig.tbNpcLevel, tbInfo)
+  end
+  self:SortNpcLevelWithGroup()
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+end
+
+function tbActivity:SortNpcLevel()
+  local nFirstTime, nSecondTime
+  for _, tbInfo in pairs(self.ACTIVITY_CONFIG) do
+    table.sort(tbInfo.tbNpcLevel, function(tbFirst, tbSecond)
+      nFirstTime = Lib:IsEmptyStr(tbFirst.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbFirst.szTimeFrameStart)
+      nSecondTime = Lib:IsEmptyStr(tbSecond.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbSecond.szTimeFrameStart)
+      return nFirstTime > nSecondTime
+    end)
+  end
+end
+
+function tbActivity:SortNpcLevelWithGroup()
+  local nFirstTime, nSecondTime
+  table.sort(self.tbConfig.tbNpcLevel, function(tbFirst, tbSecond)
+    nFirstTime = Lib:IsEmptyStr(tbFirst.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbFirst.szTimeFrameStart)
+    nSecondTime = Lib:IsEmptyStr(tbSecond.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbSecond.szTimeFrameStart)
+    return nFirstTime > nSecondTime
+  end)
+end
+
+function tbActivity:CheckConfigValid()
+  local bResult = true
+  if not self:CheckCommonConfigValid() then
+    bResult = false
+  end
+  local tbStrField = {
+    "szShowTime",
+    "szBeginTime",
+    "szEndTime",
+    "szUseTips",
+    "szHasTeam",
+    "szSystemMsg",
+    "szNumLimitedMsg",
+    "szKillAwardMsg",
+    "szLastHitAwardMsg"
+  }
+  local tbNumberField = {
+    "nJoinLevel",
+    "nMaxNum",
+    "nNpcTemplateId",
+    "nKillAwardNum",
+    "nAliveTime",
+    "nMaxAwardTime",
+    "nMaxLastHitAwardTime"
+  }
+  local tbAwardField = {
+    {"nAwardId", "nAwardKey"},
+    {
+      "nKillAwardId",
+      "nKillAwardKey"
+    },
+    {
+      "nShowAwardId",
+      "nShowAwardKey"
+    },
+    {
+      "nLastHitAwardId",
+      "nLastHitAwardKey"
+    },
+    {
+      "nNormalLastHitAwardId",
+      "nNormalLastHitAwardKey"
+    },
+    {
+      "nNormalKillAwardId",
+      "nNormalKillAwardKey"
+    }
+  }
+  local tbType = ActivityMgr.Def.tbCheckFieldTyep
+  local tbCheckFunc = ActivityMgr.Def.tbCheckFieldFunc
+  for _, szField in ipairs(tbStrField) do
+    if not tbCheckFunc[tbType.string](self.tbConfig, szField) then
+      bResult = false
+    end
+  end
+  for _, szField in ipairs(tbNumberField) do
+    if not tbCheckFunc[tbType.number](self.tbConfig, szField) then
+      bResult = false
+    end
+  end
+  for _, szField in ipairs(tbAwardField) do
+    if not tbCheckFunc[tbType.award](self.tbConfig, szField[1], szField[2]) then
+      bResult = false
+    end
+  end
+  for nIndex, tbValue in ipairs(Calendar.tbOpenLevelTimeFrame) do
+    local nStartLevel = tbValue.nLowerLimitLevel
+    local nEndLevel = tbValue.NewMaxLevel
+    local nNpcLevel = 1
+    if tbValue.nLowerLimitZongShiLevel then
+      nStartLevel = nStartLevel + tbValue.nLowerLimitZongShiLevel
+    end
+    if tbValue.NewMaxZongShiLevel then
+      nEndLevel = nEndLevel + tbValue.NewMaxZongShiLevel
+    end
+    for _, tbInfo in ipairs(self.tbConfig.tbNpcLevel or {}) do
+      if nStartLevel <= tbInfo.nLevel and nEndLevel >= tbInfo.nLevel then
+        nNpcLevel = tbInfo.nLevel
+      end
+      if nEndLevel >= tbInfo.nLevel and Lib:IsEmptyStr(tbInfo.szTimeFrameEnd) then
+        nNpcLevel = tbInfo.nLevel
+      end
+    end
+    if 1 == nNpcLevel then
+      LogErr("SummonNpc Config tbNpcLevel nLevel Set ERROR please Check nNpcLevel == 1", tbValue.Event)
+    end
+  end
+  return bResult
+end

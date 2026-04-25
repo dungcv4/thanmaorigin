@@ -1,0 +1,324 @@
+Require("CommonScript/Partner/PartnerDef.lua")
+Require("CommonScript/Partner/PartnerCommon.lua")
+
+function Partner:GetFightPower(nTemplateId, nQualityLevel, nGrowthType, nLevel, tbPotentialInfo, tbSkillInfo, nStarLevel)
+  local nValue = self:GetPartnerValue(nTemplateId, nQualityLevel, nGrowthType, nLevel, tbPotentialInfo, tbSkillInfo, nStarLevel)
+  return math.floor(nValue * self.nValueToFightPower)
+end
+
+function Partner:GetPotentialValue(tbPotentialInfo)
+  local nTotalValue = 0
+  for _, nValue in pairs(tbPotentialInfo or {}) do
+    nTotalValue = nTotalValue + nValue
+  end
+  nTotalValue = nTotalValue * 2
+  return nTotalValue
+end
+
+function Partner:GetSkillValue(tbSkillInfo)
+  local nTotalValue = 0
+  local nFightPowerUp = 0
+  for nSkillId, nSkillLevel in pairs(tbSkillInfo) do
+    if nSkillLevel then
+      nFightPowerUp = self.SkillLevelFightValue[nSkillLevel] or 0
+      nTotalValue = nTotalValue + nFightPowerUp
+    end
+  end
+  return nTotalValue
+end
+
+function Partner:GetPartnerValue(nTemplateId, nQualityLevel, nGrowthType, nLevel, tbPotentialInfo, tbSkillInfo, nStarLevel)
+  local tbGrowth = self.tbPartnerGrowthInfo[nGrowthType]
+  if not tbGrowth then
+    return 0
+  end
+  local nValue = self:GetPotentialValue(tbPotentialInfo)
+  local nAdd = self.QualityStarFightValue[nQualityLevel] and self.QualityStarFightValue[nQualityLevel][nStarLevel + 1] or 0
+  if 0 ~= nAdd then
+    nValue = nValue + nAdd
+  end
+  nValue = nValue + self:GetSkillValue(tbSkillInfo)
+  nValue = nValue + (nLevel - 1) * self.LevelupGrowthValue[nQualityLevel]
+  nValue = math.floor(nValue + 0.1)
+  return nValue
+end
+
+function Partner:GetPartnerValueByTemplateId(nPartnerTemplateId)
+  return self.tbAllPartnerInfo[nPartnerTemplateId] and self.tbAllPartnerInfo[nPartnerTemplateId].nValue or 0
+end
+
+function Partner:GetLimitPotentialValue(nQualityLevel, nGrowthType, nPotentialType, nGradeLevel, nStarLevel)
+  local tbGrowth = self.tbPartnerGrowthInfo[nGrowthType]
+  if not tbGrowth then
+    return
+  end
+  local nType = tbGrowth[self.tbAllPotentialType[nPotentialType]]
+  if not nType then
+    return
+  end
+  if not self.tbLimitPotentialInfo[nQualityLevel] then
+    return
+  end
+  local nMaxLimit = self.tbLimitPotentialInfo[nQualityLevel][1][nType]
+  local nAddByStar = self.StarUpPotentialLimitDeltaValue[nQualityLevel] and self.StarUpPotentialLimitDeltaValue[nQualityLevel][nStarLevel] or 0
+  if 0 ~= nAddByStar then
+    nMaxLimit = nMaxLimit + nAddByStar * (nType / 10)
+  end
+  local nAddByGrade = self.GradeUpPotentialLimitDeltaValue[nQualityLevel] and self.GradeUpPotentialLimitDeltaValue[nQualityLevel][nGradeLevel] or 0
+  if 0 ~= nAddByGrade then
+    nMaxLimit = nMaxLimit + nAddByGrade * (nType / 10)
+  end
+  nMaxLimit = math.floor(nMaxLimit)
+  return nMaxLimit
+end
+
+function Partner:GetProtectSkillLevel(nQualityLevel, nFightPower)
+  local nLevel = 0
+  for nOtherLevel, tbOtherFightPower in ipairs(self.ProtectSkillLevel) do
+    if nFightPower >= tbOtherFightPower[nQualityLevel] then
+      nLevel = nOtherLevel
+    else
+      break
+    end
+  end
+  return nLevel
+end
+
+function Partner:GetProtectSkillNextLevelFightPowerNeeded(nQualityLevel, nFightPower)
+  local nLevel = 0
+  for nOtherLevel, tbOtherFightPower in ipairs(self.ProtectSkillLevel) do
+    if nFightPower >= tbOtherFightPower[nQualityLevel] then
+      nLevel = nOtherLevel
+    else
+      break
+    end
+  end
+  return self.ProtectSkillLevel[nLevel + 1][nQualityLevel]
+end
+
+function Partner:RandomLimitPotential(nGrowthType, nQuality)
+  local tbLimit = {}
+  local tbLimitPotential = self.tbLimitPotentialInfo[nQuality][1]
+  local tbGrowth = self.tbPartnerGrowthInfo[nGrowthType]
+  for nIdx = 1, #self.tbAllPotentialType do
+    local nLimitType = tbGrowth[self.tbAllPotentialType[nIdx]]
+    local nLimitValue = math.floor(tbLimitPotential[nLimitType] / 10)
+    table.insert(tbLimit, nLimitValue)
+  end
+  return table.unpack(tbLimit)
+end
+
+function Partner:RandomPotential(nGrowthType, nQuality)
+  local tbGrowth = self.tbPartnerGrowthInfo[nGrowthType]
+  if not tbGrowth then
+    LogErr("Partner:RandomPotential ERR !! not tbGrowth ", "growth:" .. nGrowthType, "quality:" .. nQuality)
+    return
+  end
+  local tbAllPotential = {}
+  for _, szInfo in ipairs(self.tbAllPotentialType) do
+    local nType = tbGrowth[szInfo]
+    if not nType then
+      LogErr("Partner:RandomPotential ERR !! not nType ", "growth:" .. nGrowthType, "quality:" .. nQuality)
+      return
+    end
+    local startValue = self.tbPotentialStartValue[nQuality]
+    local nValue = math.floor(startValue * nType / 10)
+    table.insert(tbAllPotential, nValue)
+  end
+  return table.unpack(tbAllPotential)
+end
+
+function Partner:RandomAll(nTemplateId)
+  local nQualityLevel = self.tbAllPartnerInfo[nTemplateId].nQualityLevel
+  local nGrowthType = self.tbAllPartnerInfo[nTemplateId].nGrowthType
+  local nSeries = self.tbAllPartnerInfo[nTemplateId].nSeries
+  local nVitality, nDexterity, nStrength, nEnergy = self:RandomPotential(nGrowthType, nQualityLevel)
+  local nLimitVitality, nLimitDexterity, nLimitStrength, nLimitEnergy = self:RandomLimitPotential(nGrowthType, nQualityLevel)
+  local tbData = {
+    nVitality = nVitality,
+    nDexterity = nDexterity,
+    nStrength = nStrength,
+    nEnergy = nEnergy,
+    nLimitVitality = nLimitVitality,
+    nLimitDexterity = nLimitDexterity,
+    nLimitStrength = nLimitStrength,
+    nLimitEnergy = nLimitEnergy
+  }
+  return tbData
+end
+
+function Partner:SetPartnerData(pPartner, tbData)
+  local tbGrowth = Partner.tbPartnerGrowthInfo[Partner.tbAllPartnerInfo[pPartner.nTemplateId].nGrowthType]
+  local tbLimitPotential = self.tbLimitPotentialInfo[Partner.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel][1]
+  pPartner.SetLevelInfo(tbData.nLevel or 1, tbData.nExp or 0)
+  pPartner.SetGradeLevel(tbData.nGradeLevel or 1)
+  pPartner.SetLimitVitality(tbData.nLimitVitality or 1)
+  pPartner.SetXiSuiVitality(tbLimitPotential[tbGrowth.Vitality] or 1)
+  pPartner.SetPotential(self.POTENTIAL_TYPE_VITALITY, tbData.nVitality, true)
+  pPartner.SetLimitDexterity(tbData.nLimitDexterity or 1)
+  pPartner.SetXiSuiDexterity(tbLimitPotential[tbGrowth.Dexterity] or 1)
+  pPartner.SetPotential(self.POTENTIAL_TYPE_DEXTERITY, tbData.nDexterity, true)
+  pPartner.SetLimitStrength(tbData.nLimitStrength or 1)
+  pPartner.SetXiSuiStrength(tbLimitPotential[tbGrowth.Strength] or 1)
+  pPartner.SetPotential(self.POTENTIAL_TYPE_STRENGTH, tbData.nStrength, true)
+  pPartner.SetLimitEnergy(tbData.nLimitEnergy or 1)
+  pPartner.SetXiSuiEnergy(tbLimitPotential[tbGrowth.Energy] or 1)
+  pPartner.SetPotential(self.POTENTIAL_TYPE_ENERGY, tbData.nEnergy, true)
+  pPartner.SetStar(tbData.nStar or 0)
+  for nId = 1, self.nMaxSkillNum do
+    if tbData.tbSkillInfo and tbData.tbSkillInfo[nId] then
+      pPartner.SetSkillInfo(nId, tbData.tbSkillInfo[nId], 0, 0, true)
+    else
+      pPartner.SetSkillInfo(nId, 0, 0, 0, true)
+    end
+  end
+end
+
+function Partner:OnInit(pPartner)
+  self:SetPartnerData(pPartner, self:RandomAll(pPartner.nTemplateId))
+end
+
+function Partner:OnUpdate(pPartner)
+  local nQualityLevel = self.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+  local nGrowthType = self.tbAllPartnerInfo[pPartner.nTemplateId].nGrowthType
+  local tbQualityInfo = self.tbPartnerQualityInfo[nGrowthType] and self.tbPartnerQualityInfo[nGrowthType][nQualityLevel] or nil
+  if not tbQualityInfo then
+    LogErr("Partner:OnUpdate ERROR !!!", "quality:" .. nQualityLevel, "growth:" .. nGrowthType)
+    return
+  end
+  pPartner.ClearMagicAttrib()
+  local tbGrowth = self.tbPartnerGrowthInfo[nGrowthType]
+  local nLevel = pPartner.GetLevelInfo()
+  local nStarLevel = pPartner.GetStar()
+  local nGradeLevel = pPartner.GetGradeLevel()
+  local tbAllBaseAttrib = {}
+  for nType, szName in pairs(self.tbAllPotentialType) do
+    local nMaxValue = self:GetLimitPotentialValue(nQualityLevel, nGrowthType, nType, nGradeLevel, nStarLevel)
+    local nValue = pPartner.GetPotential(nType)
+    if nGradeLevel >= self.nMaxGradeLevel then
+      nValue = math.min(nMaxValue, nValue)
+    end
+    tbAllBaseAttrib[nType] = nValue
+    tbAllBaseAttrib[nType] = tbAllBaseAttrib[nType] + tbQualityInfo[szName]
+    local nGrowthValue = tbGrowth[szName] / 10
+    tbAllBaseAttrib[nType] = tbAllBaseAttrib[nType] + math.max(nLevel, 0) * self.LevelupGrowthValue[nQualityLevel] * nGrowthValue
+    tbAllBaseAttrib[nType] = tbAllBaseAttrib[nType] + math.max(nStarLevel - 1, 0) * self.StarUpPotentialDeltaValue[nQualityLevel] * nGrowthValue
+    tbAllBaseAttrib[nType] = math.floor(tbAllBaseAttrib[nType] / self.tbPotentialToMagic[nQualityLevel][nType])
+  end
+  pPartner.SetBaseAttrib(tbAllBaseAttrib[self.POTENTIAL_TYPE_VITALITY], tbAllBaseAttrib[self.POTENTIAL_TYPE_DEXTERITY], tbAllBaseAttrib[self.POTENTIAL_TYPE_STRENGTH], tbAllBaseAttrib[self.POTENTIAL_TYPE_ENERGY])
+  for _, tbAttrib in pairs(tbQualityInfo.tbMagicAttrib) do
+    pPartner.AddMagicAttrib(table.unpack(tbAttrib))
+  end
+  local tbPotentialInfo = {}
+  for nType, szName in pairs(self.tbAllPotentialType) do
+    tbPotentialInfo[szName] = pPartner.GetPotential(nType)
+  end
+  local tbSkillInfo = {}
+  for nId = 1, self.nMaxSkillNum do
+    local nSkillId, nSkillLevel = pPartner.GetSkillInfo(nId)
+    if nSkillId > 0 then
+      tbSkillInfo[nSkillId] = math.max(nSkillLevel, 1)
+    end
+  end
+  local nFightPower = self:GetFightPower(pPartner.nTemplateId, nQualityLevel, nGrowthType, nLevel, tbPotentialInfo, tbSkillInfo, nStarLevel)
+  pPartner.SetFightPower(nFightPower)
+end
+
+function Partner:IsPartnerPos(pPlayer, nPartnerId)
+  local tbPartnerPos = pPlayer.GetPartnerPosInfo()
+  for _, nPosPartnerId in pairs(tbPartnerPos) do
+    if nPartnerId == nPosPartnerId then
+      return true
+    end
+  end
+  return false
+end
+
+function Partner:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  if MODULE_GAMESERVER then
+    local tbPartnerInfoList = pPlayerAsync.GetPartnerGroup()
+    for _, tbPartnerInfo in pairs(tbPartnerInfoList) do
+      local tbSkillList = tbPartnerInfo.tbSkillList
+      for _, tbInfo in ipairs(tbSkillList) do
+        if tbInfo.nSkillId > 0 then
+          Partner:ApplyPartnerSkillBookMagicAttrib(pNpc, tbInfo.nSkillId, tbInfo.nSkillLevel, true, false)
+        end
+      end
+      local nPartnerId = tbPartnerInfo.dwPartnerId
+      local nTemplateId = tbPartnerInfo.dwTemplateId
+      local nProtectSkillId = Partner.tbAllPartnerInfo[nTemplateId].nProtectSkillId
+      local nFightPower = tbPartnerInfo.nFightPower
+      local nQualityLevel = Partner.tbAllPartnerInfo[nTemplateId].nQualityLevel
+      local nSkillLevel = Partner:GetProtectSkillLevel(nQualityLevel, nFightPower)
+      nSkillLevel = nSkillLevel + pPlayerAsync.nPartnerProtectExtraLevel
+      Partner:ApplyPartnerProtectSkill(pNpc, nProtectSkillId, nSkillLevel, true)
+      local nJueXingSkillLevel = 0
+      for i = 1, 6 do
+        if nPartnerId == pPlayerAsync.GetPartnerOrder(i) then
+          nJueXingSkillLevel = pPlayerAsync.GetPartnerAwakeningSkill(i)
+          break
+        end
+      end
+      local nJueXingSkillId = Partner.tbAllPartnerInfo[nTemplateId].nJueXingSkillId
+      Partner:ApplyPartnerJueXingSkill(pNpc, nJueXingSkillId, nJueXingSkillLevel, true)
+    end
+    for nFetterId, _ in pairs(Partner.tbPartnerFetterSetting) do
+      local nCurFetterLevel = pPlayerAsync.GetPartnerFriend(nFetterId)
+      if nCurFetterLevel >= 1 then
+        Partner:ActiveFetterMagicAttribById(pNpc, nFetterId, nCurFetterLevel, true)
+      end
+    end
+  else
+    print("playerasync OnCreatePlayerRobotNpc")
+    local tbPartner = pPlayerAsync.GetPartners()
+    for _, pPartner in pairs(tbPartner) do
+      for i = 1, Partner.nMaxSkillNum do
+        local nSkillId, nSkillLevel, nSkillExp = pPartner.GetSkillInfo(i)
+        if nSkillId > 0 then
+          Partner:ApplyPartnerSkillBookMagicAttrib(pNpc, nSkillId, nSkillLevel, true, false)
+        end
+      end
+      local nProtectSkillId = Partner.tbAllPartnerInfo[pPartner.nTemplateId].nProtectSkillId
+      local nFightPower = pPartner.nFightPower
+      local nQualityLevel = Partner.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+      local nSkillLevel = Partner:GetProtectSkillLevel(nQualityLevel, nFightPower)
+      nSkillLevel = nSkillLevel + pPlayerAsync.nPartnerProtectExtraLevel
+      Partner:ApplyPartnerProtectSkill(pNpc, nProtectSkillId, nSkillLevel, true)
+      local nJueXingSkillId = Partner.tbAllPartnerInfo[pPartner.nTemplateId].nJueXingSkillId
+      local nSkillLevel = pPartner.GetPartnerJueXingLevel()
+      Partner:ApplyPartnerJueXingSkill(pNpc, nJueXingSkillId, nSkillLevel, true)
+    end
+    for nFetterId, _ in pairs(Partner.tbPartnerFetterSetting) do
+      local nCurFetterLevel = pPlayerAsync.GetPartnerFriend(nFetterId)
+      if nCurFetterLevel >= 1 then
+        Partner:ActiveFetterMagicAttribById(pNpc, nFetterId, nCurFetterLevel, true)
+      end
+    end
+  end
+end
+
+function Partner:CalcFightPower(pPlayer, szType)
+  if "PartnerBase" == szType then
+    local nFightPower = Partner:GetAllPosPartnerFightPower(pPlayer) - Partner:GetAllPosPartnerSkillPower(pPlayer)
+    return nFightPower
+  elseif "PartnerSkill" == szType then
+    return Partner:GetAllPosPartnerSkillPower(pPlayer)
+  elseif "PartnerFetter" == szType then
+    return Partner:GetAllPartnerFetterPower(pPlayer)
+  elseif "PartnerJueXing" == szType then
+    return Partner:GetAllJueXingFightPower(pPlayer)
+  end
+  return 0
+end
+
+function Partner:GetPartnerAllFightPower(pPlayer)
+  local nFightPower = Partner:GetAllPosPartnerFightPower(pPlayer) + Partner:GetAllPartnerFetterPower(pPlayer)
+  return nFightPower
+end
+
+FightPower:RegisterFPSystemModule({
+  "PartnerBase",
+  "PartnerSkill",
+  "PartnerFetter",
+  "PartnerJueXing"
+}, Partner)

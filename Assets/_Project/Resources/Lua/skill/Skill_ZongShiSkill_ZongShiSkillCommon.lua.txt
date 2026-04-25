@@ -1,0 +1,469 @@
+Require("CommonScript/AttributeModule/AttributeModule.lua")
+ZongShiSkill = ZongShiSkill or {}
+ZongShiSkill.SKILL_POINT_GROUP = GetGroupKey("ZongShiSkillPoint")
+ZongShiSkill.SKILL_POINT = 1
+ZongShiSkill.TOTAL_COST_POINT = 2
+ZongShiSkill.XINDE_USE_COUNT = 3
+ZongShiSkill.SKILL_DATA_GROUP = GetGroupKey("ZongShiSkillData")
+ZongShiSkill.SKILL_LEVEL_GROUP = GetGroupKey("ZongShiLevelData")
+ZongShiSkill.ZONGSHI_EXP_LOW = 1
+ZongShiSkill.ZONGSHI_EXP_HIGH = 2
+ZongShiSkill.ZONGSHI_LEVEL = 3
+ZongShiSkill.ZONGSHI_EXP_NEGATIVE = 4
+ZongShiSkill.USER_EXP_EXT_RATE = 1.0E9
+
+function ZongShiSkill:LoadZongShiLevelSetting()
+  self.tbZongShiLevelSetting = {}
+  local tbTabData = Lib:LoadTabFileEx("Setting/ZongShi/ZongShiLevel.tab", "dd", nil, {"Level", "ExpUpGrade"}) or {}
+  for _, tbSkillInfo in pairs(tbTabData) do
+    local nLevel = tbSkillInfo.Level
+    self.tbZongShiLevelSetting[nLevel] = tbSkillInfo
+  end
+  self.tbZongShiLevelSetting = SetReadOnly(self.tbZongShiLevelSetting)
+end
+
+function ZongShiSkill:LoadZongShiSkillSetting()
+  self.tbZongShiSkillSetting = {}
+  self.tbZongShiSkill2SaveId = {}
+  self.tbZongShiSaveId2Skill = {}
+  self.tbZongShiAfterSkill = {}
+  self.tbZongShiSkillUIShowPos = {}
+  local tbTabData = Lib:EasyLoadTabFile("Setting/ZongShi/ZongShiSkill.tab")
+  for _, tbSkillInfo in pairs(tbTabData) do
+    local nSkillId = tbSkillInfo.nSkillId
+    self.tbZongShiSkillSetting[nSkillId] = tbSkillInfo
+    self.tbZongShiSkill2SaveId[nSkillId] = tbSkillInfo.nId
+    self.tbZongShiSaveId2Skill[tbSkillInfo.nId] = nSkillId
+    local szPreSkillDemand = tbSkillInfo.szPreSkillDemand
+    local tbPreSkillDemand = Lib:SplitStr2Num(szPreSkillDemand, ",")
+    for _, nId in pairs(tbPreSkillDemand) do
+      if nId > 0 then
+        self.tbZongShiAfterSkill[nId] = self.tbZongShiAfterSkill[nId] or {}
+        table.insert(self.tbZongShiAfterSkill[nId], nSkillId)
+      end
+    end
+    local nSkillSect = tbSkillInfo.nSect
+    local nSkillShowPos = tbSkillInfo.nUIShowPos
+    self.tbZongShiSkillUIShowPos[nSkillSect] = self.tbZongShiSkillUIShowPos[nSkillSect] or {}
+    self.tbZongShiSkillUIShowPos[nSkillSect][nSkillShowPos] = {
+      tbSkillInfo.nId,
+      nSkillId
+    }
+  end
+  self.tbZongShiSkillSetting = SetReadOnly(self.tbZongShiSkillSetting)
+  self.tbZongShiSkill2SaveId = SetReadOnly(self.tbZongShiSkill2SaveId)
+  self.tbZongShiSaveId2Skill = SetReadOnly(self.tbZongShiSaveId2Skill)
+  self.tbZongShiAfterSkill = SetReadOnly(self.tbZongShiAfterSkill)
+  self.tbZongShiSkillUIShowPos = SetReadOnly(self.tbZongShiSkillUIShowPos)
+end
+
+function ZongShiSkill:LoadUIZongShiSkillLineSetting()
+  self.tbUIZongShiSkillLineSetting = {}
+  local tbTabData = Lib:EasyLoadTabFile("Setting/ZongShi/UIZongShiSkillLine.tab")
+  for _, tbSkillInfo in pairs(tbTabData) do
+    local nSect = tbSkillInfo.nSect
+    local nPos = tbSkillInfo.nPos
+    self.tbUIZongShiSkillLineSetting[nSect] = self.tbUIZongShiSkillLineSetting[nSect] or {}
+    self.tbUIZongShiSkillLineSetting[nSect][nPos] = tbSkillInfo
+  end
+  self.tbUIZongShiSkillLineSetting = SetReadOnly(self.tbUIZongShiSkillLineSetting)
+end
+
+function ZongShiSkill:IsZongShiUnlock(pPlayer)
+  pPlayer = pPlayer or me
+  if pPlayer.nLevel < GameSetting.MAX_PLAYER_LEVEL then
+    return false
+  end
+  return true
+end
+
+function ZongShiSkill:IsZongShiByLevel(nTotalLevel)
+  return nTotalLevel >= GameSetting.MAX_PLAYER_LEVEL
+end
+
+function ZongShiSkill:IsZongShi(pPlayer)
+  return self:IsZongShiByLevel(pPlayer.nTotalLevel)
+end
+
+function ZongShiSkill:ToZongShiLevel(nTotalLevel)
+  if self:IsZongShiByLevel(nTotalLevel) then
+    return nTotalLevel - GameSetting.MAX_PLAYER_LEVEL
+  end
+  return 0
+end
+
+function ZongShiSkill:GetZongShiLevelById(dwRoleId)
+  local pAsyncRole = KPlayer.GetAsyncData(dwRoleId)
+  local nZongShiLevel = pAsyncRole and pAsyncRole.GetZongShiLevel() or 0
+  return nZongShiLevel
+end
+
+function ZongShiSkill:GetPlayerZongShiExp(pPlayer)
+  local nLowVal = pPlayer.GetUserValue(self.SKILL_LEVEL_GROUP, self.ZONGSHI_EXP_LOW)
+  local nHighVal = pPlayer.GetUserValue(self.SKILL_LEVEL_GROUP, self.ZONGSHI_EXP_HIGH)
+  local nNegativeNum = pPlayer.GetUserValue(self.SKILL_LEVEL_GROUP, self.ZONGSHI_EXP_NEGATIVE)
+  local nValue = nHighVal * self.USER_EXP_EXT_RATE + nLowVal
+  if nNegativeNum > 0 then
+    return -nValue
+  else
+    return nValue
+  end
+end
+
+function ZongShiSkill:SetPlayerZongShiExp(pPlayer, nValue)
+  local nNegativeNum = 0
+  if nValue < 0 then
+    nNegativeNum = 1
+    nValue = -nValue
+  end
+  local nLowVal = nValue % self.USER_EXP_EXT_RATE
+  local nHighVal = math.floor(nValue / self.USER_EXP_EXT_RATE)
+  pPlayer.SetUserValue(self.SKILL_LEVEL_GROUP, self.ZONGSHI_EXP_LOW, nLowVal)
+  pPlayer.SetUserValue(self.SKILL_LEVEL_GROUP, self.ZONGSHI_EXP_HIGH, nHighVal)
+  pPlayer.SetUserValue(self.SKILL_LEVEL_GROUP, self.ZONGSHI_EXP_NEGATIVE, nNegativeNum)
+end
+
+function ZongShiSkill:GetPlayerZongShiLevel(pPlayer)
+  return pPlayer.GetUserValue(self.SKILL_LEVEL_GROUP, self.ZONGSHI_LEVEL)
+end
+
+function ZongShiSkill:SetPlayerZongShiLevel(pPlayer, nNewLevel)
+  return pPlayer.SetUserValue(self.SKILL_LEVEL_GROUP, self.ZONGSHI_LEVEL, nNewLevel)
+end
+
+function ZongShiSkill:GetServerMaxZongShiLevel()
+  local nCreateTime = GetServerCreateTime()
+  local nCurOpenServerDay = Lib:GetLocalDay(nCreateTime)
+  local nToday = Lib:GetLocalDay(GetTime() - 14400)
+  local nNextMaxLevel = 0
+  local nCurMaxLevel = 0
+  for i, v in ipairs(Calendar.tbOpenLevelTimeFrame) do
+    local nOpenDay = v.OpenDay + nCurOpenServerDay - 1
+    if nToday < nOpenDay then
+      nNextMaxLevel = v.NewMaxZongShiLevel
+      break
+    else
+      nCurMaxLevel = v.NewMaxZongShiLevel
+    end
+  end
+  return nCurMaxLevel, nNextMaxLevel
+end
+
+function ZongShiSkill:UpdateZongShiLevelData(pPlayer, bInit, nCurLevel, nNewLevel)
+  pPlayer = pPlayer or me
+  pPlayer.UpdateZongShiLevelData(bInit, nCurLevel, nNewLevel)
+  if not MODULE_GAMESERVER then
+    if not bInit then
+      EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL)
+    end
+    Client.NpcManager.UpdateAllPlayerShowName()
+  end
+end
+
+function ZongShiSkill:GetZongShiPoint(pPlayer)
+  local nTotalSkillPointNum = pPlayer.GetUserValue(self.SKILL_POINT_GROUP, self.SKILL_POINT)
+  local nUsedSkillPointNum = pPlayer.GetUserValue(self.SKILL_POINT_GROUP, self.TOTAL_COST_POINT)
+  return nTotalSkillPointNum, nUsedSkillPointNum
+end
+
+function ZongShiSkill:GetXinDeUseCount(pPlayer)
+  local nXinDeUseCount = pPlayer.GetUserValue(self.SKILL_POINT_GROUP, self.XINDE_USE_COUNT)
+  return nXinDeUseCount
+end
+
+function ZongShiSkill:AddXinDeUseCount(pPlayer, nCount)
+  local nXinDeUseCount = pPlayer.GetUserValue(self.SKILL_POINT_GROUP, self.XINDE_USE_COUNT)
+  pPlayer.SetUserValue(self.SKILL_POINT_GROUP, self.XINDE_USE_COUNT, nXinDeUseCount + nCount)
+end
+
+function ZongShiSkill:OnEquip(pPlayer)
+  for nSkillId, _ in pairs(self.tbZongShiSkillSetting) do
+    local nSkillLevel, _ = self:GetSkillLevelInfoById(pPlayer, nSkillId)
+    if nSkillLevel > 0 then
+      self:ChangeZongShiSkill(pPlayer, nSkillId, nSkillLevel, true)
+    end
+  end
+end
+
+function ZongShiSkill:OnUnEquip(pPlayer)
+  for nSkillId, _ in pairs(self.tbZongShiSkillSetting) do
+    local nSkillLevel, _ = self:GetSkillLevelInfoById(pPlayer, nSkillId)
+    if nSkillLevel > 0 then
+      self:ChangeZongShiSkill(pPlayer, nSkillId, nSkillLevel, false)
+    end
+  end
+end
+
+function ZongShiSkill:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  for nSkillId, _ in pairs(self.tbZongShiSkillSetting) do
+    local nSkillLevel = pPlayerAsync.GetZongShiSkill(self.tbZongShiSkill2SaveId[nSkillId])
+    if nSkillLevel > 0 then
+      self:ChangeZongShiSkillForNpc(pNpc, nSkillId, nSkillLevel, true)
+    end
+  end
+end
+
+function ZongShiSkill:ClearAllZongShiSkill(pPlayer)
+  pPlayer = pPlayer or me
+  self:OnUnEquip(pPlayer)
+end
+
+function ZongShiSkill:ChangeZongShiSkill(pPlayer, nSkillId, nSkillLevel, bActive)
+  pPlayer = pPlayer or me
+  local pNpc = pPlayer.GetNpc()
+  if not pNpc then
+    return
+  end
+  self:ChangeZongShiSkillForNpc(pNpc, nSkillId, nSkillLevel, bActive)
+end
+
+function ZongShiSkill:ChangeZongShiSkillForNpc(pNpc, nSkillId, nSkillLevel, bActive)
+  if not pNpc then
+    return
+  end
+  if bActive then
+    pNpc.AddSkillState(nSkillId, nSkillLevel, 3, -1)
+  else
+    pNpc.RemoveSkillState(nSkillId)
+  end
+end
+
+function ZongShiSkill:GetSkillLevelInfoById(pPlayer, nSkillId)
+  if not pPlayer then
+    return nil, nil
+  end
+  if not self.tbZongShiSkill2SaveId[nSkillId] then
+    return nil, nil
+  end
+  if not self.tbZongShiSkillSetting[nSkillId] then
+    return nil, nil
+  end
+  local nSkillCurLevel = pPlayer.GetUserValue(self.SKILL_DATA_GROUP, self.tbZongShiSkill2SaveId[nSkillId]) or 0
+  local nSkillMaxLevel = self.tbZongShiSkillSetting[nSkillId].nMaxLevel
+  local nZongShiStage = self:GetCurZongShiStage(pPlayer)
+  local nMaxStageLevel = self.tbZongShiSkillSetting[nSkillId].nStagelevel * nZongShiStage
+  return nSkillCurLevel, math.min(nSkillMaxLevel, nMaxStageLevel)
+end
+
+function ZongShiSkill:CheckCanLearnSkill(pPlayer, nSkillId, bActive)
+  if not self.tbZongShiSkill2SaveId[nSkillId] then
+    return false, i18n.EasyGet("\232\175\165\230\138\128\232\131\189\228\184\141\229\173\152\229\156\168")
+  end
+  if not self.tbZongShiSkillSetting[nSkillId] then
+    return false, i18n.EasyGet("\232\175\165\230\138\128\232\131\189\228\184\141\229\173\152\229\156\168")
+  end
+  local nSkillCostPoint = self.tbZongShiSkillSetting[nSkillId].nCostPoint
+  local nTotalSkillPointNum, nUsedSkillPointNum = self:GetZongShiPoint(pPlayer)
+  local nSkillPointLeft = nTotalSkillPointNum - nUsedSkillPointNum
+  if bActive and (nTotalSkillPointNum <= nUsedSkillPointNum or nSkillCostPoint > nSkillPointLeft) then
+    return false, i18n.EasyGet("\230\138\128\232\131\189\231\130\185\228\184\141\232\182\179")
+  end
+  local nZongShiStage = self:GetCurZongShiStage(pPlayer)
+  local nMaxStageLevel = self.tbZongShiSkillSetting[nSkillId].nStagelevel * nZongShiStage
+  local nSkillCurLevel = self:GetSkillLevelInfoById(pPlayer, nSkillId)
+  local nSkillMaxLevel = math.min(self.tbZongShiSkillSetting[nSkillId].nMaxLevel, nMaxStageLevel)
+  if bActive then
+    if nSkillCurLevel >= nSkillMaxLevel then
+      return false, i18n.EasyGet("\229\183\178\232\190\190\230\156\128\229\164\167\231\173\137\231\186\167")
+    end
+  elseif nSkillCurLevel <= 0 then
+    return false, i18n.EasyGet("\232\175\165\230\138\128\232\131\189\229\183\178\231\187\143\230\152\1750\231\186\167\228\186\134")
+  end
+  if bActive then
+    local nXinFaNeed = self:GetSkillLevelupXinFaNeeded(nSkillId, nSkillCurLevel + 1)
+    local nXinFaLevel = self:GetCurXinFaLevel(pPlayer)
+    if nXinFaNeed > nXinFaLevel then
+      return false, i18n.EasyGet("\229\134\141\232\138\177{0}\231\130\185\229\156\168\229\174\151\229\184\136\229\191\131\230\179\149\229\143\175\229\141\135\231\186\167", nXinFaNeed - nXinFaLevel)
+    end
+  end
+  if bActive then
+    local nPointNeed = self:GetSkillLevelupDemandPoint(nSkillId, nSkillCurLevel + 1)
+    local nCurSectPointCost = self:GetCurSectSkillPointCost(pPlayer, self.tbZongShiSkillSetting[nSkillId].nSect)
+    if nPointNeed > 0 and nPointNeed > nCurSectPointCost then
+      return false, i18n.EasyGet("\229\134\141\232\138\177{0}\231\130\185\229\156\168\230\173\164\230\181\129\230\180\190\229\143\175\229\141\135\231\186\167", nPointNeed - nCurSectPointCost)
+    end
+  end
+  if bActive then
+    local bDemandSkillEnable = self:GetDemandSkillState(pPlayer, nSkillId)
+    if not bDemandSkillEnable then
+      return false, i18n.EasyGet("\229\137\141\231\189\174\230\138\128\232\131\189\229\176\154\230\156\170\231\130\185\228\186\174")
+    end
+  end
+  if not bActive and 1 == nSkillCurLevel then
+    local tbAfterSkillList = self.tbZongShiAfterSkill[self.tbZongShiSkill2SaveId[nSkillId]]
+    if tbAfterSkillList then
+      for _, nAfterSkillId in pairs(tbAfterSkillList) do
+        local bIgnore = false
+        local nSkillSect = self.tbZongShiSkillSetting[nSkillId].nSect
+        local nSkillPos = self.tbZongShiSkillSetting[nSkillId].nUIShowPos
+        local nAfterSkillUIShowPos = self.tbZongShiSkillSetting[nAfterSkillId].nUIShowPos
+        if 7 == nAfterSkillUIShowPos and 5 == nSkillPos then
+          local nTempSkillLevel = self:GetSkillLevelInfoById(pPlayer, self.tbZongShiSkillUIShowPos[nSkillSect][6][2])
+          if nTempSkillLevel > 0 then
+            bIgnore = true
+          end
+        elseif 7 == nAfterSkillUIShowPos and 6 == nSkillPos then
+          local nTempSkillLevel = self:GetSkillLevelInfoById(pPlayer, self.tbZongShiSkillUIShowPos[nSkillSect][5][2])
+          if nTempSkillLevel > 0 then
+            bIgnore = true
+          end
+        end
+        local nAfterSkillCurLevel = self:GetSkillLevelInfoById(pPlayer, nAfterSkillId)
+        if not bIgnore and nAfterSkillCurLevel > 0 then
+          return false, i18n.EasyGet("\229\133\179\232\129\148\230\138\128\232\131\189\230\156\170\233\129\151\229\191\152\239\188\154{0}", self.tbZongShiSkillSetting[nAfterSkillId].szName)
+        end
+      end
+    end
+  end
+  if not bActive and 0 == self.tbZongShiSkillSetting[nSkillId].nSect then
+    for nCheckSkillId, _ in pairs(self.tbZongShiSkill2SaveId) do
+      local nCheckSkillLevel = self:GetSkillLevelInfoById(pPlayer, nCheckSkillId)
+      local nXinFaNeedNum = self:GetSkillLevelupXinFaNeeded(nCheckSkillId, nCheckSkillLevel)
+      if nXinFaNeedNum > nSkillCurLevel - 1 then
+        return false, i18n.EasyGet("\229\191\131\230\179\149\231\173\137\231\186\167\228\184\141\232\131\189\228\189\142\228\186\142{0}\239\188\140\232\175\183\229\133\136\233\153\141\228\189\142{1}\231\154\132\230\138\128\232\131\189\231\173\137\231\186\167", nXinFaNeedNum, self.tbZongShiSkillSetting[nCheckSkillId].szName)
+      end
+    end
+    local nCheckSectPointCost = self:GetCurSectSkillPointCost(pPlayer, 0)
+    for nCheckSkillId, _ in pairs(self.tbZongShiSkill2SaveId) do
+      local nCheckSkillPos = self.tbZongShiSkillSetting[nCheckSkillId].nUIShowPos
+      if 1 == nCheckSkillPos then
+        local nCheckSkillLevel = self:GetSkillLevelInfoById(pPlayer, nCheckSkillId)
+        local nCheckPointNeed = self:GetSkillLevelupDemandPoint(nCheckSkillId, nCheckSkillLevel)
+        if nCheckPointNeed > nCheckSectPointCost - 1 then
+          return false, i18n.EasyGet("\230\181\129\230\180\190\230\138\128\232\131\189\231\130\185\230\149\176\228\184\141\232\131\189\228\189\142\228\186\142{0}\239\188\140\232\175\183\229\133\136\233\153\141\228\189\142{1}\231\154\132\230\138\128\232\131\189\231\173\137\231\186\167", nCheckPointNeed, self.tbZongShiSkillSetting[nCheckSkillId].szName)
+        end
+      end
+    end
+  elseif not bActive then
+    local nCheckSkillSect = self.tbZongShiSkillSetting[nSkillId].nSect
+    local nCheckSectPointCost = self:GetCurSectSkillPointCost(pPlayer, nCheckSkillSect)
+    for nCheckSkillId, _ in pairs(self.tbZongShiSkill2SaveId) do
+      if nCheckSkillId ~= nSkillId and self.tbZongShiSkillSetting[nCheckSkillId].nSect == nCheckSkillSect then
+        local nCheckSkillLevel = self:GetSkillLevelInfoById(pPlayer, nCheckSkillId)
+        local nCheckPointNeed = self:GetSkillLevelupDemandPoint(nCheckSkillId, nCheckSkillLevel)
+        if nCheckPointNeed > nCheckSectPointCost - 1 then
+          return false, i18n.EasyGet("\230\181\129\230\180\190\230\138\128\232\131\189\231\130\185\230\149\176\228\184\141\232\131\189\228\189\142\228\186\142{0}\239\188\140\232\175\183\229\133\136\233\153\141\228\189\142{1}\231\154\132\230\138\128\232\131\189\231\173\137\231\186\167", nCheckPointNeed, self.tbZongShiSkillSetting[nCheckSkillId].szName)
+        end
+      end
+    end
+  end
+  if not bActive and pPlayer.GetMoney("YuanBao") < self.Cfg.ZONGSHI_SKILL_LEVEL_DOWN_COST then
+    return false, i18n.EasyGet("\230\130\168\231\154\132\229\133\131\229\174\157\228\184\141\232\182\179")
+  end
+  return true
+end
+
+function ZongShiSkill:GetSkillLevelupDemandPoint(nSkillId, nTargetLevel)
+  if 0 == nTargetLevel then
+    return 0
+  end
+  local szPointNeed = self.tbZongShiSkillSetting[nSkillId].szSkillPointNeeded
+  local tbPointNeed = Lib:SplitStr2Num(szPointNeed, ",")
+  local nValue = 0
+  for nLevel, nPoint in ipairs(tbPointNeed) do
+    nValue = nPoint
+    if nLevel == nTargetLevel then
+      break
+    end
+  end
+  return nValue
+end
+
+function ZongShiSkill:GetDemandSkillState(pPlayer, nSkillId)
+  local tbDemandSkillIdList = Lib:SplitStr2Num(self.tbZongShiSkillSetting[nSkillId].szPreSkillDemand, ",")
+  for _, nSaveId in pairs(tbDemandSkillIdList) do
+    if 0 ~= nSaveId then
+      local nSkillId = self.tbZongShiSaveId2Skill[nSaveId]
+      local nSkillLevel = self:GetSkillLevelInfoById(pPlayer, nSkillId)
+      if nSkillLevel > 0 then
+        return true
+      end
+    else
+      return true
+    end
+  end
+  return false
+end
+
+function ZongShiSkill:GetCurZongShiStage(pPlayer)
+  local nPlayerZongShiLevel = self:GetPlayerZongShiLevel(pPlayer)
+  local nMaxLevel = self:GetServerMaxZongShiLevel()
+  local nStage = math.floor(math.min(nPlayerZongShiLevel, nMaxLevel) / 10) + 1
+  return nStage
+end
+
+function ZongShiSkill:GetSkillLevelupXinFaNeeded(nSkillId, nTargetLevel)
+  if 0 == nTargetLevel then
+    return 0
+  end
+  local szXinFaNeed = self.tbZongShiSkillSetting[nSkillId].szXinFaStageNeeded
+  local tbData = Lib:SplitStr2Num(szXinFaNeed, ",")
+  local nValue = 0
+  for nLevel, nXinFaValue in ipairs(tbData) do
+    nValue = nXinFaValue
+    if nLevel == nTargetLevel then
+      break
+    end
+  end
+  return nValue
+end
+
+function ZongShiSkill:GetCurXinFaLevel(pPlayer)
+  local nXinFa = pPlayer.GetUserValue(self.SKILL_DATA_GROUP, 1)
+  return nXinFa
+end
+
+function ZongShiSkill:GetCurSectSkillPointCost(pPlayer, nSect)
+  local nValue = 0
+  for _, tbList in pairs(self.tbZongShiSkillUIShowPos[nSect]) do
+    local nThisSkillLevel = self:GetSkillLevelInfoById(pPlayer, tbList[2])
+    local nThisSkillLevelUpCost = self.tbZongShiSkillSetting[tbList[2]].nCostPoint
+    nValue = nValue + nThisSkillLevel * nThisSkillLevelUpCost
+  end
+  return nValue
+end
+
+function ZongShiSkill:CalcFightPower(pPlayer, szType)
+  if "ZongShiSkill" == szType then
+    return self:CalcZongShiSkillFightPower(pPlayer)
+  end
+  return 0
+end
+
+function ZongShiSkill:CalcZongShiSkillFightPower(pPlayer)
+  local nFightPower = 0
+  for nSkillId, tbSkillData in pairs(self.tbZongShiSkillSetting) do
+    local nCurLevel = self:GetSkillLevelInfoById(pPlayer, nSkillId)
+    local nCurSkillFightPower = tbSkillData.nExtraFightPower
+    nFightPower = nFightPower + nCurLevel * nCurSkillFightPower
+  end
+  return nFightPower
+end
+
+function ZongShiSkill:UpdateFightPower(tbTypes, dwPlayerId)
+  local pPlayer = KPlayer.GetPlayerObjById(dwPlayerId)
+  if not pPlayer then
+    return
+  end
+  FightPower:ChangePower(tbTypes, pPlayer)
+  local nFightPower = self:CalcZongShiSkillFightPower(pPlayer)
+  Event:OnEvent(Event.emEVENT_ZONGSHISKILL_FIGHTPOWER_CHANGE, dwPlayerId, nFightPower)
+end
+
+function ZongShiSkill:onFightPowerUpdateEvent(tbTypes)
+  Event:RegisterEvent(Event.emEVENT_ZONGSHISKILL_LEVEL_CHANGE, ZongShiSkill, "UpdateFightPower", tbTypes)
+end
+
+function ZongShiSkill:PlayerDataFix(nPlayerId)
+end
+
+function ZongShiSkill:DataFix()
+end
+
+ZongShiSkill:LoadZongShiLevelSetting()
+ZongShiSkill:LoadZongShiSkillSetting()
+ZongShiSkill:LoadUIZongShiSkillLineSetting()
+AttributeModule:Register("ZongShiSkill", ZongShiSkill)
+FightPower:RegisterFPSystemModule({
+  "ZongShiSkill"
+}, ZongShiSkill)

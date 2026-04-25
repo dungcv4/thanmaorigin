@@ -1,0 +1,640 @@
+BattleAlone.nSubTaskSaveKey = 25
+
+function BattleAlone:MoveToSafetyArea()
+  local PosX, PosY = Map:GetDefaultPos(me.nMapTemplateId)
+  
+  local function fnCallBack()
+    RemoteServer.EnterBattleAlone()
+  end
+  
+  AutoPath:GotoAndCallEx(me.nMapTemplateId, PosX, PosY, fnCallBack)
+end
+
+function BattleAlone:BeforeStart()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LOADED, BattleAlone.OnEnter, BattleAlone)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LEAVE, BattleAlone.OnLeave, BattleAlone)
+end
+
+function BattleAlone:OnEnter()
+  if me.nMapTemplateId ~= Battle.nBattleMapTemplateId then
+    return
+  end
+  if 1 ~= IsAlone() then
+    return
+  end
+  me.bInBattleAlone = true
+  self:Init(me.nMapId)
+  BattleAlone:TeamEnter(1)
+  self:Start()
+  me.bForbidChangePk = 1
+  me.bCloseComboKill = true
+  local nTeamIndex = self.tbPlayerInfoList[me.dwID].nTeamIndex
+  local nCamp = Battle.tbTeamIndex2Camp[nTeamIndex]
+  self.tbRevivePos = self:GetRevivePos(nTeamIndex)
+  me.GetNpc().SetPkMode(Npc.PK_MODE.emPK_MODE_CUSTOM, nTeamIndex)
+  me.GetNpc().SetCamp(nCamp)
+  self:RegPlayerEvent()
+  Battle:EnterFightMap(math.floor(Timer:GetRestTime(self.nMainTimer) / Env.GAME_FPS), nTeamIndex, self.nMapId)
+  me.SetPosition(self.tbRevivePos[1], self.tbRevivePos[2])
+  me.GetNpc().AddSkillState(Battle.nBattleAloneBuffId, Battle.nBattleAloneBuffLevel, FightSkill.STATE_TIME_TYPE.state_time_normal, Battle.nBattleAloneLastTime * Env.GAME_FPS, 1)
+  if self.nAutoAFKTimer then
+    Timer:Close(self.nAutoAFKTimer)
+  end
+  self.nAutoAFKTimer = Timer:Register(Env.GAME_FPS * 2, self.AutoGoToMapCenter, self)
+end
+
+function BattleAlone:OnLeave()
+  if me.nMapTemplateId ~= Battle.nBattleMapTemplateId then
+    return
+  end
+  if 1 ~= IsAlone() then
+    return
+  end
+  me.bForbidChangePk = 0
+  me.bCloseComboKill = false
+  me.GetNpc().SetPkMode(Npc.PK_MODE.emPK_MODE_PEACE)
+  me.RestoreCamp()
+  me.Revive(0)
+  if self.nAutoAFKTimer then
+    Timer:Close(self.nAutoAFKTimer)
+    self.nAutoAFKTimer = nil
+  end
+  self:UnregPlayerEvent()
+  self:ClearUp()
+  me.bInBattleAlone = false
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_LOADED, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_LEAVE, self)
+end
+
+function BattleAlone:Init(nMapId)
+  self.nMapId = nMapId
+  self.tbPlayerInfoList = {}
+  self.tbWildNpc = {}
+  self.tbFakePlayerSetting = {}
+  self.nMainTimer = nil
+  self.tbTeamScore = {0, 0}
+  self:LoadNpcSetting()
+  self.tbBattleRank = {}
+  self.tbSyncRankInfo = {}
+  self.bScoreChange = true
+  self.nNpcLevel = 1
+  self.nFakePlayerLevel = me.nLevel
+end
+
+function BattleAlone:Start()
+  self.nFightTimer = Timer:Register(Env.GAME_FPS * Battle.nBattleAloneStartTime, self.StartFight, self)
+  self.nMainTimer = Timer:Register(Env.GAME_FPS * Battle.nBattleAloneLastTime, self.EndUp, self)
+  self.nSyncTimer = Timer:Register(Env.GAME_FPS, self.SyncAllSelfInfo, self)
+end
+
+function BattleAlone:LoadNpcSetting()
+  self.tbFakePlayerSetting.tbRevivePos = {}
+  local tbRevivePos = self.tbFakePlayerSetting.tbRevivePos
+  local szRevivePosFile = Map:GetMapPosFile(Battle.nBattleMapTemplateId, "fake_player_revive_pos.txt")
+  local tbRevivePosFile = Lib:LoadTabFileEx(szRevivePosFile, "dddd", nil, {
+    "Camp",
+    "Index",
+    "PosX",
+    "PosY"
+  })
+  for _, v in ipairs(tbRevivePosFile) do
+    tbRevivePos[v.Camp] = tbRevivePos[v.Camp] or {}
+    tbRevivePos[v.Camp][v.Index] = {
+      v.PosX,
+      v.PosY
+    }
+  end
+  self.tbFakePlayerSetting.tbMovePath = {}
+  local tbMovePath = self.tbFakePlayerSetting.tbMovePath
+  local szMovePathFile = Map:GetMapPosFile(Battle.nBattleMapTemplateId, "fake_player_move_path.txt")
+  local tbMovePathFile = Lib:LoadTabFileEx(szMovePathFile, "dddd", nil, {
+    "Camp",
+    "Index",
+    "PosX",
+    "PosY"
+  })
+  for _, v in ipairs(tbMovePathFile) do
+    tbMovePath[v.Camp] = tbMovePath[v.Camp] or {}
+    tbMovePath[v.Camp][v.Index] = tbMovePath[v.Camp][v.Index] or {}
+    table.insert(tbMovePath[v.Camp][v.Index], {
+      v.PosX,
+      v.PosY
+    })
+  end
+end
+
+function BattleAlone:StopTimer()
+  if self.nSyncTimer then
+    Timer:Close(self.nSyncTimer)
+    self.nSyncTimer = nil
+  end
+  if self.nDelayTimer then
+    Timer:Close(self.nDelayTimer)
+    self.nDelayTimer = nil
+  end
+  if self.nTimerReviveId then
+    Timer:Close(self.nTimerReviveId)
+    self.nTimerReviveId = nil
+  end
+  if self.nMainTimer then
+    Timer:Close(self.nMainTimer)
+    self.nMainTimer = nil
+  end
+  if self.nFightTimer then
+    Timer:Close(self.nFightTimer)
+    self.nFightTimer = nil
+  end
+end
+
+function BattleAlone:EndUp()
+  self:StopTimer()
+  self:EndFight()
+  self:SyncAllSelfInfo()
+  self:DeleteAllFakePlayer()
+  FirstRecharge:OnBattleAloneEndUp()
+  Timer:Register(Env.GAME_FPS * 5, RemoteServer.LeaveBattleAlone)
+end
+
+function BattleAlone:ClearUp()
+  self:StopTimer()
+  self.tbPlayerInfoList = {}
+  self.tbWildNpc = {}
+end
+
+function BattleAlone:StartFight()
+  self:BattleFieldTips(i18n.Get(Battle.Cfg.tbText.szBattleStartTips))
+  self:AllFakePlayerStart()
+  self:AddCampNpc()
+end
+
+function BattleAlone:EndFight()
+  self:BattleFieldTips(i18n.Get(Battle.Cfg.tbText.szBattleEnd))
+  local tbCampScore = {0, 0}
+  for dwID, v in pairs(self.tbPlayerInfoList) do
+    tbCampScore[v.nTeamIndex] = tbCampScore[v.nTeamIndex] + v.tbScoreInfo.nScore
+  end
+  local nWinTeamIndex = 0
+  if tbCampScore[1] > tbCampScore[2] then
+    nWinTeamIndex = 1
+  elseif tbCampScore[1] < tbCampScore[2] then
+    nWinTeamIndex = 2
+  end
+  if nWinTeamIndex > 0 then
+    local szWinMsg = i18n.Get(Battle.Cfg.tbText.szWinTips, i18n.Get(Battle.Cfg.tbTeamIndex2CampName[nWinTeamIndex]))
+    local szLoseMsg = i18n.Get(Battle.Cfg.tbText.szLossTips, i18n.Get(Battle.Cfg.tbTeamIndex2CampName[3 - nWinTeamIndex]))
+    me.CenterMsg(1 == nWinTeamIndex and szWinMsg or szLoseMsg)
+  else
+    self:BattleFieldTips(i18n.Get(Battle.Cfg.tbText.szDrawTips))
+  end
+  self:SyncAllRankInfo()
+  Battle:OnSynWinTeam(nWinTeamIndex)
+end
+
+function BattleAlone:GetRevivePos(nTeamIndex)
+  local nRand = MathRandom(#Battle.tbRevivePos[Battle.nBattleMapTemplateId][nTeamIndex])
+  return Battle.tbRevivePos[Battle.nBattleMapTemplateId][nTeamIndex][nRand]
+end
+
+function BattleAlone:RegPlayerEvent()
+  local nDeathEventId = PlayerEvent:Register(me, "OnDeath", self.OnPlayerDeath, self)
+  local nKillEventId = PlayerEvent:Register(me, "OnKillNpc", self.OnKillNpc, self)
+  self.tbPlayerInfoList[me.dwID].tbEventId = {nOnDeathRegID = nDeathEventId, nOnKillNpcRegID = nKillEventId}
+end
+
+function BattleAlone:UnregPlayerEvent()
+  local tbEventId = self.tbPlayerInfoList[me.dwID].tbEventId
+  if tbEventId then
+    PlayerEvent:UnRegister(me, "OnDeath", tbEventId.nOnDeathRegID)
+    PlayerEvent:UnRegister(me, "OnKillNpc", tbEventId.nOnKillNpcRegID)
+    self.tbPlayerInfoList[me.dwID].tbEventId = nil
+  end
+end
+
+function BattleAlone:RegistPlayerInfo(pPlayer, nTeamIndex)
+  local dwPlayerID = pPlayer.dwID
+  self.tbPlayerInfoList[dwPlayerID] = {}
+  local tbPlayerInfo = self.tbPlayerInfoList[dwPlayerID]
+  tbPlayerInfo.bPlayer = true
+  tbPlayerInfo.nTeamIndex = nTeamIndex
+  tbPlayerInfo.nFaction = pPlayer.nFaction
+  tbPlayerInfo.tbScoreInfo = {
+    nScore = 0,
+    nKillCount = 0,
+    nComboCount = 0,
+    nDeathCount = 0,
+    nMaxComboCount = 0,
+    nNpcScore = 0
+  }
+  table.insert(self.tbBattleRank, {
+    dwID = dwPlayerID,
+    szName = pPlayer.szName,
+    nFaction = pPlayer.nFaction,
+    nTeamIndex = nTeamIndex,
+    nScore = 0,
+    nKillCount = 0,
+    nMaxComboCount = 0
+  })
+end
+
+function BattleAlone:ClearPlayerInfo(dwPlayerID)
+  if not self.tbPlayerInfoList[dwPlayerID] then
+    return
+  end
+  self.tbPlayerInfoList[dwPlayerID] = nil
+end
+
+function BattleAlone:TeamEnter(nTeamIndex)
+  self:RegistPlayerInfo(me, nTeamIndex)
+  me.CenterMsg(i18n.Get(Battle.Cfg.tbText.szJoinACamp, i18n.Get(Battle.Cfg.tbTeamIndex2CampName[nTeamIndex])))
+  self:AddFakePlayer(Battle.Cfg.nBattleAloneCampPlayerNum - 1, nTeamIndex)
+  self:AddFakePlayer(Battle.Cfg.nBattleAloneCampPlayerNum, 3 - nTeamIndex)
+end
+
+function BattleAlone:AddPlayerScore(pKillerLuna, nScore, bScoreNeedLimit)
+  if not pKillerLuna then
+    return
+  end
+  local dwID = pKillerLuna.dwID
+  local pPlayer = pKillerLuna.GetPlayer()
+  if pPlayer then
+    dwID = pPlayer.dwID
+  end
+  if not dwID then
+    return
+  end
+  local nTeamIndex = self.tbPlayerInfoList[dwID].nTeamIndex
+  local tbScoreInfo = self.tbPlayerInfoList[dwID].tbScoreInfo
+  if bScoreNeedLimit then
+    if tbScoreInfo.nNpcScore >= Battle.Cfg.nMaxNpcScore then
+      if not self.tbPlayerInfoList[dwID].bNpcScoreNotify and pPlayer then
+        pPlayer.Msg(i18n.Get(Battle.Cfg.tbText.szBeatNonPlayerReachUpperLimit))
+        self.tbPlayerInfoList[dwID].bNpcScoreNotify = true
+      end
+      return
+    else
+      nScore = tbScoreInfo.nNpcScore + nScore <= Battle.Cfg.nMaxNpcScore and nScore or Battle.Cfg.nMaxNpcScore - tbScoreInfo.nNpcScore
+    end
+    tbScoreInfo.nNpcScore = tbScoreInfo.nNpcScore + nScore
+  end
+  tbScoreInfo.nScore = tbScoreInfo.nScore + nScore
+  self.tbTeamScore[nTeamIndex] = self.tbTeamScore[nTeamIndex] + nScore
+  self.bScoreChange = true
+  if pPlayer then
+    pPlayer.CenterMsg(i18n.Get(Battle.Cfg.tbText.szGetScoreTips, nScore))
+  end
+end
+
+function BattleAlone:ComboKill(pKillerLuna)
+  local pPlayer = pKillerLuna.GetPlayer()
+  local dwID = pKillerLuna.dwID
+  if pPlayer then
+    dwID = pPlayer.dwID
+  end
+  local tbScoreInfo = self.tbPlayerInfoList[dwID].tbScoreInfo
+  tbScoreInfo.nComboCount = tbScoreInfo.nComboCount + 1
+  if tbScoreInfo.nComboCount > tbScoreInfo.nMaxComboCount then
+    tbScoreInfo.nMaxComboCount = tbScoreInfo.nComboCount
+  end
+  if pPlayer then
+    Ui:ShowComboKillCount(tbScoreInfo.nComboCount)
+  end
+  if 5 == tbScoreInfo.nComboCount or 0 == tbScoreInfo.nComboCount % 10 then
+    self:BattleFieldTips(i18n.Get(Battle.Cfg.tbText.szComboKillShow, pKillerLuna.szName, tbScoreInfo.nComboCount))
+  end
+end
+
+function BattleAlone:BattleFieldTips(szMsg)
+  me.CenterMsg(szMsg)
+end
+
+function BattleAlone:OnKillPlayer(pKillerLuna)
+  local pPlayer = pKillerLuna.GetPlayer()
+  local dwID = pKillerLuna.dwID
+  if pPlayer then
+    dwID = pPlayer.dwID
+  end
+  if not dwID then
+    return
+  end
+  local tbScoreInfo = self.tbPlayerInfoList[dwID].tbScoreInfo
+  tbScoreInfo.nKillCount = tbScoreInfo.nKillCount + 1
+  self:AddPlayerScore(pKillerLuna, 50)
+  self:ComboKill(pKillerLuna)
+end
+
+function BattleAlone:OnKillNpc()
+end
+
+function BattleAlone:AddFakePlayer(nNum, nTeamIndex)
+  local tbInfo = Battle.tbFakePlayer[nTeamIndex]
+  local nInfoSize = #tbInfo
+  for j = 1, nNum do
+    self:InitFakePlayer(nTeamIndex, tbInfo[j % nInfoSize + 1], nil)
+  end
+end
+
+function BattleAlone:InitFakePlayer(nTeamIndex, tbFackNpcInfo, dwOldId)
+  local tbInfo, nFaction, nFactionSect, nSex, nTitleID, nBodyRes, nHeadRes, nWeaponRes, nMantleRes, szAiFile
+  if dwOldId then
+    tbInfo = self.tbPlayerInfoList[dwOldId]
+    nFaction = tbInfo.nFaction
+    nFactionSect = tbInfo.nFactionSect
+    nTeamIndex = tbInfo.nTeamIndex
+    nTitleID = tbInfo.nTitleID
+    nSex = tbInfo.nSex
+    nBodyRes = tbInfo.nBodyRes or 0
+    nHeadRes = tbInfo.nHeadRes or 0
+    nWeaponRes = tbInfo.nWeaponRes or 0
+    nMantleRes = tbInfo.nMantleRes or 0
+    szAiFile = tbInfo.szAiFile
+  elseif tbFackNpcInfo then
+    nFaction, nFactionSect, nSex, nTitleID, nWeaponRes, nMantleRes, szAiFile = table.unpack(tbFackNpcInfo)
+  end
+  local nPathIndex = MathRandom(#self.tbFakePlayerSetting.tbRevivePos[nTeamIndex])
+  local nX, nY = table.unpack(self.tbFakePlayerSetting.tbRevivePos[nTeamIndex][nPathIndex])
+  nX = nX + math.random(-500, 500)
+  nY = nY + math.random(-500, 500)
+  local nActionMode = 0
+  nSex = nSex or 0
+  local tbRes = Battle:GetFakePlayerShowId(nFaction, nFactionSect, nSex)
+  local nHonorStarLevel = me.nHonorStarLevel
+  local pNpc = KPlayer.AddFakePlayer(nFaction, self.nFakePlayerLevel, self.nMapId, nActionMode, nX, nY, 0, 0, nSex, tbRes, nHonorStarLevel)
+  if 1 == nTeamIndex then
+    pNpc.SetCamp(Npc.CampTypeDef.camp_type_justice)
+  else
+    pNpc.SetCamp(Npc.CampTypeDef.camp_type_evil)
+  end
+  pNpc.SetBaseRunSpeed(10000)
+  pNpc.SetActiveForever(1)
+  Npc:RegNpcOnDeath(pNpc, self.OnFakePlayerDeath, self)
+  local tbSkillList = FightSkill:GetFakePlayerSkillList(nFaction, nFactionSect, self.nFakePlayerLevel)
+  for _, v in ipairs(tbSkillList) do
+    local nSkillId, nLevel = table.unpack(v)
+    pNpc.AddSkill(nSkillId, nLevel)
+  end
+  pNpc.SetCurLife(pNpc.i64MaxLife)
+  pNpc.SetPkMode(Npc.PK_MODE.emPK_MODE_CUSTOM, nTeamIndex)
+  pNpc.nFightMode = 1
+  szAiFile = szAiFile or "Setting/Npc/Ai/BattleFakePlayer.ini"
+  pNpc.SetAi(szAiFile)
+  pNpc.SetAiActive(1)
+  pNpc.SetName(tbInfo and tbInfo.szName or Battle:GetRandomName(nSex, self.nFaction))
+  pNpc.nMovePath = nPathIndex
+  me.GetNpc().AddSkillState(Battle.nBattleAloneBuffId, 1, FightSkill.STATE_TIME_TYPE.state_time_normal, Battle.nBattleAloneLastTime * Env.GAME_FPS, 1)
+  dwOldId = dwOldId or self:GenRoleId()
+  pNpc.dwID = dwOldId
+  if not tbInfo then
+    self.tbPlayerInfoList[dwOldId] = {
+      nTeamIndex = nTeamIndex,
+      szName = pNpc.szName,
+      nFaction = nFaction,
+      nFactionSect = nFactionSect,
+      nNpcId = pNpc.nId,
+      dwID = dwOldId,
+      nTitleID = nTitleID,
+      nSex = nSex,
+      nBodyRes = nBodyRes,
+      nHeadRes = nHeadRes,
+      nWeaponRes = nWeaponRes,
+      nMantleRes = nMantleRes,
+      szAiFile = szAiFile,
+      tbScoreInfo = {
+        nScore = 0,
+        nKillCount = 0,
+        nComboCount = 0,
+        nDeathCount = 0,
+        nMaxComboCount = 0,
+        nNpcScore = 0
+      }
+    }
+    table.insert(self.tbBattleRank, {
+      dwID = dwOldId,
+      szName = pNpc.szName,
+      nFaction = nFaction,
+      nTeamIndex = nTeamIndex,
+      nScore = 0,
+      nKillCount = 0,
+      nMaxComboCount = 0
+    })
+  else
+    tbInfo.nNpcId = pNpc.nId
+  end
+  return pNpc
+end
+
+function BattleAlone:AddCampNpc()
+  local szNpcSettingFile = Map:GetMapPosFile(Battle.nBattleMapTemplateId, "battle_npc_alone.txt")
+  self.tbNpcSetting = Lib:LoadTabFileEx(szNpcSettingFile, "sdd", nil, {
+    "VarName",
+    "PosX",
+    "PosY"
+  }, nil, nil, true)
+  for _, tbNpcInfo in ipairs(self.tbNpcSetting) do
+    local tbEachNpcConfig = Battle.Cfg.tbNpcConfig[tbNpcInfo.VarName]
+    local pNpc = KNpc.Add(tbEachNpcConfig.nTemplateId, self.nNpcLevel, -1, self.nMapId or 0, tbNpcInfo.PosX, tbNpcInfo.PosY, 0, 0, 0)
+    if pNpc then
+      pNpc.SetPkMode(Npc.PK_MODE.emPK_MODE_CUSTOM, tbEachNpcConfig.nCamp)
+      pNpc.SetCamp(Battle.tbTeamIndex2Camp[tbEachNpcConfig.nCamp])
+      self.tbWildNpc[pNpc.nId] = tbNpcInfo
+      Npc:RegNpcOnDeath(pNpc, self.OnNpcDeath, self)
+    end
+  end
+end
+
+function BattleAlone:GenRoleId()
+  if not self.nGenId then
+    self.nGenId = me.dwID
+  end
+  self.nGenId = self.nGenId + 1
+  return self.nGenId
+end
+
+function BattleAlone:AllFakePlayerStart()
+  self.tbFakePlayerDelay = {}
+  self.nDelayCounter = 0
+  self.nDelayTotal = Env.GAME_FPS * 10
+  for dwID, v in pairs(self.tbPlayerInfoList) do
+    if not v.bPlayer then
+      local pNpc = KNpc.GetById(v.nNpcId)
+      if pNpc then
+        local nRand = math.random(1, self.nDelayTotal)
+        self.tbFakePlayerDelay[nRand] = self.tbFakePlayerDelay[nRand] or {}
+        table.insert(self.tbFakePlayerDelay[nRand], {pNpc = pNpc, tbInfo = v})
+      end
+    end
+  end
+  self.nDelayTimer = Timer:Register(1, self.FakePlayerDelayAttack, self)
+end
+
+function BattleAlone:FakePlayerDelayAttack()
+  self.nDelayCounter = self.nDelayCounter + 1
+  if self.nDelayCounter > self.nDelayTotal then
+    self.nDelayCounter = nil
+    self.nDelayTotal = nil
+    self.tbFakePlayerDelay = nil
+    self.nDelayTimer = nil
+    return false
+  end
+  if self.tbFakePlayerDelay[self.nDelayCounter] then
+    for key, value in pairs(self.tbFakePlayerDelay[self.nDelayCounter]) do
+      self:FakePlayerStartAttack(value.pNpc, value.tbInfo)
+    end
+    self.tbFakePlayerDelay[self.nDelayCounter] = nil
+  end
+  return true
+end
+
+function BattleAlone:DeleteAllFakePlayer()
+  local tbFakePlayerID = {}
+  for dwID, v in pairs(self.tbPlayerInfoList) do
+    if not v.bPlayer then
+      table.insert(tbFakePlayerID, dwID)
+      local pNpc = KNpc.GetById(v.nNpcId)
+      if pNpc then
+        Npc:UnRegNpcOnDeath(pNpc)
+        pNpc.Delete()
+      end
+    end
+  end
+  for i = 1, #tbFakePlayerID do
+    self.tbPlayerInfoList[tbFakePlayerID[i]] = nil
+  end
+end
+
+function BattleAlone:FakePlayerStartAttack(pNpc, tbInfo)
+  pNpc.SetPkMode(Npc.PK_MODE.emPK_MODE_CUSTOM, tbInfo.nTeamIndex)
+  pNpc.AI_ClearMovePathPoint()
+  for _, Pos in ipairs(self.tbFakePlayerSetting.tbMovePath[tbInfo.nTeamIndex][pNpc.nMovePath]) do
+    pNpc.AI_AddMovePos(table.unpack(Pos))
+  end
+  pNpc.AI_AddMovePos(55884 + math.random(-1000, 1000), 62317 + math.random(-1000, 1000))
+  pNpc.AI_StartPath()
+end
+
+function BattleAlone:OnPlayerDeath(pKillerLuna)
+  self.nTimerReviveId = Timer:Register(Env.GAME_FPS * 3, self.PlayerRevive, self)
+  if not pKillerLuna then
+    return
+  end
+  me.GetNpc().ClearAllSkillCD()
+  me.CenterMsg(i18n.Get(Battle.Cfg.tbText.szBeatByOther, pKillerLuna.szName))
+  local tbScoreInfo = self.tbPlayerInfoList[me.dwID].tbScoreInfo
+  if tbScoreInfo.nComboCount >= 5 then
+    self:BattleFieldTips(i18n.Get(Battle.Cfg.tbText.szShutDownComboKill, pKillerLuna.szName, me.szName, tbScoreInfo.nComboCount))
+  end
+  local tbScoreInfo = self.tbPlayerInfoList[me.dwID].tbScoreInfo
+  tbScoreInfo.nDeathCount = tbScoreInfo.nDeathCount + 1
+  tbScoreInfo.nComboCount = 0
+  if pKillerLuna.dwID or pKillerLuna.GetPlayer() then
+    self:OnKillPlayer(pKillerLuna)
+  end
+end
+
+function BattleAlone:PlayerRevive()
+  if not me then
+    return
+  end
+  me.Revive(0)
+  local pMeNpc = me.GetNpc()
+  if pMeNpc then
+    pMeNpc.RestoreHP()
+    pMeNpc.AddSkillState(Battle.nBattleAloneBuffId, Battle.nBattleAloneBuffLevel, FightSkill.STATE_TIME_TYPE.state_time_normal, Battle.nBattleAloneLastTime * Env.GAME_FPS, 1)
+  end
+  me.SetPosition(self.tbRevivePos[1], self.tbRevivePos[2])
+  self.nTimerReviveId = nil
+end
+
+function BattleAlone:OnNpcDeath(pKillerLuna)
+  local nNpcId = him.nId
+  local tbNpcInfo = self.tbWildNpc[nNpcId]
+  local tbNpcConfig = Battle.Cfg.tbNpcConfig[tbNpcInfo.VarName]
+  local nTitle = tbNpcConfig.nTitle
+  self:AddPlayerScore(pKillerLuna, Battle.Cfg.tbNpcTitleData[nTitle].nKillScore, nTitle < Battle.nScoreNoLimitMinTitle)
+  self.tbWildNpc[nNpcId] = nil
+  local pNpc = KNpc.Add(tbNpcConfig.nTemplateId, self.nNpcLevel, -1, self.nMapId or 0, tbNpcInfo.PosX, tbNpcInfo.PosY, 0, 0, 0)
+  if pNpc then
+    pNpc.SetPkMode(Npc.PK_MODE.emPK_MODE_CUSTOM, tbNpcConfig.nCamp)
+    pNpc.SetCamp(Battle.tbTeamIndex2Camp[tbNpcConfig.nCamp])
+    self.tbWildNpc[pNpc.nId] = tbNpcInfo
+    Npc:RegNpcOnDeath(pNpc, self.OnNpcDeath, self)
+  end
+end
+
+function BattleAlone:OnFakePlayerDeath(pKillerLuna)
+  local dwID = him.dwID
+  if not dwID then
+    return
+  end
+  if not pKillerLuna then
+    return
+  end
+  local pNpc = self:InitFakePlayer(nil, nil, dwID)
+  local tbNpcInfo = self.tbPlayerInfoList[dwID]
+  local tbScoreInfo = tbNpcInfo.tbScoreInfo
+  if tbScoreInfo.nComboCount >= 5 then
+    self:BattleFieldTips(i18n.EasyGet("{0}\231\187\136\230\173\162\228\186\134{1}\231\154\132{2}\232\191\158\232\131\156", pKillerLuna.szName, him.szName, tbScoreInfo.nComboCount))
+  end
+  self:FakePlayerStartAttack(pNpc, tbNpcInfo)
+  tbScoreInfo.nDeathCount = tbScoreInfo.nDeathCount + 1
+  tbScoreInfo.nComboCount = 0
+  if pKillerLuna.dwID or pKillerLuna.GetPlayer() then
+    self:OnKillPlayer(pKillerLuna)
+  end
+  local pKiller = pKillerLuna.GetPlayer()
+  if pKiller then
+    pKiller.CenterMsg(i18n.EasyGet("\228\189\160\229\135\187\228\188\164\228\186\134\227\128\140{0}\227\128\141\239\188\129", him.szName))
+  end
+end
+
+function BattleAlone:UpdatePlayerRank()
+  for _, tbRankInfo in ipairs(self.tbBattleRank) do
+    local tbInfo = self.tbPlayerInfoList[tbRankInfo.dwID]
+    tbRankInfo.nFaction = tbInfo.nFaction
+    tbRankInfo.nScore = tbInfo.tbScoreInfo.nScore
+    tbRankInfo.nKillCount = tbInfo.tbScoreInfo.nKillCount
+    tbRankInfo.nMaxCombo = tbInfo.tbScoreInfo.nMaxComboCount
+  end
+  
+  local function fnSort(tbRankA, tbRankB)
+    return tbRankA.nScore > tbRankB.nScore
+  end
+  
+  table.sort(self.tbBattleRank, fnSort)
+  for i, tbRankInfo in ipairs(self.tbBattleRank) do
+    self.tbPlayerInfoList[tbRankInfo.dwID].nRank = i
+    if i <= Battle.nSyncRankNum then
+      self.tbSyncRankInfo[i] = self.tbBattleRank[i]
+    end
+  end
+  self.bScoreChange = false
+end
+
+function BattleAlone:SyncAllSelfInfo()
+  if self.bScoreChange then
+    self:UpdatePlayerRank()
+    local nLeftTime = math.floor(Timer:GetRestTime(self.nMainTimer) / Env.GAME_FPS)
+    local nRank = self.tbPlayerInfoList[me.dwID].nRank
+    local nTeamIndex = self.tbPlayerInfoList[me.dwID].nTeamIndex
+    Battle:UpdateSelfData(nRank, self.tbBattleRank[nRank], self.tbTeamScore, nLeftTime, nTeamIndex)
+  end
+  return true
+end
+
+function BattleAlone:SyncAllRankInfo()
+  Battle:UpdateRankData(self.tbSyncRankInfo)
+end
+
+function BattleAlone:GetRandomFeature()
+  if Battle.FixFeature then
+    return Battle.FixFeature, Battle.FixFeature
+  else
+    local nSuitId = MathRandom(1, 8)
+    return nSuitId, nSuitId
+  end
+end
+
+function BattleAlone:AutoGoToMapCenter()
+  AutoPath:GotoAndCallEx(me.nMapTemplateId, 56064, 62614, function()
+    AFK:Start()
+  end)
+end

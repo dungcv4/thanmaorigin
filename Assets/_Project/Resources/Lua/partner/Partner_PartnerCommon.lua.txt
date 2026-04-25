@@ -1,0 +1,799 @@
+Require("CommonScript/Partner/PartnerDef.lua")
+
+function Partner:CheckCanPartnerJueXingSkillLevelUp(pPlayer, nPartnerId)
+  local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+  local nNowLevel = self:GetPartnerJueXingLevel(pPlayer, nPartnerId)
+  if not pPartner then
+    return false, i18n.EasyGet("\230\151\160\230\149\136\229\144\140\228\188\180")
+  end
+  if 1 ~= pPartner.GetMainDevFlag() then
+    return false, i18n.EasyGet("\232\175\165\229\144\140\228\188\180\228\184\141\229\143\175\229\159\185\229\133\187")
+  end
+  if pPartner.GetStar() < self.nPartnerAwakeningStarLimit then
+    return false, i18n.EasyGet("\229\144\140\228\188\180\230\152\159\231\186\167\228\184\141\232\182\179")
+  end
+  if pPartner.GetStar() < nNowLevel + 1 then
+    return false, i18n.EasyGet("\229\144\140\228\188\180\232\167\137\233\134\146\231\173\137\231\186\167\228\184\141\232\131\189\232\182\133\232\191\135\229\144\140\228\188\180\230\152\159\231\186\167")
+  end
+  if pPartner.nLevel < self.nPartnerAwakeningLevelLimit then
+    return false, i18n.EasyGet("\229\144\140\228\188\180\231\173\137\231\186\167\228\184\141\232\182\179")
+  end
+  local nNowLevel = self:GetPartnerJueXingLevel(pPlayer, nPartnerId)
+  local nQualityLevel = Partner.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+  local nMaxLevel = self.JueXingSkillLevelLimit[nQualityLevel]
+  if nNowLevel >= nMaxLevel then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\229\136\176\230\156\128\229\164\167\231\173\137\231\186\167")
+  end
+  local nJueXingExp = self:GetPartnerJueXingExp(pPlayer, nPartnerId)
+  local nQualityLevel = self.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+  local nJueXingExpNeeded = self.JueXingSkillDunWuNeeded[nQualityLevel][nNowLevel + 1]
+  if nJueXingExp < nJueXingExpNeeded then
+    return false, i18n.EasyGet("\229\144\140\228\188\180\233\161\191\230\130\159\229\128\188\228\184\141\232\182\179")
+  end
+  local nJueXingItemCount = pPlayer.GetItemCountInBags(self.nPartnerAwakeningItemId)
+  local nJueXingItemCountNeeded = self.JueXingSkillJueXingItemNeeded[nQualityLevel][nNowLevel + 1]
+  if nJueXingItemCount < nJueXingItemCountNeeded then
+    return false, i18n.EasyGet("\229\144\140\228\188\180\232\167\137\233\134\146\228\184\185\228\184\141\232\182\179")
+  end
+  local nTargetLevelTimeFrame = self:GetPartnerJueXingSkillNextTimeFrame(nQualityLevel, nNowLevel + 1)
+  if -999 == nTargetLevelTimeFrame or 1 ~= GetTimeFrameState(nTargetLevelTimeFrame) then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\229\189\147\229\137\141\230\151\182\233\151\180\230\156\128\229\164\167\231\173\137\231\186\167")
+  end
+  return true, "", nJueXingExpNeeded, nJueXingItemCountNeeded
+end
+
+function Partner:GetPartnerJueXingSkillNextTimeFrame(nQualityLevel, nSkillLevel)
+  if 1 == nQualityLevel then
+    return self.SSSPartnerJueXingLevelLimit[nSkillLevel] or -999
+  elseif 2 == nQualityLevel then
+    return self.SSPartnerJueXingLevelLimit[nSkillLevel] or -999
+  elseif 3 == nQualityLevel then
+    return self.SPartnerJueXingLevelLimit[nSkillLevel] or -999
+  else
+    return -999
+  end
+end
+
+function Partner:GetPartnerMaxAwakeningLevelByQuality(nQualityLevel)
+  local nMaxLevel = Partner.JueXingSkillLevelLimit[nQualityLevel]
+  if nMaxLevel <= 0 then
+    return 0
+  end
+  for i = 1, nMaxLevel do
+    local nTargetLevelTimeFrame = Partner:GetPartnerJueXingSkillNextTimeFrame(nQualityLevel, i)
+    if -999 == nTargetLevelTimeFrame or 1 ~= GetTimeFrameState(nTargetLevelTimeFrame) then
+      return i - 1
+    end
+  end
+  return nMaxLevel
+end
+
+function Partner:CheckCanDecomposePartner(pPlayer, tbPartnerList)
+  local nItemXiSuiCount = 0
+  local nItemJingHuaCount = 0
+  local nWuYinShuiCount = 0
+  local tbPartnerCounts = {}
+  local nWuYinShuiWeekDegree = DegreeCtrl:GetDegree(pPlayer, "WuYinShuiWeekDecompose")
+  for nPartnerTemplateId, nCount in pairs(tbPartnerList) do
+    local bHave, dwId = self:GetMainPartnerId(pPlayer, nPartnerTemplateId)
+    if not bHave then
+      return false, i18n.EasyGet("\230\156\170\229\143\145\231\142\176\232\166\129\233\129\163\230\149\163\231\154\132\229\144\140\228\188\180")
+    end
+    local pPartner = pPlayer.GetPartnerObj(dwId)
+    local nRedundanceNum = self:GetMainPartnerRedundanceNumById(pPlayer, dwId)
+    if nRedundanceNum <= 0 then
+      return false, i18n.EasyGet("\230\156\170\229\143\145\231\142\176\232\166\129\233\129\163\230\149\163\231\154\132\229\144\140\228\188\180")
+    end
+    if nCount > nRedundanceNum then
+      return false, i18n.EasyGet("\232\166\129\233\129\163\230\149\163\231\154\132\229\144\140\228\188\180\230\149\176\233\135\143\228\184\141\232\182\179")
+    end
+    local nTempWuYinShuiCount = self:GetDecomposeWuYinShui(pPartner)
+    local nTempItemXiSuiCount, nTempItemJingHuaCount = self:GetDecomposeItem(pPlayer, pPartner)
+    if not (nTempItemXiSuiCount and nTempItemJingHuaCount) or not nTempWuYinShuiCount then
+      return false, i18n.EasyGet("{0}\228\184\141\232\131\189\233\129\163\230\149\163", pPartner.szName)
+    end
+    if nCount > 0 then
+      tbPartnerCounts[nPartnerTemplateId] = nCount
+    end
+    nItemXiSuiCount = nItemXiSuiCount + nTempItemXiSuiCount * nCount
+    nItemJingHuaCount = nItemJingHuaCount + nTempItemJingHuaCount * nCount
+    local nBatch = math.min(nTempWuYinShuiCount * nCount, nWuYinShuiWeekDegree)
+    if nBatch > 0 then
+      nWuYinShuiCount = nWuYinShuiCount + nBatch
+      nWuYinShuiWeekDegree = math.max(0, nWuYinShuiWeekDegree - nBatch)
+    end
+  end
+  local tbAward = {}
+  if nItemXiSuiCount > 0 then
+    table.insert(tbAward, {
+      "Item",
+      self.nXiSuiItemId,
+      nItemXiSuiCount
+    })
+  end
+  if nItemJingHuaCount > 0 then
+    table.insert(tbAward, {
+      "Item",
+      self.nPartnerPotentialItemId,
+      nItemJingHuaCount
+    })
+  end
+  if nWuYinShuiCount > 0 then
+    table.insert(tbAward, {
+      "Item",
+      self.nWuYinShuiItemId,
+      nWuYinShuiCount
+    })
+  end
+  return true, "", tbAward, tbPartnerCounts
+end
+
+function Partner:GetDecomposeItem(pPlayer, pPartner)
+  local nQualityLevel = self.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+  local tbReturn = self.DecomposeReturn[nQualityLevel]
+  return tbReturn[1], tbReturn[2]
+end
+
+function Partner:GetDecomposeWuYinShui(pPartner)
+  local nQualityLevel = self.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+  local tbReturn = self.DecomposeReturn[nQualityLevel]
+  if tbReturn and PartnerZhenFa:IsSysOpen() then
+    return tbReturn[3]
+  end
+  return 0
+end
+
+function Partner:CheckLevelCanGradeLevelup(pPlayer, nPartnerId)
+  local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+  if not pPartner then
+    return false, i18n.EasyGet("\230\151\160\230\149\136\229\144\140\228\188\180")
+  end
+  if 1 ~= pPartner.GetMainDevFlag() then
+    return false, i18n.EasyGet("\232\175\165\229\144\140\228\188\180\228\184\141\229\143\175\229\159\185\229\133\187")
+  end
+  local nGradeLevel = pPartner.GetGradeLevel()
+  if nGradeLevel >= self.nMaxGradeLevel then
+    return false, i18n.EasyGet("\230\173\164\229\144\140\228\188\180\229\183\178\231\170\129\231\160\180\232\135\179\230\158\129\233\153\144")
+  end
+  local nPartnerLevel = pPartner.nLevel
+  local nMaxGradeLevel = 0
+  for _, tbInfo in ipairs(self.tbGradeLevelUpInfo) do
+    if nPartnerLevel < tbInfo.nNeedLevel then
+      break
+    end
+    nMaxGradeLevel = tbInfo.nGradeLevel
+  end
+  if nGradeLevel >= nMaxGradeLevel then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\230\151\160\233\156\128\231\170\129\231\160\180")
+  end
+  local nQualityLevel = self.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+  return true, "", pPartner, nGradeLevel + 1, nQualityLevel
+end
+
+function Partner:CheckCanStarLevelup(pPlayer, nPartnerId)
+  local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+  if not pPartner then
+    return false, i18n.EasyGet("\230\151\160\230\149\136\229\144\140\228\188\180")
+  end
+  if 1 ~= pPartner.GetMainDevFlag() then
+    return false, i18n.EasyGet("\232\175\165\229\144\140\228\188\180\228\184\141\229\143\175\229\159\185\229\133\187")
+  end
+  local nQualityLevel = self.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+  if pPartner.GetStar() >= self.nMaxStarLevel then
+    return false, i18n.EasyGet("\230\173\164\229\144\140\228\188\180\229\183\178\230\187\161\230\152\159")
+  end
+  if pPartner.GetStar() >= self.StarUpLimitLevel[nQualityLevel] then
+    return false, i18n.EasyGet("\230\173\164\229\144\140\228\188\180\229\183\178\230\187\161\230\152\159")
+  end
+  local nNewStarLevel = pPartner.GetStar() + 1
+  local bStarOpen = Partner:CheckStarIsOpen(nQualityLevel, nNewStarLevel)
+  if not bStarOpen then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\229\189\147\229\137\141\230\156\128\229\164\167\230\152\159\231\186\167")
+  end
+  local nNeedLevel = self.tbStarLevelUpInfo[nQualityLevel][nNewStarLevel].nNeedLevel
+  if nNeedLevel > pPartner.nLevel then
+    return false, i18n.EasyGet("\229\144\140\228\188\180{0}\231\186\167\229\144\142\230\150\185\229\143\175\229\141\135\230\152\159", nNeedLevel)
+  end
+  local nCostParNum = self.tbStarLevelUpInfo[nQualityLevel][nNewStarLevel].nCostParNum
+  if nCostParNum > 0 then
+    local nHave = self:GetMainPartnerRedundanceNumById(pPlayer, nPartnerId)
+    if nCostParNum > nHave then
+      return false, i18n.EasyGet("\230\137\128\233\156\128\230\182\136\232\128\151\231\154\132\229\144\140\228\188\180\230\157\144\230\150\153\228\184\141\232\182\179")
+    end
+  end
+  return true, "", pPartner, nNewStarLevel, nQualityLevel, nCostParNum
+end
+
+function Partner:CheckCanUsePotentialItem(pPlayer, nPartnerId, nPotentialType)
+  local szPotentialType = self.tbAllPotentialType[nPotentialType]
+  if not szPotentialType then
+    return false, i18n.EasyGet("\232\175\183\233\128\137\230\139\169\232\166\129\230\143\144\229\141\135\231\154\132\230\189\156\232\131\189")
+  end
+  local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+  if not pPartner then
+    return false, i18n.EasyGet("\231\155\174\230\160\135\229\144\140\228\188\180\228\184\141\229\173\152\229\156\168")
+  end
+  if 1 ~= pPartner.GetMainDevFlag() then
+    return false, i18n.EasyGet("\232\175\165\229\144\140\228\188\180\228\184\141\229\143\175\229\159\185\229\133\187")
+  end
+  local nQualityLevel = self.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+  local nGrowthType = self.tbAllPartnerInfo[pPartner.nTemplateId].nGrowthType
+  local nType = self.tbPartnerGrowthInfo[nGrowthType] and self.tbPartnerGrowthInfo[nGrowthType][szPotentialType] or nil
+  if not nType then
+    return false, i18n.EasyGet("\230\151\160\230\149\136\232\181\132\232\180\168\231\177\187\229\158\139")
+  end
+  local nPotential = pPartner.GetPotential(nPotentialType)
+  local nValue = nPotential
+  local nMaxValue = Partner:GetLimitPotentialByObj(pPartner, nPotentialType)
+  if nValue >= nMaxValue then
+    if pPartner.GetGradeLevel() >= self.nMaxGradeLevel then
+      return false, i18n.EasyGet("{0}\230\189\156\232\131\189\229\183\178\232\190\190\228\184\138\233\153\144", self.PotentialName[nPotentialType])
+    else
+      return false, i18n.EasyGet("{0}\230\189\156\232\131\189\229\189\147\229\137\141\229\183\178\232\190\190\228\184\138\233\153\144\239\188\140\231\170\129\231\160\180\229\144\142\230\137\141\229\143\175\231\187\167\231\187\173", self.PotentialName[nPotentialType])
+    end
+  end
+  return true, "", self.nPartnerPotentialItemId, pPartner, nQualityLevel
+end
+
+function Partner:CheckXiSuiPartner(pPlayer, nPartnerId)
+  local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+  if not pPartner then
+    return false, i18n.EasyGet("\230\151\160\230\173\164\229\144\140\228\188\180")
+  end
+  if 1 ~= pPartner.GetMainDevFlag() then
+    return false, i18n.EasyGet("\232\175\165\229\144\140\228\188\180\228\184\141\229\143\175\229\159\185\229\133\187")
+  end
+  local nCost = self.nXiSuiCost or 10
+  local nCount = pPlayer.GetItemCountInBags(self.nXiSuiItemId)
+  if nCost > nCount then
+    return false, i18n.EasyGet("\232\143\169\230\143\144\230\158\156\228\184\141\232\182\179")
+  end
+  local tbData = {}
+  local tbTemp = {}
+  for nPotentialType, _ in pairs(self.tbAllPotentialType) do
+    table.insert(tbTemp, nPotentialType)
+  end
+  Lib:SmashTable(tbTemp)
+  local nRand = MathRandom(1, #tbTemp)
+  for nId = 1, nRand do
+    tbData[tbTemp[nId]] = 0
+  end
+  tbTemp = {}
+  for nPotentialVal = self.tbXiSuiPotentialDeltaValue[1], self.tbXiSuiPotentialDeltaValue[2] do
+    table.insert(tbTemp, nPotentialVal)
+  end
+  for nPotentialType, _ in pairs(tbData) do
+    Lib:SmashTable(tbTemp)
+    tbData[nPotentialType] = tbTemp[1]
+  end
+  return true, "", pPartner, nCost, tbData
+end
+
+function Partner:CheckCanUseSkillBook(pPlayer, nPartnerId, nItemId)
+  local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+  if not pPartner then
+    return false, i18n.EasyGet("\230\151\160\230\173\164\229\144\140\228\188\180")
+  end
+  if 1 ~= pPartner.GetMainDevFlag() then
+    return false, i18n.EasyGet("\232\175\165\229\144\140\228\188\180\228\184\141\229\143\175\229\159\185\229\133\187")
+  end
+  local szName = self.tbAllPartnerInfo[pPartner.nTemplateId].szName
+  local nSeries = self.tbAllPartnerInfo[pPartner.nTemplateId].nSeries
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem or pItem.szClass ~= "PartnerSkillBook" then
+    return false, i18n.EasyGet("\230\151\160\230\149\136\233\129\147\229\133\183")
+  end
+  local tbSkillSetting = self.tbSkillBookSetting.tbBookInfo[pItem.dwTemplateId]
+  if not tbSkillSetting then
+    return false, i18n.EasyGet("\230\151\160\230\149\136\233\129\147\229\133\183")
+  end
+  if tbSkillSetting.nSeries > Item.emSERIES_TYPE.SERIES_NONE and nSeries ~= tbSkillSetting.nSeries then
+    return false, i18n.EasyGet("{0}\228\184\142\230\173\164\229\191\131\230\179\149\228\186\148\232\161\140\228\184\141\231\172\166\239\188\129", szName)
+  end
+  local bCanUse = false
+  local nPos = 0
+  local tbReplaceInfo = {}
+  local tbSkillInfo = pPartner.GetNormalSkillInfo()
+  local tbOtherParam = {}
+  tbOtherParam.nTemplateId = pPartner.nTemplateId
+  tbOtherParam.tbSkillInfo = tbSkillInfo
+  tbOtherParam.nSkillId = tbSkillSetting.nSkillId
+  tbOtherParam.pItem = pItem
+  local nCurSkillNum = self.StarLevelExtSkillNum[pPartner.GetStar()] or Partner.nMaxSkillNum
+  if nCurSkillNum > Partner.nMaxSkillNum then
+    nCurSkillNum = Partner.nMaxSkillNum
+  end
+  for nId = 1, self.nMaxSkillNum do
+    local nCurSkillId = tbSkillInfo[nId].nSkillId
+    if nCurSkillId > 0 then
+      local tbCurSkillSetting = self:GetSkillBookInfoBySkillId(nCurSkillId)
+      if not tbCurSkillSetting then
+        return false, i18n.EasyGet("\229\188\130\229\184\184\233\133\141\231\189\174")
+      end
+      if tbCurSkillSetting.nType == tbSkillSetting.nType then
+        return false, i18n.EasyGet("\229\183\178\231\187\143\229\173\166\228\185\160\231\155\184\229\144\140\231\154\132\229\191\131\230\179\149\228\186\134")
+      else
+        bCanUse = true
+        tbReplaceInfo[nId] = true
+      end
+    elseif nId <= nCurSkillNum then
+      bCanUse = true
+      if nPos <= 0 then
+        nPos = nId
+      end
+    else
+      break
+    end
+  end
+  if not bCanUse then
+    return false, i18n.EasyGet("\230\173\164\231\167\152\231\177\141\229\191\131\230\179\149\228\184\141\229\143\175\231\148\168")
+  end
+  return true, "", tbOtherParam, nPos, tbReplaceInfo, tbSkillSetting.tbSkillValue[1], tbSkillSetting.nQuality
+end
+
+function Partner:GetSkillBookInfoBySkillId(nSkillId)
+  local nBookId = self.tbSkillBookSetting.tbSkillId2BookId[nSkillId]
+  if not nBookId then
+    return
+  end
+  return self.tbSkillBookSetting.tbBookInfo[nBookId]
+end
+
+function Partner:GetItemIdByType(nType, nTemplateId)
+  if "XinWuItem" == nType and nil ~= nTemplateId then
+    for nXinWuItemId, tbPartnerXinWuInfo in pairs(Partner.tbAllPartnerXinWuInfo) do
+      if tbPartnerXinWuInfo.nId == nTemplateId then
+        return nXinWuItemId
+      end
+    end
+  end
+  local tbItemId = {
+    ExpItem = Partner.nPartnerExpItemId,
+    PotentialItem = Partner.nPartnerPotentialItemId,
+    SkillFragmentItem = Partner.nPartnerSkillBookFragmentItemId,
+    JueXingItem = Partner.nPartnerAwakeningItemId
+  }
+  return tbItemId[nType]
+end
+
+function Partner:GetRebornReturnItem(pPlayer, nPartnerId)
+  local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+  local tbReturnItem = {}
+  tbReturnItem.ExpItem = self:GetExpItemReturnCount(pPartner)
+  tbReturnItem.XinWuItem = self:GetXinWuItemReturnCount(pPartner)
+  tbReturnItem.SkillFragmentItem = self:GetSkillItemReturnCount(pPartner)
+  tbReturnItem.PotentialItem = self:GetPotentialItemReturnCount(pPartner)
+  tbReturnItem.JueXingItem = self:GetJueXingItemReturnCount(pPartner)
+  return tbReturnItem
+end
+
+function Partner:GetExpItemReturnCount(pPartner)
+  local nCount = 0
+  local tbQualityText = {
+    [1] = "nSSS",
+    [2] = "nSS",
+    [3] = "nS",
+    [4] = "nA",
+    [5] = "nB"
+  }
+  local tbStage = {
+    [1] = 1,
+    [2] = 40,
+    [3] = 50,
+    [4] = 60,
+    [5] = 80,
+    [6] = 90,
+    [7] = 100,
+    [8] = 110,
+    [9] = 120,
+    [10] = 130,
+    [11] = 400
+  }
+  local tbExpCount = {}
+  for i = 1, #tbStage - 1 do
+    table.insert(tbExpCount, 0)
+  end
+  local nLevel, nExp, nLevelupExp = pPartner.GetLevelInfo()
+  local nQualityLevel = self.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+  local stage = 1
+  for i = 2, nLevel do
+    if i > tbStage[stage + 1] then
+      stage = stage + 1
+    end
+    tbExpCount[stage] = tbExpCount[stage] + Partner.tbPartnerExpSetting[i - 1][tbQualityText[nQualityLevel]]
+  end
+  tbExpCount[stage] = tbExpCount[stage] + nExp
+  for i = 1, #tbExpCount do
+    nCount = nCount + tbExpCount[i] / (Partner.tbPartnerExpSetting[tbStage[i]][string.format("%s_Base", tbQualityText[nQualityLevel])] * 125) * 0.8
+  end
+  return math.floor(nCount)
+end
+
+function Partner:GetXinWuItemReturnCount(pPartner)
+  local nCount = 0
+  for i = 1, pPartner.GetStar() do
+    nCount = nCount + Partner.tbStarLevelUpInfo[Partner.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel][i].nCostParNum
+  end
+  return 20 * nCount
+end
+
+function Partner:GetSkillItemReturnCount(pPartner)
+  local nCount = 0
+  local nStarLevelSkillNum = Partner.StarLevelExtSkillNum[pPartner.GetStar()] or Partner.nMaxSkillNum
+  if nStarLevelSkillNum > Partner.nMaxSkillNum then
+    nStarLevelSkillNum = Partner.nMaxSkillNum
+  end
+  for i = 1, nStarLevelSkillNum do
+    local nSkillId, nSkillLevel, nSkillExp = pPartner.GetSkillInfo(i)
+    local nSkillBookId = Partner.tbSkillBookSetting.tbSkillId2BookId[nSkillId]
+    if nSkillId > 0 then
+      nCount = nCount + 20
+      for k = 2, nSkillLevel do
+        nCount = nCount + Partner.tbSkillBookSetting.tbBookInfo[nSkillBookId].tbGradeValue[k - 1] * 20
+        nCount = nCount + Partner.tbSkillBookSetting.tbBookInfo[nSkillBookId].tbSkillValue[k - 1]
+      end
+      nCount = nCount + nSkillExp
+    end
+  end
+  return math.floor(0.8 * nCount)
+end
+
+function Partner:GetPotentialItemReturnCount(pPartner)
+  local AttribNow = 0
+  for i = 1, #self.tbAllPotentialType do
+    AttribNow = AttribNow + pPartner.GetPotential(i)
+  end
+  local nVitality, nDexterity, nStrength, nEnergy = Partner:RandomPotential(Partner.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel, Partner.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel)
+  local AttribReborn = nVitality + nDexterity + nStrength + nEnergy
+  local nChange = AttribNow - AttribReborn
+  local nCount = 0.8 * nChange * 3 / self:GetPotentialExpectation()
+  return math.floor(nCount)
+end
+
+function Partner:GetJueXingItemReturnCount(pPartner)
+  local nJueXingLevel = pPartner.GetPartnerJueXingLevel()
+  local nQualityLevel = Partner.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+  local nTotal = 0
+  if nJueXingLevel <= 0 then
+    return 0
+  end
+  for i = 1, nJueXingLevel do
+    local nValue = self.JueXingSkillJueXingItemNeeded[nQualityLevel][i] or 0
+    nTotal = nTotal + nValue
+  end
+  nTotal = nTotal * 0.8
+  return math.floor(nTotal)
+end
+
+function Partner:GetRandomPotential()
+  local nMyProb = MathRandom(1, self.tbPotentialRandomInfo.nTotalRate)
+  for index, tbPotential in ipairs(self.tbPotentialRandomInfo) do
+    if nMyProb <= tbPotential.nRate then
+      return tbPotential.nTimes
+    end
+  end
+  return 0
+end
+
+function Partner:GetPotentialExpectation()
+  local nCount = 0
+  local preTotal = 0
+  for index, tbPotential in ipairs(self.tbPotentialRandomInfo) do
+    nCount = nCount + tbPotential.nTimes * (tbPotential.nRate - preTotal)
+    preTotal = tbPotential.nRate
+  end
+  return nCount / self.tbPotentialRandomInfo.nTotalRate
+end
+
+function Partner:CheckPotentialLevel(nNowValue, nMaxValue)
+  local val = nNowValue / nMaxValue
+  if val >= self.PotentialLevel[1] and val < self.PotentialLevel[2] then
+    return i18n.EasyGet("<color=#54AB4D>\230\153\174\233\128\154</color>")
+  elseif val >= self.PotentialLevel[2] and val < self.PotentialLevel[3] then
+    return i18n.EasyGet("<color=#057FC5>\228\188\152\231\167\128</color>")
+  elseif val >= self.PotentialLevel[3] and val < self.PotentialLevel[4] then
+    return i18n.EasyGet("<color=#6D05C5>\229\141\147\232\182\138</color>")
+  elseif val >= self.PotentialLevel[4] then
+    return i18n.EasyGet("<color=#C56D05>\229\174\140\231\190\142</color>")
+  else
+    return i18n.EasyGet("<color=#54AB4D>\230\153\174\233\128\154</color>")
+  end
+end
+
+function Partner:GetQualityText(nQualityLevel)
+  return self.tbQualityText[nQualityLevel]()
+end
+
+function Partner:CheckStarIsOpen(nQuality, nStar)
+  if not nQuality or not nStar then
+    return false
+  end
+  if nStar > Partner.nMaxStarLevel then
+    return false
+  end
+  if nStar > Partner.StarUpLimitLevel[nQuality] then
+    return false
+  end
+  if 0 == nStar then
+    return true
+  end
+  if MODULE_GAMESERVER then
+    local nLevelLimit = GetMaxTotalLevel()
+    local nNeedLevel = self.tbStarLevelUpInfo[nQuality][nStar].nNeedLevel
+    return nLevelLimit >= nNeedLevel
+  else
+    local szTimeFrame = self.tbStarLevelUpInfo[nQuality][nStar].szTimeFrame
+    local nTimeFrame = Lib:CalcTimeFrameOpenTime(szTimeFrame)
+    local nNowTime = GetTime()
+    return nTimeFrame <= nNowTime
+  end
+end
+
+function Partner:CheckPartnerUIStarInfo(nStar)
+  if nStar <= 0 then
+    return 0, 0
+  end
+  local nMoonCount = nStar // 8
+  local nStarCount = nStar % 8
+  return nMoonCount, nStarCount
+end
+
+function Partner:CheckPartnerUIStarIsOpen(nQuality, nStar, nPos)
+  local nMoonCount, nStarCount = self:CheckPartnerUIStarInfo(nStar)
+  if 0 == nMoonCount then
+    return self:CheckStarIsOpen(nQuality, nPos)
+  elseif nPos <= nMoonCount then
+    return true
+  else
+    return self:CheckStarIsOpen(nQuality, nPos - nMoonCount + nMoonCount * 8)
+  end
+end
+
+function Partner:GetLimitPotentialByObj(pPartner, nType)
+  if nType == self.POTENTIAL_TYPE_VITALITY then
+    return pPartner.GetLimitVitality()
+  elseif nType == self.POTENTIAL_TYPE_DEXTERITY then
+    return pPartner.GetLimitDexterity()
+  elseif nType == self.POTENTIAL_TYPE_STRENGTH then
+    return pPartner.GetLimitStrength()
+  elseif nType == self.POTENTIAL_TYPE_ENERGY then
+    return pPartner.GetLimitEnergy()
+  end
+end
+
+function Partner:SetLimitPotential(nPartnerId, nType, nValue)
+  local pPartner = me.GetPartnerObj(nPartnerId)
+  if pPartner then
+    self:SetLimitPotentialByObj(pPartner, nType, nValue)
+  end
+end
+
+function Partner:SetLimitPotentialByObj(pPartner, nType, nValue)
+  if nType == self.POTENTIAL_TYPE_VITALITY then
+    pPartner.SetLimitVitality(nValue or 1)
+  elseif nType == self.POTENTIAL_TYPE_DEXTERITY then
+    pPartner.SetLimitDexterity(nValue or 1)
+  elseif nType == self.POTENTIAL_TYPE_STRENGTH then
+    pPartner.SetLimitStrength(nValue or 1)
+  elseif nType == self.POTENTIAL_TYPE_ENERGY then
+    pPartner.SetLimitEnergy(nValue or 1)
+  end
+end
+
+function Partner:GetXiSuiPotentialByObj(pPartner, nType)
+  if nType == self.POTENTIAL_TYPE_VITALITY then
+    return pPartner.GetXiSuiVitality()
+  elseif nType == self.POTENTIAL_TYPE_DEXTERITY then
+    return pPartner.GetXiSuiDexterity()
+  elseif nType == self.POTENTIAL_TYPE_STRENGTH then
+    return pPartner.GetXiSuiStrength()
+  elseif nType == self.POTENTIAL_TYPE_ENERGY then
+    return pPartner.GetXiSuiEnergy()
+  end
+end
+
+function Partner:SetXiSuiPotentialByObj(pPartner, nType, nValue)
+  if nType == self.POTENTIAL_TYPE_VITALITY then
+    pPartner.SetXiSuiVitality(nValue or 1)
+  elseif nType == self.POTENTIAL_TYPE_DEXTERITY then
+    pPartner.SetXiSuiDexterity(nValue or 1)
+  elseif nType == self.POTENTIAL_TYPE_STRENGTH then
+    pPartner.SetXiSuiStrength(nValue or 1)
+  elseif nType == self.POTENTIAL_TYPE_ENERGY then
+    pPartner.SetXiSuiEnergy(nValue or 1)
+  end
+end
+
+function Partner:GetPartnerJueXingLevel(pPlayer, dwId)
+  pPlayer = pPlayer or me
+  local pPartner = pPlayer.GetPartnerObj(dwId)
+  if not pPartner then
+    return 0
+  end
+  return pPartner.GetPartnerJueXingLevel()
+end
+
+function Partner:SetPartnerJueXingLevel(pPlayer, dwId, nLevel)
+  pPlayer = pPlayer or me
+  local pPartner = pPlayer.GetPartnerObj(dwId)
+  if not pPartner then
+    return 0
+  end
+  pPartner.SetPartnerJueXingLevel(nLevel or 0)
+end
+
+function Partner:GetPartnerJueXingExp(pPlayer, dwId)
+  pPlayer = pPlayer or me
+  return pPlayer.GetUserValue(GetGroupKey("Partner"), self.nGroupKey.JueXingZhiValue)
+end
+
+function Partner:SetPartnerJueXingExp(pPlayer, dwId, nExp)
+  pPlayer = pPlayer or me
+  return pPlayer.SetUserValue(GetGroupKey("Partner"), self.nGroupKey.JueXingZhiValue, nExp)
+end
+
+function Partner:UpdatePartnerJueXingLevel(pPlayer, dwId, nNum)
+  pPlayer = pPlayer or me
+  Partner:SetPartnerJueXingLevel(pPlayer, dwId, nNum)
+  if MODULE_GAMESERVER then
+    pPlayer.CallClientScript("Partner:SetPartnerJueXingLevel", nil, dwId, nNum)
+  end
+end
+
+function Partner:UpdatePartnerJueXingExp(pPlayer, dwId, nNum)
+  pPlayer = pPlayer or me
+  Partner:SetPartnerJueXingExp(pPlayer, dwId, nNum)
+  if MODULE_GAMESERVER then
+  end
+end
+
+function Partner:GetMainPartnerId(pPlayer, nTemplateId)
+  pPlayer = pPlayer or me
+  local tbPartnerList = pPlayer.GetAllPartner(nTemplateId)
+  for nId, tbPartnerInfo in pairs(tbPartnerList) do
+    if tbPartnerInfo.nTemplateId == nTemplateId then
+      local pPartner = pPlayer.GetPartnerObj(tbPartnerInfo.dwId)
+      if pPartner and 1 == pPartner.GetMainDevFlag() then
+        return true, tbPartnerInfo.dwId
+      end
+    end
+  end
+  return false, 0
+end
+
+function Partner:GetMainPartnerRedundanceNumByTemplateId(pPlayer, nTemplateId)
+  pPlayer = pPlayer or me
+  local tbPartnerList = pPlayer.GetAllPartner(nTemplateId)
+  for nId, tbPartnerInfo in pairs(tbPartnerList) do
+    if tbPartnerInfo.nTemplateId == nTemplateId then
+      return self:GetMainPartnerRedundanceNumById(pPlayer, tbPartnerInfo.dwId)
+    end
+  end
+  return 0
+end
+
+function Partner:UpdateMainPartnerRedundanceNum(pPlayer, dwId, nNum)
+  pPlayer = pPlayer or me
+  Partner:SetMainPartnerRedundanceNum(pPlayer, dwId, nNum)
+  if MODULE_GAMESERVER then
+    pPlayer.CallClientScript("Partner:SetMainPartnerRedundanceNum", nil, dwId, nNum)
+  end
+end
+
+function Partner:GetMainPartnerRedundanceNumById(pPlayer, dwId)
+  pPlayer = pPlayer or me
+  local pPartner = pPlayer.GetPartnerObj(dwId)
+  return pPartner.GetPartnerRedundanceNum()
+end
+
+function Partner:SetMainPartnerRedundanceNum(pPlayer, dwId, nNum)
+  pPlayer = pPlayer or me
+  local pPartner = pPlayer.GetPartnerObj(dwId)
+  if pPartner then
+    pPartner.SetPartnerRedundanceNum(nNum)
+  end
+end
+
+function Partner:GetCanDecomposePartnersList(pPlayer)
+  pPlayer = pPlayer or me
+  local tbPartnerList = {}
+  local tbHashTalbe = {}
+  local tbAllPartner = pPlayer.GetAllPartner()
+  for nPartnerId in pairs(tbAllPartner) do
+    local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+    if pPartner and 1 == pPartner.GetMainDevFlag() then
+      local nRedundanceNum = self:GetMainPartnerRedundanceNumById(pPlayer, nPartnerId)
+      if nRedundanceNum > 0 then
+        tbHashTalbe[pPartner.nTemplateId] = nRedundanceNum
+      end
+    end
+  end
+  local temp = {}
+  for k, v in pairs(tbHashTalbe) do
+    table.insert(temp, k)
+  end
+  table.sort(temp, function(a, b)
+    return b < a
+  end)
+  local nIndex = 1
+  local tbIdToIndex = {}
+  for k, v in pairs(temp) do
+    tbPartnerList[nIndex] = {}
+    tbPartnerList[nIndex].nTemplateId = v
+    tbPartnerList[nIndex].nCount = tbHashTalbe[v]
+    tbIdToIndex[v] = nIndex
+    nIndex = nIndex + 1
+  end
+  return tbPartnerList, tbIdToIndex
+end
+
+function Partner:CheckCanComposePartner(tbSelectedPartnerList)
+  local nCount = 0
+  local needConfirm = false
+  for nPartnerTemplateId, v in pairs(tbSelectedPartnerList) do
+    nCount = nCount + v
+    if v > 0 and self.tbAllPartnerInfo[nPartnerTemplateId].nQualityLevel <= 3 then
+      needConfirm = true
+    end
+  end
+  return nCount, needConfirm
+end
+
+function Partner:GetPartnerQualityLevel(nTemplateId)
+  return self.tbAllPartnerInfo[nTemplateId] and self.tbAllPartnerInfo[nTemplateId].nQualityLevel or 0
+end
+
+function Partner:CheckFetterCanShow(nFetterId)
+  local tbThisFetter = self.tbPartnerFetterSetting[nFetterId]
+  if tbThisFetter.nPartnerId1 > 0 and self.tbAllPartnerTemplateInfo[tbThisFetter.nPartnerId1].szTimeFrame ~= "" and 0 == GetTimeFrameState(self.tbAllPartnerTemplateInfo[tbThisFetter.nPartnerId1].szTimeFrame) then
+    return false
+  end
+  if tbThisFetter.nPartnerId2 > 0 and "" ~= self.tbAllPartnerTemplateInfo[tbThisFetter.nPartnerId2].szTimeFrame and 0 == GetTimeFrameState(self.tbAllPartnerTemplateInfo[tbThisFetter.nPartnerId2].szTimeFrame) then
+    return false
+  end
+  if tbThisFetter.nPartnerId3 > 0 and "" ~= self.tbAllPartnerTemplateInfo[tbThisFetter.nPartnerId3].szTimeFrame and 0 == GetTimeFrameState(self.tbAllPartnerTemplateInfo[tbThisFetter.nPartnerId3].szTimeFrame) then
+    return false
+  end
+  if tbThisFetter.nPartnerId4 > 0 and "" ~= self.tbAllPartnerTemplateInfo[tbThisFetter.nPartnerId4].szTimeFrame and 0 == GetTimeFrameState(self.tbAllPartnerTemplateInfo[tbThisFetter.nPartnerId4].szTimeFrame) then
+    return false
+  end
+  if tbThisFetter.nPartnerId5 > 0 and "" ~= self.tbAllPartnerTemplateInfo[tbThisFetter.nPartnerId5].szTimeFrame and 0 == GetTimeFrameState(self.tbAllPartnerTemplateInfo[tbThisFetter.nPartnerId5].szTimeFrame) then
+    return false
+  end
+  return true
+end
+
+function Partner:CheckPartnerInPos(pPlayer, nPartnerId)
+  local bIn = false
+  local tbPosInfo = pPlayer.GetPartnerPosInfo()
+  for nPos, nOtherPartnerId in pairs(tbPosInfo) do
+    if nOtherPartnerId == nPartnerId then
+      bIn = true
+      break
+    end
+  end
+  return bIn
+end
+
+function Partner:GetAttributeNameByIndex(nIndex)
+  if "nStrength" == nIndex then
+    return i18n.EasyGet("\229\138\155\233\135\143")
+  elseif "nEnergy" == nIndex then
+    return i18n.EasyGet("\232\186\171\230\179\149")
+  elseif "nVitality" == nIndex then
+    return i18n.EasyGet("\228\189\147\232\180\168")
+  elseif "nDexterity" == nIndex then
+    return i18n.EasyGet("\229\134\133\229\138\159")
+  end
+end
+
+function Partner:GetPartnerInfo(nTemplateId)
+  return self.tbAllPartnerInfo[nTemplateId]
+end
+
+function Partner:GetAiTypeByIndex(nIndex)
+  if self.tbAiTypeSetting ~= nil then
+    return i18n.Parse(self.tbAiTypeSetting[nIndex].szInfo)
+  end
+  return ""
+end

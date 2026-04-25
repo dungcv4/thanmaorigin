@@ -1,0 +1,570 @@
+Require("CommonScript/ZhenFa/ZhenFaCommon.lua")
+Shop.tbCurrencyOpenSwitch = Shop.tbCurrencyOpenSwitch or {
+  Coin = true,
+  YuanBao = true,
+  Gold = true,
+  KinContrib = true,
+  JingHuo = true,
+  ZhuLuRepute = true,
+  WuWeiRepute = true,
+  XiaoYaoRepute = true,
+  JingHua = true,
+  TongFund = true,
+  HunShi = true,
+  MingWang = true,
+  SkillRemnants = true,
+  HanWuFuShi = true,
+  DWLiQuan = true,
+  GuDaiZhenFa = true,
+  JinDing = true,
+  XunYuan = true,
+  RedStone = true,
+  GreenStone = true,
+  MightyStone = true,
+  StarStone = true,
+  MingYangJiFen = true,
+  ActivityCurrency1 = true,
+  ActivityCurrency2 = true,
+  ActivityCurrency3 = true,
+  KuangMaiJingHua = true
+}
+for i = 1, ZhenFa.nMaxZFCYCount do
+  Shop.tbCurrencyOpenSwitch["ZhenFaCanYe" .. i] = true
+end
+Shop.ShopType = {
+  NpcWeapon = 1,
+  LimitBuy = 1,
+  Gold = 1,
+  YuanBao = 1,
+  Repute = 1,
+  Stone = 1,
+  Tong = 1,
+  HunShi = 1,
+  ShiTu = 1,
+  Drug = 1,
+  Remnants = 1,
+  Returner = 1,
+  JinDing = 1
+}
+Shop.ShopTypeStr = {
+  Npc = "Npc",
+  LimitBuy = "LimitBuy",
+  Gold = "Gold",
+  YuanBao = "YuanBao",
+  Repute = "Repute",
+  Stone = "Stone",
+  Tong = "Tong",
+  HunShi = "HunShi",
+  ShiTu = "ShiTu",
+  DrugShop = "DrugShop",
+  Remnants = "Remnants",
+  Returner = "Returner",
+  JinDingShop = "JinDingShop",
+  SuitFashion = "SuitFashion",
+  SingleFashion = "SingleFashion",
+  Domain = "Domain",
+  KuangMai = "KuangMai"
+}
+Shop.LimitType = {
+  Day = 1,
+  Week = 7,
+  Month = 30,
+  Permanent = 0
+}
+Shop.LimitRule = {Default = 0, Reference = 1}
+Shop.SHOP_LOG_TYPE = {
+  Npc = 1,
+  LimitBuy = 2,
+  Gold = 3,
+  YuanBao = 4,
+  Repute = 5,
+  Stone = 6,
+  Tong = 7,
+  HunShi = 8,
+  ShiTu = 9,
+  Drug = 10,
+  Remnants = 11,
+  Returner = 12,
+  JinDing = 13,
+  SuitFashion = 14,
+  SingleFashion = 15
+}
+Shop.Protocol = {
+  C2SBuy = 1,
+  C2SSell = 2,
+  C2SCheckFamilyShop = 3,
+  C2SOneClickPurchase = 4
+}
+Shop.ShopType2ViewIndex = {
+  YuanBao = 1,
+  Gold = 2,
+  LimitBuy = 3
+}
+Shop.CustomCheckCanBuy = {
+  Tong = "CanBuyTongWare",
+  Mantle = "CanBuyMantleWare"
+}
+
+function Shop:LoadWares()
+  self.tbWares = Lib:EasyLoadTabFile("Setting/Shop/AllShopWares.tab", {"nId"}, nil, nil, false)
+  self.tbTemplateId2WareId = {}
+  for nId, tbData in pairs(self.tbWares) do
+    local szShopType = tbData.szShopType
+    self.tbTemplateId2WareId[szShopType] = self.tbTemplateId2WareId[szShopType] or {}
+    self.tbTemplateId2WareId[szShopType][tbData.nItemId] = nId
+    if tbData.szOpenTimeStr and tbData.szOpenTimeStr ~= "" then
+      local nTime = Lib:GetConfigDate2Time(tbData.szOpenTimeStr)
+      if nTime and nTime > 0 then
+        tbData.nOpenTimestamp = nTime
+      end
+    end
+    if tbData.szEndTimeStr and "" ~= tbData.szEndTimeStr then
+      local nTime = Lib:GetConfigDate2Time(tbData.szEndTimeStr)
+      if nTime and nTime > 0 then
+        tbData.nEndTimestamp = nTime
+      end
+    end
+    if tbData.szPrevWareId and not Lib:IsEmptyStr(tbData.szPrevWareId) then
+      tbData.tbPrevWareId = Lib:SplitStr2Num(tbData.szPrevWareId, "|")
+    end
+  end
+  self.tbWares = SetReadOnly(self.tbWares)
+  Validator:Register(Shop.CheckAllShopWareCfg, Shop)
+end
+
+function Shop:CheckAllShopWareCfg()
+  for nWareId, tbWareInfo in pairs(self.tbWares) do
+    if tbWareInfo.tbPrevWareId then
+      for _, nPrevWareId in ipairs(tbWareInfo.tbPrevWareId) do
+        if not self.tbWares[nPrevWareId] then
+          Lib:LogErrFormat("[Shop:CheckAllShopWareCfg] failed, unexist nPrevWareId = %d, nWareId = %d", nPrevWareId, nWareId)
+          return false
+        end
+      end
+    end
+    if tbWareInfo.nLimitRule == Shop.LimitRule.Reference then
+      local nReferenceWareId = tonumber(tbWareInfo.szLimitParam)
+      if not nReferenceWareId then
+        Lib:LogErrFormat("[Shop:CheckAllShopWareCfg] failed, reference LimitRule have not nReferenceWareId config, nWareId = %d", nWareId)
+        return false
+      end
+      do
+        local tbReferenceWare = self:GetAWare(nReferenceWareId)
+        if not tbReferenceWare then
+          Lib:LogErrFormat("[Shop:CheckAllShopWareCfg] failed, reference LimitRule can not get tbReferenceWare by nWareId = %d, nReferenceWareId = %d", nWareId, nReferenceWareId)
+          return false
+        end
+      end
+    end
+    if not Lib:IsInteger(tbWareInfo.nPrice) or tbWareInfo.nPrice < 0 then
+      Lib:LogErrFormat("[Shop:CheckAllShopWareCfg] failed, field nPrice bad! nWareId = %d", nWareId)
+      return false
+    end
+    
+    local function CheckTimeFrame(szFieldname)
+      if not Lib:IsEmptyStr(tbWareInfo[szFieldname]) and Lib:IsEmptyStr(Calendar:GetTimeframeName(tbWareInfo[szFieldname])) then
+        Lib:LogErrFormat("[Shop:CheckAllShopWareCfg] failed! %d field %s bad!", nWareId, szFieldname)
+        return false
+      end
+      return true
+    end
+    
+    for _, szField in ipairs({
+      "szOpenTimeFrame",
+      "szEndTimeFrame",
+      "szTimeFrame1",
+      "szTimeFrame2"
+    }) do
+      if not CheckTimeFrame(szField) then
+        return false
+      end
+    end
+  end
+  return true
+end
+
+function Shop:CanBuyWare(pPlayer, nWareId, nBuyCount)
+  nBuyCount = math.floor(nBuyCount)
+  if not nBuyCount or nBuyCount <= 0 then
+    return false, i18n.Get(Shop.Terms.SelectBuyNumber)
+  end
+  local tbWare = self:GetAWare(nWareId)
+  if not tbWare then
+    return false, i18n.Get(Shop.Terms.GoodNotExist)
+  end
+  if not self.tbCurrencyOpenSwitch[tbWare.szCurrencyType] then
+    return false, i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\180\230\151\182\229\133\179\233\151\173\232\180\173\228\185\176")
+  end
+  if not self:CheckWareAvaliable(tbWare, pPlayer) then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  local nRemainCount = self:GetShopRemainCount(tbWare, pPlayer)
+  if 0 == nRemainCount or nRemainCount > 0 and nBuyCount > nRemainCount then
+    return false, i18n.Get(Shop.Terms.InsufficientRemainInventory)
+  end
+  if tbWare.nMonthCardLimit and 1 == tbWare.nMonthCardLimit and not WeekMonthCard:CheckMonthCardState(pPlayer) then
+    return false, i18n.EasyGet("\228\187\133\230\156\136\229\141\161\231\148\168\230\136\183\229\143\175\228\187\165\232\180\173\228\185\176")
+  end
+  local nNeedGridNum = self:GetItemNeededBagGrid(tbWare.nItemId, nBuyCount)
+  if nNeedGridNum > pPlayer.GetFreeBagCount() then
+    return false, i18n.Get(Shop.Terms.NotEnoughBagCell)
+  end
+  if MODULE_GAMESERVER then
+    if tbWare.nOfficialLimit and tbWare.nOfficialLimit > 0 then
+      local nPersonalLevel = Tong:GetMemberOfficialLevel(pPlayer.dwID)
+      if nPersonalLevel <= 0 then
+        return false, i18n.Get(Shop.Terms.NotOfficialLevel)
+      end
+      local nCurNo = Tong:GetOfficialMaintainNo()
+      local nMyCurNo = Tong:GetMemberMaintainOfficialNo(pPlayer.dwID)
+      if nCurNo ~= nMyCurNo then
+        return false, i18n.Get(Shop.Terms.NotOfficialActive)
+      end
+      if nPersonalLevel == Tong.Def.OfficialTitleCommont and tbWare.nOfficialLimit ~= Tong.Def.OfficialTitleCommont then
+        return false, i18n.Get(Shop.Terms.OfficialLevelTooLow)
+      end
+      if tbWare.nOfficialLimit ~= Tong.Def.OfficialTitleCommont and nPersonalLevel < tbWare.nOfficialLimit then
+        return false, i18n.Get(Shop.Terms.OfficialLevelTooLow)
+      end
+    end
+    if "Tong" == tbWare.szShopType then
+      local bRet, szErr = self:CanBuyTongWare(pPlayer, tbWare)
+      if not bRet then
+        return false, szErr
+      end
+    elseif tbWare.szItemType == "Mantle" then
+      local bRet, szErr = self:CanBuyMantleWare(pPlayer, nWareId)
+      if not bRet then
+        return false, szErr
+      end
+    end
+    if HanWuYiJi:IsInFubenMap(pPlayer) and (tbWare.szShopType ~= self.ShopTypeStr.Npc or not self:FindNpcShopWare(HanWuYiJi.SHOP_NPCID[1], tbWare.nItemId)) then
+      return false, i18n.Get(Shop.Terms.MapLimit)
+    end
+  end
+  local nPrice = self:GetPrice(tbWare, tbWare.szShopType, pPlayer)
+  if not self:HasEnoughMoney(pPlayer, tbWare.szCurrencyType, nPrice, nBuyCount) then
+    local szMoneyName = Currency:GetName(tbWare.szCurrencyType)
+    return false, i18n.Get(Shop.Terms.NotEnoughMoney, szMoneyName)
+  end
+  local bFamiShop, bRand = self:IsFamilyShop(tbWare.szShopType)
+  if bFamiShop then
+    if 0 == pPlayer.dwKinId then
+      return false, i18n.EasyGet("\228\189\160\230\178\161\230\156\137\229\174\182\230\151\143\239\188\140\228\184\141\232\131\189\232\180\173\228\185\176")
+    end
+    if bRand then
+      local nDegree = self:GetFamilyWareDegree(pPlayer, tbWare.szShopType, tbWare.nItemId)
+      if nBuyCount > nDegree then
+        return false, i18n.EasyGet("\229\137\169\228\189\153\229\186\147\229\173\152\228\184\141\232\182\179")
+      end
+    else
+      local nBuildingId = Shop.tbFamilyShopCharToId[tbWare.szShopType]
+      local nBuildingLevel = self:GetBuildingLevel(pPlayer, nBuildingId)
+      if nBuildingLevel < tbWare.nLevel then
+        return false, i18n.EasyGet("\229\187\186\231\173\145\231\173\137\231\186\167\228\184\141\232\182\179")
+      end
+    end
+  end
+  return true
+end
+
+function Shop:GetAWare(nWareId)
+  local tbInfo = self.tbWares[nWareId]
+  if not tbInfo then
+    return
+  end
+  return tbInfo
+end
+
+function Shop:GetAWare2(szShopType, nTemplateId)
+  if not self.tbTemplateId2WareId[szShopType] or not self.tbTemplateId2WareId[szShopType][nTemplateId] then
+    return
+  end
+  return self:GetAWare(self.tbTemplateId2WareId[szShopType][nTemplateId])
+end
+
+function Shop:GetFamilyAWare(szShopType, nTemplateId)
+  local tbShopWares = self.ShopWares[szShopType]
+  if not tbShopWares then
+    LogErr("Shop Type do not exist!!!! szShopType, nTemplateId, bWeekLimit = ", szShopType, nTemplateId)
+    return false
+  end
+  local bFamiShop, bRand = self:IsFamilyShop(szShopType)
+  if bFamiShop then
+    if bRand then
+      for nLevel, tbPool in pairs(tbShopWares) do
+        for _, tbWares in pairs(tbPool) do
+          if tbWares[nTemplateId] then
+            return tbWares[nTemplateId]
+          end
+        end
+      end
+    else
+      for nLevel, v in pairs(tbShopWares) do
+        if v[nTemplateId] then
+          return v[nTemplateId]
+        end
+      end
+    end
+  end
+  return false
+end
+
+function Shop:GetFamilyWareDegree(pPlayer, szShopType, nTemplateId)
+  local nDegree = 0
+  if self.GetFaimlyWareRemainClient then
+    nDegree = self:GetFaimlyWareRemainClient(szShopType, nTemplateId)
+  end
+  if self.GetFamilyWareRemainServer then
+    nDegree = self:GetFamilyWareRemainServer(pPlayer, szShopType, nTemplateId)
+  end
+  return nDegree
+end
+
+function Shop:CheckWareAvaliable(tbWare, pPlayer)
+  if tbWare.nShowLevel and tbWare.nShowLevel > pPlayer.nLevel then
+    return false
+  end
+  if tbWare.nShowVipLevel and 0 ~= tbWare.nShowVipLevel and pPlayer.GetVipLevel() < tbWare.nShowVipLevel then
+    return false
+  end
+  local szOpenTimeFrame = tbWare.szOpenTimeFrame
+  local szEndTimeFrame = tbWare.szEndTimeFrame
+  local bIsOpen = true
+  if szOpenTimeFrame and "" ~= szOpenTimeFrame then
+    bIsOpen = 1 == GetTimeFrameState(szOpenTimeFrame)
+  end
+  local bNotEnd = true
+  if szEndTimeFrame and "" ~= szEndTimeFrame then
+    bNotEnd = 1 ~= GetTimeFrameState(szEndTimeFrame)
+  end
+  local nCurTime = GetTime()
+  if tbWare.nOpenTimestamp then
+    bIsOpen = bIsOpen and nCurTime >= tbWare.nOpenTimestamp
+  end
+  if tbWare.nEndTimestamp then
+    bNotEnd = bNotEnd and nCurTime < tbWare.nEndTimestamp
+  end
+  local bPrevSoldOut = true
+  if tbWare.tbPrevWareId then
+    for _, nPrevWareId in ipairs(tbWare.tbPrevWareId) do
+      local tbPrevWare = self:GetAWare(nPrevWareId)
+      local nRemainCount = self:GetShopRemainCount(tbPrevWare, pPlayer)
+      if tbPrevWare and -1 ~= nRemainCount and nRemainCount > 0 then
+        bPrevSoldOut = false
+        break
+      end
+    end
+  end
+  return bIsOpen and bNotEnd and bPrevSoldOut
+end
+
+function Shop:GetShopRemainCount(tbWare, pPlayer)
+  local tbRemainCount
+  if tbWare.nLimitRule and not self:CheckLimitRuleCfg(tbWare.nLimitRule) then
+    LogErr("Shop:GetShopRemainCount", tbWare.nId, "The configured nLimitRule", tbWare.nLimitRule, "is illegal")
+    return 0
+  end
+  if tbWare.nLimitRule == Shop.LimitRule.Reference then
+    tbRemainCount = self:GetReferenceShopRemainCount(tbWare, pPlayer)
+  else
+    tbRemainCount = self:GetDefaultShopRemainCount(tbWare, pPlayer)
+  end
+  if not tbRemainCount then
+    LogErr("Shop:GetShopRemainCount", tbWare.nId, "Get tbRemainCount is nil by tbWares.nLimitRule", tbWare.nLimitRule)
+    return 0
+  end
+  local nRet = -1
+  for index, nRemainCount in ipairs(tbRemainCount) do
+    if -1 ~= nRemainCount and (-1 == nRet or nRemainCount < nRet) then
+      nRet = nRemainCount
+    end
+  end
+  return nRet
+end
+
+function Shop:GetReferenceShopRemainCount(tbWare, pPlayer)
+  if not tbWare then
+    return
+  end
+  local nReferenceWareId = tonumber(tbWare.szLimitParam)
+  if not nReferenceWareId then
+    return
+  end
+  local tbReferenceWare = self:GetAWare(nReferenceWareId)
+  if tbReferenceWare then
+    local tbRemainCount = self:GetDefaultShopRemainCount(tbReferenceWare, pPlayer)
+    return tbRemainCount
+  end
+end
+
+function Shop:GetDefaultShopRemainCount(tbWare, pPlayer)
+  if not tbWare then
+    return
+  end
+  local nDayBuyCount = 0
+  local nWeekBuyCount = 0
+  local nMonthBuyCount = 0
+  local nPermanenBuyCount = 0
+  local nDayRemainCount = -1
+  local nWeekRemainCount = -1
+  local nMonthRemainCount = -1
+  local nPermanenRemainCount = -1
+  if tbWare.nDayLimit and tbWare.nDayLimit > 0 then
+    local tbLimitInfo = Shop:GetLimitInfo(pPlayer, Shop.LimitType.Day)
+    if tbLimitInfo and tbLimitInfo[tbWare.nId] then
+      nDayBuyCount = tbLimitInfo[tbWare.nId]
+    end
+    if nDayBuyCount < tbWare.nDayLimit then
+      nDayRemainCount = tbWare.nDayLimit - nDayBuyCount
+    else
+      nDayRemainCount = 0
+    end
+  end
+  if tbWare.nWeekLimit and tbWare.nWeekLimit > 0 then
+    local tbLimitInfo = Shop:GetLimitInfo(pPlayer, Shop.LimitType.Week)
+    if tbLimitInfo and tbLimitInfo[tbWare.nId] then
+      nWeekBuyCount = tbLimitInfo[tbWare.nId]
+    end
+    if nWeekBuyCount < tbWare.nWeekLimit then
+      nWeekRemainCount = tbWare.nWeekLimit - nWeekBuyCount
+    else
+      nWeekRemainCount = 0
+    end
+  end
+  if tbWare.nMonthLimit and tbWare.nMonthLimit > 0 then
+    local tbLimitInfo = Shop:GetLimitInfo(pPlayer, Shop.LimitType.Month)
+    if tbLimitInfo and tbLimitInfo[tbWare.nId] then
+      nMonthBuyCount = tbLimitInfo[tbWare.nId]
+    end
+    if nMonthBuyCount < tbWare.nMonthLimit then
+      nMonthRemainCount = tbWare.nMonthLimit - nMonthBuyCount
+    else
+      nMonthRemainCount = 0
+    end
+  end
+  if tbWare.nPermanentLimit and tbWare.nPermanentLimit > 0 then
+    local tbLimitInfo = Shop:GetLimitInfo(pPlayer, Shop.LimitType.Permanent)
+    if tbLimitInfo and tbLimitInfo[tbWare.nId] then
+      nPermanenBuyCount = tbLimitInfo[tbWare.nId]
+    end
+    if nPermanenBuyCount < tbWare.nPermanentLimit then
+      nPermanenRemainCount = tbWare.nPermanentLimit - nPermanenBuyCount
+    else
+      nPermanenRemainCount = 0
+    end
+  end
+  local tbRemainCount = {
+    nDayRemainCount,
+    nWeekRemainCount,
+    nMonthRemainCount,
+    nPermanenRemainCount
+  }
+  return tbRemainCount
+end
+
+function Shop:CheckLimitRuleCfg(nLimitRule)
+  nLimitRule = nLimitRule or 0
+  for _, nRule in pairs(Shop.LimitRule) do
+    if nRule == nLimitRule then
+      return true
+    end
+  end
+  return false
+end
+
+function Shop:GetItemNeededBagGrid(nTemplateId, nAddCount)
+  local tbBaseInfo = Item:GetItemBaseProp(nTemplateId)
+  local nStackMax = tbBaseInfo.nStackMax
+  if 0 == nStackMax then
+    return nAddCount
+  else
+    local nNeedBag = math.ceil(nAddCount / nStackMax)
+    return nNeedBag
+  end
+end
+
+function Shop:HasEnoughFreeBag(pPlayer, nTemplateId, nAddCount)
+  local nFreeBagCount = pPlayer.GetFreeBagCount()
+  local tbBaseInfo = Item:GetItemBaseProp(nTemplateId)
+  local nStackMax = tbBaseInfo.nStackMax
+  if 0 == nStackMax then
+    return nFreeBagCount - nAddCount >= 0
+  else
+    local nCount, tbItems = pPlayer.GetItemCountByTypeInBag(nTemplateId)
+    local nCurFree = 0
+    for _, pItem in pairs(tbItems) do
+      nCurFree = nCurFree + nStackMax - pItem.nCount
+    end
+    nAddCount = nAddCount - nCurFree
+    local nNeedBag = math.ceil(nAddCount / nStackMax)
+    return nFreeBagCount - nNeedBag >= 0
+  end
+end
+
+function Shop:HasEnoughMoney(pPlayer, szCurrencyType, nPrice, nCount)
+  local nMoneyHave = pPlayer.GetMoney(szCurrencyType)
+  return nMoneyHave >= nPrice * nCount
+end
+
+function Shop:GetPrice(tbWares, szShopType, pPlayer)
+  local nPrice = tbWares.nPrice
+  if szShopType and pPlayer and self:IsFamilyShop(szShopType) then
+    local nAppealLevel = tbWares.nLevel
+    local nBuildingId = self.tbFamilyShopCharToId[szShopType]
+    local nLevel = self:GetBuildingLevel(pPlayer, nBuildingId)
+    if tbWares.nDiscount and tbWares.nDiscount > 0 then
+      nPrice = math.floor(nPrice * tbWares.nDiscount / 10 + 0.5)
+    end
+    local nDiscount = self:GetFamilyDiscount(szShopType, nLevel)
+    nPrice = nPrice * nDiscount
+    nPrice = math.floor(nPrice + 0.5)
+    nPrice = nPrice < 1 and 1 or nPrice
+    return nPrice
+  else
+    return self:GetShopItemPrice(tbWares)
+  end
+end
+
+function Shop:GetShopItemPrice(tbInfo)
+  local nPrice = tbInfo.nPrice
+  for i = 1, 6 do
+    local szTimeFrameName = table.concat({
+      "szTimeFrame",
+      i
+    })
+    local szTimeFrame = tbInfo[szTimeFrameName]
+    if "" ~= szTimeFrame and 1 == GetTimeFrameState(szTimeFrame) then
+      local szPrice = table.concat({"nPrice", i})
+      nPrice = tbInfo[szPrice]
+    else
+      break
+    end
+  end
+  if tbInfo.nDiscount and tbInfo.nDiscount > 0 then
+    nPrice = math.floor(nPrice * tbInfo.nDiscount / 10 + 0.5)
+  end
+  return nPrice
+end
+
+function Shop:GetWareIDByItemID(nItemId, szShopType)
+  local wareId = 0
+  if not Lib:IsEmptyStr(szShopType) then
+    for k, v in pairs(self.tbTemplateId2WareId[szShopType]) do
+      if k == nItemId then
+        wareId = v
+        break
+      end
+    end
+  else
+    for _, v in pairs(self.tbTemplateId2WareId) do
+      if v[nItemId] then
+        wareId = v[nItemId]
+        break
+      end
+    end
+  end
+  return wareId
+end
+
+Shop:LoadWares()

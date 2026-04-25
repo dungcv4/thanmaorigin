@@ -1,0 +1,425 @@
+local tbItem = Item:GetClass("MedicineItem")
+tbItem.ExtParam1 = 1
+tbItem.ExtParam2 = 2
+tbItem.ExtParam3 = 3
+tbItem.ExtParam4 = 4
+tbItem.ExtParam5 = 5
+tbItem.ExtParam6 = 6
+tbItem.ExtParam7 = 7
+tbItem.nMaxMedicineCount = 30
+tbItem.nDefaultMedicineTId = 50001
+tbItem.tbMedicineChangeValue = {
+  [50001] = {
+    [1] = {
+      40,
+      600,
+      50001
+    },
+    [2] = {
+      70,
+      1000,
+      50002
+    },
+    [3] = {
+      90,
+      1400,
+      50003
+    },
+    [4] = {
+      110,
+      1800,
+      50004
+    },
+    [5] = {
+      130,
+      2200,
+      50005
+    },
+    [6] = {
+      150,
+      2600,
+      50006
+    },
+    [7] = {
+      170,
+      3000,
+      50007
+    },
+    [8] = {
+      190,
+      3500,
+      50008
+    },
+    [9] = {
+      210,
+      4000,
+      50009
+    },
+    [10] = {
+      230,
+      4300,
+      50010
+    },
+    [11] = {
+      250,
+      4600,
+      50011
+    },
+    [12] = {
+      270,
+      4900,
+      50012
+    },
+    [13] = {
+      290,
+      5200,
+      50013
+    },
+    [14] = {
+      400,
+      5500,
+      50014
+    }
+  }
+}
+tbItem.nLiftSkillState = 401
+tbItem.szMoneyType = "Coin"
+tbItem.szKeyOfZoneCostMoneyForMedicine = "ZoneCostMoneyForMedicine"
+tbItem.szKeyOfZoneMedicineCount = "ZoneMedicineCount"
+tbItem.nZoneMedicineCountChangeFlag = 10000
+
+function tbItem:GetMaxMedicineCount()
+  return self.nMaxMedicineCount
+end
+
+function tbItem:GetMedicineCountAtMaxLevel(pPlayer)
+  local nCount = 0
+  local nMaxLevel = 0
+  local tbList = pPlayer.GetItemListInMedicineBag()
+  for _, pItem in pairs(tbList) do
+    if nMaxLevel < pItem.nLevel then
+      nMaxLevel = pItem.nLevel
+      nCount = pItem.nCount
+    elseif pItem.nLevel == nMaxLevel then
+      nCount = nCount + pItem.nCount
+    end
+  end
+  return nCount
+end
+
+function tbItem:GetMedicineItemIDAtMaxLevel(pPlayer)
+  local nItemID
+  local nMaxLevel = 0
+  local tbList = pPlayer.GetItemListInMedicineBag()
+  for _, pItem in pairs(tbList) do
+    if nMaxLevel < pItem.nLevel then
+      nMaxLevel = pItem.nLevel
+      nItemID = pItem.dwId
+    end
+  end
+  return nItemID
+end
+
+function tbItem:ClearUserValueOfZoneCostMoneyForMedicine(pPlayer)
+  MedicineMgr:ClearZoneCostMoney(pPlayer.dwID)
+  Log("---->", self.szKeyOfZoneCostMoneyForMedicine, MedicineMgr:GetZoneCostMoney(pPlayer.dwID))
+end
+
+function tbItem:AddUserValueOfZoneCostMoneyForMedicine(pPlayer, nAdd)
+  if SERVER_RUNNING_MODE == SERVER_MODE.ZONE_SERVER then
+    if Map:IsDisableSyncZoneMedicine(pPlayer.nMapTemplateId) then
+      return
+    end
+    MedicineMgr:SetPlayerCostMoneyData(pPlayer, MedicineMgr:GetPlayerCostMoneyData(pPlayer) + nAdd)
+    Log("---->", self.szKeyOfZoneCostMoneyForMedicine, MedicineMgr:GetPlayerCostMoneyData(pPlayer))
+  end
+end
+
+function tbItem:GetUserValueOfZoneCostMoneyForMedicine(pPlayer)
+  local nCostMoney = MedicineMgr:GetZoneCostMoney(pPlayer.dwID)
+  if nCostMoney > 0 then
+    return nCostMoney
+  end
+end
+
+function tbItem:ClearUserValueOfZoneMedicineCount(pPlayer)
+  MedicineMgr:ClearZoneMedicineCount(pPlayer.dwID)
+  Log("---->", self.szKeyOfZoneMedicineCount, MedicineMgr:GetZoneMedicineCount(pPlayer.dwID))
+end
+
+function tbItem:UpdateUserValueOfZoneMedicineCount(pPlayer)
+  if SERVER_RUNNING_MODE == SERVER_MODE.ZONE_SERVER then
+    if Map:IsDisableSyncZoneMedicine(pPlayer.nMapTemplateId) then
+      return
+    end
+    local nCount = self:GetMedicineCountAtMaxLevel(pPlayer)
+    MedicineMgr:SetPlayerMedicineData(pPlayer, nCount + self.nZoneMedicineCountChangeFlag)
+    Log("---->", self.szKeyOfZoneMedicineCount, MedicineMgr:GetPlayerMedicineData(pPlayer))
+  end
+end
+
+function tbItem:GetUserValueOfZoneMedicineCount(pPlayer)
+  local nCount = MedicineMgr:GetZoneMedicineCount(pPlayer.dwID)
+  if nCount >= self.nZoneMedicineCountChangeFlag then
+    return nCount - self.nZoneMedicineCountChangeFlag
+  end
+end
+
+function tbItem:SyncZoneMedicineCount(pPlayer)
+  local nZoneCount = self:GetUserValueOfZoneMedicineCount(pPlayer)
+  if nZoneCount then
+    nZoneCount = math.min(nZoneCount, self.nMaxMedicineCount)
+    local nLocalCount = self:GetMedicineCountAtMaxLevel(pPlayer)
+    local nDelta = nZoneCount - nLocalCount
+    Log("----> SyncZoneMedicineCount Beg", nZoneCount, nLocalCount)
+    if nDelta > 0 then
+      local tbItemExtParams = {}
+      local tbAward = {
+        {
+          "Item",
+          self.nDefaultMedicineTId,
+          nDelta,
+          tbItemExtParams
+        }
+      }
+      pPlayer.SendAward(tbAward, false, false, Env.LogWay_SyncZoneConsume, 0, "Medicine")
+    elseif nDelta < 0 then
+      local nItemID = self:GetMedicineItemIDAtMaxLevel(pPlayer)
+      if nItemID then
+        local pItem = pPlayer.GetItemInAllSpace(nItemID)
+        if pItem then
+          pPlayer.ConsumeItem(pItem, -nDelta, Env.LogWay_SyncZoneConsume)
+        end
+      end
+    end
+    Log("----> SyncZoneMedicineCount End", self:GetMedicineCountAtMaxLevel(pPlayer))
+    self:ClearUserValueOfZoneMedicineCount(pPlayer)
+  end
+end
+
+function tbItem:SyncZoneCostMoneyForMedicine(pPlayer)
+  local nCostMoney = self:GetUserValueOfZoneCostMoneyForMedicine(pPlayer)
+  if nCostMoney and nCostMoney > 0 then
+    if nCostMoney > 0 then
+      Log("----> SyncZoneCostMoneyForMedicine Beg", pPlayer.GetMoney(self.szMoneyType), nCostMoney)
+      pPlayer.CostMoney(self.szMoneyType, nCostMoney, Env.LogWay_SyncZoneConsume, self.nDefaultMedicineTId)
+      Log("----> SyncZoneCostMoneyForMedicine End", pPlayer.GetMoney(self.szMoneyType))
+    end
+    self:ClearUserValueOfZoneCostMoneyForMedicine(pPlayer)
+  end
+end
+
+function tbItem:CheckUsable(it)
+  local tbMagicAttrSetting = self.tbMagicAttrSetting[it.dwTemplateId]
+  if not tbMagicAttrSetting then
+    return
+  end
+  if MODULE_GAMESERVER then
+    local nTotalCDTime = tbMagicAttrSetting.WaitTime or 0
+    if nTotalCDTime > 0 then
+      local pNpc = me.GetNpc()
+      local nLastUseTime = pNpc.GetLastTimeUsedMedicine(it.dwTemplateId)
+      local nTimeOfCDClose = nLastUseTime + nTotalCDTime
+      if nTimeOfCDClose > GetTime() then
+        return 0
+      end
+    end
+  end
+  return 1
+end
+
+function tbItem:CheckUseMedicine(dwTemplateId)
+  local pMeNpc = me.GetNpc()
+  if not pMeNpc then
+    return false
+  end
+  if pMeNpc.HaveRefFlag(Npc.RefFlagType.npc_forbid_useitem) and me.GetDoing() ~= Npc.Doing.float then
+    return false
+  end
+  if not GoodwillValue:CheckValueCanUseMedicine(me) then
+    return false
+  end
+  self.nChangeValue = -1
+  local tbChangeValue = tbItem.tbMedicineChangeValue[dwTemplateId]
+  if tbChangeValue then
+    local myLevel = me.nTotalLevel
+    for i = 1, #tbChangeValue do
+      if myLevel < tbChangeValue[i][1] then
+        self.nChangeValue = tbChangeValue[i][2]
+        break
+      end
+    end
+  end
+  return true
+end
+
+function tbItem:GetCurMedicineTId(pPlayer)
+  assert(pPlayer)
+  local tid = self.nDefaultMedicineTId
+  local tbChangeValue = self.tbMedicineChangeValue[self.nDefaultMedicineTId]
+  if tbChangeValue then
+    local myLevel = pPlayer.nTotalLevel
+    for i = 1, #tbChangeValue do
+      if myLevel < tbChangeValue[i][1] then
+        tid = tbChangeValue[i][3]
+        break
+      end
+    end
+  end
+  return tid
+end
+
+function tbItem:OnUse(it)
+  if not it.dwTemplateId or it.dwTemplateId <= 0 then
+    return
+  end
+  return self:UseItembyTemplateId(it.dwTemplateId)
+end
+
+function tbItem:UseItembyTemplateId(dwTemplateId)
+  if not dwTemplateId or dwTemplateId <= 0 then
+    return
+  end
+  local tbMagicAttrSetting = self.tbMagicAttrSetting[dwTemplateId]
+  if not tbMagicAttrSetting then
+    return
+  end
+  local bCanUse = self:CheckUseMedicine(dwTemplateId)
+  if not bCanUse then
+    return
+  end
+  self.nChangeValue = self.nChangeValue or -1
+  local bAddFlag = false
+  local nMATime = 0
+  for i = 1, 10 do
+    local szAttrib = tbMagicAttrSetting[string.format("Attrib%dType", i)]
+    local nMA1 = tbMagicAttrSetting[string.format("Attrib%dValue1", i)]
+    if self.nChangeValue >= 0 then
+      nMA1 = self.nChangeValue
+    end
+    local nMA2 = tbMagicAttrSetting[string.format("Attrib%dValue2", i)]
+    local nMA3 = tbMagicAttrSetting[string.format("Attrib%dValue3", i)] or 0
+    if not szAttrib or "" == szAttrib then
+      break
+    end
+    me.ApplyMagicAttrib(szAttrib, nMA1, nMA2, nMA3)
+    if "lifepotion_v" == szAttrib or "manapotion_v" == szAttrib then
+      bAddFlag = true
+      nMATime = nMA2
+    end
+  end
+  if bAddFlag and MODULE_GAMESERVER then
+    me.AddSkillState(tbItem.nLiftSkillState, 1, 0, nMATime)
+  end
+  local nSkillId = KItem.GetItemExtParam(dwTemplateId, self.ExtParam1) or 0
+  if nSkillId > 0 then
+    local nSkillLv = KItem.GetItemExtParam(dwTemplateId, self.ExtParam2) or 0
+    if nSkillLv <= 0 then
+      nSkillLv = 1
+    end
+    local nSkillType = KItem.GetItemExtParam(dwTemplateId, self.ExtParam3) or 0
+    local nSkillTime = KItem.GetItemExtParam(dwTemplateId, self.ExtParam4) or 0
+    local nSkillRemove = KItem.GetItemExtParam(dwTemplateId, self.ExtParam5) or 0
+    Log("MedicineItem::OnUse add skill state 2", nSkillId, nSkillLv, nSkillType, nSkillTime, nSkillRemove)
+    me.AddSkillState(nSkillId, nSkillLv, nSkillType, nSkillTime, 1)
+  end
+  local nBuffSkillId = KItem.GetItemExtParam(dwTemplateId, tbItem.ExtParam6) or 0
+  local nBuffLevel = KItem.GetItemExtParam(dwTemplateId, tbItem.ExtParam7) or 0
+  if nBuffSkillId < 0 then
+    local pNpc = me.GetNpc()
+    local _, nPosX, nPosY = pNpc.GetWorldPos()
+    if nBuffLevel <= 0 then
+      nBuffLevel = 1
+    end
+    pNpc.CastSkill(nBuffSkillId, nBuffLevel, nPosX, nPosY)
+  end
+  local nTotalCDTime = tbMagicAttrSetting.WaitTime or 0
+  if nTotalCDTime > 0 then
+    if MODULE_GAMESERVER then
+      local pNpc = me.GetNpc()
+      pNpc.SetLastTimeUsedMedicine(dwTemplateId)
+      me.CallClientScript("MedicineMgr:NotifyMedicineCD", dwTemplateId, nTotalCDTime, nTotalCDTime)
+    end
+    if MODULE_GAMECLIENT then
+      MedicineMgr:NotifyMedicineCD(dwTemplateId, nTotalCDTime, nTotalCDTime)
+    end
+  end
+  return 1, true
+end
+
+function tbItem:NotifyMedicineCD(dwTemplateId, pPlayer, nTotalCDTime)
+  if nil == pPlayer then
+    pPlayer = me
+  end
+  local pNpc = pPlayer.GetNpc()
+  local nLastUseTime = pNpc.GetLastTimeUsedMedicine(dwTemplateId)
+  local nTimeOfCDClose = nLastUseTime + nTotalCDTime
+  if nTimeOfCDClose > GetTime() then
+    local nRemainTime = nTimeOfCDClose - GetTime()
+    pPlayer.CallClientScript("MedicineMgr:NotifyMedicineCD", dwTemplateId, nRemainTime, nTotalCDTime)
+    return true
+  else
+    return false
+  end
+end
+
+function tbItem:LoadMagicAttrSetting()
+  self.tbMagicAttrSetting = self.tbMagicAttrSetting or {}
+  local tbSetting = Lib:LoadTabFileEx("Setting/Item/Other/MedicineItem.tab", "dsdddsdddsdddsdddsdddsdddsdddsdddsdddsddddddddddd", "TemplateId", {
+    "TemplateId",
+    "Attrib1Type",
+    "Attrib1Value1",
+    "Attrib1Value2",
+    "Attrib1Value3",
+    "Attrib2Type",
+    "Attrib2Value1",
+    "Attrib2Value2",
+    "Attrib2Value3",
+    "Attrib3Type",
+    "Attrib3Value1",
+    "Attrib3Value2",
+    "Attrib3Value3",
+    "Attrib4Type",
+    "Attrib4Value1",
+    "Attrib4Value2",
+    "Attrib4Value3",
+    "Attrib5Type",
+    "Attrib5Value1",
+    "Attrib5Value2",
+    "Attrib5Value3",
+    "Attrib6Type",
+    "Attrib6Value1",
+    "Attrib6Value2",
+    "Attrib6Value3",
+    "Attrib7Type",
+    "Attrib7Value1",
+    "Attrib7Value2",
+    "Attrib7Value3",
+    "Attrib8Type",
+    "Attrib8Value1",
+    "Attrib8Value2",
+    "Attrib8Value3",
+    "Attrib9Type",
+    "Attrib9Value1",
+    "Attrib9Value2",
+    "Attrib9Value3",
+    "Attrib10Type",
+    "Attrib10Value1",
+    "Attrib10Value2",
+    "Attrib10Value3",
+    "ExtParam1",
+    "ExtParam2",
+    "ExtParam3",
+    "ExtParam4",
+    "ExtParam5",
+    "ExtParam6",
+    "ExtParam7",
+    "WaitTime"
+  })
+  for k, v in pairs(tbSetting) do
+    self.tbMagicAttrSetting[k] = v
+  end
+  self.tbMagicAttrSetting = SetReadOnly(self.tbMagicAttrSetting)
+end
+
+tbItem:LoadMagicAttrSetting()

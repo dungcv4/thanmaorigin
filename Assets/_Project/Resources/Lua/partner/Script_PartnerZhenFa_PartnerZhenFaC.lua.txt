@@ -1,0 +1,467 @@
+Require("CommonScript/PartnerZhenFa/PartnerZhenFaCommon.lua")
+
+function PartnerZhenFa:OnLogin()
+  self.tbWashRandomAttrDiff = {}
+  self:TryLightDailyRedPoint()
+  self:TryUpdateActivateRedPoint()
+  self:TryUpdateEnhanceRedPoint()
+  self:TryUpdateLevelUpRedPoint()
+  self:TryUpdateWashRandomValRedPoint()
+end
+
+PartnerZhenFa.tbCheckFuncDict = {
+  [PartnerZhenFa.Protocol.ReqActivateZF] = PartnerZhenFa.CheckCanActivate,
+  [PartnerZhenFa.Protocol.ReqChangeZF] = PartnerZhenFa.CheckCanChangeZF,
+  [PartnerZhenFa.Protocol.ReqZFLevelUp] = PartnerZhenFa.CheckCanZFLevelUp,
+  [PartnerZhenFa.Protocol.ReqChangeEye] = PartnerZhenFa.CheckCanChangeEye,
+  [PartnerZhenFa.Protocol.ReqFixAttrEnhance] = PartnerZhenFa.CheckCanFixAttrEnhance,
+  [PartnerZhenFa.Protocol.ReqWashRandomAttrType] = PartnerZhenFa.CheckCanWashRandomAttrType,
+  [PartnerZhenFa.Protocol.ReqReplaceRandomAttrType] = PartnerZhenFa.CheckCanReplaceRandomAttr,
+  [PartnerZhenFa.Protocol.ReqWashRandomAttrVal] = PartnerZhenFa.CheckCanWashRandomAttrVal
+}
+
+function PartnerZhenFa:SendClientReq(szReq, tbCheck, tbSend)
+  if not PartnerZhenFa.Protocol[szReq] then
+    LogErr("PartnerZhenFa:SendClientReq error, not find szReq in tbClientReq", szReq)
+    return
+  end
+  local pCheckFunc = PartnerZhenFa.tbCheckFuncDict[szReq]
+  if not pCheckFunc then
+    LogErr("PartnerZhenFa:SendClientReq error, not find szReq in tbCheckFuncDict", szReq)
+    return
+  end
+  local bRet, szMsg = pCheckFunc(self, me, table.unpack(tbCheck or {}))
+  if not bRet then
+    if szMsg then
+      me.CenterMsg(szMsg)
+    end
+    return
+  end
+  RemoteServer.RequestPartnerZhenFa(szReq, table.unpack(tbSend or {}))
+  return true
+end
+
+PartnerZhenFa.tbUIRefreshType = {
+  ACTIVATE_STATE = 1,
+  ZF_CHANGE = 2,
+  EYE_CHANGE = 3,
+  ZF_LEVELUP = 4,
+  FIXATTR_ENHANCE = 5,
+  RANDOMATTR_CHANGE = 6,
+  RANDOMVAL_CHANGE = 7,
+  SYNCITEM = 8
+}
+PartnerZhenFa.tbS2CProtocol = {
+  [PartnerZhenFa.Protocol.SyncActivateState] = true,
+  [PartnerZhenFa.Protocol.RspChangeZF] = true,
+  [PartnerZhenFa.Protocol.RspZFLevelUp] = true,
+  [PartnerZhenFa.Protocol.RspChangeEye] = true,
+  [PartnerZhenFa.Protocol.RspFixAttrEnhance] = true,
+  [PartnerZhenFa.Protocol.RspWashRandomAttrType] = true,
+  [PartnerZhenFa.Protocol.RspReplaceRandomAttrType] = true,
+  [PartnerZhenFa.Protocol.RspWashRandomAttrVal] = true,
+  [PartnerZhenFa.Protocol.ResetAttr] = true
+}
+
+function PartnerZhenFa:OnClientRsp(szRsp, bSuccess, ...)
+  if not self.tbS2CProtocol[szRsp] then
+    LogErr("PartnerZhenFa:OnClientRsp Error, not find szRsp in tbClientRspFunc", szRsp)
+    return
+  end
+  self[szRsp](self, bSuccess, ...)
+end
+
+function PartnerZhenFa:SyncActivateState(bChange, nEyeId)
+  if bChange then
+    if self:IsZFActivate(me) then
+      self:ActivateZFAttr(me)
+    else
+      self:RemoveZFAttr(me, nEyeId)
+    end
+    self:TryUpdateActivateRedPoint()
+    EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_ZHENFA_UI_REFRESH, self.tbUIRefreshType.ACTIVATE_STATE)
+  end
+end
+
+function PartnerZhenFa:RspChangeZF(bSuccess, nOldPos)
+  if bSuccess then
+    for nIndex = 1, self.nFixAttrCount do
+      self:OperateFixAttr(me, nOldPos, nIndex, false)
+    end
+    for nIndex = 1, self.nFixAttrCount do
+      self:OperateFixAttr(me, nil, nIndex, true)
+    end
+    EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_ZHENFA_UI_REFRESH, self.tbUIRefreshType.ZF_CHANGE)
+  end
+end
+
+function PartnerZhenFa:RspZFLevelUp(bSuccess)
+  if bSuccess then
+    local tbZFCfg = self:GetZFLevelCfg()
+    if tbZFCfg and tbZFCfg.nNewRandomAttr > 0 then
+      local nCount = self:GetCurRandomAttrCount(me)
+      for nIndex = nCount, nCount - tbZFCfg.nNewRandomAttr, -1 do
+        local tbAttr = self:GetZFRandomAttr(me, nIndex)
+        self:ApplyAttribute(me, tbAttr)
+      end
+    end
+    self:TryUpdateLevelUpRedPoint()
+    EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_ZHENFA_UI_REFRESH, self.tbUIRefreshType.ZF_LEVELUP)
+  end
+end
+
+function PartnerZhenFa:RspChangeEye(bSuccess, szOldAttr)
+  if bSuccess then
+    if not Lib:IsEmptyStr(szOldAttr) then
+      local tbAttrs = Lib:SplitStr(szOldAttr, "|")
+      for _, szAttr in ipairs(tbAttrs) do
+        local tbOldAttr = Lib:SplitStr(szAttr)
+        self:RemoveAttribute(me, {
+          tbOldAttr[1],
+          tonumber(tbOldAttr[2]),
+          tonumber(tbOldAttr[3]),
+          tonumber(tbOldAttr[4])
+        })
+      end
+      for nIndex = 1, self.nFixAttrCount do
+        local tbFixAttr = self:GetZFBaseFixAttr(me, nil, nIndex)
+        if tbFixAttr then
+          self:ApplyAttribute(me, tbFixAttr)
+        else
+          LogErr("PartnerZhenFa:RspChangeEye Error. GetZFBaseFixAttr is nil", szOldAttr)
+          return
+        end
+      end
+    end
+    self:TryUpdateActivateRedPoint()
+    EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_ZHENFA_UI_REFRESH, self.tbUIRefreshType.EYE_CHANGE)
+    local nEyePartnerId = me.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nEyePartnerId)
+    if nEyePartnerId > 0 then
+      local pPartner = me.GetPartnerObj(nEyePartnerId)
+      me.CenterMsg(i18n.EasyGet("\230\136\144\229\138\159\232\174\190\231\189\174\229\144\140\228\188\180{0}\228\184\186\233\152\181\231\156\188", i18n.Parse(pPartner.szName)))
+    end
+  end
+end
+
+function PartnerZhenFa:RspFixAttrEnhance(bSuccess, nIndex, nOldLevel)
+  if bSuccess then
+    local tbOldFixAttr = self:GetZFEnhanceFixAttr(me, nil, nOldLevel, nIndex)
+    if tbOldFixAttr then
+      self:RemoveAttribute(me, tbOldFixAttr)
+    end
+    local tbNewFixAttr = self:GetZFEnhanceFixAttr(me, nil, nil, nIndex)
+    if tbNewFixAttr then
+      self:ApplyAttribute(me, tbNewFixAttr)
+    else
+      LogErr("PartnerZhenFa:RspFixAttrEnhance Error. tbNewFixAttr is nil", nIndex, nOldLevel)
+    end
+    EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_ZHENFA_UI_REFRESH, self.tbUIRefreshType.FIXATTR_ENHANCE)
+  end
+end
+
+function PartnerZhenFa:RspWashRandomAttrType(bSuccess)
+  if bSuccess then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_ZHENFA_UI_REFRESH, self.tbUIRefreshType.RANDOMATTR_CHANGE)
+  end
+end
+
+function PartnerZhenFa:RspReplaceRandomAttrType(bSuccess, szOldAttr)
+  if bSuccess then
+    if not Lib:IsEmptyStr(szOldAttr) then
+      local tbAttrs = Lib:SplitStr(szOldAttr, ";")
+      for _, szAttr in ipairs(tbAttrs) do
+        local tbOldAttr = Lib:SplitStr(szAttr)
+        self:RemoveAttribute(me, {
+          tbOldAttr[1],
+          tonumber(tbOldAttr[2]),
+          tonumber(tbOldAttr[3]),
+          tonumber(tbOldAttr[4])
+        })
+      end
+      local nAttrCount = self:GetCurRandomAttrCount(me)
+      for nIndex = 1, nAttrCount do
+        local tbAttrCfg = self:GetZFRandomAttr(me, nIndex)
+        if tbAttrCfg then
+          self:ApplyAttribute(me, tbAttrCfg)
+        end
+      end
+    end
+    EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_ZHENFA_UI_REFRESH, self.tbUIRefreshType.RANDOMATTR_CHANGE)
+  end
+end
+
+function PartnerZhenFa:RspWashRandomAttrVal(bSuccess, nIndex, nOldLevel, nNewLevel)
+  if bSuccess then
+    local nAttrCount = self:GetCurRandomAttrCount(me)
+    if nIndex > nAttrCount or nIndex < 0 then
+      return
+    end
+    local nGroup = me.GetUserValue(self.RandomAttrSaveGroup, nIndex)
+    local tbOldAttrCfg = self.tbRandomAttrPool[nGroup][nOldLevel]
+    local tbNewAttrCfg = self.tbRandomAttrPool[nGroup][nNewLevel]
+    if not tbOldAttrCfg or not tbNewAttrCfg then
+      LogErr("PartnerZhenFa:RspWashRandomAttrVal Error, tbOldAttr or tbNewAttr is nil", bSuccess, nIndex, nOldLevel, nNewLevel, nGroup, tbOldAttrCfg, tbNewAttrCfg)
+      return
+    end
+    local tbOldAttr = {
+      tbOldAttrCfg.szAttrType,
+      tbOldAttrCfg.nAttrVal1,
+      tbOldAttrCfg.nAttrVal2,
+      tbOldAttrCfg.nAttrVal3
+    }
+    local tbNewAttr = {
+      tbNewAttrCfg.szAttrType,
+      tbNewAttrCfg.nAttrVal1,
+      tbNewAttrCfg.nAttrVal2,
+      tbNewAttrCfg.nAttrVal3
+    }
+    local bLevelUp = nOldLevel < nNewLevel
+    if bLevelUp then
+      self:RemoveAttribute(me, tbOldAttr)
+      self:ApplyAttribute(me, tbNewAttr)
+    end
+    local _, szOldVal = FightSkill:GetMagicDescSplit(tbOldAttr[1], {
+      tbOldAttr[2],
+      tbOldAttr[3],
+      tbOldAttr[4]
+    })
+    local _, szNewVal = FightSkill:GetMagicDescSplit(tbNewAttr[1], {
+      tbNewAttr[2],
+      tbNewAttr[3],
+      tbNewAttr[4]
+    })
+    local szDiff = FightSkill:StringValueSubResult(szOldVal, szNewVal)
+    if nNewLevel < nOldLevel then
+      szDiff = "<color=#c50505>(" .. szDiff .. ")</color>"
+    else
+      szDiff = "<color=#54ab4d>(" .. szDiff .. ")</color>"
+    end
+    self.tbWashRandomAttrDiff[nIndex] = szDiff
+    EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_ZHENFA_UI_REFRESH, PartnerZhenFa.tbUIRefreshType.RANDOMVAL_CHANGE, nIndex, bLevelUp)
+  end
+end
+
+function PartnerZhenFa:ResetAttr()
+  self:OnUnEquip(me)
+end
+
+PartnerZhenFa.nDayOffset = 14400
+PartnerZhenFa.szDailyRedPointKey = "PartnerZF_DailyRedPoint"
+
+function PartnerZhenFa:TryLightDailyRedPoint()
+  local nLastTime = Ui.PlayerPrefs.GetInt(PartnerZhenFa.szDailyRedPointKey, 0)
+  if Lib:IsDiffDay(self.nDayOffset, GetTime(), nLastTime) and (self:CheckCanZFLevelUp(me) or self:CheckCanWashRandomAttrVal(me, 1) or self:GetCanEnhanceFixAttrIndex()) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.PartnerZFDailyRemind)
+  end
+end
+
+function PartnerZhenFa:TryFadeDailyRedPoint()
+  if RedPointMgr:CheckEvent(RedPointMgr.EVENT.PartnerZFDailyRemind) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.PartnerZFDailyRemind)
+    Ui.PlayerPrefs.SetInt(PartnerZhenFa.szDailyRedPointKey, GetTime())
+  end
+end
+
+function PartnerZhenFa:TryUpdateActivateRedPoint()
+  local bActivate = self:IsZFActivate(me)
+  local bCanActivate = self:CheckCanActivate(me, self.nDefaultZFPos)
+  if bActivate ~= bCanActivate then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.PartnerZFActivate)
+  elseif RedPointMgr:CheckEvent(RedPointMgr.EVENT.PartnerZFActivate) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.PartnerZFActivate)
+  end
+end
+
+function PartnerZhenFa:TryUpdateEnhanceRedPoint()
+  local nEnhanceIndex = self:GetCanEnhanceFixAttrIndex()
+  if nEnhanceIndex then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.PartnerZFEnhance)
+  elseif RedPointMgr:CheckEvent(RedPointMgr.EVENT.PartnerZFEnhance) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.PartnerZFEnhance)
+  end
+end
+
+function PartnerZhenFa:GetCanEnhanceFixAttrIndex()
+  for nIndex = 1, self.nFixAttrCount do
+    if self:CheckCanFixAttrEnhance(me, nIndex) then
+      return nIndex
+    end
+  end
+end
+
+function PartnerZhenFa:TryUpdateLevelUpRedPoint()
+  if self:CheckCanZFLevelUp(me) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.PartnerZFLevelUp)
+  elseif RedPointMgr:CheckEvent(RedPointMgr.EVENT.PartnerZFLevelUp) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.PartnerZFLevelUp)
+  end
+end
+
+function PartnerZhenFa:TryUpdateWashRandomValRedPoint()
+  if self:CheckCanWashRandomAttrVal(me, 1) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.PartnerZFWashRandomVal)
+  elseif RedPointMgr:CheckEvent(RedPointMgr.EVENT.PartnerZFWashRandomVal) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.PartnerZFWashRandomVal)
+  end
+end
+
+function PartnerZhenFa:CanShowUIEntrance()
+  if not self:IsSysOpen() then
+    return false
+  end
+  if not self:CheckPlayerLevel(me) then
+    return false
+  end
+  return true
+end
+
+function PartnerZhenFa:GetFixAttrWithEyeDesc(nIndex)
+  if not nIndex then
+    LogErr("PartnerZhenFa:GetFixAttrWithEyeDesc Error. nIndex is nil", me.dwID, nIndex)
+    return
+  end
+  local tbZFGroup = self:GetPosGroupCfg(me)
+  if not tbZFGroup then
+    LogErr("PartnerZhenFa:GetFixAttrWithEyeDesc Error. GetCurPosGroupCfg is nil", me.dwID, nIndex)
+    return
+  end
+  local nGroup = tbZFGroup["nAttrGroup" .. nIndex]
+  local szAttrType = self.tbFixGroup2AttrType[nGroup]
+  local tbAddVal = Lib:SplitStr2Num(tbZFGroup["szShowAddVal" .. nIndex])
+  local tbAttrVal = Lib:SplitStr2Num(tbZFGroup["szShowBaseVal" .. nIndex])
+  local szBaseDesc = FightSkill:GetMagicDesc(szAttrType, tbAttrVal)
+  local _, szAddDesc = FightSkill:GetMagicDescSplit(szAttrType, tbAddVal)
+  local nQuality = self:GetEyeQuality(me)
+  local szColor = self.tbEyeAttrColor[nQuality]
+  return i18n.EasyGet("{0}  <color=#{1}>{2}</color>", szBaseDesc, Ui.tbColor:GetColorHexByDefineName(szColor), szAddDesc)
+end
+
+function PartnerZhenFa:GetFixBaseAttrDesc(nPos, nIndex)
+  local tbZFGroup = self:GetPosGroupCfg(me, nPos)
+  if not tbZFGroup then
+    LogErr("PartnerZhenFa:GetFixBaseAttrDesc Error. GetCurPosGroupCfg is nil", me.dwID, nPos, nIndex)
+    return
+  end
+  local nGroup = tbZFGroup["nAttrGroup" .. nIndex]
+  local szAttrType = self.tbFixGroup2AttrType[nGroup]
+  local tbAttrVal = Lib:SplitStr2Num(tbZFGroup["szShowBaseVal" .. nIndex])
+  return FightSkill:GetMagicDesc(szAttrType, tbAttrVal)
+end
+
+function PartnerZhenFa:GetFixAttrEnhanceDescInfo(nIndex)
+  local szFinalName, szFinalValue
+  local nLevel = me.GetUserValue(self.FixAttrLevelSaveGroup, nIndex)
+  if nLevel > 0 then
+    local tbLevelAttr = self:GetZFEnhanceFixAttr(me, nil, nLevel, nIndex)
+    if not tbLevelAttr then
+      LogErr("PartnerZhenFa:GetFixAttrEnhanceDescInfo Error GetZFEnhanceFixAttr is nil", nLevel, nIndex)
+      return
+    end
+    szFinalName, szFinalValue = FightSkill:GetMagicDescSplit(tbLevelAttr[1], {
+      tbLevelAttr[2],
+      tbLevelAttr[3],
+      tbLevelAttr[4]
+    })
+  else
+    local tbBaseAttr = self:GetZFBaseFixAttr(me, nil, nIndex)
+    if not tbBaseAttr then
+      LogErr("PartnerZhenFa:GetFixAttrEnhanceDescInfo Error GetZFBaseFixAttr is nil", nIndex)
+      return
+    end
+    szFinalName, szFinalValue = FightSkill:GetMagicDescSplit(tbBaseAttr[1], {
+      0,
+      0,
+      0
+    })
+  end
+  return nLevel, szFinalName, szFinalValue
+end
+
+function PartnerZhenFa:GetRandomAttrDesc(nIndex, nZFLevel, bWash)
+  local tbRandomAttr = bWash and self:GetZFWashRandomAttr(me, nIndex) or self:GetZFRandomAttr(me, nIndex)
+  if not tbRandomAttr then
+    LogErr("PartnerZhenFa:GetRandomAttrDesc Error GetZFRandomAttr is nil", nIndex, nZFLevel, bWash)
+    return ""
+  end
+  local szAttrDesc = FightSkill:GetMagicDesc(tbRandomAttr[1], {
+    tbRandomAttr[2],
+    tbRandomAttr[3],
+    tbRandomAttr[4]
+  })
+  local nQuality = self:GetRandomAttrQuality(me, nIndex, nZFLevel)
+  if not nQuality then
+    LogErr("PartnerZhenFa:GetRandomAttrDesc Error GetRandomAttrQuality is nil", nZFLevel, nIndex)
+    return ""
+  end
+  local szColor = PartnerZhenFa.tbAttrColor[nQuality]
+  szAttrDesc = i18n.EasyGet("<color=#{0}>{1}</color>", Ui.tbColor:GetColorHexByDefineName(szColor), szAttrDesc)
+  return szAttrDesc
+end
+
+function PartnerZhenFa:GetRandomAttrWashValInfo(nIndex)
+  local tbAttr = self:GetZFRandomAttr(me, nIndex)
+  if not tbAttr then
+    LogErr("PartnerZhenFa:GetRandomAttrWashValInfo Error GetZFRandomAttr is nil", nIndex)
+    return
+  end
+  local szName, szValue = FightSkill:GetMagicDescSplit(tbAttr[1], {
+    tbAttr[2],
+    tbAttr[3],
+    tbAttr[4]
+  })
+  local nGroup = me.GetUserValue(self.RandomAttrSaveGroup, nIndex)
+  local nMaxLevel = self:GetCurMaxRandomAttrLevel(me)
+  local tbMaxAttr = self.tbRandomAttrPool[nGroup][nMaxLevel]
+  if not tbMaxAttr then
+    LogErr("PartnerZhenFa:GetRandomAttrWashValInfo Error GetMaxAttr is nil", nIndex, nGroup, nMaxLevel)
+    return
+  end
+  local _, szMaxValue = FightSkill:GetMagicDescSplit(tbMaxAttr.szAttrType, {
+    tbMaxAttr.nAttrVal1,
+    tbMaxAttr.nAttrVal2,
+    tbMaxAttr.nAttrVal3
+  })
+  return szName, szValue, self.tbWashRandomAttrDiff[nIndex], szMaxValue
+end
+
+function PartnerZhenFa:GetZFCount()
+  for _, tbPosCfg in pairs(self.tbZFGroup) do
+    return Lib:CountTB(tbPosCfg)
+  end
+  return 0
+end
+
+function PartnerZhenFa:GetFixAttrEnhanceCfg(nIndex, nLevel)
+  nLevel = nLevel or me.GetUserValue(self.FixAttrLevelSaveGroup, nIndex)
+  return self.tbFixAttrLevelUp[nLevel]
+end
+
+function PartnerZhenFa:GetZFLevelCfg(nLevel)
+  nLevel = nLevel or me.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nZFLevel)
+  return self.tbZFLevel[nLevel]
+end
+
+function PartnerZhenFa:OnCrossDays()
+  self:TryLightDailyRedPoint()
+end
+
+function PartnerZhenFa:OnSyncItem()
+  self:TryUpdateEnhanceRedPoint()
+  self:TryUpdateLevelUpRedPoint()
+  self:TryUpdateWashRandomValRedPoint()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_ZHENFA_UI_REFRESH, self.tbUIRefreshType.SYNCITEM)
+end
+
+function PartnerZhenFa:OnDelItem()
+  self:TryUpdateEnhanceRedPoint()
+  self:TryUpdateLevelUpRedPoint()
+  self:TryUpdateWashRandomValRedPoint()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_ZHENFA_UI_REFRESH, self.tbUIRefreshType.SYNCITEM)
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, PartnerZhenFa)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, PartnerZhenFa.OnCrossDays, PartnerZhenFa)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, PartnerZhenFa)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, PartnerZhenFa.OnSyncItem, PartnerZhenFa)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_DEL_ITEM, PartnerZhenFa)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_DEL_ITEM, PartnerZhenFa.OnDelItem, PartnerZhenFa)

@@ -1,0 +1,297 @@
+Require("CommonScript/DomainBattle/DomainBattleDef.lua")
+Require("Script/Fuben/FubenUIController.lua")
+DomainBattle.tbOccupyShowList = DomainBattle.tbOccupyShowList or {}
+DomainBattle.nRank = DomainBattle.nRank or nil
+DomainBattle.szWeekDay = DomainBattle.szWeekDay or nil
+DomainBattle.szStartTime = DomainBattle.szStartTime or nil
+
+function DomainBattle:NotifyOpen(nTimeOut)
+  Ui:SynNotifyMsg({
+    szType = "DomainBattleStart",
+    nTimeOut = nTimeOut
+  })
+  RedPointMgr:LightRedPoint(RedPointMgr.EVENT.DomainBattleOpen)
+end
+
+function DomainBattle:ClientLoginReq()
+  RemoteServer.RequestDomainBattle("ClientLoginReq")
+end
+
+function DomainBattle:QueryBaseReq()
+  RemoteServer.RequestDomainBattle("QueryBaseReq", self.nBaseVersion)
+end
+
+function DomainBattle:QueryBaseRsp(nBaseVersion, nGameState, tbClaimList, tbLastOccupyList, tbOccupyList, tbOccupyShowList, tbMonsterFlagList, nRank, szWeekDay, szStartTime)
+  self.nBaseVersion = nBaseVersion
+  self.nGameState = nGameState
+  self.tbClaimList = tbClaimList
+  self.tbLastOccupyList = tbLastOccupyList
+  self.tbOccupyList = tbOccupyList
+  self.tbOccupyShowList = tbOccupyShowList
+  self.tbMonsterFlagList = tbMonsterFlagList
+  self.nRank = nRank
+  self.szWeekDay = szWeekDay
+  self.szStartTime = szStartTime
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TONG_DOMAIN_INFO)
+end
+
+function DomainBattle:QueryScoreReq()
+  if self:IsGamePhase() and self:IsGameMap(me.nMapTemplateId) then
+    RemoteServer.RequestDomainBattle("QueryScoreReq")
+  end
+end
+
+function DomainBattle:QueryScoreRsp(tbDomainList, tbAttendeeList)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TONG_DOMAIN_SCORE, tbDomainList, tbAttendeeList)
+end
+
+function DomainBattle:QueryResultReq()
+  RemoteServer.RequestDomainBattle("QueryResultReq")
+end
+
+function DomainBattle:QueryResultRsp(tbResultList, nMyRank)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TONG_DOMAIN_RESULT, tbResultList, nMyRank)
+end
+
+function DomainBattle:ClaimReq(nMapTid)
+  local bRet, szErr = self:CanClaim(me, nMapTid, false)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  
+  local function fnConfirm()
+    RemoteServer.RequestDomainBattle("ClaimReq", nMapTid)
+  end
+  
+  local szMsg = i18n.EasyGet("\231\161\174\229\174\154\229\175\185{0}\229\143\145\232\181\183\229\174\163\230\136\152\229\144\151\239\188\159", Map:GetMapName(nMapTid))
+  me.MsgBox(szMsg, {
+    {
+      i18n.szOk,
+      fnConfirm
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function DomainBattle:AttendReq(nMapTid)
+  local bRet, szErr = self:CanAttend(me, nMapTid)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  
+  local function fnEnter()
+    RemoteServer.RequestDomainBattle("AttendReq", nMapTid)
+    Ui:CloseWindow("UIWorldMap")
+    Ui:CloseWindow("UITong")
+  end
+  
+  local bRet, szErr = ActivityCheck:CheckCanEnterActivityEx(me, nil, fnEnter, nil, nil, not self:IsGameMap(me.nMapTemplateId))
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+end
+
+function DomainBattle:SendToFrontReq(nFrontIdx)
+  local bRet, szErr = self:CanSendToFront(me, nFrontIdx)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  RemoteServer.RequestDomainBattle("SendToFrontReq", nFrontIdx)
+end
+
+function DomainBattle:FollowMemberReq(nFromMapId, nFromMapTid, nTargetMapId, nTargetMapTid)
+  RemoteServer.RequestDomainBattle("FollowMemberReq", nTargetMapId, nTargetMapTid)
+end
+
+function DomainBattle:FollowMemberRsp(bRet)
+  if not bRet and TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+end
+
+function DomainBattle:GetOccupierShow(nMapTid)
+  local nOccupier = self:GetOccupier(nMapTid)
+  return nOccupier and self.tbOccupyShowList[nOccupier] or i18n.EasyGet("\230\151\160")
+end
+
+function DomainBattle:IsWeekDay()
+  if not self.szWeekDay then
+    return false
+  end
+  return nil ~= string.find(self.szWeekDay, tostring(Lib:GetLocalWeekDay()))
+end
+
+function DomainBattle:OnLogin()
+  self.nBaseVersion = 0
+  if self:IsGameMap(me.nMapTemplateId) then
+    self:QueryBaseReq()
+  else
+    self:ClientLoginReq()
+  end
+end
+
+function DomainBattle:OnCalendarAction()
+  if not Tong:HasTong() then
+    me.CenterMsg(i18n.EasyGet("\233\156\128\232\166\129\229\133\136\229\138\160\229\133\165\229\184\174\228\188\154"))
+    return
+  end
+  Ui:OpenWindow("UITong", "ACTIVITY")
+end
+
+function DomainBattle:OnFubenMapLoaded(pPlayer)
+  FubenUIController:OpenFuBenUI()
+end
+
+function DomainBattle:IsShowTipWhenQuit()
+  return false
+end
+
+function DomainBattle:IsNeedFuncScoreButton()
+  return true, {
+    Ui.SwitchWindow,
+    Ui,
+    "UIHudDomainScore"
+  }
+end
+
+function DomainBattle:IsNeedExitFubenButton()
+  local function fnCallback()
+    me.MsgBox(i18n.EasyGet("\230\152\175\229\144\166\231\161\174\229\174\154\231\166\187\229\188\128\233\162\134\229\156\159\229\156\176\229\155\190\239\188\159"), {
+      {
+        i18n.szOk,
+        
+        function()
+          FubenUIController:RequireQuit()
+        end
+      },
+      {
+        i18n.szCancel
+      }
+    })
+  end
+  
+  return true, {fnCallback}
+end
+
+function DomainBattle:IsNeedFubenBtn()
+  local tbBtnList
+  local tbSetting = self.MAP_FIGHT[me.nMapTemplateId]
+  if tbSetting and tbSetting.POS.FRONT then
+    tbBtnList = {}
+    
+    local function fnGoto(nIndex)
+      TeamMgr:StopFollowMember()
+      AFK:Stop()
+      Timer:Register(Env.GAME_FPS / 2, function()
+        DomainBattle:SendToFrontReq(nIndex)
+      end)
+    end
+    
+    for nIndex, tbPos in ipairs(tbSetting.POS.FRONT) do
+      table.insert(tbBtnList, {
+        szName = i18n.EasyGet("\229\137\141\231\186\191{0}", nIndex),
+        fnOnClick = function()
+          fnGoto(nIndex)
+        end
+      })
+    end
+  end
+  return true, nil, tbBtnList
+end
+
+function DomainBattle:IsHadOccupyInfo(bIsHadOccupyInfo)
+  self.bIsHadOccupyInfo = bIsHadOccupyInfo
+end
+
+function DomainBattle:GetOccupyListInfoRsp(tbData)
+  if Ui:WindowVisible("UINewInformation") then
+    Ui:GetWindow("UINewInformation"):UpdateDomainBattlePanel(tbData)
+  end
+end
+
+function DomainBattle:GetFubenBtnAImagePathAndText()
+  return "UI/atlas/hud/btn_transfer.png", nil
+end
+
+function DomainBattle:RegisterFubenUIChecker()
+  local tbMapList = {}
+  for nMapTid, _ in pairs(self.MAP_FIGHT) do
+    table.insert(tbMapList, nMapTid)
+  end
+  FubenUIController:RegisterChecker(tbMapList, self)
+end
+
+function DomainBattle:RegisterFubenClass()
+  for nMapTid, _ in pairs(self.MAP_FIGHT) do
+    local tbMapClass = Map:GetClass(nMapTid)
+    
+    function tbMapClass:TransmitFrom(...)
+      DomainBattle:FollowMemberReq(...)
+    end
+  end
+end
+
+function DomainBattle:GiveItem(nMemberId, nItemId, nTemplateId)
+  RemoteServer.RequestDomainBattle("RequestGiveItem", nMemberId, nItemId, nTemplateId)
+end
+
+function DomainBattle:OnGiveSucc()
+  Ui:CloseWindow("UIExperienceBook")
+end
+
+function DomainBattle:ApplyMagicAttr()
+  local tbAttrList
+  for nIndex, tbInfo in pairs(self.TRANSFORM_ATTRIBUTE_LIST) do
+    if GetTimeFrameState(tbInfo.szTimeFrame) > 0 then
+      tbAttrList = tbInfo.tbAttrList
+    else
+      break
+    end
+  end
+  if tbAttrList then
+    local pNpc = me.GetNpc()
+    for nIndex, tbAttr in pairs(tbAttrList) do
+      pNpc.ApplyMagicAttrib(table.unpack(tbAttr))
+    end
+  end
+  self.bTransform = true
+end
+
+function DomainBattle:RemoveMagicAttr()
+  local tbAttrList
+  for nIndex, tbInfo in pairs(self.TRANSFORM_ATTRIBUTE_LIST) do
+    if GetTimeFrameState(tbInfo.szTimeFrame) > 0 then
+      tbAttrList = tbInfo.tbAttrList
+    else
+      break
+    end
+  end
+  if tbAttrList then
+    local pNpc = me.GetNpc()
+    for nIndex, tbAttr in pairs(tbAttrList) do
+      pNpc.RemoveMagicAttrib(table.unpack(tbAttr))
+    end
+  end
+  self.bTransform = false
+end
+
+function DomainBattle:IsTransform()
+  return self.bTransform
+end
+
+function DomainBattle:Init()
+  if self.bInit then
+    return
+  end
+  self:RegisterFubenUIChecker()
+  self:RegisterFubenClass()
+  self.bInit = true
+end
+
+DomainBattle:Init()

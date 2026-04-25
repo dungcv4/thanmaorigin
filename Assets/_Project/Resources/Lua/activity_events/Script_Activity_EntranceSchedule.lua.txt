@@ -1,0 +1,232 @@
+Require("CommonScript/Activity/Common/EntranceScheduleCfg.lua")
+ActivityMgr.EntranceSchedule = ActivityMgr.EntranceSchedule or {}
+local EntranceSchedule = ActivityMgr.EntranceSchedule
+EntranceSchedule.ActivityType = {}
+local tbJumpFunc = {}
+
+function EntranceSchedule:GetActivityCfg(szType)
+  local tbActivityList = self:GetActivityList()
+  if not tbActivityList then
+    Log("EntranceSchedule:GetActivity() data nil ")
+    return nil
+  end
+  for nId in pairs(ActivityMgr:GetIdListByClassName(szType)) do
+    local tbConfig = self:BuildInstanceConfig(nId, szType)
+    return tbConfig
+  end
+  return nil
+end
+
+function EntranceSchedule:GetActivityList(nEntranceIndex)
+  local tbEntranceCfg = ActivityMgr.EntranceScheduleCfg[nEntranceIndex]
+  if tbEntranceCfg and tbEntranceCfg.ActivityListV2 then
+    return self:GetActivityListV2(nEntranceIndex)
+  end
+  if not tbEntranceCfg or not tbEntranceCfg.ActivityList then
+    return {}
+  end
+  local tbList = {}
+  local tbConfig, szName, pInstance
+  for nId, szType in pairs(tbEntranceCfg.ActivityList) do
+    tbConfig, pInstance = self:BuildInstanceConfig(nId, szType)
+    if tbConfig then
+      szName = tbConfig.szName and i18n.Parse(tbConfig.szName) or ""
+      table.insert(tbList, {
+        szClassName = szType,
+        nId = nId,
+        szName = szName,
+        szDesc = i18n.Parse(tbConfig.szDesc),
+        nLevel = tbConfig.nLevel or tbConfig.nJoinLevel,
+        tbAward = Award:GetAward(tbConfig.nShowAwardId or tbConfig.nAwardId or -1, tbConfig.nShowAwardKey or tbConfig.nAwardKey or -1) or {},
+        pFunc = ActivityMgr.tbJumpFunc[tbConfig.szJumpType or szType],
+        szJumpParam = tbConfig.szJumpParam,
+        szShowTime = i18n.Parse(tbConfig.szShowTime or ""),
+        nSortValue = tbEntranceCfg.SortList[nId] or 0,
+        tbRedPointEventId = pInstance and pInstance.GetRedPointEventList and pInstance:GetRedPointEventList(),
+        szExtraParam = tbConfig.szExtraParam,
+        bNeedCloseTopRedPoint = 1 == tbConfig.nNeedCloseTopRedPoint and true or false,
+        bDirectJump = Lib:IIF(tbConfig.nDirectJump and 1 == tbConfig.nDirectJump, true, false),
+        szHelpKey = tbEntranceCfg.HelpList and tbEntranceCfg.HelpList[nId] or "",
+        szCallBack1 = tbConfig.szCallBack1 or "",
+        szCallBack2 = tbConfig.szCallBack2 or "",
+        szCallBackParam1 = tbConfig.szCallBackParam1 or "",
+        szCallBackParam2 = tbConfig.szCallBackParam2 or ""
+      })
+    end
+  end
+  table.sort(tbList, function(tbFirst, tbSecond)
+    return tbFirst.nSortValue > tbSecond.nSortValue
+  end)
+  return tbList
+end
+
+function EntranceSchedule:GetActivityListV2(nEntranceIndex)
+  local tbEntranceCfg = ActivityMgr.EntranceScheduleCfg[nEntranceIndex]
+  if not tbEntranceCfg or not tbEntranceCfg.ActivityListV2 then
+    return {}
+  end
+  local tbList = {}
+  local tbConfig, pInstance, szName, szDesc
+  for nIndex, tbInfo in ipairs(tbEntranceCfg.ActivityListV2) do
+    local bShow = ActivityMgr:CheckCanShow(tbInfo.szCanShowType)
+    if bShow then
+      tbConfig, pInstance = self:BuildInstanceConfig(tbInfo.nActId, tbInfo.szClassName)
+      if tbConfig and tbInfo.nActId ~= tbEntranceCfg.nMainActId then
+        szName = tbConfig.szName and i18n.Parse(tbConfig.szName) or ""
+        szDesc = i18n.Parse(tbConfig.szDesc)
+        table.insert(tbList, {
+          szClassName = tbInfo.szClassName,
+          nId = tbInfo.nActId,
+          szName = szName,
+          szDesc = szDesc,
+          nLevel = tbConfig.nLevel or tbConfig.nJoinLevel or tbConfig.nLevelLimit,
+          tbAward = Award:GetAward(tbConfig.nShowAwardId or tbConfig.nAwardId or -1, tbConfig.nShowAwardKey or tbConfig.nAwardKey or -1) or {},
+          pFunc = ActivityMgr.tbJumpFunc[tbConfig.szJumpType or szType],
+          szJumpParam = tbConfig.szJumpParam,
+          szShowTime = i18n.Parse(tbConfig.szShowTime or ""),
+          nSortValue = tbInfo.nSortOrder,
+          tbRedPointEventId = pInstance and pInstance.GetRedPointEventList and pInstance:GetRedPointEventList(),
+          szExtraParam = tbConfig.szExtraParam,
+          bNeedCloseTopRedPoint = 1 == tbConfig.nNeedCloseTopRedPoint and true or false,
+          bDirectJump = Lib:IIF(tbConfig.nDirectJump and 1 == tbConfig.nDirectJump, true, false),
+          szHelpKey = tbInfo.szHelpKey or "",
+          szCallBack1 = tbConfig.szCallBack1 or "",
+          szCallBack2 = tbConfig.szCallBack2 or "",
+          szCallBackParam1 = tbConfig.szCallBackParam1 or "",
+          szCallBackParam2 = tbConfig.szCallBackParam2 or "",
+          nIndex = nIndex,
+          szOutsideDesc = Lib:IIF(Lib:IsEmptyStr(tbInfo.szOutsideDesc), szDesc, i18n.Get(tbInfo.szOutsideDesc))
+        })
+      end
+    end
+  end
+  table.sort(tbList, function(tbFirst, tbSecond)
+    return tbFirst.nSortValue > tbSecond.nSortValue
+  end)
+  return tbList
+end
+
+function EntranceSchedule:BuildInstanceConfig(nId, szType)
+  local pInstance = ActivityMgr:GetInstanceById(nId)
+  if pInstance then
+    return pInstance:GetConfig(), pInstance
+  end
+  local tmpInstance = ActivityMgr:Create(szType)
+  if not tmpInstance then
+    return
+  end
+  tmpInstance:OnInit(ActivityMgr:GetConfigById(nId))
+  return tmpInstance:GetConfig()
+end
+
+function EntranceSchedule:OnActive(nId)
+  local pInstance = ActivityMgr:GetInstanceById(nId)
+  if not pInstance then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return
+  end
+end
+
+function EntranceSchedule:GetTitle(nIndex)
+  if not ActivityMgr.EntranceScheduleCfg[nIndex] then
+    return ""
+  end
+  return i18n.Get(ActivityMgr.EntranceScheduleCfg[nIndex].szTitle)
+end
+
+function EntranceSchedule:GetSmallTitle(nIndex)
+  if not ActivityMgr.EntranceScheduleCfg[nIndex] then
+    return ""
+  end
+  return i18n.Get(ActivityMgr.EntranceScheduleCfg[nIndex].szSmallTitle)
+end
+
+function EntranceSchedule:CallScript(szFunc, ...)
+  if string.find(szFunc, ":") then
+    local szTable, szFunc = string.match(szFunc, "^(.*):(.*)$")
+    local tb = load("return " .. szTable)()
+    if tb and nil ~= tb[szFunc] then
+      return tb[szFunc](tb, ...)
+    else
+      Log("CallClientScript", szTable, szFunc, "is nil")
+    end
+  else
+    local func = load("return " .. szFunc)()
+    return func(...)
+  end
+end
+
+function EntranceSchedule:GetEntranceRankData(nEntranceIndex)
+  local tbEntranceCfg = ActivityMgr.EntranceScheduleCfg[nEntranceIndex]
+  if not tbEntranceCfg or not tbEntranceCfg.RankLayerIdList then
+    return {}
+  end
+  local tbRankData = {}
+  tbRankData.szTitle = tbEntranceCfg.szRankTitle ~= nil and tbEntranceCfg.szRankTitle or ""
+  tbRankData.tbRankLayerIdList = tbEntranceCfg.RankLayerIdList ~= nil and tbEntranceCfg.RankLayerIdList or {}
+  return tbRankData
+end
+
+function EntranceSchedule:BuildInstance(nId, szType)
+  local pInstance = ActivityMgr:GetInstanceById(nId)
+  if pInstance then
+    return pInstance
+  end
+  local tmpInstance = ActivityMgr:Create(szType)
+  if not tmpInstance then
+    return
+  end
+  tmpInstance:OnInit(ActivityMgr:GetConfigById(nId))
+  return tmpInstance
+end
+
+function EntranceSchedule:GetStepList(nEntranceIndex, nIndex)
+  if not ActivityMgr.EntranceScheduleCfg[nEntranceIndex] or not ActivityMgr.EntranceScheduleCfg[nEntranceIndex].tbStep then
+    return {}
+  end
+  return ActivityMgr.EntranceScheduleCfg[nEntranceIndex].tbStep[nIndex] or {}
+end
+
+function EntranceSchedule:GetExtraData(nEntranceIndex, nIndex)
+  if not ActivityMgr.EntranceScheduleCfg[nEntranceIndex] or not ActivityMgr.EntranceScheduleCfg[nEntranceIndex].tbExtraData then
+    return {}
+  end
+  return ActivityMgr.EntranceScheduleCfg[nEntranceIndex].tbExtraData[nIndex] or {}
+end
+
+function EntranceSchedule:OpenDragonBoatRaceWindow()
+  local szUiName = "UIDragonBoatRace"
+  local nCurTime = GetTime()
+  local nStartTime, nEndTime, bShow
+  for nEntranceIndex, tbCfg in pairs(ActivityMgr.EntranceScheduleCfg) do
+    if tbCfg.ActivityListV2 then
+      nStartTime = Lib:ParseDateTime(tbCfg.szStartTime)
+      nEndTime = Lib:ParseDateTime(tbCfg.szEndTime)
+      bShow = not bIsInFuBen and me.nLevel >= tbCfg.nLevel
+      bShow = bShow and nCurTime >= nStartTime and nCurTime < nEndTime
+      if bShow then
+        for nIndex, tbInfo in pairs(tbCfg.ActivityListV2) do
+          if tbInfo.szUiName == szUiName then
+            Ui:OpenWindow(tbCfg.szWndName, nEntranceIndex, tbInfo.nActId)
+            return
+          end
+        end
+      end
+    end
+  end
+  Log("EntranceSchedule:OpenDragonBoatRaceWindow fail")
+end
+
+function EntranceSchedule:GetExtraBtnList(nEntranceIndex, nIndex)
+  if not (ActivityMgr.EntranceScheduleCfg[nEntranceIndex] and ActivityMgr.EntranceScheduleCfg[nEntranceIndex].tbExtraBtnList) or not ActivityMgr.EntranceScheduleCfg[nEntranceIndex].tbExtraBtnList[nIndex] then
+    return {}
+  end
+  local tbExtraBtnList = {}
+  for idx, tbInfo in ipairs(ActivityMgr.EntranceScheduleCfg[nEntranceIndex].tbExtraBtnList[nIndex]) do
+    local bShow = ActivityMgr:CheckCanShow(tbInfo.szCanShowType)
+    if bShow then
+      table.insert(tbExtraBtnList, tbInfo)
+    end
+  end
+  return tbExtraBtnList
+end

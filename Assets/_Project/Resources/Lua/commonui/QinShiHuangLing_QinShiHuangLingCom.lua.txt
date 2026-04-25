@@ -1,0 +1,362 @@
+Require("CommonScript/QinShiHuangLing/QinShiHuangLingDef.lua")
+
+function QinShiHuangLing:LoadSetting()
+  self.tbPosListSetting = {}
+  self.tbMainSetting = {}
+  self.tbBossSetting = {}
+  self.tbAllTMapSetting = {}
+  self.tbTimeFrameTMapSetting = {}
+  local tbFileData = Lib:LoadTabFile("Setting/QinShiHuangLing/PosList.tab", {PosID = 1})
+  for _, tbInfo in pairs(tbFileData) do
+    local tbPosInfo = {}
+    tbPosInfo.nMapID = tonumber(tbInfo.MapID)
+    tbPosInfo.strMapName = tbInfo.MapName
+    tbPosInfo.tbPos = Lib:GetTabFromString1(tbInfo.Pos)
+    tbPosInfo.nTrapIndex = tonumber(tbInfo.TrapIndex)
+    self.tbPosListSetting[tbInfo.PosID] = tbPosInfo
+  end
+  tbFileData = Lib:LoadTabFile("Setting/QinShiHuangLing/Main.tab", {
+    ShowAwardID = 1,
+    ShowNpcID = 1,
+    BossId = 1,
+    BossNum = 1,
+    FalseBossId = 1,
+    FalseBossNum = 1,
+    NpcLevel = 1,
+    SeriesType = 1,
+    AwardId = 1,
+    TongAwardId = 0,
+    Sort = 1
+  })
+  for nRow, tbInfo in pairs(tbFileData) do
+    local tbNpcInfo = {}
+    tbNpcInfo.nShowAwardID = tbInfo.ShowAwardID
+    tbNpcInfo.nShowNpcID = tbInfo.ShowNpcID
+    tbNpcInfo.nBossId = tbInfo.BossId
+    tbNpcInfo.nBossNum = tbInfo.BossNum
+    tbNpcInfo.nFalseBossId = tbInfo.FalseBossId
+    tbNpcInfo.nFalseBossNum = tbInfo.FalseBossNum
+    tbNpcInfo.nNpcLevel = tbInfo.NpcLevel
+    tbNpcInfo.nSeries = tbInfo.SeriesType
+    tbNpcInfo.nAwardId = tbInfo.AwardId
+    tbNpcInfo.nTongAwardId = tbInfo.TongAwardId
+    tbNpcInfo.nSort = tbInfo.Sort
+    tbNpcInfo.tbPosIDs = Lib:SplitStr2Num(tbInfo.PosIDs)
+    tbNpcInfo.tbMapTIDs = {}
+    for _, posID in pairs(tbNpcInfo.tbPosIDs) do
+      local posInfo = self.tbPosListSetting[posID]
+      if posInfo then
+        local arr
+        tbNpcInfo.tbMapTIDs[posID] = posInfo
+        arr = Lib:DefaultTable(self.tbAllTMapSetting, posInfo.nMapID)
+        table.insert(arr, posID)
+        arr = Lib:DefaultTable(self.tbTimeFrameTMapSetting, tbInfo.TimeFrame, posInfo.nMapID)
+        table.insert(arr, posID)
+      end
+    end
+    local tbNpcInfoArr = Lib:DefaultTable(self.tbMainSetting, tbInfo.TimeFrame, tbNpcInfo.nShowNpcID)
+    table.insert(tbNpcInfoArr, tbNpcInfo)
+    local tbTrueBoss = Lib:DefaultTable(self.tbBossSetting, tbInfo.TimeFrame, "tbTrueBoss")
+    if tbNpcInfo.nBossId > 0 and tbNpcInfo.nBossNum > 0 then
+      local tbTrueBossData = {}
+      tbTrueBossData.nShowNpcID = tbNpcInfo.nShowNpcID
+      tbTrueBossData.nNpcTId = tbNpcInfo.nBossId
+      tbTrueBossData.nNpcLevel = tbNpcInfo.nNpcLevel
+      tbTrueBossData.nSeries = tbNpcInfo.nSeries
+      tbTrueBossData.nAwardId = tbNpcInfo.nAwardId
+      tbTrueBossData.nTongAwardId = tbNpcInfo.nTongAwardId
+      tbTrueBossData.nCount = tbNpcInfo.nBossNum
+      tbTrueBossData.tbPosIDs = tbNpcInfo.tbPosIDs
+      tbTrueBossData.tbMapTIDs = tbNpcInfo.tbMapTIDs
+      tbTrueBossData.bIsFalseBoss = nil
+      table.insert(tbTrueBoss, tbTrueBossData)
+    end
+  end
+  self.tbPosListSetting = SetReadOnly(self.tbPosListSetting)
+  self.tbMainSetting = SetReadOnly(self.tbMainSetting)
+  self.tbBossSetting = SetReadOnly(self.tbBossSetting)
+end
+
+QinShiHuangLing:LoadSetting()
+QinShiHuangLing.nState = QinShiHuangLing.STATE_INIT
+
+function QinShiHuangLing:GetState()
+  return self.nState
+end
+
+function QinShiHuangLing:IsInMap(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  for _, nMapTempleteID in pairs(self.tbMapTIDArr) do
+    if pPlayer.nMapTemplateId == nMapTempleteID then
+      return true
+    end
+  end
+  return false
+end
+
+function QinShiHuangLing:IsDailyStage()
+  local nState = self:GetState()
+  return nState == self.STATE_DAILY_START or nState == self.STATE_DAILY_RESUME
+end
+
+function QinShiHuangLing:IsKingStage()
+  local nState = self:GetState()
+  return nState >= self.STATE_ACT_NOT_BEGIN and nState <= self.STATE_END_ACT
+end
+
+function QinShiHuangLing:GetDailyMapCfg(nMapTID)
+  local tbMapCfgs = self.tbDaily.tbMapCfgs
+  if not tbMapCfgs then
+    tbMapCfgs = {}
+    self.tbDaily.tbMapCfgs = tbMapCfgs
+  end
+  local tbMapCfg = tbMapCfgs[nMapTID]
+  if not tbMapCfg then
+    tbMapCfg = {}
+    tbMapCfgs[nMapTID] = tbMapCfg
+    local tb = Map:GetMapSetting(nMapTID)
+    if not tb then
+      LogErr("fail to get map setting:", nMapTID)
+    else
+      local szPath = tb.InfoFilePath
+      if Lib:IsEmptyStr(szPath) then
+        LogErr("invalid InfoFilePath:", nMapTID)
+      else
+        szPath = string.format("Setting/Map/%s/info/npc_richang_info.txt", szPath)
+        local tbFileData = Lib:LoadTabFile(szPath)
+        if not tbFileData then
+          LogErr("fail to load file:", szPath)
+        else
+          tbMapCfg.tbNpcCfgs = tbFileData
+        end
+      end
+    end
+  end
+  return tbMapCfg
+end
+
+function QinShiHuangLing:GetDailyMapNpcCfgs(nMapTID)
+  local tbMapCfg = self:GetDailyMapCfg(nMapTID)
+  if tbMapCfg then
+    return tbMapCfg.tbNpcCfgs
+  end
+end
+
+function QinShiHuangLing:IsKingID(nBossID)
+  return self.tbKingIDs[nBossID] == true
+end
+
+function QinShiHuangLing:LayerIndex2MapTID(nLayerIndex)
+  return self.tbMapTIDArr[nLayerIndex]
+end
+
+function QinShiHuangLing:MapTID2LayerIndex(nMapTID)
+  for i, v in ipairs(self.tbMapTIDArr) do
+    if v == nMapTID then
+      return i
+    end
+  end
+end
+
+function QinShiHuangLing:GetTrapPosCfgs()
+  local tbTrapPosCfgs = self.tbTrapPosCfgs
+  if not tbTrapPosCfgs then
+    tbTrapPosCfgs = Lib:LoadTabFile("Setting/QinShiHuangLing/transport.tab") or {}
+    self.tbTrapPosCfgs = tbTrapPosCfgs
+  end
+  return tbTrapPosCfgs
+end
+
+function QinShiHuangLing:GetTrapPosData(nFromMapTID, nToMapTID)
+  local tbTrapPosCfgs = self:GetTrapPosCfgs()
+  for _, tbTrapPos in pairs(tbTrapPosCfgs) do
+    if tonumber(tbTrapPos.FromMapID) == nFromMapTID and tonumber(tbTrapPos.ToMapID) == nToMapTID then
+      return tbTrapPos
+    end
+  end
+end
+
+function QinShiHuangLing:GetTrapPosDataByName(szTrapName)
+  local tbTrapPosCfgs = self:GetTrapPosCfgs()
+  for _, tbTrapPos in pairs(tbTrapPosCfgs) do
+    if tbTrapPos.Name == szTrapName then
+      return tbTrapPos
+    end
+  end
+end
+
+function QinShiHuangLing:GetTimeFrameActConf()
+  local szCurTimeFrame = Lib:GetMaxTimeFrame(self.tbMainSetting)
+  return self.tbMainSetting[szCurTimeFrame], szCurTimeFrame
+end
+
+function QinShiHuangLing:GetTimeFrameMapSetting()
+  local szCurTimeFrame = Lib:GetMaxTimeFrame(self.tbTimeFrameTMapSetting)
+  return self.tbTimeFrameTMapSetting[szCurTimeFrame], szCurTimeFrame
+end
+
+function QinShiHuangLing:GetTimeFrameNpcsAndMaps()
+  Log("------------ perpare QinShiHuangLing maps and npcs ------------")
+  local szCurTimeFrame = Lib:GetMaxTimeFrame(self.tbMainSetting)
+  if not self.tbBossSetting[szCurTimeFrame] then
+    LogErr("QinShiHuangLing not Boss TimeFrame Config", szCurTimeFrame)
+    return
+  end
+  local tbBossSetting = Lib:CopyTB(self.tbBossSetting[szCurTimeFrame])
+  if not tbBossSetting then
+    LogErr("QinShiHuangLing not tbBossSetting", szCurTimeFrame)
+    return
+  end
+  local tbAllCreateBoss = {}
+  for nIdx, tbData in pairs(tbBossSetting.tbTrueBoss) do
+    tbAllCreateBoss[tbData.nNpcTId] = tbData
+    Log(string.format("Create count:%s TrueBoss nShowNpcID:%d, BossTemplateID:%d ", tbData.nCount, tbData.nShowNpcID, tbData.nNpcTId))
+  end
+  local tbCreateMapData = {}
+  for nTId, tbData in pairs(tbAllCreateBoss) do
+    for _, posID in pairs(tbData.tbPosIDs) do
+      local posInfo = self.tbPosListSetting[posID]
+      local nMapTId = tonumber(posInfo.nMapID) or 0
+      if posInfo and not tbCreateMapData[nMapTId] then
+        tbCreateMapData[nMapTId] = 1
+        Log("Create Map TID:", nMapTId)
+      end
+    end
+  end
+  Log("-----------------------QinShiHuangLing maps and npcs over ---------------------")
+  return tbCreateMapData, tbAllCreateBoss, szCurTimeFrame
+end
+
+function QinShiHuangLing:ShowOrHideRankPanel(bShow)
+  if bShow then
+    Ui:OpenHudFubenCustomWithTeam("UIGoldBossOutputInfo", "QinShiHuangLingHelp")
+  else
+    FubenUIController:OpenDefaultFuBenUI("QinShiHuangLingHelp")
+  end
+end
+
+function QinShiHuangLing:ClientShowNoticByProgress(nProgress, nTime)
+  local classifyColor = Ui.tbColor:GetColorByType("Classify")
+  local introColor = Ui.tbColor:GetColorByType("Intro")
+  self.nCurProgress = nProgress
+  if 1 == nProgress then
+    FubenUIController:OpenDefaultFuBenUI("QinShiHuangLingHelp", {
+      {
+        nTime,
+        i18n.EasyGet("<color=#{0}>\232\183\157\231\166\187\231\167\166\229\167\139\231\154\135\231\142\176\232\186\171\229\137\169\228\189\153</color>\239\188\154%s", classifyColor)
+      }
+    }, {
+      i18n.EasyGet("<color=#{0}>\229\128\146\232\174\161\230\151\182\231\187\147\230\157\159\229\144\142\229\176\134\231\142\176\232\186\171\231\167\166\229\167\139\231\154\135\229\146\140\233\166\150\233\162\134\239\188\140\229\176\134\229\133\182\229\135\187\232\180\165\229\144\142\239\188\140\230\160\185\230\141\174\229\184\174\228\188\154\228\188\164\229\174\179\230\142\146\229\144\141\232\142\183\229\190\151\229\165\150\229\138\177!</color>", introColor)
+    })
+  elseif 2 == nProgress then
+    FubenUIController:OpenDefaultFuBenUI("QinShiHuangLingHelp", {
+      {
+        nTime,
+        i18n.EasyGet("<color=#{0}>\232\183\157\231\166\187\230\180\187\229\138\168\231\187\147\230\157\159</color>\239\188\154%s", classifyColor)
+      }
+    }, {
+      i18n.EasyGet("<color=#{0}>\231\167\166\229\167\139\231\154\135\229\146\140\233\166\150\233\162\134\229\183\178\231\142\176\232\186\171\239\188\140\232\175\183\233\128\159\229\142\187\230\140\145\230\136\152!</color>", introColor)
+    })
+  elseif 3 == nProgress then
+    FubenUIController:OpenDefaultFuBenUI("QinShiHuangLingHelp", {
+      {
+        nTime,
+        i18n.EasyGet("<color=#{0}>\232\183\157\231\166\187\231\167\166\229\167\139\231\154\135\233\153\181\229\133\179\233\151\173</color>\239\188\154%s", classifyColor)
+      }
+    }, {
+      i18n.EasyGet("<color=#{0}>\230\180\187\229\138\168\229\183\178\231\187\143\231\187\147\230\157\159,\229\143\175\228\187\165\231\166\187\229\188\128\229\156\176\229\155\190!</color>", introColor)
+    })
+  elseif 10 == nProgress then
+    FubenUIController:OpenDefaultFuBenUI("QinShiHuangLingHelp", {
+      {
+        nTime,
+        i18n.EasyGet("<color=#{0}>\229\137\169\228\189\153\230\151\182\233\151\180</color>\239\188\154%s", classifyColor)
+      }
+    }, {
+      i18n.EasyGet("<color=#{0}>\229\128\146\232\174\161\230\151\182\231\187\147\230\157\159\229\144\142\229\176\134\229\188\186\229\136\182\231\166\187\229\188\128\231\167\166\229\167\139\231\154\135\233\153\181\229\156\176\229\155\190!</color>", introColor)
+    })
+  end
+end
+
+function QinShiHuangLing:ClientCustomCheckEnter(nMapTID)
+  if me.nLevel < QinShiHuangLing.nJoinLevel then
+    return false, i18n.EasyGet("\232\190\190\229\136\176{0}\231\186\167\230\137\141\229\143\175\229\143\130\229\138\160\230\180\187\229\138\168", QinShiHuangLing.nJoinLevel)
+  end
+  local nMapLevel = Map:GetEnterLevel(nMapTID)
+  if nMapLevel > me.nLevel then
+    return false, i18n.EasyGet("\232\190\190\229\136\176{0}\231\186\167\230\137\141\229\143\175\232\191\155\229\133\165\232\175\165\229\156\176\229\155\190", nMapLevel)
+  end
+  local bRet, szMsg = ActivityCheck:CheckCanEnterActivityEx(me, nil, nil, false, false, true, nil, {
+    "UIQinShiHuangLingEntrance"
+  }, false)
+  return bRet, szMsg
+end
+
+function QinShiHuangLing:ClientCanEnterQinShiHuangLing(nMapTID, nX, nY)
+  local bRet, szMsg = QinShiHuangLing:ClientCustomCheckEnter(nMapTID)
+  if not bRet then
+    me.CenterMsg(szMsg or "")
+    return
+  end
+  RemoteServer.QinShiHuangLingEnterFuben(nMapTID, nX, nY)
+end
+
+function QinShiHuangLing:IsQinShiHuangLingMap(nMapTID)
+  if not self.tbAllTMapSetting[nMapTID] then
+    return false
+  end
+  return true
+end
+
+function QinShiHuangLing:IsCurTimeFrameQinShiHuangLingMap(nMapTID)
+  local curTimeFrameMap, nCurTimeFrame = QinShiHuangLing:GetTimeFrameMapSetting()
+  if not curTimeFrameMap[nMapTID] then
+    return false
+  end
+  return true
+end
+
+function QinShiHuangLing:GetShowAwardKey()
+  local tbMapGroup = QinShiHuangLing:GetTimeFrameActConf()
+  if not tbMapGroup then
+    LogErr("QinShiHuangLing fatal error, Config is nil")
+    return
+  end
+  for nMapTID, tbMapInfo in pairs(tbMapGroup) do
+    local nShowAwardKey = tbMapInfo.ShowAwardKey
+    if nShowAwardKey and nShowAwardKey > 0 then
+      return nShowAwardKey
+    end
+  end
+  return
+end
+
+function QinShiHuangLing:CheckActOpen(pPlayer)
+  return QinShiHuangLing.bGMOpen
+end
+
+function QinShiHuangLing:GetDailyRemainTime(pPlayer)
+  local nRemainTime = pPlayer.GetUserValue(self.Daily.Degree.GroupKey, self.Daily.RemainTimeSaveID)
+  return nRemainTime or 0
+end
+
+function QinShiHuangLing:GetCurrentScriptData()
+  return ScriptData:GetValue(QinShiHuangLing.SCRIPTDATA_NAME, 0)
+end
+
+function QinShiHuangLing:GetNpcLevelFaction()
+  local tbWuLinGaoShouData = QinShiHuangLing:GetCurrentScriptData() or {}
+  local nNpcLevelFaction = tbWuLinGaoShouData.nNpcLevelFaction or 0
+  return nNpcLevelFaction
+end
+
+function QinShiHuangLing:SetNpcLevelFaction(nValue)
+  local tbQinShiHuangLingData = QinShiHuangLing:GetCurrentScriptData() or {}
+  local nCur = tbQinShiHuangLingData.nNpcLevelFaction or 0
+  Log("[QinShiHuangLing] SetNpcLevelFaction ", nCur, nValue)
+  tbQinShiHuangLingData.nNpcLevelFaction = nValue
+  ScriptData:SaveValue(QinShiHuangLing.SCRIPTDATA_NAME, 0, tbQinShiHuangLingData)
+  return tbQinShiHuangLingData
+end

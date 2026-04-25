@@ -1,0 +1,202 @@
+local tbWnd = Ui:CreateWindow("UIKinFlagDisplay")
+tbWnd.tbControls = {
+  txtRemainMain = "imgBG/Mask/Region/GroupRemaining/txtMain",
+  txtPlayerMain = "imgBG/Mask/Region/GroupPlayers/txtMain",
+  txtExpTimesMain = "imgBG/Mask/Region/GroupExpTimes/txtMain",
+  txtAnswerMain = "imgBG/Mask/Region/GroupProgress/txtMain",
+  txtDivinationMain = "imgBG/Mask/Region/GroupDivination/txtMain",
+  txtResultMain = "imgBG/Mask/Region/GroupDiviResult/txtMain",
+  BtnClose = "imgBG/Mask/Region/BtnClose",
+  BtnAnswer = "imgBG/Mask/Region/BtnAnswer",
+  BtnCheer = "imgBG/Mask/Region/BtnCheer"
+}
+tbWnd.tbOnClick = {
+  BtnClose = function(self)
+    self:Close()
+  end,
+  BtnAnswer = function(self)
+    TongParty:OpenAnswerWnd()
+  end,
+  BtnCheer = function(self)
+    local szDesc = i18n.EasyGet("\231\161\174\229\174\154\232\138\177\232\180\185{0}\229\133\131\229\174\157\229\138\169\229\168\129\229\144\151\239\188\159\239\188\136\229\138\169\229\168\129\229\144\142\228\191\174\231\130\188\231\187\143\233\170\140\229\138\160\230\136\144\229\162\158\229\138\160{1}%\239\188\137", TongParty.nCheerCost, TongParty.nAddExpPercent)
+    
+    local function pFunc()
+      TongParty:CSCheerReq()
+    end
+    
+    Ui:OpenWindow("UIMessageBox", szDesc, {
+      {pFunc},
+      {}
+    })
+  end
+}
+
+function tbWnd:OnCreate()
+  self.pPanel:Label_SetText(self.txtRemainMain, "")
+  self.pPanel:Label_SetText(self.txtPlayerMain, "")
+  self.pPanel:Label_SetText(self.txtExpTimesMain, "")
+  self.pPanel:Label_SetText(self.txtAnswerMain, "")
+  self.pPanel:Label_SetText(self.txtDivinationMain, "")
+  self.pPanel:Label_SetText(self.txtResultMain, "")
+end
+
+function tbWnd:UpdateView()
+  self:SetRemainTimer()
+  self:SetPlayerCount()
+  self:SetExpTimes()
+  self:SetAnswerStatus()
+  self:SetBaGuaStatus()
+  self:SetCheerBtnStatus()
+  self:ShowCloseBtn()
+end
+
+function tbWnd:OnOpen()
+  self:UpdateView()
+end
+
+function tbWnd:OnClose()
+  if self.nRemainTimer then
+    Timer:Close(self.nRemainTimer)
+    self.nRemainTimer = nil
+  end
+  if self.nAnswerTimer then
+    Timer:Close(self.nAnswerTimer)
+    self.nAnswerTimer = nil
+  end
+  if self.nDivinationTimer then
+    Timer:Close(self.nDivinationTimer)
+    self.nDivinationTimer = nil
+  end
+end
+
+function tbWnd:OnLeave()
+  self:Close()
+end
+
+function tbWnd:SetRemainTimer()
+  if TongParty.nPartyStatus == TongParty.tbPartyStatus.Close then
+    self.pPanel:Label_SetText(self.txtRemainMain, i18n.EasyGet("\229\183\178\231\187\147\230\157\159"))
+    return
+  end
+  if TongParty.nRemainTime then
+    local nLeftTime = TongParty.nRemainTime - GetTime()
+    if nLeftTime >= 0 then
+      self.pPanel:Label_SetText(self.txtRemainMain, Lib:TimeDesc(nLeftTime))
+    end
+    if self.nRemainTimer then
+      Timer:Close(self.nRemainTimer)
+    end
+    self.nRemainTimer = Timer:Register(Env.GAME_FPS, function(self)
+      local nLeftTime = TongParty.nRemainTime - GetTime()
+      if nLeftTime >= 0 then
+        self.pPanel:Label_SetText(self.txtRemainMain, Lib:TimeDesc(nLeftTime))
+        return true
+      else
+        self.pPanel:Label_SetText(self.txtRemainMain, i18n.EasyGet("\229\183\178\231\187\147\230\157\159"))
+        return false
+      end
+    end, self)
+  else
+    self.pPanel:Label_SetText(self.txtRemainMain, "")
+  end
+end
+
+function tbWnd:SetPlayerCount()
+  self.pPanel:Label_SetText(self.txtPlayerMain, TongParty.nJoinPlayerCount or 1)
+end
+
+function tbWnd:SetExpTimes()
+  local nAdd = TongParty.nAddExpPercent * (TongParty.nCheerCount or 0)
+  self.pPanel:Label_SetText(self.txtExpTimesMain, nAdd + 100 .. "%")
+end
+
+function tbWnd:SetAnswerStatus()
+  if self.nAnswerTimer then
+    Timer:Close(self.nAnswerTimer)
+  end
+  if TongParty.nPartyStatus == TongParty.tbPartyStatus.Cheer then
+    self.nAnswerTimer = Timer:Register(Env.GAME_FPS, function(self)
+      local nLeftTime = TongParty.nQuestionTime - GetTime()
+      if nLeftTime >= 0 then
+        self.pPanel:Label_SetText(self.txtAnswerMain, i18n.EasyGet("{0}\229\144\142\229\188\128\229\144\175", Lib:TimeDesc(nLeftTime)))
+        return true
+      else
+        return false
+      end
+    end, self)
+  elseif TongParty.nPartyStatus == TongParty.tbPartyStatus.Question then
+    self:UpdateQuizTimer()
+  else
+    self.pPanel:Label_SetText(self.txtAnswerMain, i18n.EasyGet("\229\183\178\231\187\147\230\157\159"))
+  end
+  self:SetAnswerBtnStatus()
+end
+
+function tbWnd:UpdateQuizTimer()
+  if self.nAnswerTimer then
+    Timer:Close(self.nAnswerTimer)
+  end
+  self.nAnswerTimer = Timer:Register(Env.GAME_FPS, function(self)
+    local nLeftTime = TongParty.nQuestionTime - GetTime()
+    if nLeftTime >= 0 then
+      self.pPanel:Label_SetText(self.txtAnswerMain, i18n.EasyGet("{0}/{1}\239\188\136{2}\231\167\146\239\188\137", TongParty.nCurQuiz, TongParty.nQuizCount, nLeftTime))
+      return true
+    else
+      return false
+    end
+  end, self)
+end
+
+function tbWnd:SetBaGuaStatus()
+  if self.nDivinationTimer then
+    Timer:Close(self.nDivinationTimer)
+  end
+  if TongParty.nPartyStatus ~= TongParty.tbPartyStatus.Divination and TongParty.nPartyStatus ~= TongParty.tbPartyStatus.Normal and TongParty.nPartyStatus ~= TongParty.tbPartyStatus.Close then
+    self.pPanel:Label_SetText(self.txtDivinationMain, i18n.EasyGet("\233\156\128\230\173\163\231\161\174\231\173\148\233\162\152"))
+  elseif TongParty.tbBaGuaAnswer and Lib:CountTB(TongParty.tbBaGuaAnswer) > 0 then
+    local szStr = ""
+    for k, v in pairs(TongParty.tbBaGuaAnswer) do
+      szStr = szStr .. i18n.Get(TongParty.PartyCfg[k]) .. " "
+    end
+    self.pPanel:Label_SetText(self.txtDivinationMain, szStr)
+  else
+    self.pPanel:Label_SetText(self.txtDivinationMain, i18n.EasyGet("\233\156\128\230\173\163\231\161\174\231\173\148\233\162\152"))
+  end
+  if TongParty.nPartyStatus == TongParty.tbPartyStatus.Normal or TongParty.nPartyStatus == TongParty.tbPartyStatus.Close then
+    local szAnswerGuaXiang = TongParty.PartyCfg[TongParty.nRealBagAnswer] or ""
+    self.pPanel:Label_SetText(self.txtResultMain, i18n.Get(szAnswerGuaXiang))
+  else
+    self.nDivinationTimer = Timer:Register(Env.GAME_FPS, function(self)
+      local nLeftTime = TongParty.nDivinationTime - GetTime()
+      if nLeftTime >= 0 then
+        self.pPanel:Label_SetText(self.txtResultMain, i18n.EasyGet("{0}\229\144\142\229\188\128\229\165\150", Lib:TimeDesc(nLeftTime)))
+        return true
+      else
+        return false
+      end
+    end, self)
+  end
+end
+
+function tbWnd:SetCheerBtnStatus()
+  if TongParty.nCheerStatus then
+    self.pPanel:Button_SetEnable(self.BtnCheer, false)
+  else
+    self.pPanel:Button_SetEnable(self.BtnCheer, true)
+  end
+end
+
+function tbWnd:SetAnswerBtnStatus()
+  if TongParty.nPartyStatus == TongParty.tbPartyStatus.Question then
+    self.pPanel:Button_SetEnable(self.BtnAnswer, true)
+  else
+    self.pPanel:Button_SetEnable(self.BtnAnswer, false)
+  end
+end
+
+function tbWnd:ShowCloseBtn()
+  local bIsClose = TongParty.nPartyStatus == TongParty.tbPartyStatus.Close
+  self.pPanel:SetActive(self.BtnCheer, not bIsClose)
+  self.pPanel:SetActive(self.BtnAnswer, not bIsClose)
+  self.pPanel:SetActive(self.BtnClose, bIsClose)
+end

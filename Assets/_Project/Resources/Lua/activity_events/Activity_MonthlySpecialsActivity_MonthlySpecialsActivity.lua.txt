@@ -1,0 +1,104 @@
+Require("CommonScript/Activity/ActivityMgrDef.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.MonthlySpecialsActivity)
+tbActivity.Protocol = {GetGiftPackRewardReq = 1, OnGetGiftPackRewardResp = 2}
+tbActivity.SaveID = {RewardProgress = 1, LastOpenMonth = 2}
+tbActivity.tbConditions = {
+  Free = 1,
+  Recharge = 2,
+  LimitedTime = 3
+}
+tbActivity.nReceiveSaveIDOffest = 2
+tbActivity.nOneDaySeconds = 86400
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  self.bLoadConfig = true
+  local szAwardPath = "Setting/Activity/MonthlySpecialsActivity/MonthlyAward.tab"
+  local szActivityPath = "Setting/Activity/MonthlySpecialsActivity/MonthlySpecialsActivity.tab"
+  self.tbAwardList = Lib:EasyLoadTabFile(szAwardPath, nil, nil, nil, false)
+  self.ACTIVITY_CONFIG = Lib:EasyLoadTabFile(szActivityPath, {"nConfigId"})
+  table.sort(self.tbAwardList, function(a, b)
+    return a.nSort < b.nSort
+  end)
+  self.tbAwardList = SetReadOnly(self.tbAwardList)
+end
+
+function tbActivity:CheckConfig(nConfigId)
+  self:LoadConfig()
+  local tbConfig = self.ACTIVITY_CONFIG[nConfigId]
+  if not tbConfig then
+    LogErr(string.format("[%s] CheckConfig fail. nConfigId =%d not found", self.szClassName, nConfigId))
+    return false
+  end
+  local nMinStartTime = 14400
+  local nMaxMonthlyTime = 28 * self.nOneDaySeconds
+  if nMaxMonthlyTime < tbConfig.nMonthlyStartTime or nMinStartTime > tbConfig.nMonthlyStartTime then
+    LogErr(string.format("[%s] CheckConfig fail. nMonthlyStartTime Configuration Error", self.szClassName))
+    return false
+  end
+  if nMaxMonthlyTime < tbConfig.nMonthlyEndTime then
+    LogErr(string.format("[%s] CheckConfig fail. nMonthlyEndTime > nMaxMonthlyTime", self.szClassName))
+    return false
+  end
+  return true
+end
+
+function tbActivity:InitExtraData()
+  self.SaveKey = GetGroupKey(self.tbConfig.szSaveKey)
+end
+
+function tbActivity:IsOpen(pPlayer)
+  if not pPlayer then
+    return true
+  end
+  if self.tbConfig.nJoinLevel > pPlayer.nLevel then
+    return false
+  end
+  if not self:CheckInOpenTime() then
+    return false
+  end
+  if MODULE_GAMESERVER and not self:CheckCanOpenActivity() then
+    return false
+  end
+  return true
+end
+
+function tbActivity:CheckExpiredCurTime(nLimitedTime)
+  if not nLimitedTime then
+    return false
+  end
+  local nPassTime = self:GetCurMonthTime()
+  if nPassTime < self.tbConfig.nMonthlyStartTime and self.tbConfig.nMonthlyStartTime > self.tbConfig.nMonthlyEndTime then
+    local nLastMonthDay = Lib:GetThisMonthTotalDay(GetTime() - nPassTime - 1)
+    local nLastMonthlyTotalTime = nLastMonthDay * self.nOneDaySeconds
+    nPassTime = nPassTime + nLastMonthlyTotalTime
+  end
+  local nExpiredTime = self.tbConfig.nMonthlyStartTime + nLimitedTime
+  return nPassTime > nExpiredTime
+end
+
+function tbActivity:CheckInOpenTime()
+  local nCurMonthTime = self:GetCurMonthTime()
+  local nEndTime = self.tbConfig.nMonthlyEndTime
+  local nStartTime = self.tbConfig.nMonthlyStartTime
+  if nCurMonthTime >= nStartTime and nCurMonthTime < nEndTime or (nCurMonthTime >= nStartTime or nCurMonthTime < nEndTime) and nEndTime <= nStartTime then
+    return true
+  end
+  return false
+end
+
+function tbActivity:GetCurMonthTime(nNow)
+  nNow = nNow or GetTime()
+  local nMonthDay = Lib:GetLocalMonthDay(nNow)
+  local nMonthTime = (nMonthDay - 1) * self.nOneDaySeconds + Lib:GetLocalDayTime(nNow)
+  return nMonthTime
+end
+
+function tbActivity:GetCurRewardProgress(pPlayer)
+  if not pPlayer then
+    return 0
+  end
+  return pPlayer.GetUserValue(self.SaveKey, self.SaveID.RewardProgress) or 0
+end

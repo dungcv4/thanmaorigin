@@ -1,0 +1,169 @@
+local tbWnd = Ui:CreateClass("UISnowFight", "UIPanel")
+local tbControls = {
+  txtOutputTarget = "Info/Scroll View_Tittle/Viewport/Content/txtOutputTarget",
+  OutputTemplate = "Info/OutputGroup/Viewport/Content/OutputTemplate"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self.tbOutputGroup = {}
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.OutputTemplate, nil, false, true)
+end
+
+function tbWnd:OnActivate()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_SNOWFIGHT_RANK, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_SNOWFIGHT_RANK, self.OnSyncRankData, self)
+  self:OnSyncRankData(SnowFight.tbRankData or {})
+  self:UpdateData(SnowFight.szStatus, table.unpack(SnowFight.tbEndTime))
+end
+
+function tbWnd:OnDeactivate()
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_SNOWFIGHT_RANK, self)
+end
+
+function tbWnd:UpdateData(szStatus, ...)
+  if szStatus == SnowFight.RaceStatus.Prepare then
+    self:HandlePrepareStatus(...)
+  elseif szStatus == SnowFight.RaceStatus.Fight then
+    self:HandleFightStatus(...)
+  elseif szStatus == SnowFight.RaceStatus.Rest then
+    self:HandleRestStatus(...)
+  elseif szStatus == SnowFight.RaceStatus.Settlement then
+    self:HandleSettleStatus(...)
+  end
+  self.szStatus = szStatus
+end
+
+function tbWnd:HandlePrepareStatus(nSignPlayerNum, nEndTime)
+  self:ShowContent({
+    {
+      i18n.EasyGet("\229\189\147\229\137\141\233\152\182\230\174\181\239\188\154\229\135\134\229\164\135\228\184\173")
+    },
+    {
+      i18n.EasyGet("\229\128\146\232\174\161\230\151\182"),
+      nEndTime
+    },
+    {
+      i18n.EasyGet("\229\189\147\229\137\141\229\135\134\229\164\135\229\156\186\228\186\186\230\149\176\239\188\154{0}", nSignPlayerNum)
+    }
+  })
+end
+
+function tbWnd:HandleFightStatus(nEndTime, nBossTime)
+  self:ShowContent({
+    {
+      i18n.EasyGet("\229\189\147\229\137\141\233\152\182\230\174\181\239\188\154\230\175\148\232\181\155\228\184\173")
+    },
+    {
+      i18n.EasyGet("\229\128\146\232\174\161\230\151\182"),
+      nEndTime,
+      i18n.EasyGet("\229\185\180\229\133\189\231\142\176\232\186\171"),
+      nBossTime
+    }
+  })
+end
+
+function tbWnd:HandleRestStatus(nEndTime, nFightRound)
+  if nFightRound < 1 then
+    self:ShowContent({
+      {
+        i18n.EasyGet("\229\189\147\229\137\141\233\152\182\230\174\181\239\188\154\229\135\134\229\164\135\228\184\173")
+      },
+      {
+        i18n.EasyGet("\229\128\146\232\174\161\230\151\182"),
+        nEndTime
+      }
+    })
+  else
+    self:ShowContent({
+      {
+        i18n.EasyGet("\229\189\147\229\137\141\233\152\182\230\174\181\239\188\154\228\184\173\229\156\186\228\188\145\230\129\175")
+      },
+      {
+        i18n.EasyGet("\229\128\146\232\174\161\230\151\182"),
+        nEndTime
+      }
+    })
+  end
+end
+
+function tbWnd:HandleSettleStatus(nEndTime)
+  self:ShowContent({
+    {
+      i18n.EasyGet("\229\189\147\229\137\141\233\152\182\230\174\181\239\188\154\231\187\147\231\174\151\228\184\173")
+    },
+    {
+      i18n.EasyGet("\229\128\146\232\174\161\230\151\182"),
+      nEndTime
+    }
+  })
+end
+
+function tbWnd:OnSyncRankData(tbRankData)
+  self.tbScrollView:Clear()
+  if not self.szStatus or self.szStatus == SnowFight.RaceStatus.Prepare then
+    return
+  end
+  for i = 1, #tbRankData do
+    self.tbScrollView:SetElement(i, function(tbElement)
+      self:SetRank(tbElement, tbRankData[i], i)
+    end)
+  end
+end
+
+function tbWnd:SetRank(tbElement, tbData, i)
+  local pPanel = tbElement.pPanel
+  pPanel:Label_SetText("img", i)
+  local szName = tbData.szName
+  if szName == me.szName then
+    szName = string.format("<color=#c5b505>%s</color>", szName)
+  end
+  pPanel:Label_SetText("Name", szName)
+  pPanel:Label_SetText("OutputDamage", tbData.nScore)
+end
+
+function tbWnd:ShowContent(tbEndTime)
+  self.tbEndTime = tbEndTime
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+  end
+  self:UpdateTimer()
+  self.nTimer = Timer:Register(Env.GAME_FPS, self.UpdateTimer, self)
+end
+
+function tbWnd:UpdateTimer()
+  local tbDesc = {}
+  local nNow = GetTime()
+  for _, tbInfo in ipairs(self.tbEndTime) do
+    if type(tbInfo[1]) == "string" then
+      local szDesc = tbInfo[1]
+      if type(tbInfo[2]) == "number" and tbInfo[2] > 0 then
+        local nRemainTime = tbInfo[2] - nNow
+        if type(tbInfo[3]) == "string" and type(tbInfo[4]) == "number" and tbInfo[4] > 0 then
+          local nRemainTimeExtra = tbInfo[4] - nNow
+          if nRemainTime > 0 and nRemainTimeExtra > 0 then
+            local szTime = Lib:TimeDesc(nRemainTime)
+            table.insert(tbDesc, string.format("%s\239\188\154%s(%s\239\188\154%s)", i18n.Parse(szDesc), szTime, i18n.Parse(tbInfo[3]), Lib:TimeDesc(nRemainTimeExtra)))
+          elseif nRemainTime > 0 then
+            local szTime = Lib:TimeDesc(nRemainTime)
+            table.insert(tbDesc, string.format("%s\239\188\154%s", i18n.Parse(szDesc), szTime))
+          end
+        elseif nRemainTime > 0 then
+          local szTime = Lib:TimeDesc(nRemainTime)
+          table.insert(tbDesc, string.format("%s\239\188\154%s", i18n.Parse(szDesc), szTime))
+        end
+      else
+        table.insert(tbDesc, i18n.Parse(szDesc))
+      end
+    end
+  end
+  if self.szStatus and self.szStatus ~= SnowFight.RaceStatus.Prepare then
+    table.insert(tbDesc, i18n.EasyGet("\230\137\147\233\155\170\228\187\151\231\167\175\229\136\134\230\142\146\232\161\140"))
+  end
+  self.pPanel:Label_SetText(tbControls.txtOutputTarget, table.concat(tbDesc, "\n"))
+  return true
+end

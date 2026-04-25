@@ -1,0 +1,483 @@
+FieldPractice.tbJiuState = {}
+FieldPractice.nAutoStopTimerMain = 0
+FieldPractice.nAutoStopLastExp = 0
+FieldPractice.nAutoStopLastTime = 0
+FieldPractice.nCheckInterval = 10
+
+function FieldPractice:GetExpQuotiety()
+  return self.nXiuLianExpQuotiety or 100
+end
+
+function FieldPractice:LoadRecommendationSetting()
+  local tbSetting = Lib:LoadTabFileEx("Setting/FieldPractice/MapRecommendation.tab", "dds", nil, {
+    "LevelBegin",
+    "LevelEnd",
+    "MapIdList"
+  })
+  self.tbMapRecommendation = {}
+  for _, tbInfo in ipairs(tbSetting) do
+    local tbMapIdString = Lib:SplitStr(tbInfo.MapIdList, "|")
+    local tbMapList = {}
+    for _, szMapId in ipairs(tbMapIdString) do
+      table.insert(tbMapList, tonumber(szMapId))
+    end
+    table.insert(self.tbMapRecommendation, {
+      tbInfo.LevelBegin,
+      tbInfo.LevelEnd,
+      tbMapList
+    })
+  end
+end
+
+function FieldPractice:GetRecommendMapList(nLevel)
+  local tbMapList = self:GetRecommendMapId(nLevel)
+  local tbLowerMapList = self:GetRecommendMapId(nLevel - 10)
+  local tbHigherMapList = self:GetRecommendMapId(nLevel + 10)
+  local tbMapSet = {}
+  for _, nMapId in ipairs(tbMapList) do
+    tbMapSet[nMapId] = 1
+  end
+  for _, nMapId in ipairs(tbLowerMapList) do
+    if not tbMapSet[nMapId] then
+      table.insert(tbMapList, nMapId)
+      tbMapSet[nMapId] = 1
+    end
+  end
+  for _, nMapId in ipairs(tbHigherMapList) do
+    if not tbMapSet[nMapId] then
+      table.insert(tbMapList, nMapId)
+      tbMapSet[nMapId] = 1
+    end
+  end
+  return tbMapList
+end
+
+function FieldPractice:GetRecommendation(nLevel)
+  local tbMapIdList = self:GetRecommendMapId(nLevel)
+  local szRet = ""
+  for _, nMapId in ipairs(tbMapIdList) do
+    local szMapName = i18n.Parse(Map:GetMapName(nMapId))
+    if 0 == #szRet then
+      szRet = szMapName
+    else
+      szRet = string.format("%s\227\128\129%s", szRet, szMapName)
+    end
+  end
+  if #tbMapIdList ~= #self:GetRecommendMapList(nLevel) then
+    szRet = string.format("%s%s", szRet, i18n.EasyGet("\231\173\137"))
+  end
+  return szRet
+end
+
+function FieldPractice:GetRecommendMapId(nLevel)
+  local tbRet = {}
+  if self.tbMapRecommendation then
+    for i = 1, #self.tbMapRecommendation do
+      local nLevelBegin = self.tbMapRecommendation[i][1]
+      local nLevelEnd = self.tbMapRecommendation[i][2]
+      if nLevel >= nLevelBegin and nLevel <= nLevelEnd then
+        local tbMapIdList = self.tbMapRecommendation[i][3]
+        for j = 1, #tbMapIdList do
+          local nMapLevel = Map:GetMapLevel(tbMapIdList[j])
+          if nLevelBegin <= nMapLevel and nLevelEnd >= nMapLevel then
+            table.insert(tbRet, tbMapIdList[j])
+          end
+        end
+      end
+    end
+  end
+  local tbSortedRet = {}
+  for nIndex, nMapId in ipairs(tbRet) do
+    if 2 == Map:GetForcePkMode(nMapId) then
+      table.insert(tbSortedRet, nMapId)
+    end
+  end
+  for nIndex, nMapId in ipairs(tbRet) do
+    if 2 ~= Map:GetForcePkMode(nMapId) then
+      table.insert(tbSortedRet, nMapId)
+    end
+  end
+  return tbSortedRet
+end
+
+FieldPractice:LoadRecommendationSetting()
+
+function FieldPractice:OnUseJiuItem(nQuotiety)
+  if not TeamMgr:HasTeam() then
+    self:CheckState()
+  else
+    LogErr("FieldPractice:OnUseJiuItem seems something error!")
+  end
+end
+
+function FieldPractice:OnSyncJiuStateTb(tbJiuState)
+  self.tbJiuState = tbJiuState
+  self:CheckState()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_XIULIAN_JIUSTATE_CHANGE)
+end
+
+function FieldPractice:GetJiuStateTb()
+  return self.tbJiuState
+end
+
+function FieldPractice:ReqGetJiuStateTb()
+  RemoteServer.ReqGetJiuStateTb()
+end
+
+function FieldPractice:CheckState()
+  local nCurFrame = GetFrame()
+  if self.nTimerId then
+    Timer:Close(self.nTimerId)
+    self.nTimerId = nil
+  end
+  if not me or not me.GetNpc() then
+    return
+  end
+  local nNextCheckFrame = 0
+  if TeamMgr:HasTeam() then
+    local tbRemove = {}
+    self.nXiuLianExpQuotiety = self.tbDef.nNormalQuotiety
+    for nPlayerId, nEndFrame in pairs(self.tbJiuState) do
+      if nEndFrame <= nCurFrame then
+        table.insert(tbRemove, nPlayerId)
+      else
+        self.nXiuLianExpQuotiety = self.nXiuLianExpQuotiety + (self.tbDef.nQuotietyPerRole - self.tbDef.nNormalQuotiety)
+        if 0 == nNextCheckFrame then
+          nNextCheckFrame = nEndFrame
+        else
+          nNextCheckFrame = nEndFrame > nNextCheckFrame and nNextCheckFrame or nEndFrame
+        end
+      end
+    end
+    for _, nPlayerId in ipairs(tbRemove) do
+      self.tbJiuState[nPlayerId] = nil
+      EventNotify.OnNotify(EventNotify.emNOTIFY_XIULIAN_JIUSTATE_CHANGE)
+    end
+  else
+    local nNewExpQuotiety = 0
+    local tbSkillState = me.GetNpc().GetSkillState(self.tbDef.nJiuSkillId)
+    if tbSkillState and nCurFrame < tbSkillState.nEndFrame then
+      nNextCheckFrame = tbSkillState.nEndFrame
+      nNewExpQuotiety = self.tbDef.nQuotietyPerRole
+    else
+      nNewExpQuotiety = self.tbDef.nNormalQuotiety
+    end
+    if nNewExpQuotiety ~= self:GetExpQuotiety() then
+      local szJiuName = Item:GetName(self.tbDef.nJiuTempId, me)
+      if nNewExpQuotiety > self.tbDef.nNormalQuotiety then
+        local szTips = i18n.EasyGet("\229\189\147\229\137\141\229\164\132\228\186\142\228\189\191\231\148\168{0}\231\138\182\230\128\129\239\188\140\232\142\183\229\190\151{1}%\231\154\132\231\175\157\231\129\171\231\187\143\233\170\140", szJiuName, nNewExpQuotiety)
+        ChatMgr:OnChannelMessage(ChatMgr.ChannelType.System, 0, ChatMgr.SystemMsgType.Tip, "", 0, 0, 0, szTips)
+      else
+        local szTips = i18n.EasyGet("{0}\230\151\182\230\149\136\229\183\178\232\191\135\239\188\140\232\142\183\229\190\151100%\231\154\132\231\175\157\231\129\171\231\187\143\233\170\140", szJiuName)
+        ChatMgr:OnChannelMessage(ChatMgr.ChannelType.System, 0, ChatMgr.SystemMsgType.Tip, "", 0, 0, 0, szTips)
+      end
+    end
+    self.nXiuLianExpQuotiety = nNewExpQuotiety
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_XIULIAN_EXP_RATE_UPDATE)
+  if nNextCheckFrame > 0 then
+    self.nTimerId = Timer:Register(nNextCheckFrame - nCurFrame, self.CheckState, self)
+  end
+end
+
+function FieldPractice:EventCheck(szEvent)
+  if "MemberChanged" == szEvent or "new" == szEvent then
+    FieldPractice:ReqGetJiuStateTb()
+  elseif "quite" == szEvent then
+    self.tbJiuState = {}
+    self:CheckState()
+  end
+end
+
+function FieldPractice:UpdateInfo()
+  self:ReStartAutoStopTimer()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_XIULIAN_UPDATE)
+end
+
+function FieldPractice:GotoRecommendMap(pPlayer)
+  if not pPlayer then
+    return
+  end
+  local nlevel = pPlayer.nLevel
+  local tbMapIdList = self:GetRecommendMapId(nlevel)
+  if #tbMapIdList <= 0 then
+    pPlayer.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\231\173\137\231\186\167\230\178\161\230\156\137\230\142\168\232\141\144\229\156\176\229\155\190"))
+    return
+  end
+  for _, nMapId in pairs(tbMapIdList) do
+    if nMapId == pPlayer.nMapId then
+      pPlayer.CenterMsg(i18n.EasyGet("\229\183\178\229\156\168\230\142\168\232\141\144\229\156\176\229\155\190"))
+      return
+    end
+  end
+  local nMapId = Lib:RandTable(tbMapIdList)
+  self:GoToMap(pPlayer, nMapId)
+end
+
+function FieldPractice:GoToMap(pPlayer, nMapId)
+  if not pPlayer then
+    return
+  end
+  if nMapId == pPlayer.nMapId then
+    pPlayer.CenterMsg(i18n.EasyGet("\229\183\178\229\156\168\231\155\174\230\160\135\229\156\176\229\155\190"))
+    return
+  end
+  local tbMapDefaultPosInfo = Map.tbMapListEx[nMapId].tbDefaultPos
+  if not tbMapDefaultPosInfo then
+    return
+  end
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  if AFK:IsLeadFightRunning() then
+    AFK:Stop()
+  end
+  local nX, nY
+  for _, tbPos in pairs(tbMapDefaultPosInfo) do
+    if tbPos.PosX and tbPos.PosY then
+      nX = tbPos.PosX
+      nY = tbPos.PosY
+      break
+    end
+  end
+  if AutoPath:GotoAndCallEx(nMapId, nX, nY) then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_XIULIAN_GOTO_RECOMMENDMAP_SUCC)
+  end
+end
+
+function FieldPractice:GoToMap(pPlayer, nMapId)
+  if not pPlayer then
+    return
+  end
+  if nMapId == pPlayer.nMapId then
+    pPlayer.CenterMsg(i18n.EasyGet("\229\183\178\229\156\168\231\155\174\230\160\135\229\156\176\229\155\190"))
+    return
+  end
+  local tbMapDefaultPosInfo = Map.tbMapListEx[nMapId].tbDefaultPos
+  if not tbMapDefaultPosInfo then
+    return
+  end
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  if AFK:IsLeadFightRunning() then
+    AFK:Stop()
+  end
+  local nX, nY
+  for _, tbPos in pairs(tbMapDefaultPosInfo) do
+    if tbPos.PosX and tbPos.PosY then
+      nX = tbPos.PosX
+      nY = tbPos.PosY
+      break
+    end
+  end
+  if AutoPath:GotoAndCallEx(nMapId, nX, nY) then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_XIULIAN_GOTO_RECOMMENDMAP_SUCC)
+  end
+end
+
+function FieldPractice:FlyToNearbyNpc(nMapTemplateId)
+  if me.nMapId == nMapTemplateId then
+    me.CenterMsg(i18n.EasyGet("\229\183\178\229\156\168\231\155\174\230\160\135\229\156\176\229\155\190"))
+  else
+    local tbNpcTemplateIds = Map:GetAllFieldMapNpcByMapId(nMapTemplateId)
+    if not tbNpcTemplateIds or 0 == #tbNpcTemplateIds then
+      return
+    end
+    local nNpcTemplateId = tbNpcTemplateIds[MathRandom(#tbNpcTemplateIds)]
+    local nPosX, nPosY = Npc:GetNpcPos(nNpcTemplateId, nMapTemplateId, true)
+    self:FlyToPosC(nMapTemplateId, nPosX, nPosY)
+  end
+end
+
+function FieldPractice:FlyToPosC(nMapId, nPosX, nPosY)
+  if not nMapId or nMapId < 0 then
+    return
+  end
+  local bRet = TeamMgr:CanSwitchMap(nMapId)
+  if not bRet then
+    return
+  end
+  local nDelayFrame
+  if AFK:IsInFightStep() then
+    AFK:Suspend()
+    nDelayFrame = 18
+  end
+  if nDelayFrame then
+    if self.nDelayTimer then
+      Timer:Close(self.nDelayTimer)
+    end
+    self.nDelayTimer = Timer:Register(nDelayFrame, function()
+      self.nDelayTimer = nil
+      self.nFlyMapId = nMapId
+      AutoPath:StopGoto()
+      RemoteServer.RequestFieldPractice("FlyToPosS", nMapId, nPosX, nPosY)
+    end)
+    return
+  end
+  self.nFlyMapId = nMapId
+  AutoPath:StopGoto()
+  RemoteServer.RequestFieldPractice("FlyToPosS", nMapId, nPosX, nPosY)
+end
+
+function FieldPractice:OnSwitchMapFail()
+  self.nFlyMapId = nil
+end
+
+function FieldPractice:OnMapLoaded(nMapId)
+  if nMapId == self.nFlyMapId then
+    self.nFlyMapId = nil
+    self:GoToNearbyNpc()
+  end
+end
+
+function FieldPractice:GoToNearbyNpc()
+  local nPosX, nPosY, nNpcTemplateId, nWalkNearLength
+  local tbNpcTemplateIds = Map:GetAllFieldMapNpcByMapId(me.nMapId)
+  if not tbNpcTemplateIds or 0 == #tbNpcTemplateIds then
+    return
+  end
+  for _, nNpcId in ipairs(tbNpcTemplateIds) do
+    local pNpc = KNpc.GetNearestNpcByTemplateId(me.GetNpc(), nNpcId, AFK:GetSetting():GetFightSetting().nSearchRadius)
+    if pNpc then
+      nNpcTemplateId = nNpcId
+      _, nPosX, nPosY = pNpc.GetWorldPos()
+      nWalkNearLength = GetNpcDialogDistance(nNpcTemplateId)
+      break
+    end
+  end
+  if not nNpcTemplateId then
+    nNpcTemplateId = tbNpcTemplateIds[MathRandom(#tbNpcTemplateIds)]
+    nPosX, nPosY, nWalkNearLength = Npc:GetNpcPos(nNpcTemplateId, me.nMapId, true)
+  end
+  
+  local function fnCallback()
+    local function __timer_Callback()
+      AFK:Start()
+    end
+    
+    AFK:Stop()
+    Timer:Register(5, __timer_Callback)
+    EventNotify.OnNotify(EventNotify.emNOTIFY_XIULIAN_GOTO_RECOMMENDMAP_SUCC)
+  end
+  
+  AutoPath:GotoAndCallEx(me.nMapId, nPosX, nPosY, fnCallback, nWalkNearLength, nil, nNpcTemplateId)
+end
+
+function FieldPractice:SaveCurState()
+  local nCurExp = me.GetUserValue(FieldPractice.tbDef.nSaveGroupID, FieldPractice.tbDef.nSaveResidueExp)
+  if self.nAutoStopLastExp ~= nCurExp then
+    self.nAutoStopLastTime = GetTime() + self.Cfg.nXiuLianAutoStopTime
+  end
+  self.nAutoStopLastExp = nCurExp
+end
+
+function FieldPractice:ReStartAutoStopTimer()
+  self:StopAutoStopTimer()
+  if not me then
+    return
+  end
+  self:SaveCurState()
+  if self:IsPlayState(me) then
+    self.nAutoStopTimerMain = Timer:Register(Env.GAME_FPS * self.nCheckInterval, self.OnAutoStopMainEvent, self)
+  end
+end
+
+function FieldPractice:StopAutoStopTimer()
+  self.nAutoStopLastExp = 0
+  self.nAutoStopLastTime = 0
+  if 0 ~= self.nAutoStopTimerMain then
+    Timer:Close(self.nAutoStopTimerMain)
+    self.nAutoStopTimerMain = 0
+  end
+end
+
+function FieldPractice:OnAutoStopMainEvent()
+  if not me then
+    return false
+  end
+  self:SaveCurState()
+  if self:CheckCanAutoStop() then
+    self:AutoStop()
+    return false
+  end
+  return true
+end
+
+function FieldPractice:CheckCanAutoStop()
+  if not me then
+    return
+  end
+  local nResidueExp = me.GetUserValue(self.tbDef.nSaveGroupID, self.tbDef.nSaveResidueExp)
+  if GetTime() >= self.nAutoStopLastTime and self:IsPlayState(me) and nResidueExp > 0 then
+    return true
+  end
+  return false
+end
+
+function FieldPractice:AutoStop()
+  if not me then
+    return
+  end
+  RemoteServer.PauseXiuLianTime()
+  self:StopAutoStopTimer()
+end
+
+function FieldPractice:OnShowBuyJiuNotice()
+  local nCount = me.GetItemCountInBags(401)
+  if 0 ~= nCount then
+    return
+  end
+  local nLastTime = LocalData:GetRoleNumber("AutoMedicine_CloseBuyJiuNoticeTime", 0)
+  local bIsDiffDay = Lib:IsDiffDay(14400, nLastTime)
+  if not bIsDiffDay then
+    return
+  end
+  self.nLastNoticeTime = self.nLastNoticeTime or 0
+  if GetTime() - self.nLastNoticeTime < 300 then
+    return
+  end
+  self.nLastNoticeTime = GetTime()
+  
+  local function fnBuyJiu()
+    local tbWare = Shop:GetAWare(496)
+    local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+    if 0 == nRemainCount then
+      me.CenterMsg(i18n.Get(Shop.Terms.InsufficientRemainInventory))
+      return
+    end
+    Ui:OpenWindow("UIShopBuy", tbWare, true)
+  end
+  
+  local szNotice = i18n.EasyGet("\231\162\167\232\158\186\230\152\165\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\232\180\173\228\185\176")
+  Ui:OpenWindow("UIMessageBox", szNotice, {
+    {fnBuyJiu},
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  }, "FieldPractice", nil, i18n.EasyGet("\228\187\138\230\151\165\228\184\141\229\134\141\230\143\144\233\134\146"))
+end
+
+function FieldPractice:SetNotShowValue(bNotShowToday)
+  if bNotShowToday then
+    LocalData:SetRoleNumber("AutoMedicine_CloseBuyJiuNoticeTime", GetTime())
+  end
+end
+
+function FieldPractice:OnLogInReset()
+  self.nLastNoticeTime = nil
+end
+
+function FieldPractice:Init()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_TEAM_UPDATE, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_AFK_BUY_JIU_NOTICE, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_LOADED, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LOADED, self.OnMapLoaded, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_TEAM_UPDATE, self.EventCheck, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self.OnLogInReset, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_AFK_BUY_JIU_NOTICE, self.OnShowBuyJiuNotice, self)
+end
+
+FieldPractice:Init()

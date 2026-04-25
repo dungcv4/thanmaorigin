@@ -1,0 +1,191 @@
+local tbWnd = Ui:CreateWindow("UIWuxingyinFixAttrUp")
+local tbControls = {
+  EquipGrid = "EquipInfo/UIItemGrid",
+  txtName = "EquipInfo/txtName",
+  txtLevel = "EquipInfo/txtLevel",
+  btnLevelUp = "LevelUp/btnLevelUp",
+  btnAttribute1 = "AttributeList/Attribute1",
+  btnAttribute2 = "AttributeList/Attribute2",
+  imgSelected = "AttributeList/Attribute%d/imgSelected",
+  txtAttributeTip = "AttributeList/Attribute%d/txtAttributeTip",
+  txtAttributeNow = "AttributeList/Attribute%d/txtAttributeNow",
+  txtAttributeNext = "AttributeList/Attribute%d/txtAttributeNext",
+  txtExp = "AttributeList/Attribute%d/txtExp",
+  txtCost = "LevelUp/CostItem/txtCost",
+  ItemGrid = "LevelUp/CostItem/Item/UIItemGrid",
+  AddAndSubGroup = "LevelUp/UIAddAndSubGroup",
+  btnAdd = "LevelUp/CostItem/btnAdd"
+}
+tbWnd.tbControls = tbControls
+local tbBtnAttrList = {
+  tbControls.btnAttribute1,
+  tbControls.btnAttribute2
+}
+tbWnd.tbOnClick = {
+  btnLevelUp = function(self)
+    for nIndex, nRedPoint in pairs(Item.WuXingYin.tbIndex2RedPoint) do
+      if nRedPoint and RedPointMgr:CheckEvent(nRedPoint) then
+        RedPointMgr:FadeRedPoint(nRedPoint)
+      end
+    end
+    Item.WuXingYin:LevelUp(self.nItemId, self.nSelect, self.nCost or 0)
+  end,
+  btnAdd = function(self)
+    Item.WuXingYin:OnBuyMaterial("FixAttrUp", self.nItemId, self.nSelect)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbAttrGroup = Ui:NewButtonGroup(self, tbBtnAttrList, true, self.SwitchAttr)
+  self.EquipGrid = Ui:NewExistItemGrid(self, tbControls.EquipGrid)
+  self.ItemGrid = Ui:NewExistItemGrid(self, tbControls.ItemGrid)
+  self.AddAndSubGroup = Ui:NewExistAddAndSubGroup(self, tbControls.AddAndSubGroup)
+  self.AddAndSubGroup:SetNumPadPos(-600, -50)
+  self.AddAndSubGroup:BindEvent(function(nValue)
+    local nResult = self:UpdateNumberInput(nValue)
+    return nResult
+  end, nil, nil, nil, {})
+end
+
+function tbWnd:OnOpen(nItemId)
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnAttribute1, {
+    RedPointMgr.EVENT.WuXingYinEnhanceLvUp
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnAttribute2, {
+    RedPointMgr.EVENT.WuXingYinabateLvUp
+  })
+  for i = 1, Item.WuXingYin.nFixAttr do
+    local imgSelected = string.format(tbControls.imgSelected, i)
+    self.pPanel:SetActive(imgSelected, false)
+  end
+  self.nItemId = nItemId
+  self.tbAttrGroup:Select(1)
+  self:Update()
+  self.AddAndSubGroup:SetInputValue(0)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.OnSyncItemEvent, self)
+end
+
+function tbWnd:SwitchAttr(nSelect)
+  local nRedPoint = Item.WuXingYin.tbIndex2RedPoint[nSelect]
+  if nRedPoint and RedPointMgr:CheckEvent(nRedPoint) then
+    RedPointMgr:FadeRedPoint(nRedPoint)
+  end
+  local nOldSelect = self.nSelect
+  if nSelect == self.nSelect then
+    return
+  end
+  local szNewPath = string.format(tbControls.imgSelected, nSelect)
+  self.pPanel:SetActive(szNewPath, true)
+  if self.nSelect then
+    local szCurPath = string.format(tbControls.imgSelected, self.nSelect)
+    self.pPanel:SetActive(szCurPath, false)
+  end
+  self.nSelect = nSelect
+  self:UpdateMaterial()
+  self:UpdateElement(nSelect, self.nCost, nOldSelect)
+end
+
+function tbWnd:Update(nItemId)
+  self.nItemId = nItemId or self.nItemId
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return
+  end
+  self.EquipGrid:SetItem(self.nItemId, pItem.dwTemplateId, {bShowTip = true}, me.nFaction, me.nFactionSect, me.nSex)
+  self.EquipGrid:SetClickEnable(true)
+  self.pPanel:Label_SetText(tbControls.txtName, i18n.Parse(pItem.szName))
+  self.pPanel:Label_SetText(tbControls.txtLevel, i18n.EasyGet("{0}\233\152\182", pItem.nLevel))
+  for i = 1, Item.WuXingYin.nFixAttr do
+    local txtAttributeTip = string.format(tbControls.txtAttributeTip, i)
+    local txtAttributeNow = string.format(tbControls.txtAttributeNow, i)
+    local txtAttributeNext = string.format(tbControls.txtAttributeNext, i)
+    local txtExp = string.format(tbControls.txtExp, i)
+    local _, szName = Item.WuXingYin:GetFixAttrName(self.nItemId, i)
+    local _, szCurValue, szNextValue = Item.WuXingYin:GetFixAttrAllValue(self.nItemId, i)
+    local bFullLevel = Item.WuXingYin:CheckFixAttrIsFull(self.nItemId, i)
+    local nDegree, nMaxDegree = Item.WuXingYin:GetFixAttrDegree(self.nItemId, i)
+    local szDegree = bFullLevel and "" or i18n.EasyGet("\228\191\174\231\130\188\229\186\166({0}/{1})", nDegree, nMaxDegree)
+    self.pPanel:Label_SetText(txtAttributeTip, szName)
+    self.pPanel:Label_SetText(txtAttributeNow, szCurValue)
+    self.pPanel:Label_SetText(txtAttributeNext, szNextValue)
+    self.pPanel:Label_SetText(txtExp, szDegree)
+  end
+  self:UpdateMaterial()
+  self:UpdateElement(self.nSelect, self.nCost)
+end
+
+function tbWnd:UpdateMaterial()
+  local nSelectLevel = Item.WuXingYin:GetFixAttrLevel(self.nItemId, self.nSelect)
+  local nCostTemplate = Item.WuXingYin:GetFixAttrUpCost(nSelectLevel)
+  self.nCostTemplated = nCostTemplate
+  self.ItemGrid:SetItemByTemplate(nCostTemplate, nil, nil, nil, {bShowTip = true})
+  self.ItemGrid:SetClickEnable(true)
+  local nHave = me.GetItemCountInBags(nCostTemplate)
+  self.nCost = self.nCost or 0
+  self.AddAndSubGroup:SetInputValue(self.nCost)
+  self.pPanel:Label_SetText(tbControls.txtCost, nHave)
+end
+
+function tbWnd:UpdateNumberInput(nNum)
+  self.nCost = nNum
+  if not self.nSelect then
+    me.CenterMsg(i18n.EasyGet("\232\175\183\229\133\136\233\128\137\230\139\169\233\156\128\232\166\129\229\141\135\231\186\167\231\154\132\229\177\158\230\128\167\239\188\129"))
+    self.nCost = 0
+  end
+  if nNum < 0 then
+    me.CenterMsg(i18n.EasyGet("\228\184\141\232\131\189\229\134\141\229\135\143\229\176\145\228\186\134\239\188\129"))
+    self.nCost = 0
+  end
+  if nNum > 99999 then
+    self.nCost = 99999
+    self:UpdateMaterial()
+  end
+  if nNum > me.GetItemCountInBags(self.nCostTemplated) then
+    self.nCost = me.GetItemCountInBags(self.nCostTemplated)
+  end
+  self:UpdateMaterial()
+  self:UpdateElement(self.nSelect, self.nCost)
+  return self.nCost
+end
+
+function tbWnd:OnSyncItemEvent(nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  local pEquip = me.GetEquipByPos(Item.EQUIPPOS_WUXINGYIN)
+  if not pItem or not pEquip then
+    return
+  end
+  if not self.nSelect then
+    return
+  end
+  local nLevel = Item.WuXingYin:GetFixAttrLevel(pEquip.dwId, self.nSelect)
+  local nCostTemplate = Item.WuXingYin:GetFixAttrUpCost(nLevel)
+  if nCostTemplate ~= pItem.dwTemplateId then
+    return
+  end
+  self:UpdateMaterial()
+end
+
+function tbWnd:UpdateElement(nIndex, nAdd, nOldIndex)
+  local txtExp = string.format(tbControls.txtExp, nIndex)
+  local bFullLevel = Item.WuXingYin:CheckFixAttrIsFull(self.nItemId, nIndex)
+  local nDegree, nMaxDegree = Item.WuXingYin:GetFixAttrDegree(self.nItemId, nIndex)
+  self.AddAndSubGroup:SetNumRange(0, nMaxDegree - nDegree)
+  local szDegree = bFullLevel and "" or i18n.EasyGet("\228\191\174\231\130\188\229\186\166({0}<color=#54ab4d>+{1}</color>/{2})", nDegree, nAdd, nMaxDegree)
+  self.pPanel:Label_SetText(txtExp, szDegree)
+  if nOldIndex then
+    txtExp = string.format(tbControls.txtExp, nOldIndex)
+    bFullLevel = Item.WuXingYin:CheckFixAttrIsFull(self.nItemId, nOldIndex)
+    nDegree, nMaxDegree = Item.WuXingYin:GetFixAttrDegree(self.nItemId, nOldIndex)
+    szDegree = bFullLevel and "" or i18n.EasyGet("\228\191\174\231\130\188\229\186\166({0}/{1})", nDegree, nMaxDegree)
+    self.pPanel:Label_SetText(txtExp, szDegree)
+  end
+end
+
+function tbWnd:OnClose()
+  self.nSelect = nil
+  self.nCost = nil
+  self.nItemId = nil
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnAttribute1)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnAttribute2)
+end

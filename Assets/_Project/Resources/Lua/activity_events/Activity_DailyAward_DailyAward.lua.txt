@@ -1,0 +1,169 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.DailyAward)
+local nDayOffset = 14400
+local nMaxBitLength = 32
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/Common/DailyAward/DailyAwardCfg.tab"
+  local tbActivityConfig = Lib:EasyLoadTabFile(szFilepath, {"nConfigId"})
+  if not tbActivityConfig then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  self.ACTIVITY_CONFIG = {}
+  for nConfigId, tbConfig in pairs(tbActivityConfig) do
+    self.ACTIVITY_CONFIG[nConfigId] = tbConfig
+  end
+  szFilepath = "Setting/Activity/Common/DailyAward/DailyAwardInfo.tab"
+  local tbDailyAwardInfo = Lib:EasyLoadTabFile(szFilepath)
+  if not tbDailyAwardInfo then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  for _, tbInfo in pairs(tbDailyAwardInfo) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("DailyAward: Load DailyAwardInfo failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbDailyAwardInfo = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbDailyAwardInfo or {}
+    if not self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbDailyAwardInfo[tbInfo.nDay] then
+      self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbDailyAwardInfo[tbInfo.nDay] = tbInfo
+    else
+      LogErr(string.format("DailyAward: Load DailyAwardInfo failed, duplicate Day Award Info, nDay = %d", tbInfo.nDay))
+      return false
+    end
+    if Lib:CountTB(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbDailyAwardInfo) > nMaxBitLength then
+      LogErr(string.format("DailyAward: Load DailyAwardInfo failed, the dailyaward info length has over the %d", nMaxBitLength))
+      return false
+    end
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+  self.bLoadConfig = true
+end
+
+tbActivity.SaveID = {
+  LastJoinTime = 1,
+  DailyAwardGetCursor = 2,
+  AwardBitMap = 3
+}
+tbActivity.Protocol = {OnGetDailyAwardReq = 1, OnRefreshClientResp = 2}
+tbActivity.AwardStatus = {NotGet = 0, HasGet = 1}
+tbActivity.GetType = {SignIn = 1, ReSign = 2}
+tbActivity.GetTypeWhiteBoard = {
+  [tbActivity.GetType.SignIn] = true,
+  [tbActivity.GetType.ReSign] = true
+}
+tbActivity.CheckAwardFunc = {
+  [tbActivity.GetType.SignIn] = function()
+    return tbActivity.CheckCanGetSignInAward
+  end,
+  [tbActivity.GetType.ReSign] = function()
+    return tbActivity.CheckCanGetReSignAward
+  end
+}
+
+function tbActivity:CheckCanGetSignInAward(pPlayer, nIndex)
+  if not pPlayer then
+    return false, ""
+  end
+  if nIndex < 0 or not self.tbConfig.tbDailyAwardInfo[nIndex + 1] then
+    return false, i18n.EasyGet("\231\164\188\231\137\169\233\162\134\229\143\150\229\164\177\232\180\165\239\188\140\232\175\183\231\168\141\229\144\142\233\135\141\232\175\149")
+  end
+  if self:GetAwardStatusByIndex(pPlayer, nIndex) == self.AwardStatus.HasGet then
+    return false, i18n.EasyGet("\229\175\185\228\184\141\232\181\183\239\188\140\230\130\168\229\183\178\231\187\143\231\173\190\229\136\176\232\191\135\228\186\134")
+  end
+  if nIndex ~= self:GetAwardIndexToday() then
+    return false, i18n.EasyGet("\229\175\185\228\184\141\232\181\183\239\188\140\233\157\158\228\187\138\230\151\165\230\180\187\232\183\131\229\165\189\231\164\188\230\151\160\230\179\149\231\173\190\229\136\176\232\142\183\229\190\151")
+  end
+  return true, ""
+end
+
+function tbActivity:CheckCanGetReSignAward(pPlayer, nIndex)
+  if not pPlayer then
+    return false, ""
+  end
+  if not nIndex or not self.tbConfig.tbDailyAwardInfo[nIndex + 1] then
+    Log("DailyAward: CheckCanGetReSignAward failed, invalid nIndex, nPlayer=%d, nIndex=%d", pPlayer.dwID, nIndex or -1)
+    return false, i18n.EasyGet("\231\164\188\231\137\169\233\162\134\229\143\150\229\164\177\232\180\165\239\188\140\232\175\183\231\168\141\229\144\142\233\135\141\232\175\149")
+  end
+  if nIndex < self:GetAwardIndexToday() - self.tbConfig.nCanRewardDay or nIndex >= self:GetAwardIndexToday() then
+    return false, i18n.EasyGet("\229\175\185\228\184\141\232\181\183\239\188\140\230\130\168\228\184\141\232\131\189\232\161\165\231\173\190\233\162\134\229\143\150\232\191\153\228\184\128\229\164\169\231\154\132\230\180\187\232\183\131\229\165\189\231\164\188")
+  end
+  if self:GetAwardStatusByIndex(pPlayer, nIndex) ~= self.AwardStatus.NotGet then
+    return false, i18n.EasyGet("\229\175\185\228\184\141\232\181\183\239\188\140\230\130\168\229\183\178\231\187\143\232\161\165\231\173\190\232\191\135\228\186\134")
+  end
+  return true, ""
+end
+
+function tbActivity:CheckCanGetDailyAward(pPlayer, nIndex, nGetType)
+  if not pPlayer then
+    return false, ""
+  end
+  if not (nIndex and nGetType and self.GetTypeWhiteBoard[nGetType]) or not self.CheckAwardFunc[nGetType] then
+    Log("DailyAward: OnGetDailyAwardReq failed, param error nPlayerId = %d,invalid nIndex = %d, nGetType = %d ", pPlayer.dwID, nIndex or -1, nGetType or -1)
+    return false, i18n.EasyGet("\231\164\188\231\137\169\233\162\134\229\143\150\229\164\177\232\180\165\239\188\140\232\175\183\231\168\141\229\144\142\233\135\141\232\175\149")
+  end
+  local pCheckFunc = self.CheckAwardFunc[nGetType]()
+  return pCheckFunc(self, pPlayer, nIndex)
+end
+
+function tbActivity:GetPlayerAwardCursor(pPlayer)
+  if not pPlayer then
+    return
+  end
+  return pPlayer.GetUserValue(GetGroupKey(self.tbConfig.szSaveKey), self.SaveID.DailyAwardGetCursor)
+end
+
+function tbActivity:GetAwardIndexToday()
+  if GetTime() < self.nStartTime then
+    return -1
+  else
+    return Lib:CalcDayOffset(nDayOffset, self.nStartTime, GetTime())
+  end
+end
+
+function tbActivity:GetAwardByIndex(nIndex)
+  local tbAwards = {}
+  if not nIndex then
+    return tbAwards
+  end
+  local tbAwardInfo = self.tbConfig.tbDailyAwardInfo[nIndex + 1]
+  if tbAwardInfo then
+    tbAwards = Award:GetAward(tbAwardInfo.nAwardId, tbAwardInfo.nAwardKey)
+  end
+  return tbAwards
+end
+
+function tbActivity:GetAwardStatusByIndex(pPlayer, nIndex)
+  if not pPlayer then
+    return
+  end
+  if not nIndex or nIndex < 0 or not self.tbConfig.tbDailyAwardInfo[nIndex + 1] then
+    Log("DailyAwardS: SetAwardStatusByIndex failed, invalid nIndex = %d, nPlayerId", nIndex or -1, pPlayer.dwID)
+    return
+  end
+  local nAwardBitMap = pPlayer.GetUserValue(GetGroupKey(self.tbConfig.szSaveKey), self.SaveID.AwardBitMap)
+  return Lib:IIF(Lib:GetBit(nAwardBitMap, nIndex + 1) or false, self.AwardStatus.HasGet, self.AwardStatus.NotGet)
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  if not tbActCfg then
+    LogErr(string.format("tbActivity:LoadConfigWithGroup ERROR tbActCfg is nil szGroupName = %s, szGroupSubType = %s", szGroupName, szGroupSubType))
+  end
+  self.tbConfig = tbActCfg.Cfg
+  self.tbConfig.szName = i18n.Encode(self.tbConfig.szName)
+  self.tbConfig.szDesc = i18n.Encode(self.tbConfig.szDesc)
+  self.tbConfig.szShowTime = i18n.Encode(self.tbConfig.szShowTime)
+  self.tbConfig.tbDailyAwardInfo = {}
+  for _, tbInfo in pairs(tbActCfg.tbDailyAwardInfo) do
+    self.tbConfig.tbDailyAwardInfo[tbInfo.nDay] = tbInfo
+  end
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+end
+
+function tbActivity:CheckConfigValid()
+  return true
+end

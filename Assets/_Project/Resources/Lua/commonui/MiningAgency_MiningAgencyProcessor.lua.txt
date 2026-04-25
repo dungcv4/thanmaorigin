@@ -1,0 +1,256 @@
+MiningAgency.ProcessorClass = MiningAgency.ProcessorClass or {}
+local Processor = MiningAgency.ProcessorClass
+
+function Processor:init(nPlayerId1, nPlayerId2)
+  self.tbPlayers = {nPlayerId1, nPlayerId2}
+  self.tbItems = {}
+  self.tbItemsForTracking = nil
+  self.tbPlayerMiningInfo = {
+    [nPlayerId1] = {},
+    [nPlayerId2] = {}
+  }
+  self.nRequireMoney = 0
+end
+
+function Processor:Reset()
+  self.tbItems = {}
+  self.tbPlayerMiningInfo = {
+    [self.tbPlayers[1]] = {},
+    [self.tbPlayers[2]] = {}
+  }
+  self.tbItemsForTracking = nil
+  self.nRequireMoney = 0
+end
+
+function Processor:SetProcessorId(nId)
+  self.nId = nId
+end
+
+function Processor:GetProcessorId()
+  return self.nId
+end
+
+function Processor:GetPlayerIds()
+  return self.tbPlayers[MiningAgency.OWNER], self.tbPlayers[MiningAgency.HELPER]
+end
+
+function Processor:GetOtherPlayerId(nPlayerId)
+  if nPlayerId ~= self.tbPlayers[MiningAgency.OWNER] and nPlayerId ~= self.tbPlayers[MiningAgency.HELPER] then
+    return
+  end
+  if nPlayerId ~= self.tbPlayers[MiningAgency.OWNER] then
+    return self.tbPlayers[MiningAgency.OWNER]
+  else
+    return self.tbPlayers[MiningAgency.HELPER]
+  end
+end
+
+function Processor:CheckCanAddItem(nPlayerId, nItemTemplateId, nNum)
+  if nPlayerId ~= self.tbPlayers[MiningAgency.OWNER] then
+    return false
+  end
+  local bRet, nErrCode = MiningAgency:CheckItemCanMining(nItemTemplateId)
+  if not bRet then
+    return false, nErrCode
+  end
+  if self:GetItemCanAddNum(nItemTemplateId) <= 0 then
+    return false, MiningAgency.ERR.ITEM_OVER_LIMIT
+  end
+  return true
+end
+
+function Processor:GetItemCanAddNum(nItemTemplateId)
+  local nOtherGridCount = 0
+  for nTemplateId, nCount in pairs(self.tbItems) do
+    if nTemplateId ~= nItemTemplateId then
+      local nMaxNumPerGrid = MiningAgency:GetItemMaxNumPerGrid(nTemplateId)
+      local nGridNum = math.ceil(nCount / nMaxNumPerGrid)
+      nOtherGridCount = nOtherGridCount + nGridNum
+    end
+  end
+  local nThisGridMaxCount = MiningAgency.nMaxGrid - nOtherGridCount
+  local nThisMaxNumPerGrid = MiningAgency:GetItemMaxNumPerGrid(nItemTemplateId)
+  return nThisGridMaxCount * nThisMaxNumPerGrid - (self.tbItems[nItemTemplateId] or 0)
+end
+
+function Processor:AddItem(nPlayerId, nItemTemplateId, nNum)
+  if not Lib:IsInteger(nNum) then
+    return false
+  end
+  local bRet, nErrCode = self:CheckCanAddItem(nPlayerId, nItemTemplateId, nNum)
+  if not bRet then
+    return false, nErrCode
+  end
+  local nCanAddNum = self:GetItemCanAddNum(nItemTemplateId)
+  nNum = math.min(nNum, nCanAddNum)
+  self.tbItems[nItemTemplateId] = self.tbItems[nItemTemplateId] or 0
+  self.tbItems[nItemTemplateId] = self.tbItems[nItemTemplateId] + nNum
+  self:CalculateRequireMoney()
+  return true, nil, nNum
+end
+
+function Processor:CheckCanDeleteItem(nPlayerId, nItemTemplateId, nNum)
+  if nPlayerId ~= self.tbPlayers[MiningAgency.OWNER] then
+    return false
+  end
+  local bRet, nErrCode = MiningAgency:CheckItemCanMining(nItemTemplateId)
+  if not bRet then
+    return false, nErrCode
+  end
+  if not self.tbItems[nItemTemplateId] then
+    return false
+  end
+  return true
+end
+
+function Processor:GetItemCanDeleteNum(nItemTemplateId)
+  return self.tbItems[nItemTemplateId] or 0
+end
+
+function Processor:DeleteItem(nPlayerId, nItemTemplateId, nNum)
+  if not Lib:IsInteger(nNum) then
+    return false
+  end
+  local bRet, nErrCode = self:CheckCanDeleteItem(nPlayerId, nItemTemplateId, nNum)
+  if not bRet then
+    return false, nErrCode
+  end
+  local nCanDeleteNum = self:GetItemCanDeleteNum(nItemTemplateId)
+  nNum = math.min(nNum, nCanDeleteNum)
+  self.tbItems[nItemTemplateId] = self.tbItems[nItemTemplateId] - nNum
+  if self.tbItems[nItemTemplateId] < 0 then
+    LogErr("[Processor:DeleteItem] min num error +++++++++++ ", nPlayerId, nItemTemplateId, self.tbItems[nItemTemplateId])
+    self.tbItems[nItemTemplateId] = nil
+  end
+  self:CalculateRequireMoney()
+  return true, nil, nNum
+end
+
+function Processor:CalculateRequireMoney()
+  local nRequireMoney = 0
+  for nTemplateId, nNum in pairs(self.tbItems) do
+    local nMoney = MiningAgency:GetItemMiningMoney(nTemplateId)
+    nRequireMoney = nRequireMoney + nMoney * nNum
+  end
+  self.nRequireMoney = nRequireMoney
+end
+
+function Processor:GetChosenItems()
+  return self.tbItems
+end
+
+function Processor:GetRequireMoney()
+  return self.nRequireMoney or 0
+end
+
+function Processor:TryChangePlayerMiningState(nPlayerId, nState)
+  if not self.tbPlayerMiningInfo[nPlayerId] then
+    LogErr("[Processor:TryChangePlayerMiningState] wrong player +++++++++ ", nPlayerId)
+    return false
+  end
+  if nState ~= MiningAgency.UNLOCK_STATE and nState ~= MiningAgency.LOCK_STATE and nState ~= MiningAgency.CONFIRM_STATE then
+    return false
+  end
+  local bRet, nErrorCode = self:CheckChangingState(nPlayerId, nState)
+  if not bRet then
+    return false, nErrorCode
+  end
+  self:SetPlayerMiningState(nPlayerId, nState)
+  return true
+end
+
+function Processor:CheckChangingState(nPlayerId, nToState)
+  local nOtherPlayerId = self:GetOtherPlayerId(nPlayerId)
+  if nToState == MiningAgency.LOCK_STATE and self:GetPlayerMiningState(nPlayerId) == MiningAgency.LOCK_STATE then
+    return false, Trade.ERR.IN_LOCK
+  end
+  if nToState == MiningAgency.CONFIRM_STATE and self:GetPlayerMiningState(nPlayerId) == MiningAgency.CONFIRM_STATE then
+    return false, Trade.ERR.IN_CONFIRM
+  end
+  if nToState == MiningAgency.CONFIRM_STATE and self:GetPlayerMiningState(nOtherPlayerId) == MiningAgency.UNLOCK_STATE then
+    return false, Trade.ERR.OTHER_IN_UNLOCK
+  end
+  if nToState == MiningAgency.UNLOCK_STATE and self:GetPlayerMiningState(nPlayerId) == MiningAgency.CONFIRM_STATE then
+    return false, Trade.ERR.IN_CONFIRM
+  end
+  if nToState == MiningAgency.UNLOCK_STATE and not self:GetPlayerMiningState(nPlayerId) == MiningAgency.LOCK_STATE then
+    return false, Trade.ERR.SELF_IN_UNLOCK
+  end
+  return true
+end
+
+function Processor:SetPlayerMiningState(nPlayerId, nState)
+  if not self.tbPlayerMiningInfo[nPlayerId] then
+    LogErr("[Processor:SetPlayerMiningState] wrong player +++++++++ ", nPlayerId, debug.traceback())
+    return false
+  end
+  if nState ~= MiningAgency.UNLOCK_STATE and nState ~= MiningAgency.LOCK_STATE and nState ~= MiningAgency.CONFIRM_STATE then
+    return false
+  end
+  local nOtherPlayerId = self:GetOtherPlayerId(nPlayerId)
+  local nOtherState = self:GetPlayerMiningState(nOtherPlayerId)
+  if nState == MiningAgency.UNLOCK_STATE and nOtherState == MiningAgency.CONFIRM_STATE then
+    self.tbPlayerMiningInfo[nOtherPlayerId].nState = MiningAgency.LOCK_STATE
+  end
+  self.tbPlayerMiningInfo[nPlayerId].nState = nState
+  return true
+end
+
+function Processor:GetPlayerMiningState(nPlayerId)
+  if not self.tbPlayerMiningInfo[nPlayerId] then
+    LogErr("[Processor:GetPlayerMiningState] wrong player +++++++++ ", nPlayerId, debug.traceback())
+    return
+  end
+  return self.tbPlayerMiningInfo[nPlayerId].nState or MiningAgency.UNLOCK_STATE
+end
+
+function Processor:SetPlayerMiningMoney(nPlayerId, nNum)
+  if not Lib:IsInteger(nNum) then
+    return false
+  end
+  if not self.tbPlayerMiningInfo[nPlayerId] then
+    LogErr("[Processor:SetPlayerMiningMoney] wrong player +++++++++ ", nPlayerId)
+    return false
+  end
+  local nOtherPlayerId = self:GetOtherPlayerId(nPlayerId)
+  local nOtherPlayerMoney = self:GetPlayerMiningMoney(nOtherPlayerId)
+  local nRequireMoney = self:GetRequireMoney()
+  nNum = math.min(nNum, nRequireMoney - nOtherPlayerMoney)
+  self.tbPlayerMiningInfo[nPlayerId].nMoneyNum = nNum
+  return true, nil, nNum
+end
+
+function Processor:GetLackOfMoney()
+  local nOwnerId, nHelperId = self:GetPlayerIds()
+  local nOwnerMoney = self:GetPlayerMiningMoney(nOwnerId)
+  local nHelperMoney = self:GetPlayerMiningMoney(nHelperId)
+  return self.nRequireMoney - nOwnerMoney - nHelperMoney
+end
+
+function Processor:GetPlayerMiningMoney(nPlayerId)
+  if not self.tbPlayerMiningInfo[nPlayerId] then
+    LogErr("[Processor:GetPlayerMiningMoney] wrong player +++++++++ ", nPlayerId)
+    return
+  end
+  return self.tbPlayerMiningInfo[nPlayerId].nMoneyNum or 0
+end
+
+function Processor:CheckBothLock()
+  local nOwnerId, nHelperId = self:GetPlayerIds()
+  local nOwnerState = self:GetPlayerMiningState(nOwnerId)
+  local nHelperState = self:GetPlayerMiningState(nHelperId)
+  if nOwnerState == MiningAgency.LOCK_STATE and nHelperState == MiningAgency.LOCK_STATE then
+    return true
+  end
+  return false
+end
+
+function Processor:CheckBothConfirm()
+  local nOwnerId, nHelperId = self:GetPlayerIds()
+  local nOwnerState = self:GetPlayerMiningState(nOwnerId)
+  local nHelperState = self:GetPlayerMiningState(nHelperId)
+  if nOwnerState == MiningAgency.CONFIRM_STATE and nHelperState == MiningAgency.CONFIRM_STATE then
+    return true
+  end
+  return false
+end

@@ -1,0 +1,194 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.DailyAward)
+local Protocol = {
+  [tbActivity.Protocol.OnRefreshClientResp] = "OnRefreshClientResp"
+}
+
+function tbActivity:OnOpen()
+  self:OnPlayerLogin()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self.OnPlayerLogin, self)
+end
+
+function tbActivity:OnClientClose()
+  self.tbAwardInfoListCache = nil
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.DailyAwardReSignIn)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.DailyAwardSignIn)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self)
+end
+
+function tbActivity:OnCrossDay()
+  self:OnPlayerLogin()
+end
+
+function tbActivity:OnPlayerLogin()
+  if GetTime() < self.nEndTime then
+    self:CheckRedPoint()
+  end
+end
+
+function tbActivity:CheckRedPoint()
+  local bNeedLightSignRedPoint = self:CheckCanGetSignInAward(me, self:GetAwardIndexToday())
+  if bNeedLightSignRedPoint and not RedPointMgr:CheckEvent(RedPointMgr.EVENT.DailyAwardSignIn) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.DailyAwardSignIn)
+  elseif not bNeedLightSignRedPoint and RedPointMgr:CheckEvent(RedPointMgr.EVENT.DailyAwardSignIn) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.DailyAwardSignIn)
+  end
+  local bNeedLightReSignRedPoint = false
+  for i = 0, self:GetAwardIndexToday() do
+    if self:CheckCanGetReSignAward(me, i) then
+      bNeedLightReSignRedPoint = true
+      break
+    end
+  end
+  if bNeedLightReSignRedPoint and not RedPointMgr:CheckEvent(RedPointMgr.EVENT.DailyAwardReSignIn) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.DailyAwardReSignIn)
+  elseif not bNeedLightReSignRedPoint and RedPointMgr:CheckEvent(RedPointMgr.EVENT.DailyAwardReSignIn) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.DailyAwardReSignIn)
+  end
+end
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:OnRefreshClientResp()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UPDATE_DAILY_AWARD_WND)
+  self:CheckRedPoint()
+end
+
+function tbActivity:ReqGetDailyAward(nIndex, nGetType)
+  if not nIndex or not self.tbConfig.tbDailyAwardInfo[nIndex + 1] then
+    me.CenterMsg(i18n.EasyGet("\231\173\190\229\136\176\229\165\150\229\138\177\230\151\160\230\149\136"))
+    self:OnRefreshClientResp()
+    return
+  end
+  if not nGetType or not self.GetTypeWhiteBoard[nGetType] then
+    me.CenterMsg(i18n.EasyGet("\231\173\190\229\136\176\231\177\187\229\158\139\230\151\160\230\149\136"))
+    self:OnRefreshClientResp()
+    return
+  end
+  if self.tbConfig.nLevel and me.nLevel < self.tbConfig.nLevel then
+    me.CenterMsg(i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179{0}\231\186\167", self.tbConfig.nLevel))
+    return
+  end
+  local bRet, szMsg = self:CheckCanGetDailyAward(me, nIndex, nGetType)
+  if not bRet then
+    if szMsg and not Lib:IsEmptyStr(szMsg) then
+      me.CenterMsg(szMsg)
+    end
+    self:OnRefreshClientResp()
+    return
+  end
+  if nGetType == self.GetType.SignIn then
+    ActivityMgr:CallServerScript(self.nId, self.Protocol.OnGetDailyAwardReq, nIndex, nGetType)
+  elseif nGetType == self.GetType.ReSign then
+    local function fnOK()
+      if me.GetMoney(Currency.TYPE.YuanBao) < self.tbConfig.nRewardCost then
+        local function fnYuanBaoOK()
+          GainCurrency:DirectJump(Currency.TYPE.YuanBao)
+        end
+        
+        local function fnYuanBaoCancel()
+        end
+        
+        Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\133\131\229\174\157\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\232\142\183\229\143\150\229\133\131\229\174\157\239\188\159"), {
+          {fnYuanBaoOK},
+          {fnYuanBaoCancel}
+        }, {
+          i18n.szOk,
+          i18n.szCancel
+        })
+        return true
+      else
+        ActivityMgr:CallServerScript(self.nId, self.Protocol.OnGetDailyAwardReq, nIndex, nGetType)
+      end
+    end
+    
+    local function fnCancel()
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\232\161\165\231\173\190\233\156\128\232\166\129\232\138\177\232\180\185{0}\229\133\131\229\174\157\239\188\140\230\130\168\231\161\174\229\174\154\232\166\129\232\161\165\231\173\190\229\144\151\239\188\159", self.tbConfig.nRewardCost), {
+      {fnOK},
+      {fnCancel}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  end
+end
+
+function tbActivity:GetAwardInfo(bNeedRefresh)
+  if bNeedRefresh then
+    local tbAwardInfoList = {}
+    local tbAwardInfo = {}
+    for nDay, _ in pairs(self.tbConfig.tbDailyAwardInfo) do
+      local nIndex = nDay - 1
+      local tbAwards = self:GetAwardByIndex(nIndex)
+      local szTitle = i18n.EasyGet("\231\172\172{0}\229\164\169", nDay)
+      local nGetStatus = self:GetAwardStatusByIndex(me, nIndex)
+      local bCanGetAsSignAward, _ = self:CheckCanGetSignInAward(me, nIndex)
+      local bCanGetAsReSignAward = false
+      if not bCanGetAsSignAward then
+        bCanGetAsReSignAward, _ = self:CheckCanGetReSignAward(me, nIndex)
+      end
+      tbAwardInfo = {
+        nIndex = nIndex,
+        tbAwards = tbAwards,
+        szTitle = szTitle,
+        nGetStatus = nGetStatus,
+        bCanGetAsSignAward = bCanGetAsSignAward,
+        bCanGetAsReSignAward = bCanGetAsReSignAward
+      }
+      tbAwardInfo.nSortWeight = self:CalcSortWeight(tbAwardInfo)
+      table.insert(tbAwardInfoList, tbAwardInfo)
+    end
+    self:SortAwardInfo(tbAwardInfoList)
+    self.tbAwardInfoListCache = tbAwardInfoList
+  end
+  return self.tbAwardInfoListCache
+end
+
+tbActivity.SortWeight = {
+  SignIn = 4,
+  ReSign = 3,
+  NotGet = 2,
+  HasGet = 1,
+  NoOpen = 0
+}
+
+function tbActivity:CalcSortWeight(tbAwardInfo)
+  local nSortWeight = self.SortWeight.NoOpen
+  if GetTime() < self.nStartTime then
+    return nSortWeight
+  end
+  if tbAwardInfo.bCanGetAsSignAward then
+    nSortWeight = nSortWeight + self.SortWeight.SignIn
+  elseif tbAwardInfo.bCanGetAsReSignAward then
+    nSortWeight = nSortWeight + self.SortWeight.ReSign
+  end
+  if tbAwardInfo.nGetStatus == self.AwardStatus.HasGet then
+    nSortWeight = nSortWeight + self.SortWeight.HasGet
+  elseif tbAwardInfo.nGetStatus == self.AwardStatus.NotGet then
+    nSortWeight = nSortWeight + self.SortWeight.NotGet
+  end
+  return nSortWeight
+end
+
+function tbActivity:GetRedPointEventList()
+  return {
+    RedPointMgr.EVENT.DailyAwardReSignIn,
+    RedPointMgr.EVENT.DailyAwardSignIn
+  }
+end
+
+function tbActivity:SortAwardInfo(tbAwardInfoList)
+  table.sort(tbAwardInfoList, function(tb1, tb2)
+    if tb1.nSortWeight == tb2.nSortWeight then
+      return tb1.nIndex < tb2.nIndex
+    else
+      return tb1.nSortWeight > tb2.nSortWeight
+    end
+  end)
+end

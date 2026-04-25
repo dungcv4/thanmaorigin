@@ -1,0 +1,291 @@
+Require("Script/LevelTower/LevelTowerC.lua")
+local tbWnd = Ui:CreateWindow("UIToweActivity")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  LeftTowerTemplate = "node/imgBG/Left/ScrollView/Viewport/Content/Template",
+  RightTopTemplate = "node/imgBG/Right/Template",
+  txtcondition01 = "node/imgBG/Right/txtcondition01",
+  txtcondition02 = "node/imgBG/Right/txtcondition02",
+  txtFirstNum = "node/imgBG/Right/txtFirstNum",
+  txtFighting = "node/imgBG/Right/txtFighting",
+  txtLV = "node/imgBG/Right/txtLV",
+  RightFirstPassAwardTemplate = "node/imgBG/Right/ScrollViewItem/Viewport/Content/Template",
+  RightTower1 = "node/imgBG/Right/Grid_Level/01",
+  RightTower2 = "node/imgBG/Right/Grid_Level/02",
+  RightTower3 = "node/imgBG/Right/Grid_Level/03",
+  RightTower4 = "node/imgBG/Right/Grid_Level/04",
+  RightTower5 = "node/imgBG/Right/CenterLevel",
+  LineEffect = "node/imgBG/Right/Line/Line",
+  txtTittle = "node/imgBG/Right/txtTittle",
+  btnGo = "node/imgBG/Right/btnGo",
+  btnHelp = "node/imgBG/txtTitle/btnHelp"
+}
+tbWnd.szBtnDisablePath = "UI/atlas/common_btn/btn_common1_disable.png"
+tbWnd.szBtnEnablePath = "UI/atlas/common_btn/btn_common1_1.png"
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseByDefault()
+  end,
+  btnGo = function(self)
+    if self.nSelectRightLevel then
+      LevelTower.LevelTowerC:DoRequestEnterFuBen(self.nSelectRightLevel)
+    end
+  end,
+  btnHelp = function(self)
+    Ui:OpenWindow("UIGeneralHelp", "LevelTowerHelp")
+  end
+}
+local LevelTowerC = LevelTower.LevelTowerC
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_SWITCH,
+      self.CloseByDefault,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_UPDATE_TEAM_MINLEVEL,
+      self.OnSyncTeamMinLevel,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_TEAM_UPDATE,
+      LevelTowerC.ReqTeamMinPassLevel,
+      LevelTowerC
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.tbLeftTowerScrollView = Ui:NewSuperListView(self, tbControls.LeftTowerTemplate, self.__SetLeftTowerElement, nil, self.__OnLeftTowerSelected, true)
+  self.tbRightFirstAwardView = Ui:NewItemGridScrollView(self, tbControls.RightFirstPassAwardTemplate, 1, 1)
+end
+
+function tbWnd:OnOpen()
+  self.tbPassLevelInfo = LevelTowerC:GetPassLevelInfoByLevelOrder()
+  self.nMaxPassLevel = LevelTower:GetMaxPassLevel(me)
+  self.tbData = Lib:SplitElementByGroup(Lib:GetHeadNElement(LevelTower.tbLevelSetting, (LevelTower:GetMainLevelBySub(Lib:IIF(0 == self.nMaxPassLevel, 1, self.nMaxPassLevel)) + LevelTower.Cfg.nOverShowNum) * LevelTower.Cfg.nSubLevelPerMain), LevelTower.Cfg.nSubLevelPerMain)
+  self.pPanel:SetActive(tbControls.RightTopTemplate, false)
+  if me.dwTeamID <= 0 then
+    local bPassMaxLevel = self.nMaxPassLevel == #LevelTower.tbLevelSetting
+    self.tbLeftTowerScrollView:SetAllElement(self.tbData)
+    self.tbLeftTowerScrollView:MovePanelToItemIndex(LevelTower:GetMainLevelBySub(self.nMaxPassLevel + Lib:IIF(bPassMaxLevel, 0, 1)))
+    self.tbLeftTowerScrollView:_OnClickElement(LevelTower:GetMainLevelBySub(self.nMaxPassLevel + Lib:IIF(bPassMaxLevel, 0, 1)))
+  else
+    LevelTowerC:ReqTeamMinPassLevel()
+  end
+end
+
+function tbWnd:OnSyncTeamMinLevel()
+  self.nTeamMinPassLevel = LevelTowerC:GetTeamMinPassLevel()
+  local bPassMaxLevel = self.nTeamMinPassLevel == #LevelTower.tbLevelSetting
+  self.tbLeftTowerScrollView:SetAllElement(self.tbData)
+  self.tbLeftTowerScrollView:MovePanelToItemIndex(LevelTower:GetMainLevelBySub(self.nTeamMinPassLevel + Lib:IIF(bPassMaxLevel, 0, 1)))
+  self.tbLeftTowerScrollView:_OnClickElement(LevelTower:GetMainLevelBySub(self.nTeamMinPassLevel + Lib:IIF(bPassMaxLevel, 0, 1)))
+end
+
+function tbWnd:__SetLeftTowerElement(tbElement, tbLevelInfo, nIndex)
+  local pPanel = tbElement.pPanel
+  pPanel:SetActive("img_Select", false)
+  pPanel:SetActive("img_SelectNew", false)
+  local nMainName, _ = LevelTower:GetLevelName(tbLevelInfo[1].nLevel)
+  local nMainLevel = LevelTower:GetMainLevelBySub(tbLevelInfo[1].nLevel)
+  pPanel:Label_SetText("txtName", nMainName)
+  local nNearMainLevel = LevelTower:GetMainLevelBySub(self.nMaxPassLevel + 1)
+  pPanel:SetActive("img_Normal", nMainLevel <= 1)
+  pPanel:SetActive("img_NormalNew", nMainLevel > 1)
+  if nMainLevel <= nNearMainLevel then
+    pPanel:SetActive("img_Lock", false)
+    pPanel:SetActive("img_LockNew", false)
+    local nSNum = 0
+    local tbScore = {}
+    for _, tbInfo in ipairs(tbLevelInfo) do
+      if self.tbPassLevelInfo[tbInfo.nLevel] then
+        if self.tbPassLevelInfo[tbInfo.nLevel].szScore == "S" then
+          nSNum = nSNum + 1
+        end
+        table.insert(tbScore, self.tbPassLevelInfo[tbInfo.nLevel].szScore)
+      end
+    end
+    if nSNum == LevelTower.Cfg.nSubLevelPerMain then
+      pPanel:SetActive("img_SSS", nMainLevel <= 1)
+      pPanel:SetActive("img_SSSNew", nMainLevel > 1)
+      pPanel:SetActive("DengLong_L", true)
+      pPanel:SetActive("DengLong_R", true)
+    else
+      pPanel:SetActive("img_SSS", false)
+      pPanel:SetActive("img_SSSNew", false)
+      pPanel:SetActive("DengLong_L", false)
+      pPanel:SetActive("DengLong_R", false)
+    end
+    self:__ShowLeftTowerScore(pPanel, tbScore)
+    if me.dwTeamID > 0 and self.nTeamMinPassLevel > 0 and nMainLevel == LevelTower:GetMainLevelBySub(self.nTeamMinPassLevel) then
+      pPanel:SetActive("State/img_StateGroup", true)
+    else
+      pPanel:SetActive("State/img_StateGroup", false)
+    end
+    if nMainLevel == LevelTower:GetMainLevelBySub(self.nMaxPassLevel) then
+      pPanel:SetActive("State/img_StateSigle", true)
+    else
+      pPanel:SetActive("State/img_StateSigle", false)
+    end
+  else
+    pPanel:SetActive("State/img_StateSigle", false)
+    pPanel:SetActive("State/img_StateGroup", false)
+    pPanel:SetActive("img_SSS", false)
+    pPanel:SetActive("img_SSSNew", false)
+    pPanel:SetActive("img_Lock", nMainLevel <= 1)
+    pPanel:SetActive("img_LockNew", nMainLevel > 1)
+    pPanel:SetActive("DengLong_L", false)
+    pPanel:SetActive("DengLong_R", false)
+    pPanel:SetActive("Grid_LV", false)
+  end
+end
+
+function tbWnd:__ShowLeftTowerScore(pPanel, tbScore)
+  pPanel:SetActive("Grid_LV", true)
+  for i = 1, LevelTower.Cfg.nSubLevelPerMain do
+    if pPanel:IsObjectExist("Grid_LV/Element" .. i) then
+      pPanel:DeleteObject("Grid_LV/Element" .. i)
+    end
+    if tbScore[i] then
+      local szKey = pPanel:CloneObject("Grid_LV/txt_LV" .. tbScore[i], "Element" .. i)
+      pPanel:SetActive(szKey, true)
+    end
+  end
+end
+
+function tbWnd:__ShowLeftSelectEffect(nIndex, bShow)
+  local tbElement, _ = self.tbLeftTowerScrollView:GetElement(nIndex)
+  if tbElement then
+    tbElement.pPanel:SetActive("img_Select", bShow and nIndex <= 1)
+    tbElement.pPanel:SetActive("img_SelectNew", bShow and nIndex > 1)
+  end
+end
+
+function tbWnd:__OnLeftTowerSelected(tbElement, tbInfo, nIndex)
+  if nIndex > LevelTower:GetMainLevelBySub(self.nMaxPassLevel + 1) then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\229\177\130\232\191\152\230\156\170\232\167\163\233\148\129"))
+    self:__ShowLeftSelectEffect(nIndex, false)
+    return
+  end
+  if self.nSelectLeftIndex then
+    self:__ShowLeftSelectEffect(self.nSelectLeftIndex, false)
+  end
+  self:__ShowLeftSelectEffect(nIndex, true)
+  self.nSelectLeftIndex = nIndex
+  self:UpdateRightPanel(tbInfo)
+end
+
+function tbWnd:__SetRightScore(nIndex, szScore)
+  if "S" == szScore then
+    self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/S_Effect", true)
+  else
+    self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/S_Effect", false)
+  end
+  for score, _ in pairs(LevelTower.ScoreWeight) do
+    self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Cont_Normal/txt_LV" .. score, score == szScore)
+  end
+end
+
+function tbWnd:UpdateRightPanel(tbLevelInfo)
+  local nRemainFirstPassCount = LevelTower:GetRemainFirstPassCount(me)
+  if nRemainFirstPassCount > 0 then
+    self.pPanel:Label_SetText(tbControls.txtFirstNum, i18n.EasyGet("\233\166\150\233\128\154\230\172\161\230\149\176\239\188\154<color=#1FFB24>{0}</color>", nRemainFirstPassCount))
+  else
+    self.pPanel:Label_SetText(tbControls.txtFirstNum, i18n.EasyGet("\233\166\150\233\128\154\230\172\161\230\149\176\239\188\154<color=red>0</color>"))
+  end
+  for nIndex, tbInfo in ipairs(tbLevelInfo or {}) do
+    local _, szSubName = LevelTower:GetLevelName(tbInfo.nLevel)
+    self.pPanel:Label_SetText(tbControls["RightTower" .. nIndex] .. "/txtName", szSubName)
+    if self.tbPassLevelInfo[tbInfo.nLevel] then
+      self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Cont_Lock", false)
+      self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Cont_Normal", true)
+      self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Activate_Effect", true)
+      local szScore = self.tbPassLevelInfo[tbInfo.nLevel].szScore
+      self:__SetRightScore(nIndex, szScore)
+      if nIndex == LevelTower.Cfg.nSubLevelPerMain then
+        self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/SuiZi", true)
+      end
+      if nIndex < LevelTower.Cfg.nSubLevelPerMain then
+        self.pPanel:SetActive(tbControls.LineEffect .. "0" .. nIndex, true)
+      end
+      if tbInfo.nLevel == self.nMaxPassLevel then
+        self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Cont_Normal/State/img_StateSigle", true)
+      else
+        self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Cont_Normal/State/img_StateSigle", false)
+      end
+      if tbInfo.nLevel == self.nTeamMinPassLevel then
+        self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Cont_Normal/State/img_StateGroup", true)
+      else
+        self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Cont_Normal/State/img_StateGroup", false)
+      end
+    else
+      self:__SetRightScore(nIndex, "")
+      self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Cont_Normal/State/img_StateGroup", false)
+      self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Cont_Normal/State/img_StateSigle", false)
+      if self.nMaxPassLevel + 1 >= tbInfo.nLevel then
+        self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Cont_Normal", true)
+        self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Cont_Lock", false)
+      else
+        self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Cont_Lock", true)
+        self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Cont_Normal", false)
+      end
+      self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/S_Effect", false)
+      self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/Activate_Effect", false)
+      if nIndex == LevelTower.Cfg.nSubLevelPerMain then
+        self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/SuiZi", false)
+      end
+      if nIndex < LevelTower.Cfg.nSubLevelPerMain then
+        self.pPanel:SetActive(tbControls.LineEffect .. "0" .. nIndex, false)
+      end
+    end
+    Ui:Button_BindEvent(self.pPanel, tbControls["RightTower" .. nIndex], self.__OnRightTowerSelected, self, nIndex, tbLevelInfo[nIndex])
+  end
+  local nIndex = 0
+  if me.dwTeamID > 0 then
+    nIndex = self.nTeamMinPassLevel + 1 - LevelTower.Cfg.nSubLevelPerMain * (LevelTower:GetMainLevelBySub(self.nTeamMinPassLevel + 1) - 1)
+  else
+    nIndex = self.nMaxPassLevel + 1 - LevelTower.Cfg.nSubLevelPerMain * (LevelTower:GetMainLevelBySub(self.nMaxPassLevel + 1) - 1)
+  end
+  nIndex = Lib:IIF(self.nMaxPassLevel <= 0, 1, nIndex)
+  self:__OnRightTowerSelected(nIndex, tbLevelInfo[nIndex])
+end
+
+function tbWnd:__OnRightTowerSelected(nIndex, tbSingleLevelInfo)
+  self.nSelectRightLevel = tbSingleLevelInfo.nLevel
+  if self.nSelectRightIndex then
+    self.pPanel:SetActive(tbControls["RightTower" .. self.nSelectRightIndex] .. "/img_Select", false)
+  end
+  self.pPanel:SetActive(tbControls["RightTower" .. nIndex] .. "/img_Select", true)
+  self.nSelectRightIndex = nIndex
+  self.pPanel:Label_SetText(tbControls.txtcondition01, i18n.EasyGet("\233\161\186\229\136\169\233\128\154\229\133\179\239\188\154{0}", i18n.Parse(tbSingleLevelInfo.szPassCondition)))
+  self.pPanel:Label_SetText(tbControls.txtcondition02, i18n.EasyGet("S\232\175\132\229\136\134\230\157\161\228\187\182\239\188\154{0}", i18n.Parse(tbSingleLevelInfo.szSCondition)))
+  self.pPanel:Label_SetText(tbControls.txtFighting, i18n.EasyGet("\230\136\152\229\138\155\232\166\129\230\177\130\239\188\154{0}", tbSingleLevelInfo.nNeedFightPower))
+  self.pPanel:Label_SetText(tbControls.txtLV, i18n.EasyGet("\231\173\137\231\186\167\232\166\129\230\177\130\239\188\154{0}", tbSingleLevelInfo.nNeedLevel))
+  if not self.tbPassLevelInfo[self.nSelectRightLevel] then
+    self.pPanel:SetActive(tbControls.txtTittle, true)
+    local tbAwards = Award:GetAward(tbSingleLevelInfo.nFirstPassAwardId, tbSingleLevelInfo.nFirstPassDisplayAwardKey, {bNotMerge = true})
+    self.tbRightFirstAwardView:UpdateGenericItem(tbAwards, true)
+  else
+    self.pPanel:SetActive(tbControls.txtTittle, false)
+    self.tbRightFirstAwardView:UpdateGenericItem({}, true)
+  end
+  self:__RefreshBtnGo()
+end
+
+function tbWnd:__RefreshBtnGo()
+  if me.dwTeamID > 0 then
+    if self.nTeamMinPassLevel + 1 >= self.nSelectRightLevel then
+      self.pPanel:Sprite_SetSprite(tbControls.btnGo, self.szBtnEnablePath)
+    else
+      self.pPanel:Sprite_SetSprite(tbControls.btnGo, self.szBtnDisablePath)
+    end
+  elseif self.nMaxPassLevel + 1 >= self.nSelectRightLevel then
+    self.pPanel:Sprite_SetSprite(tbControls.btnGo, self.szBtnEnablePath)
+  else
+    self.pPanel:Sprite_SetSprite(tbControls.btnGo, self.szBtnDisablePath)
+  end
+end

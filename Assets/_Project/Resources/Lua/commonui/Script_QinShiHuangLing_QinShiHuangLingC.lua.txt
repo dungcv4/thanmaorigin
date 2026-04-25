@@ -1,0 +1,390 @@
+QinShiHuangLing.tbSyncData = QinShiHuangLing.tbSyncData or {}
+
+function QinShiHuangLing:OnSyncMapData(bOpenEntraceUI, tbSyncData)
+  self.tbSyncData = tbSyncData
+  self.nState = tbSyncData.nState
+  EventNotify.OnNotify(EventNotify.emNOTIFY_QINSHIHUANGLING_SYNC_STATE, self.nState)
+  if DEBUG_ZJQ then
+    if self:IsDailyStage() then
+      Assist.PrintDataStyle(tbSyncData, "----> QinShiHuangLing:OnSyncMapData: ")
+    else
+      Assist.PrintDataStyle(tbSyncData[5], "----> QinShiHuangLing:OnSyncMapData[5]: ")
+      Assist.PrintDataStyle(tbSyncData[6], "----> QinShiHuangLing:OnSyncMapData[6]: ")
+    end
+  end
+  if self:IsKingStage() then
+    local tbData = {
+      tbAlieData = tbSyncData[1],
+      tbDieData = tbSyncData[2],
+      nState = tbSyncData[3],
+      nActivityStartTime = tbSyncData[4],
+      tbBossCfg = tbSyncData[5],
+      tbRunData = tbSyncData[6],
+      bStartEnter = tbSyncData[7]
+    }
+    self.tbServerData = tbData
+    EventNotify.OnNotify(EventNotify.emNOTIFY_QINSHIHUANGLING_SYNC_MAP_DATA)
+    if bOpenEntraceUI and not Ui:WindowVisible("UIQinShiHuangLingEntrance") then
+      Ui:OpenWindow("UIQinShiHuangLingEntrance")
+    end
+  elseif self:IsDailyStage() and bOpenEntraceUI then
+    self:EnterFuben()
+  end
+end
+
+function QinShiHuangLing:OnMapLoaded(nMapTID)
+  if self:IsQinShiHuangLingMap(nMapTID) then
+    if AutoPath:GetLastPathReason() == AutoPath.PathReason.emFuben_GoToTargetPos then
+      self:NextPos()
+    else
+      self:ClearPos()
+    end
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_LOADED, QinShiHuangLing)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LOADED, QinShiHuangLing.OnMapLoaded, QinShiHuangLing)
+
+function QinShiHuangLing:OnPlayerLogin()
+  self:RequestActivityStatus()
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, QinShiHuangLing)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, QinShiHuangLing.OnPlayerLogin, QinShiHuangLing)
+
+function QinShiHuangLing:GetSyncData()
+  return self.tbSyncData or {}
+end
+
+function QinShiHuangLing:GetServerData()
+  return self.tbServerData or {}
+end
+
+function QinShiHuangLing:GetBossIDArr()
+  local tbBossIDArr = self.tbBossIDArr
+  if not tbBossIDArr then
+    tbBossIDArr = {}
+    local tbServerData = self:GetServerData()
+    if tbServerData then
+      local tbBossCfg = tbServerData.tbBossCfg
+      if tbBossCfg then
+        for nBossID, _ in pairs(tbBossCfg) do
+          if not self:IsKingID(nBossID) then
+            table.insert(tbBossIDArr, nBossID)
+          end
+        end
+        table.sort(tbBossIDArr, function(a, b)
+          return a < b
+        end)
+      end
+    end
+    self.tbBossIDArr = tbBossIDArr
+  end
+  return tbBossIDArr
+end
+
+function QinShiHuangLing:RequestActivityStatus()
+  RemoteServer:RequestQinShiHuangLingStatus()
+end
+
+function QinShiHuangLing:OnSyncActivityStatus(nState)
+  Log("QinShiHuangLing:OnSyncActivityStatus: ", nState)
+  self.nState = nState
+  EventNotify.OnNotify(EventNotify.emNOTIFY_QINSHIHUANGLING_SYNC_STATE, nState)
+end
+
+function QinShiHuangLing:RequestQinShiHuangLingBossDmgRank()
+  if Calendar:IsActivityInOpenState("QinShiHuangLing") then
+    RemoteServer.RequestQinShiHuangLingBossDmgRank()
+  else
+    Ui:FinishHudFuben()
+  end
+end
+
+function QinShiHuangLing:GoToBossPosition(nMapID, nX, nY)
+  self:PauseAutoCtrl()
+  AutoPath:DelayGotoAndCallEx(10, nMapID, nX, nY, function()
+    if not self:IsGoingTo() then
+      self:ResumeAutoCtrl()
+    end
+  end, nil, nil, nil, nil, nil, nil, nil, AutoPath.PathReason.emFuben_GoToTargetPos)
+end
+
+function QinShiHuangLing:IsPlayerInActivityStart()
+  if not self:IsQinShiHuangLingMap(me.nMapTemplateId) then
+    return false
+  end
+  local tbSyncData = self:GetSyncData()
+  if not tbSyncData then
+    return false
+  end
+  return tbSyncData[3] ~= self.STATE_ACT_NOT_BEGIN
+end
+
+function QinShiHuangLing:GetSeriesType(type)
+  if 1 == type then
+    return i18n.EasyGet("\233\135\145")
+  elseif 2 == type then
+    return i18n.EasyGet("\230\156\168")
+  elseif 3 == type then
+    return i18n.EasyGet("\230\176\180")
+  elseif 4 == type then
+    return i18n.EasyGet("\231\129\171")
+  elseif 5 == type then
+    return i18n.EasyGet("\229\156\159")
+  else
+    return i18n.EasyGet("\230\151\160")
+  end
+end
+
+function QinShiHuangLing:OnJoinQinShiHuangLing()
+  RemoteServer.RequestDataQinShiHuangLing(true)
+end
+
+function QinShiHuangLing:OnJoinQinShiHuangLingRiChang()
+  RemoteServer.RequestDataQinShiHuangLing(true, true)
+end
+
+function QinShiHuangLing:EnterFuben()
+  local function fnEnter()
+    RemoteServer.QinShiHuangLingEnterFuben()
+  end
+  
+  local bRet, szErr = ActivityCheck:CheckCanEnterActivityEx(me, nil, fnEnter, false, false, true, nil, {}, false)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  return bRet
+end
+
+function QinShiHuangLing:GetTrapNpcCfgs()
+  local tbNpcCfgs = self.tbNpcCfgs
+  if not tbNpcCfgs then
+    tbNpcCfgs = {}
+    for i = 1, 4 do
+      local tbCfgs = Lib:LoadTabFile(string.format("Setting/Map/qinshihuangling_%d/info/npc_info.txt", i)) or {}
+      for k, tbCfg in pairs(tbCfgs) do
+        tbNpcCfgs[tonumber(tbCfg.NpcTemplateId)] = tbCfg
+      end
+    end
+    self.tbNpcCfgs = tbNpcCfgs
+  end
+  return tbNpcCfgs
+end
+
+function QinShiHuangLing:GetTrapNpcData(nNpcTID)
+  local tbNpcCfgs = self:GetTrapNpcCfgs()
+  for k, tbNpc in pairs(tbNpcCfgs) do
+    if k == nNpcTID then
+      return tbNpc
+    end
+  end
+end
+
+function QinShiHuangLing:GetBossPosCfg(nPosID)
+  local tbServerData = self.tbServerData
+  if tbServerData then
+    local tbBossCfgs = tbServerData.tbBossCfg
+    if tbBossCfgs then
+      local _, tbBossCfg = next(tbBossCfgs)
+      if tbBossCfg then
+        local tbMapTIDs = tbBossCfg.tbMapTIDs
+        if tbMapTIDs then
+          return tbMapTIDs[nPosID]
+        end
+      end
+    end
+  end
+end
+
+function QinShiHuangLing:PauseAutoCtrl(bOpenAFK)
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  local bAFKRunning = AFK:IsLeadFightRunning()
+  if bAFKRunning then
+    AFK:Stop()
+  end
+  self.bOpenAFKAfterGoto = bAFKRunning or bOpenAFK
+end
+
+function QinShiHuangLing:ResumeAutoCtrl()
+  if self.bOpenAFKAfterGoto then
+    self.bOpenAFKAfterGoto = nil
+    AFK:Start()
+  end
+end
+
+function QinShiHuangLing:CheckAndGoto(nMapTID, nX, nY)
+  if nMapTID and QinShiHuangLing:IsQinShiHuangLingMap(nMapTID) then
+    local nLayerIndex = QinShiHuangLing:MapTID2LayerIndex(nMapTID)
+    QinShiHuangLing:GotoLayer(nLayerIndex, {
+      nMapTID = nMapTID,
+      nX = nX,
+      nY = nY
+    })
+    return true
+  end
+  return false
+end
+
+function QinShiHuangLing:GotoLayer(nEndLayerIndex, tbBossPos)
+  local nStartLayerIndex = self:MapTID2LayerIndex(me.nMapTemplateId)
+  local tbLayerIndexArr = Lib:CreateDijkstraPointArr(QinShiHuangLing.tbReachable, nStartLayerIndex or 1, nEndLayerIndex)
+  local tbPosArr = self:CreateGotoPosArr(tbLayerIndexArr)
+  self.tbPosArr = tbPosArr
+  if tbBossPos then
+    table.insert(tbPosArr, 1, tbBossPos)
+  end
+  self:PauseAutoCtrl(nil ~= tbBossPos)
+  if not nStartLayerIndex then
+    self:EnterFuben()
+    AutoPath:SetLastPathReason(AutoPath.PathReason.emFuben_GoToTargetPos)
+  else
+    self:NextPos()
+  end
+end
+
+function QinShiHuangLing:CreateGotoPosArr(tbLayerIndexArr)
+  local tbMapTIDArr = {}
+  for _, v in ipairs(tbLayerIndexArr) do
+    local nMapTID = self:LayerIndex2MapTID(v)
+    table.insert(tbMapTIDArr, nMapTID)
+  end
+  local tbPosArr = {}
+  for i = 1, #tbMapTIDArr - 1 do
+    local nTo = tbMapTIDArr[i]
+    local nFrom = tbMapTIDArr[i + 1]
+    local tbTrapPos = self:GetTrapPosData(nFrom, nTo)
+    local tbNpcData = self:GetTrapNpcData(tonumber(tbTrapPos.TrapNPC))
+    table.insert(tbPosArr, {
+      nMapTID = nFrom,
+      nX = tonumber(tbNpcData.XPos),
+      nY = tonumber(tbNpcData.YPos)
+    })
+  end
+  return tbPosArr
+end
+
+function QinShiHuangLing:NextPos()
+  if self:IsGoingTo() then
+    local tbPos = table.remove(self.tbPosArr)
+    if tbPos and tbPos.nMapTID == me.nMapTemplateId then
+      local nMapID, nX, nY = me.nMapId, tbPos.nX, tbPos.nY
+      Timer:Register(10, function()
+        self:GoToBossPosition(nMapID, nX, nY)
+      end)
+    end
+  end
+end
+
+function QinShiHuangLing:ClearPos()
+  self.tbPosArr = nil
+end
+
+function QinShiHuangLing:IsGoingTo()
+  local tb = self.tbPosArr
+  return nil ~= tb and #tb > 0
+end
+
+function QinShiHuangLing:ExitFuben()
+  AFK:Stop()
+  FubenUIController:RequireQuit()
+end
+
+function QinShiHuangLing:IsNeedExitFubenButton()
+  return true, {
+    function()
+      me.MsgBox(i18n.EasyGet("\230\152\175\229\144\166\231\161\174\229\174\154\231\166\187\229\188\128\231\167\166\229\167\139\231\154\135\233\153\181\239\188\159"), {
+        {
+          i18n.szOk,
+          self.ExitFuben,
+          self
+        },
+        {
+          i18n.szCancel
+        }
+      })
+    end
+  }
+end
+
+function QinShiHuangLing:IsNeedFubenBtn()
+  if self:IsKingStage() then
+    return true, {
+      function()
+        self:OnJoinQinShiHuangLing()
+      end
+    }
+  else
+    return false
+  end
+end
+
+function QinShiHuangLing:IsShowTipWhenQuit()
+  return false
+end
+
+function QinShiHuangLing:GetFubenBtnAImagePathAndText()
+  return "UI/atlas/hud/btn_transfer.png", nil
+end
+
+function QinShiHuangLing:HowToSwitchMapAsSrcMap(nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+  local nEndLayerIndex = self:MapTID2LayerIndex(nTargetMapTemplateId)
+  if nEndLayerIndex then
+    local nStartLayerIndex = self:MapTID2LayerIndex(nFromTemplateId)
+    assert(nStartLayerIndex, "nFromTemplateId = " .. nFromTemplateId)
+    local tbLayerIndexArr = Lib:CreateDijkstraPointArr(QinShiHuangLing.tbReachable, nStartLayerIndex, nEndLayerIndex)
+    local tbPosArr = self:CreateGotoPosArr(tbLayerIndexArr)
+    local tbPos = table.remove(tbPosArr)
+    if tbPos then
+      return true, {
+        nTransPosX = tbPos.nX,
+        nTransPosY = tbPos.nY
+      }
+    end
+  else
+    Dungeon:ExitDungeon()
+    return false, nil
+  end
+end
+
+function QinShiHuangLing:HowToSwitchMapAsDstMap(nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+  if ActivityCheck:CheckIsInSafeArea(me, false) then
+    self:EnterFuben()
+  else
+    if TeamMgr:IsFollowTeammate() then
+      TeamMgr:StopFollowMember()
+    end
+    AFK:Stop()
+    me.CenterMsg(i18n.EasyGet("\228\184\141\229\156\168\229\174\137\229\133\168\229\140\186\228\184\141\232\131\189\229\143\130\229\138\160\230\173\164\230\180\187\229\138\168"))
+  end
+end
+
+function QinShiHuangLing:InitMapClass()
+  for _, nMapTID in ipairs(self.tbMapTIDArr) do
+    local tbMapObj = Map:GetClass(nMapTID)
+    if tbMapObj then
+      function tbMapObj.TransmitTo(tbMapObj, nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+        return self:HowToSwitchMapAsSrcMap(nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+      end
+      
+      function tbMapObj.TransmitFrom(tbMapObj, nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+        return self:HowToSwitchMapAsDstMap(nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+      end
+      
+      function tbMapObj.IsNeedTrapPointToSwitchMap(tbMapObj, nFromMapTID, nToMapTID)
+        return self:MapTID2LayerIndex(nFromMapTID) ~= nil and self:MapTID2LayerIndex(nToMapTID) ~= nil
+      end
+    end
+  end
+end
+
+function QinShiHuangLing:Init()
+  self:InitMapClass()
+  FubenUIController:RegisterChecker(self.tbMapTIDArr, self)
+  self.nSelectIndex = 1
+end
+
+QinShiHuangLing:Init()

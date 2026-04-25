@@ -1,0 +1,243 @@
+Require("Script/Ui/Window/UIPortraitObj.lua")
+local tbWnd = Ui:CreateWindow("UIHudLeftPanelXiakedao")
+local tbControls = {
+  TemplateBoss = "imgBG/TemplateBoss",
+  Template = "imgBG/Scroll View/Viewport/Content/Template",
+  BelongPortraitObj = "imgBG/TemplateBoss/PortraitObj",
+  BelongimgBoss = "imgBG/TemplateBoss/imgBoss",
+  BelongtxtState = "imgBG/TemplateBoss/txtState",
+  BelongBtnFight = "imgBG/TemplateBoss/BtnFight",
+  BelongtxtRoleName = "imgBG/TemplateBoss/Info/txtRoleName",
+  Belonghp = "imgBG/TemplateBoss/Info/hpBg/hp",
+  BelonghpRed = "imgBG/TemplateBoss/Info/hpBg/hpRed",
+  txtState = "imgBG/TemplateBoss/txtState",
+  btnHandle = "imgBG/btnHandle"
+}
+tbWnd.tbOnClick = {}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self.tbPlayerScrollView = Ui:NewScrollView(self, tbControls.Template, nil)
+  self.tbTeamMemberPanel = {}
+  self.tbPortraitObj = {}
+end
+
+function tbWnd:OnOpen(tbPlayerList)
+  self:SetPlayerList(tbPlayerList)
+  self:UpdateBelongPlayerInfo()
+  self:UpdatePlayerList()
+  self.pPanel:SetActive(tbControls.btnHandle, false)
+  self.nUpdatePlayerTimer = Timer:Register(Env.GAME_FPS, function()
+    self:UpdatePlayer()
+    return true
+  end)
+end
+
+function tbWnd:IsShowBtnFight(tbPlayerInfo)
+  if tbPlayerInfo.dwID == me.dwID then
+    return false
+  end
+  if 0 == me.dwKinId or 0 == tbPlayerInfo.nKinId then
+    return true
+  end
+  if tbPlayerInfo.nKinId ~= me.dwKinId and tbPlayerInfo.nTongId ~= me.dwTongId then
+    return true
+  end
+  return false
+end
+
+function tbWnd:UpdateBelongPlayerInfo()
+  if not self.tbBelongInfo then
+    self.pPanel:SetActive(tbControls.TemplateBoss, false)
+    return
+  end
+  self.pPanel:SetActive(tbControls.TemplateBoss, true)
+  self.tbBelongPortraitObj = {}
+  self.pPanel:SetActive(tbControls.BelongimgBoss, true)
+  self.pPanel:SetActive(tbControls.BelongtxtState, false)
+  if XiaKeDao:GetGroup() == self.tbBelongInfo.nGroup and not self.tbBelongInfo.nOwner then
+    self.pPanel:SetActive(tbControls.txtState, true)
+    self.pPanel:Label_SetText(tbControls.txtState, i18n.EasyGet("\229\138\169\230\136\152\228\184\173"))
+  elseif XiaKeDao:GetGroup() == self.tbBelongInfo.nGroup and self.tbBelongInfo.nOwner then
+    self.pPanel:SetActive(tbControls.txtState, true)
+    self.pPanel:Label_SetText(tbControls.txtState, i18n.EasyGet("\229\165\150\229\138\177\229\189\146\229\177\158"))
+  else
+    self.pPanel:SetActive(tbControls.txtState, false)
+  end
+  local bShowBtnFight = self:IsShowBtnFight(self.tbBelongInfo)
+  self.pPanel:SetActive(tbControls.BelongBtnFight, bShowBtnFight)
+  if bShowBtnFight then
+    self.pPanel:Button_BindEvent(tbControls.BelongBtnFight .. "/4Empty", self.OnClickFight, self, -1)
+    local nTargetId = Operation:GetLockTargetNpcId()
+    if nTargetId and nTargetId == self.tbBelongInfo.nNpcId then
+      self.pPanel:Animator_SetEnable(tbControls.BelongBtnFight, true)
+    else
+      self.pPanel:Animator_SetEnable(tbControls.BelongBtnFight, false)
+    end
+  end
+  self.pPanel:SetActive(tbControls.Belonghp, true)
+  self.pPanel:SetActive(tbControls.BelonghpRed, false)
+  self.pPanel:Sprite_SetFill(tbControls.Belonghp, self.tbBelongInfo.nHpPercent / 100)
+  self.pPanel:Label_SetText(tbControls.BelongtxtRoleName, i18n.EasyGet("{0}(\229\189\146\229\177\158)", self.tbBelongInfo.szName))
+  self.tbBelongPortraitObj = Ui:NewExistPortraitObjPanel(self, tbControls.BelongPortraitObj)
+  self.tbBelongPortraitObj:SetRoleIcon(self.tbBelongInfo.nPortrait)
+  self.tbBelongPortraitObj:SetFactionIcon(self.tbBelongInfo.nFaction)
+  self.tbBelongPortraitObj:SetLevel(self.tbBelongInfo.nLevel)
+  self.tbBelongPortraitObj:SetPortraitFrame(self.tbBelongInfo.nPortraitFrameID or 0)
+end
+
+function tbWnd:SetPlayerList(tbPlayerList)
+  self.tbPlayerList = {}
+  self.tbBelongInfo = nil
+  local nBelongId = XiaKeDao:GetBelongId()
+  for _, tbPlayerInfo in pairs(tbPlayerList) do
+    if tbPlayerInfo.tbMemberData.dwID == nBelongId then
+      self.tbBelongInfo = tbPlayerInfo.tbMemberData
+    else
+      table.insert(self.tbPlayerList, tbPlayerInfo.tbMemberData)
+    end
+  end
+end
+
+function tbWnd:UpdatePlayer()
+  local bSort = false
+  local nTargetId = Operation:GetLockTargetNpcId()
+  for index, tbPlayerInfo in ipairs(self.tbPlayerList) do
+    local pNpc = KNpc.GetById(tbPlayerInfo.nNpcId or 0)
+    if pNpc and 0 ~= pNpc.nPlayerID then
+      tbPlayerInfo.nHpPercent = pNpc.i64CurLife / pNpc.i64MaxLife * 100
+      if tbPlayerInfo.nHpPercent <= 0 then
+        bSort = true
+        if nTargetId and nTargetId == tbPlayerInfo.nNpcId then
+          Operation:ClearTargetNpcId()
+        end
+      end
+      tbPlayerInfo.nLevel = pNpc.nTotalLevel
+      tbPlayerInfo.nFaction = pNpc.nFaction
+      tbPlayerInfo.nPortrait = pNpc.nPortrait
+      tbPlayerInfo.nSex = pNpc.nSex
+      tbPlayerInfo.nNpcId = pNpc.nId
+    end
+  end
+  if self.tbBelongInfo then
+    local pNpc = KNpc.GetById(self.tbBelongInfo.nNpcId or 0)
+    if pNpc and 0 ~= pNpc.nPlayerID then
+      self.tbBelongInfo.nHpPercent = pNpc.i64CurLife / pNpc.i64MaxLife * 100
+      if self.tbBelongInfo.nHpPercent <= 0 and nTargetId and nTargetId == self.tbBelongInfo.nNpcId then
+        Operation:ClearTargetNpcId()
+      end
+      self.tbBelongInfo.nLevel = pNpc.nTotalLevel
+      self.tbBelongInfo.nFaction = pNpc.nFaction
+      self.tbBelongInfo.nPortrait = pNpc.nPortrait
+      self.tbBelongInfo.nSex = pNpc.nSex
+      self.tbBelongInfo.nNpcId = pNpc.nId
+      self:UpdateBelongPlayerInfo()
+    end
+  end
+  if bSort then
+    self:SortPlayerList()
+  end
+  self:UpdatePlayerList()
+end
+
+function tbWnd:SortPlayerList()
+  local tbNewPlayerList = {}
+  for index, tbPlayerInfo in ipairs(self.tbPlayerList) do
+    local pNpc = KNpc.GetById(tbPlayerInfo.nNpcId or 0)
+    if pNpc and 0 ~= pNpc.nPlayerID then
+      tbPlayerInfo.nHpPercent = pNpc.i64CurLife / pNpc.i64MaxLife * 100
+      if tbPlayerInfo.nHpPercent > 0 then
+        table.insert(tbNewPlayerList, tbPlayerInfo)
+      end
+    end
+  end
+  for index, tbPlayerInfo in ipairs(self.tbPlayerList) do
+    local pNpc = KNpc.GetById(tbPlayerInfo.nNpcId or 0)
+    if pNpc and 0 ~= pNpc.nPlayerID then
+      tbPlayerInfo.nHpPercent = pNpc.i64CurLife / pNpc.i64MaxLife * 100
+      if tbPlayerInfo.nHpPercent <= 0 then
+        table.insert(tbNewPlayerList, tbPlayerInfo)
+      end
+    end
+  end
+  self.tbPlayerList = tbNewPlayerList
+end
+
+function tbWnd:UpdatePlayerList()
+  self.tbPlayerScrollView:Clear()
+  local nBelongId = XiaKeDao:GetBelongId()
+  self.tbPortraitObj = {}
+  for nIndex, tbPlayerInfo in ipairs(self.tbPlayerList) do
+    self.tbPlayerScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      local bShowimgBoss = nBelongId and nBelongId == tbPlayerInfo.dwID
+      pPanel:SetActive("imgBoss", bShowimgBoss)
+      if XiaKeDao:GetGroup() == tbPlayerInfo.nGroup and not tbPlayerInfo.nOwner then
+        pPanel:SetActive("txtState", true)
+        pPanel:Label_SetText("txtState", i18n.EasyGet("\229\138\169\230\136\152\228\184\173"))
+      elseif self.tbBelongInfo and self.tbBelongInfo.nGroup == tbPlayerInfo.nGroup and XiaKeDao:GetGroup() == tbPlayerInfo.nGroup and tbPlayerInfo.nOwner then
+        pPanel:SetActive("txtState", true)
+        pPanel:Label_SetText("txtState", i18n.EasyGet("\229\165\150\229\138\177\229\189\146\229\177\158"))
+      else
+        pPanel:SetActive("txtState", false)
+      end
+      local bShowBtnFight = self:IsShowBtnFight(tbPlayerInfo)
+      pPanel:SetActive("BtnFight", bShowBtnFight)
+      pPanel:SetActive("Info/hpBg/hpRed", false)
+      pPanel:SetActive("Info/hpBg/hp", true)
+      pPanel:Sprite_SetFill("Info/hpBg/hp", tbPlayerInfo.nHpPercent / 100)
+      if bShowBtnFight then
+        pPanel:Button_BindEvent("BtnFight/4Empty", self.OnClickFight, self, nIndex)
+        local nTargetId = Operation:GetLockTargetNpcId()
+        if nTargetId and nTargetId == tbPlayerInfo.nNpcId then
+          pPanel:Animator_SetEnable("BtnFight", true)
+        else
+          pPanel:Animator_SetEnable("BtnFight", false)
+        end
+      end
+      pPanel:Label_SetText("Info/txtRoleName", i18n.EasyGet("{0}", tbPlayerInfo.szName))
+      self.tbPortraitObj[nIndex] = Ui:NewExistPortraitObjPanel(tbElement, "PortraitObj")
+      self.tbPortraitObj[nIndex]:SetRoleIcon(tbPlayerInfo.nPortrait)
+      self.tbPortraitObj[nIndex]:SetFactionIcon(tbPlayerInfo.nFaction)
+      self.tbPortraitObj[nIndex]:SetLevel(tbPlayerInfo.nLevel)
+      self.tbPortraitObj[nIndex]:SetPortraitFrame(tbPlayerInfo.nPortraitFrameID or 0)
+      if tbPlayerInfo.nHpPercent <= 0 then
+        pPanel:SetActive("BtnFight", false)
+        self.tbPortraitObj[nIndex]:SetOutlineObjActive(true)
+        self.tbPortraitObj[nIndex]:SetOutlineText(i18n.EasyGet("\230\173\187\228\186\161"))
+      end
+    end)
+  end
+end
+
+function tbWnd:OnClickFight(nIndex)
+  if Ui:WindowVisible("UIBloodBarBossTop") then
+    Ui:GetWindow("UIBloodBarBossTop"):OnClickUnLockBoss()
+  end
+  if not AFK:IsRunning() then
+    AFK:Start()
+  end
+  local tbPlayerInfo
+  if -1 == nIndex then
+    tbPlayerInfo = self.tbBelongInfo
+  else
+    tbPlayerInfo = self.tbPlayerList[nIndex]
+  end
+  if tbPlayerInfo then
+    local pPlayerNpc = KNpc.GetById(tbPlayerInfo.nNpcId)
+    Operation:SimpleTapEnemy(pPlayerNpc)
+    Operation:SetLockTargetNpcId(tbPlayerInfo.nNpcId)
+    local AFKFightSetting = AFK:GetSetting():GetFightSetting()
+    AFKFightSetting:SetFollowType(1)
+  end
+end
+
+function tbWnd:OnClose()
+  self.tbPlayerScrollView:Clear()
+  for key, value in pairs(self.tbPortraitObj) do
+    self.tbPortraitObj[key] = nil
+  end
+  if self.nUpdatePlayerTimer then
+    Timer:Close(self.nUpdatePlayerTimer)
+  end
+end

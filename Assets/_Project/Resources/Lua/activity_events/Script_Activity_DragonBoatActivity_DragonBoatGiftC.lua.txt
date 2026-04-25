@@ -1,0 +1,263 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.DragonBoatGift)
+local Protocol = {
+  [tbActivity.Protocol.OnPickResultResp] = "OnPickResultResp",
+  [tbActivity.Protocol.OnNextLevelResp] = "OnNextLevelResp",
+  [tbActivity.Protocol.OnRefreshResp] = "OnRefreshResp",
+  [tbActivity.Protocol.OnClickStartBtnResp] = "OnClickStartBtnResp"
+}
+tbActivity.DRAGONBOATGIFT_PRIOR_LOGIN_TIME = "DRAGONBOATGIFT_PRIOR_LOGIN_TIME"
+tbActivity.DRAGONBOATGIFT_REDPOINT_STATUS = "DRAGONBOATGIFT_REDPOINT_STATUS"
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    me.CenterMsg(i18n.EasyGet("\230\156\141\229\138\161\231\171\175\232\190\147\229\133\165\233\148\153\232\175\175"))
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:OnOpen()
+  self.tbCache = self.tbCache or {
+    tbPlayerOpenInfoCache = {},
+    nCurLevelCache = 1,
+    nOpenNumCache = 1
+  }
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, tbActivity.OnPlayerLogin, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_ENTER, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_ENTER, tbActivity.OnEnterMap, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.OnSyncItem, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_DEL_ITEM, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_DEL_ITEM, self.OnDelItem, self)
+end
+
+function tbActivity:OnSyncItem(nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  if pItem and (pItem.dwTemplateId == self.tbConfig.nDragonBoatKeyTemplateId or pItem.dwTemplateId == Currency:GetItemId(self.tbConfig.szCurrencyType)) then
+    self:TryLightRedPoint()
+  end
+end
+
+function tbActivity:OnDelItem(nItemId, nTemplateId)
+  if nTemplateId == self.tbConfig.nDragonBoatKeyTemplateId or nTemplateId == Currency:GetItemId(self.tbConfig.szCurrencyType) then
+    self:TryLightRedPoint()
+  end
+end
+
+function tbActivity:ReqPickResult(nOpenIndex)
+  local nDragonBoatKeyNum = me.GetItemCountInBags(self.tbConfig.nDragonBoatKeyTemplateId)
+  local ui = Ui:GetWindow("UIDuanWuGift")
+  if GetTime() >= self.nEndTime then
+    if ui then
+      me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\229\183\178\231\187\147\230\157\159"))
+      ui:StopAutoOpen()
+    end
+    return false
+  end
+  if nDragonBoatKeyNum <= 0 then
+    local function funcOK()
+      self:OpenKeyShop()
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\232\180\173\228\185\176\239\188\159", Item:GetName(self.tbConfig.nDragonBoatKeyTemplateId, me)), {
+      {funcOK},
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+    if ui then
+      ui:StopAutoOpen()
+    end
+    return false
+  end
+  if self.tbCache.nOpenNumCache > self.tbConfig.nMaxOpenIndex then
+    me.CenterMsg(i18n.EasyGet("\229\164\167\228\190\160\229\183\178\231\187\143\233\128\154\232\191\135\232\175\165\229\133\179\229\141\161\228\186\134"))
+    if ui then
+      ui:StopAutoOpen()
+    end
+    return false
+  end
+  ActivityMgr:CallServerScript(self.nId, self.Protocol.RespPickResult, nOpenIndex)
+  return true
+end
+
+function tbActivity:OpenKeyShop()
+  local tbYuanBaoWare = Shop:GetAWare(self.tbConfig.nYuanBaoWareId)
+  local nRemainCount = 0
+  if tbYuanBaoWare then
+    nRemainCount = Shop:GetShopRemainCount(tbYuanBaoWare, me)
+    if nRemainCount > 0 then
+      Ui:OpenWindow("UIShopBuy", tbYuanBaoWare, true, nRemainCount)
+      return
+    end
+  end
+  for nIndex, nGoldWareId in ipairs(self.tbConfig.tbnGoldWareId) do
+    local tbGoldWare = Shop:GetAWare(nGoldWareId)
+    if tbGoldWare then
+      nRemainCount = Shop:GetShopRemainCount(tbGoldWare, me)
+      if nRemainCount > 0 then
+        Ui:OpenWindow("UIShopBuy", tbGoldWare, true, nRemainCount)
+        return
+      end
+    end
+  end
+  me.CenterMsg(i18n.EasyGet("\229\175\185\228\184\141\232\181\183\239\188\140\230\130\168\232\180\173\228\185\176{0}\231\154\132\230\149\176\233\135\143\229\183\178\232\190\190\229\136\176\228\184\138\233\153\144", Item:GetName(self.tbConfig.nDragonBoatKeyTemplateId, me)))
+end
+
+function tbActivity:OnPickResultResp(nOpenIndex, nAwardType, tbAward, nMultiple, nOpenNum)
+  if not self.tbCache.tbPlayerOpenInfoCache[nOpenIndex] then
+    self.tbCache.tbPlayerOpenInfoCache[nOpenIndex] = tbAward
+    self.tbCache.tbPlayerOpenInfoCache.nMultiple = self.tbCache.tbPlayerOpenInfoCache.nMultiple or nMultiple
+    self.tbCache.tbPlayerOpenInfoCache.bOpenSpecialAward = Lib:IIF(self.tbCache.tbPlayerOpenInfoCache.bOpenSpecialAward, true, nAwardType == self.AwardType.SpecialAward)
+    self.tbCache.nOpenNumCache = nOpenNum
+    EventNotify.OnNotify(EventNotify.emNOTIFY_DRAGONBOATGIFT_ON_PICK_RESP, nOpenIndex, nAwardType, tbAward, nMultiple, nOpenNum)
+  else
+    self:ReqRefresh(true)
+  end
+end
+
+function tbActivity:ReqNextLevel()
+  if not self.tbCache.tbPlayerOpenInfoCache.bOpenSpecialAward and self.tbCache.nOpenNumCache <= self.tbConfig.nMaxOpenIndex then
+    me.CenterMsg(i18n.EasyGet("\229\164\167\228\190\160\232\191\152\230\156\170\233\128\154\232\191\135\230\173\164\229\133\179\229\141\161"))
+    return
+  end
+  ActivityMgr:CallServerScript(self.nId, self.Protocol.RespNextLevel)
+end
+
+function tbActivity:OnNextLevelResp(nCurLevel)
+  self:ResetClientCache()
+  self.tbCache.nCurLevelCache = nCurLevel
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DRAGONBOATGIFT_REFRESH_UI, self.tbCache)
+end
+
+function tbActivity:ReqRefresh(bForce)
+  if not bForce and self.tbCache and next(self.tbCache.tbPlayerOpenInfoCache) then
+    self:OnRefreshResp(self.tbCache.nCurLevelCache, self.tbCache.nOpenNumCache, self.tbCache.tbPlayerOpenInfoCache)
+    return
+  end
+  ActivityMgr:CallServerScript(self.nId, self.Protocol.RespRefresh)
+end
+
+function tbActivity:OnRefreshResp(nCurLevel, nOpenNum, tbPlayerOpenInfo)
+  self.tbCache.tbPlayerOpenInfoCache = tbPlayerOpenInfo or self.tbCache.tbPlayerOpenInfoCache
+  self.tbCache.nCurLevelCache = nCurLevel or self.tbCache.nCurLevelCache
+  self.tbCache.nOpenNumCache = nOpenNum or self.tbCache.nOpenNumCache
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DRAGONBOATGIFT_REFRESH_UI, self.tbCache)
+end
+
+function tbActivity:ReqClickStartBtn()
+  ActivityMgr:CallServerScript(self.nId, self.Protocol.RespClickStartBtn)
+end
+
+function tbActivity:OnClickStartBtnResp()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DRAGONBOATGIFT_ON_CLICK_STARTBTN_RESP, self.tbCache)
+end
+
+function tbActivity:ReqClickCancelBtn()
+  ActivityMgr:CallServerScript(self.nId, self.Protocol.RespClickCancelBtn)
+end
+
+function tbActivity:OnClose()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_ENTER, self)
+  self.tbCache = nil
+  for nIndex, nRedPointEventId in ipairs(self:GetRedPointEventId()) do
+    if RedPointMgr:CheckEvent(nRedPointEventId) then
+      RedPointMgr:FadeRedPoint(nRedPointEventId)
+    end
+  end
+end
+
+function tbActivity:ResetClientCache()
+  self.tbCache.tbPlayerOpenInfoCache = {}
+  self.tbCache.nCurLevelCache = 1
+  self.tbCache.nOpenNumCache = 1
+end
+
+function tbActivity:GetCache()
+  return self.tbCache
+end
+
+function tbActivity:OnEnterMap()
+  if Ui:WindowVisible("UIShopBuy") then
+    Ui:CloseWindow("UIShopBuy")
+  end
+  if Ui:WindowVisible("UIMessageBox") then
+    Ui:CloseWindow("UIMessageBox")
+  end
+  if Ui:WindowVisible("UIGeneralHelp") then
+    Ui:CloseWindow("UIGeneralHelp")
+  end
+end
+
+function tbActivity:OnPlayerLogin()
+  self:TryLightRedPoint()
+end
+
+function tbActivity:OnCrossDay()
+  self:TryLightRedPoint()
+end
+
+function tbActivity:GetRedPointEventId()
+  return {
+    [1] = RedPointMgr.EVENT.WuDuGiftGo,
+    [2] = RedPointMgr.EVENT.WuDuGiftShop
+  }
+end
+
+function tbActivity:GetRedPointEventList()
+  return self:GetRedPointEventId()
+end
+
+function tbActivity:TryLightRedPoint()
+  local nLiQuanNum = me.GetMoney(Currency.TYPE[self.tbConfig.szCurrencyType])
+  local nKeyNum = me.GetItemCountInBags(self.tbConfig.nDragonBoatKeyTemplateId)
+  local nGoRedPointEventId = self:GetRedPointEventId()[1]
+  local nShopRedPointEventId = self:GetRedPointEventId()[2]
+  if nKeyNum > 0 then
+    RedPointMgr:LightRedPoint(nGoRedPointEventId)
+  else
+    RedPointMgr:FadeRedPoint(nGoRedPointEventId)
+  end
+  if nLiQuanNum > 0 then
+    RedPointMgr:LightRedPoint(nShopRedPointEventId)
+  else
+    RedPointMgr:FadeRedPoint(nShopRedPointEventId)
+  end
+end
+
+function tbActivity:TryLightRedPointAfterPicking(nOpenIndex, nAwardType, tbAward)
+  local nLiQuanNum = me.GetMoney(Currency.TYPE[self.tbConfig.szCurrencyType])
+  local nKeyNum = me.GetItemCountInBags(self.tbConfig.nDragonBoatKeyTemplateId)
+  local nGoRedPointEventId = tbActivity:GetRedPointEventId()[1]
+  local nShopRedPointEventId = tbActivity:GetRedPointEventId()[2]
+  if nKeyNum > 0 then
+    RedPointMgr:LightRedPoint(nGoRedPointEventId)
+  else
+    RedPointMgr:FadeRedPoint(nGoRedPointEventId)
+  end
+  if Lib:IsInteger(nOpenIndex) and 2 == nAwardType and tbAward[1] and "Item" == tbAward[1][1] and tbAward[1][2] == Currency:GetItemId(Currency.TYPE[self.tbConfig.szCurrencyType]) and tbAward[1][3] == nLiQuanNum then
+    RedPointMgr:LightRedPoint(nShopRedPointEventId)
+  end
+end
+
+function tbActivity:TryLightRedPointAfterBuying()
+  local nKeyNum = me.GetItemCountInBags(self.tbConfig.nDragonBoatKeyTemplateId)
+  local nGoRedPointEventId = self:GetRedPointEventId()[1]
+  if nKeyNum > 0 then
+    RedPointMgr:LightRedPoint(nGoRedPointEventId)
+  else
+    RedPointMgr:FadeRedPoint(nGoRedPointEventId)
+  end
+end
+
+function tbActivity:GetName()
+  return self.tbConfig.szName
+end
+
+function tbActivity:DoCommonJump()
+  Ui:OpenWindow("UINpcShop", self.tbConfig.nNpcShopId, nil, nil, nil, nil, Currency.TYPE[self.tbConfig.szCurrencyType], true)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.WuDuGiftShop)
+end

@@ -1,0 +1,226 @@
+local tbWnd = Ui:CreateClass("UIMailView", "UIPanel")
+tbWnd.tbControls = {
+  goMailTemplate = "MailList/ScrollView/Viewport/Content/template",
+  imgMailOpen = "imgMailOpen",
+  imgMailClose = "imgMailClose",
+  txtMailTitle = "txtMailTitle",
+  txtMailTips = "txtMailTips",
+  imgMailAttach = "imgMailAttachment",
+  txtTimeRemain = "txtTimeRemain",
+  btnDelete = "btnDelete"
+}
+tbWnd.tbOnClick = {}
+
+function tbWnd:OnCreate()
+  self.tbScrollView = Ui:NewLoopScrollView(self, self.goMailTemplate)
+end
+
+function tbWnd:OnShow()
+  self:UpdateMailList()
+end
+
+function tbWnd:UpdateMailList()
+  self:ShowMailList()
+  Mail:RequestMailData()
+end
+
+function tbWnd:ShowMailList()
+  if Mail:IsNeedDelete() then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\233\130\174\231\174\177\229\183\178\230\187\161\239\188\140\232\175\183\229\136\160\233\153\164\228\184\141\233\156\128\232\166\129\231\154\132\233\130\174\228\187\182"))
+  end
+  self:UpdateItemSV()
+end
+
+function tbWnd:UpdateItemSV()
+  local nNow = GetTime()
+  local tbMailList = Mail:GetMailData()
+  local nCount = Lib:CountTB(tbMailList)
+  self.tbScrollItemList = {}
+  
+  local function fnSetItem(tbLoopScroll, nIndex)
+    local tbMail = tbMailList[nIndex]
+    if not tbMail then
+      return
+    end
+    local tbElem = tbLoopScroll:GetElement(nIndex)
+    tbElem.tbMail = tbMail
+    local pPanel = tbElem.pPanel
+    pPanel:SetActive(self.imgMailOpen, tbMail.ReadFlag)
+    pPanel:SetActive(self.imgMailClose, not tbMail.ReadFlag)
+    pPanel:SetActive(self.btnDelete, false)
+    pPanel:Label_SetText(self.txtMailTitle, i18n.Parse(tbMail.Title))
+    if tbMail.nHasAttach > 0 then
+      pPanel:Label_SetText(self.txtMailTips, i18n.EasyGet("\230\156\137\230\156\170\233\162\134\229\143\150\231\154\132\233\153\132\228\187\182"))
+      pPanel:SetActive(self.txtMailTips, true)
+      pPanel:SetActive(self.imgMailAttach, true)
+    else
+      pPanel:SetActive(self.txtMailTips, false)
+      pPanel:SetActive(self.imgMailAttach, false)
+    end
+    if tbMail.RecyleTime then
+      pPanel:Label_SetText(self.txtTimeRemain, tbWnd.DescMailTime(tbMail.RecyleTime - nNow))
+      pPanel:SetActive(self.txtTimeRemain, true)
+    else
+      pPanel:SetActive(self.txtTimeRemain, false)
+    end
+    tbElem.pPanel:Button_BindLongPressEnd("", function()
+      pPanel:SetActive(self.btnDelete, true)
+    end)
+    Ui:Button_BindEvent(tbElem.pPanel, self.btnDelete, function()
+      self.OnClickDelete(self, tbMail)
+    end)
+    Ui:Button_BindEvent(tbElem.pPanel, "", function()
+      self.OnClickOpenMail(tbMail)
+    end)
+    self.tbScrollItemList[tbMail.ID] = tbElem
+  end
+  
+  self.tbScrollView:SetElement(nCount, fnSetItem)
+end
+
+function tbWnd.DescMailTime(nLeftTime)
+  if nLeftTime <= 0 then
+    return i18n.EasyGet("<color=#FF706DFF>\229\137\169\228\189\153{0}\229\176\143\230\151\182</color>", 0)
+  elseif nLeftTime < 86400 then
+    return i18n.EasyGet("<color=#FF706DFF>\229\137\169\228\189\153{0}\229\176\143\230\151\182</color>", math.ceil(nLeftTime / 3600))
+  else
+    return i18n.EasyGet("<color=#FFD07CFF>\229\137\169\228\189\153{0}\229\164\169</color>", math.ceil(nLeftTime / 86400))
+  end
+end
+
+function tbWnd.OnClickDelete(tbWnd, tbMail)
+  if tbMail.nHasAttach > 0 then
+    me.CenterMsg(i18n.EasyGet("\230\156\137\230\156\170\233\162\134\229\143\150\231\154\132\233\153\132\228\187\182"))
+    return
+  end
+  if not tbMail.ReadFlag then
+    Mail:Record({
+      tbMail.ID
+    })
+  end
+  RemoteServer.RecordReadMails({
+    tbMail.ID
+  }, true)
+  Mail:Delete({
+    tbMail.ID
+  })
+  tbWnd.UpdateMailList(tbWnd)
+end
+
+function tbWnd.OnClickOpenMail(tbMail)
+  Ui:GetWindow("UIChat"):SwitchMailDetailPanel(true, tbMail)
+end
+
+function tbWnd:OnOpenMail(nMailId)
+  local tbElem = self.tbScrollItemList[nMailId]
+  if not tbElem then
+    return
+  end
+  local tbMail = tbElem.tbMail
+  if not tbMail then
+    return
+  end
+  local pPanel = tbElem.pPanel
+  pPanel:SetActive(tbWnd.tbControls.imgMailOpen, tbMail.ReadFlag)
+  pPanel:SetActive(tbWnd.tbControls.imgMailClose, not tbMail.ReadFlag)
+end
+
+function tbWnd:OnClickRecieveAll()
+  local tbMailList = Mail:GetMailData()
+  local bBreak = false
+  local tbDelList = {}
+  local tbKeepList = {}
+  local tbTakeAttachList = {}
+  local nTakeNum = 0
+  for _, tbMail in ipairs(tbMailList) do
+    if tbMail.nHasAttach > 0 then
+      local bHasItem = false
+      for _, tbInfo in pairs(tbMail.tbAttach) do
+        if Player.AwardType[tbInfo[1]] == Player.award_type_item then
+          bHasItem = true
+          break
+        end
+      end
+      if bHasItem and me.CheckNeedArrangeBag() then
+        bBreak = true
+        break
+      end
+      table.insert(tbTakeAttachList, tbMail.ID)
+      nTakeNum = nTakeNum + 1
+      if not tbMail.ReadFlag then
+        if tbMail.bNotAutoDelete then
+          table.insert(tbKeepList, tbMail.ID)
+        else
+          table.insert(tbDelList, tbMail.ID)
+        end
+        tbMail.ReadFlag = true
+      end
+    end
+  end
+  if #tbTakeAttachList > 0 then
+    RemoteServer.TakeMailAttachList(tbTakeAttachList)
+  end
+  if #tbDelList > 0 then
+    RemoteServer.RecordReadMails(tbDelList, true)
+    Mail:Record(tbDelList)
+  end
+  if #tbKeepList > 0 then
+    RemoteServer.RecordReadMails(tbKeepList)
+    Mail:Record(tbKeepList)
+  end
+  if bBreak then
+    me.CenterMsg(i18n.EasyGet("\232\175\183\230\184\133\231\144\134\232\131\140\229\140\133\239\188\129"))
+  elseif 0 == nTakeNum then
+    me.CenterMsg(i18n.EasyGet("\230\151\160\229\143\175\233\162\134\229\143\150\233\153\132\228\187\182\239\188\129"))
+  end
+  Ui:GetWindow("UIChat"):SwitchMailDetailPanel(false)
+end
+
+function tbWnd:OnClickDeleteAll()
+  local function fnConfirm(self)
+    local tbMailList = Mail:GetMailData()
+    
+    local tbDelList = {}
+    local tbUnreadList = {}
+    for _, tbMail in ipairs(tbMailList) do
+      if tbMail.nHasAttach <= 0 then
+        table.insert(tbDelList, tbMail.ID)
+        if not tbMail.ReadFlag then
+          table.insert(tbUnreadList, tbMail.ID)
+        end
+      end
+    end
+    if #tbDelList > 0 then
+      RemoteServer.RecordReadMails(tbDelList, true)
+      Mail:Delete(tbDelList)
+    end
+    if #tbUnreadList > 0 then
+      Mail:Record(tbUnreadList)
+    end
+    if #tbDelList > 0 then
+      self:UpdateMailList()
+    else
+      me.CenterMsg(i18n.EasyGet("\230\151\160\229\143\175\229\136\160\233\153\164\233\130\174\228\187\182"))
+    end
+    Ui:GetWindow("UIChat"):SwitchMailDetailPanel(false)
+  end
+  
+  me.MsgBox(i18n.EasyGet("\229\176\134\230\184\133\231\169\186\230\137\128\230\156\137\233\130\174\228\187\182\239\188\136\230\156\137\233\153\132\228\187\182\231\154\132\233\130\174\228\187\182\228\184\141\228\188\154\230\184\133\231\169\186\239\188\137\239\188\140\230\152\175\229\144\166\231\161\174\232\174\164\228\184\128\233\148\174\230\184\133\231\169\186\239\188\159"), {
+    {
+      i18n.szOk,
+      fnConfirm,
+      self
+    },
+    {
+      i18n.szCancel
+    }
+  }, "DeleteAllMail")
+end
+
+function tbWnd:SyncMailData(nMailId, bSuccess)
+  self:ShowMailList()
+end
+
+function tbWnd:OnDestroy()
+  self.tbScrollItemList = {}
+end

@@ -1,0 +1,118 @@
+local tbWnd = Ui:CreateClass("UIOtherMarryInfo", "UIPanel")
+local tbControls = {
+  Empty = "Empty",
+  Info = "Info",
+  MyNpcModel = "Info/Left/NPCGrid/NpcModel1",
+  LoverModel = "Info/Left/NPCGrid/NpcModel",
+  RingGrid = "Info/Left/UIItemGrid1",
+  txtLoverName = "Info/Right/txtPlayName",
+  txtTotalTime = "Info/Right/txtTime",
+  txtMarryTime = "Info/Right/txtTime1"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  local obj = self.pPanel:GetObject(tbControls.MyNpcModel)
+  self.MyModel = obj:GetComponent(Ui.UINpcModel)
+  obj = self.pPanel:GetObject(tbControls.LoverModel)
+  self.LoverModel = obj:GetComponent(Ui.UINpcModel)
+  self.RingGrid = Ui:NewExistItemGrid(self, tbControls.RingGrid)
+end
+
+function tbWnd:OnOpen()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_VIEWROLE_DATA, self.OnGetViewRoleData, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_MARRY_ASYNCDATA, self.OnGetSyncData, self)
+  self.pAsyncRole = self.tbOwner.pAsyncRole
+  self:ShowModel(self.pAsyncRole, self.MyModel, self.tbOwner.tbEquips)
+  self:Update()
+end
+
+function tbWnd:Update()
+  self.tbMarryData = Marry:RequstGetAsyncData(self.pAsyncRole.dwID)
+  if not self.tbMarryData or 0 == self.tbMarryData.dwLoverID or 0 == self.tbMarryData.nTime then
+    self.pPanel:SetActive(tbControls.Info, false)
+    self.pPanel:SetActive(tbControls.Empty, true)
+    return
+  else
+    self.pPanel:SetActive(tbControls.Empty, false)
+    self.pPanel:SetActive(tbControls.Info, true)
+  end
+  local nRingLevel = self.tbMarryData.nRingLevel
+  self.RingGrid:SetItemByTemplate(Marry.Cfg.Ring[nRingLevel].nId)
+  local nMarryTime = self.tbMarryData.nTime
+  local nDiff = Lib:GetLocalDay(GetTime()) - Lib:GetLocalDay(nMarryTime)
+  self.pPanel:Label_SetText(tbControls.txtTotalTime, i18n.EasyGet("\229\183\178\231\187\147\231\188\152{0}\229\164\169", nDiff))
+  self.pPanel:Label_SetText(tbControls.txtMarryTime, i18n.EasyGet("\228\186\142{0}\231\187\147\231\188\152", Lib:TimeDesc10(nMarryTime)))
+  self.RingGrid:SetItemByTemplate(Marry.Cfg.Ring[nRingLevel].nId)
+  self.RingGrid:SetClickEnable(true)
+  local pLoverAsyncRole = KPlayer.GetAsyncData(self.tbMarryData.dwLoverID)
+  if not pLoverAsyncRole then
+    RemoteServer.ViewPlayerInfo(self.tbMarryData.dwLoverID)
+    return
+  end
+  self:ShowModel(pLoverAsyncRole, self.LoverModel)
+end
+
+function tbWnd:OnGetViewRoleData(dwID)
+  if dwID ~= self.tbMarryData.dwLoverID then
+    return
+  end
+  local pLoverAsyncRole = KPlayer.GetAsyncData(self.tbMarryData.dwLoverID)
+  if not pLoverAsyncRole then
+    return
+  end
+  self.pPanel:SetActive(tbControls.Info, true)
+  self.pPanel:SetActive(tbControls.Empty, false)
+  local tbEquip = ViewRole:GetCurResInfo(self.tbMarryData.dwLoverID)
+  if tbEquip then
+    self:ShowModel(pLoverAsyncRole, self.LoverModel, tbEquip)
+  end
+  self.pPanel:Label_SetText(tbControls.txtLoverName, i18n.EasyGet("{0}\231\154\132\228\190\160\228\190\163\239\188\154{1}", self.pAsyncRole.szName, pLoverAsyncRole.szName))
+end
+
+function tbWnd:OnGetSyncData(dwPlayerId)
+  if dwPlayerId == self.pAsyncRole.dwID then
+    self:Update()
+  end
+end
+
+function tbWnd:ShowModel(pAsyncRole, Model, tbEquip)
+  local tbFeature = {}
+  for nEquipPos, nIndex in pairs(Item.EQUIPPOS_TO_NPC_RES_PART) do
+    local nResId
+    local nFashionId = pAsyncRole.GetFashion(nIndex + 1)
+    if nFashionId > 0 then
+      local tbFashionSetting = Fashion:GetFashionSettingNotPlayer(nFashionId, pAsyncRole.GetFaction(), pAsyncRole.GetFactionSect(), pAsyncRole.GetSex())
+      if nil ~= tbFashionSetting then
+        nResId = tbFashionSetting.nResId
+      end
+    end
+    if nil == nResId and tbEquip then
+      local nItemId = tbEquip[nEquipPos]
+      if nItemId and nItemId > 0 then
+        local pEquip = KItem.GetItemObj(nItemId)
+        local _, _, _, _, nInnerResId = KItem.GetItemShowInfo(pEquip.dwTemplateId, pAsyncRole.GetFaction(), pAsyncRole.GetFactionSect(), pAsyncRole.GetSex())
+        nResId = nInnerResId
+      end
+    end
+    if nil ~= nResId then
+      tbFeature[nIndex] = nResId
+    else
+      tbFeature[nIndex] = 0
+    end
+  end
+  if tbFeature[Npc.NpcResPartsDef.npc_part_body] <= 0 then
+    tbFeature[Npc.NpcResPartsDef.npc_part_body] = 1
+  end
+  if tbFeature[Npc.NpcResPartsDef.npc_part_head] <= 0 then
+    tbFeature[Npc.NpcResPartsDef.npc_part_head] = 1
+  end
+  Model:ShowModel(pAsyncRole.GetSex(), 1, tbFeature[Npc.NpcResPartsDef.npc_part_body], tbFeature[Npc.NpcResPartsDef.npc_part_weapon], tbFeature[Npc.NpcResPartsDef.npc_part_mantle], 0, tbFeature[Npc.NpcResPartsDef.npc_part_head], tbFeature[Npc.NpcResPartsDef.npc_part_wind])
+end
+
+function tbWnd:OnClose()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_VIEWROLE_DATA, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_MARRY_ASYNCDATA, self)
+  self.MyModel:Release()
+  self.LoverModel:Release()
+end

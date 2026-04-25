@@ -1,0 +1,111 @@
+local tbItem = Item:GetClass("BeautifulLandCard")
+tbItem.PARAM_AWARD_ID = 1
+tbItem.PARAM_AWARD_KEY = 2
+tbItem.PARAM_CARDBOOK_ID = 3
+tbItem.RATIO = 2
+tbItem.bRecordData = false
+tbItem.tbRecordList = {}
+
+function tbItem:OnUse(it)
+  return self:OnUseMany(it, 1)
+end
+
+function tbItem:OnUseMany(it, nCount)
+  local nAwardId = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_AWARD_ID)
+  local nAwardKey = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_AWARD_KEY)
+  local nCardBookId = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_CARDBOOK_ID)
+  if not (nAwardId and not (nAwardId <= 0) and nAwardKey and not (nAwardKey <= 0) and nCardBookId) or nCardBookId <= 0 then
+    LogErr("[BeautifulLandCard] OnUseMany config is wrong", it.dwTemplateId, nAwardId, nAwardKey, nCardBookId)
+    return 0
+  end
+  local tbCfg = Item.SouvenirCard:GetCfgById(nCardBookId)
+  if not tbCfg then
+    LogErr("[BeautifulLandCard] OnUseMany card book config is not exist", it.dwTemplateId, nCardBookId)
+    return 0
+  end
+  local nLeftBag = me.GetFreeBagCount()
+  if nLeftBag <= 0 then
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\231\169\186\233\151\180\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\228\189\191\231\148\168\239\188\129"))
+    return 0
+  end
+  local tbAward = {}
+  local tbSingle, nTemplateId
+  local tbAwardParam = {
+    nLogReason = Env.LogWay_BeautifulLandCard,
+    bNotMerge = true,
+    szMsg = it.szName
+  }
+  Award:GenerateDefaultAwardParam(tbAwardParam)
+  local tbPool, nSum = self:GenCardPool(me, tbCfg)
+  for i = 1, nCount do
+    tbSingle = Award:GetAward(nAwardId, nAwardKey, tbAwardParam)
+    Lib:MergeTable(tbAward, tbSingle)
+    tbSingle, nTemplateId = self:GetRandAward(tbPool, nSum, tbAwardParam)
+    Lib:MergeTable(tbAward, tbSingle)
+    if self.bRecordData then
+      Lib:CallBack({
+        self.RecordData,
+        self,
+        tbCfg,
+        me.dwID,
+        tbAward,
+        nTemplateId
+      })
+    end
+  end
+  Award:SendAward(me.dwID, tbAward, tbAwardParam)
+  local tbMoneyForTrack, tbItemForTrack = Award:GetAwardListForMBILog(Award:MergetSameTypeAward(tbAward), true, {
+    "Gold",
+    "YuanBao",
+    "Coin"
+  })
+  Lib:TrackEvent(me.dwID, Env.track_openbox_open, it.dwTemplateId, nCount, 0, 0 * nCount, tbMoneyForTrack.Gold or 0, tbMoneyForTrack.YuanBao or 0, tbMoneyForTrack.Coin or 0, Lib:EncodeJson(tbItemForTrack) or "")
+  return nCount
+end
+
+function tbItem:GenCardPool(pPlayer, tbCfg)
+  local tbList = {}
+  local nWeight
+  local nSum = 0
+  for _, tbInfo in pairs(tbCfg.tbCard) do
+    nWeight = pPlayer.GetUserValue(tbCfg.nSaveKey, tbInfo.nSaveId) > 0 and tbInfo.nWeight or tbInfo.nWeight * self.RATIO
+    table.insert(tbList, {
+      tbInfo.nTemplateId,
+      nWeight,
+      tbInfo.nAwardID,
+      tbInfo.nAwardKey
+    })
+    nSum = nSum + nWeight
+  end
+  return tbList, nSum
+end
+
+function tbItem:GetRandAward(tbPool, nSum, tbAwardParam)
+  local nCount = 0
+  local nRand = MathRandom(nSum)
+  for _, tbInfo in ipairs(tbPool) do
+    nCount = nCount + tbInfo[2]
+    if nRand <= nCount then
+      return Award:GetAward(tbInfo[3], tbInfo[4], tbAwardParam), tbInfo[1]
+    end
+  end
+  return {}
+end
+
+function tbItem:OnTimeOut(pItem, pPlayer)
+  Item:OnTimeOutHelper(pItem, pPlayer, "BeautifulLandCard")
+end
+
+function tbItem:RecordData(tbCfg, dwID, tbAward, nTemplateId)
+  self.tbRecordList[dwID] = self.tbRecordList[dwID] or {}
+  self.tbRecordList[dwID][nTemplateId] = (self.tbRecordList[dwID][nTemplateId] or 0) + 1
+end
+
+function tbItem:DumpRecordList()
+  local nCount = 0
+  for _, nNum in pairs(self.tbRecordList[me.dwID] or {}) do
+    nCount = nCount + nNum
+  end
+  Lib:Tree(self.tbRecordList[me.dwID] or {})
+  Log("DumpRecordList", me.dwID, nCount)
+end

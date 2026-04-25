@@ -1,0 +1,111 @@
+function ClientNpc:LoadSetting()
+  self.tbMapNpcSetting = {}
+  
+  local tbFileData = Lib:LoadTabFile("Setting/ClientNpc/MapNpc.tab", {
+    MapID = 1,
+    NpcID = 1,
+    NpcLevel = 1,
+    PosX = 1,
+    PosY = 1,
+    Dir = 1,
+    Series = 1
+  })
+  for _, tbInfo in pairs(tbFileData) do
+    self.tbMapNpcSetting[tbInfo.MapID] = self.tbMapNpcSetting[tbInfo.MapID] or {}
+    table.insert(self.tbMapNpcSetting[tbInfo.MapID], tbInfo)
+  end
+  self.tbMapNpcSetting = SetReadOnly(self.tbMapNpcSetting)
+end
+
+ClientNpc:LoadSetting()
+
+function ClientNpc:GetNpcPath(szFile)
+  local tbPath = Lib:LoadTabFile("Setting/ClientNpc/" .. szFile, {PosX = 1, PosY = 1})
+  return tbPath
+end
+
+function ClientNpc:GetMapNpc(nMapTID)
+  local tbMapNpc = self.tbMapNpcSetting[nMapTID]
+  return tbMapNpc
+end
+
+function ClientNpc:OnEnterMap(nMapTID)
+  local tbMapNpc = self:GetMapNpc(nMapTID)
+  if not tbMapNpc then
+    return
+  end
+  for _, tbNpcInfo in pairs(tbMapNpc) do
+    local pNpc = KNpc.Add(tbNpcInfo.NpcID, tbNpcInfo.NpcLevel, tbNpcInfo.Series or -1, 0, tbNpcInfo.PosX, tbNpcInfo.PosY, 0, tbNpcInfo.Dir)
+    if pNpc and not Lib:IsEmptyStr(tbNpcInfo.FindPathFile) then
+      local tbPath = self:GetNpcPath(tbNpcInfo.FindPathFile)
+      pNpc.AI_ClearMovePathPoint()
+      for _, tbPos in ipairs(tbPath) do
+        pNpc.AI_AddMovePos(tbPos.PosX, tbPos.PosY)
+      end
+      self:StartFindPath(pNpc.nId)
+    end
+  end
+end
+
+function ClientNpc:StartFindPath(nNpcID)
+  local pNpc = KNpc.GetById(nNpcID)
+  if not pNpc then
+    return
+  end
+  pNpc.SetActiveForever(1)
+  pNpc.AI_StartPath()
+  pNpc.tbOnArrive = {
+    self.StartFindPath,
+    self,
+    nNpcID
+  }
+end
+
+function ClientNpc:GetDefaultMsg(szClassName)
+  if not self.tbDefaultDialogMsg then
+    return ""
+  end
+  if not self.tbDefaultDialogMsg[szClassName] then
+    szClassName = "__Default__"
+  end
+  local tbMsgList = self.tbDefaultDialogMsg[szClassName][me.nSex]
+  local nIndex = MathRandom(#tbMsgList)
+  return i18n.Parse(tbMsgList[nIndex])
+end
+
+function ClientNpc:LoadDefaultDialogMsg()
+  self.tbDefaultDialogMsg = {}
+  local tbFileSetting = Lib:LoadTabFileEx("Setting/Npc/NpcDefaultDlg.tab", "sssssssssss", "szClassName", {
+    "szClassName",
+    "szMaleDialogMsg1",
+    "szMaleDialogMsg2",
+    "szMaleDialogMsg3",
+    "szMaleDialogMsg4",
+    "szMaleDialogMsg5",
+    "szFemaleDialogMsg1",
+    "szFemaleDialogMsg2",
+    "szFemaleDialogMsg3",
+    "szFemaleDialogMsg4",
+    "szFemaleDialogMsg5"
+  })
+  for szClassName, tbInfo in pairs(tbFileSetting) do
+    self.tbDefaultDialogMsg[szClassName] = {}
+    self.tbDefaultDialogMsg[szClassName][Npc.SexDef.MALE] = {}
+    self.tbDefaultDialogMsg[szClassName][Npc.SexDef.FEMALE] = {}
+    for i = 1, 5 do
+      local szKey = string.format("szMaleDialogMsg%s", i)
+      if tbInfo[szKey] and "" ~= tbInfo[szKey] then
+        table.insert(self.tbDefaultDialogMsg[szClassName][Npc.SexDef.MALE], tbInfo[szKey])
+      end
+    end
+    for i = 1, 5 do
+      local szKey = string.format("szFemaleDialogMsg%s", i)
+      if tbInfo[szKey] and "" ~= tbInfo[szKey] then
+        table.insert(self.tbDefaultDialogMsg[szClassName][Npc.SexDef.FEMALE], tbInfo[szKey])
+      end
+    end
+  end
+  self.tbDefaultDialogMsg = SetReadOnly(self.tbDefaultDialogMsg)
+end
+
+ClientNpc:LoadDefaultDialogMsg()

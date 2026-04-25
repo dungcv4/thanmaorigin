@@ -1,0 +1,180 @@
+local tbWnd = Ui:CreateWindow("UIPKCompetitionReport2")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SERVER_TIME_ZONE_UPDATE,
+      self.UpdateSchedule
+    },
+    {
+      EventNotify.emNOTIFY_DINGFENGPK_SYNC_FINAL,
+      self.UpdateShow
+    },
+    {
+      EventNotify.emNOTIFY_DINGFENGPK_SYNC_GUESS,
+      self.UpdateShow
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  Team = "node/imgBG/Content/Name/Team",
+  Champion = "node/imgBG/Content/Name/Champion",
+  txtTime = "node/imgBG/Content/Schedule/txtTime",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  txtGroupTime = "node/imgBG/Content/BG/time%d/txtGroupTime"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbPhase2Idx = {
+  [16] = {
+    1,
+    9,
+    13,
+    5,
+    7,
+    15,
+    11,
+    3,
+    4,
+    12,
+    16,
+    8,
+    6,
+    14,
+    10,
+    2
+  },
+  [8] = {
+    17,
+    21,
+    23,
+    19,
+    20,
+    24,
+    22,
+    18
+  },
+  [4] = {
+    25,
+    27,
+    28,
+    26
+  },
+  [2] = {29, 30},
+  [1] = {31}
+}
+tbWnd.tbViewPhase2Idx = {
+  [16] = {
+    1,
+    5,
+    7,
+    3,
+    4,
+    8,
+    6,
+    2
+  },
+  [8] = {
+    9,
+    11,
+    12,
+    10
+  },
+  [4] = {13, 14},
+  [2] = {15}
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:OnCreate()
+end
+
+function tbWnd:OnClose()
+  if self.nTimer ~= nil then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+end
+
+function tbWnd:OnOpen()
+  self.pPanel:SetActive(tbControls.btnHelp, false)
+  DingFengPK:RequestFinalMatch()
+  self:UpdateSchedule()
+  self:UpdateShow()
+end
+
+function tbWnd:GetShowTime(nDate)
+  local tbTime = os.date("*t", Lib:GetConfigDate2Time(nDate))
+  return string.format("%d.%d %02d:%02d", tbTime.month, tbTime.day, tbTime.hour, tbTime.min)
+end
+
+function tbWnd:UpdateSchedule()
+  for i, nTime in ipairs(DingFengPK.ShowTitleTimeCfg) do
+    self.pPanel:SetActive(tbControls.txtTime .. i, false)
+  end
+  for i, nTime in ipairs(DingFengPK.ShowGroupTimeCfg) do
+    self.pPanel:Label_SetText(string.format(tbControls.txtGroupTime, i), self:GetShowTime(nTime))
+  end
+end
+
+function tbWnd:UpdateLeftTime(nEndTime)
+  local nTimeRemaining = nEndTime - GetTime()
+  if nTimeRemaining > 0 then
+    self.pPanel:Label_SetText(tbControls.txtCountdownValue, Lib:TimeDesc2(nTimeRemaining))
+  else
+    self.pPanel:SetActive(tbControls.Countdown, false)
+  end
+  if self.nTimer ~= nil then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  if nTimeRemaining > 0 then
+    self.nTimer = Timer:Register(Env.GAME_FPS, self.UpdateLeftTime, self, nEndTime)
+  end
+  return false
+end
+
+function tbWnd:UpdateShow()
+  if not DingFengPK.tbFinalMatchData then
+    return
+  end
+  for i = 1, 30 do
+    self.pPanel:Label_SetText(tbControls.Team .. i .. "/txtName", i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+    self.pPanel:SetActive(tbControls.Team .. i .. "/imgWin", false)
+  end
+  self.pPanel:Label_SetText(tbControls.Champion .. "/txtName", i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+  for nPhase, tbPhaseData in pairs(DingFengPK.tbFinalMatchData) do
+    if self.tbPhase2Idx[nPhase] then
+      local tbGuessTeam = {}
+      if DingFengPK.tbMyGuessData and DingFengPK.tbMyGuessData[nPhase] then
+        do
+          local tbGuessData = DingFengPK.tbMyGuessData[nPhase]
+          for _, nTeamId in ipairs(tbGuessData.tbGuess) do
+            tbGuessTeam[nTeamId] = true
+          end
+        end
+      end
+      for nIdx, tbData in pairs(tbPhaseData) do
+        if self.tbPhase2Idx[nPhase][nIdx] then
+          if 1 == nPhase then
+            self.pPanel:Label_SetText(tbControls.Champion .. "/txtName", tbData.szTeamName or i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+          else
+            local nNameIdx = self.tbPhase2Idx[nPhase][nIdx]
+            self.pPanel:Label_SetText(tbControls.Team .. nNameIdx .. "/txtName", tbData.szTeamName or i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+            self.pPanel:SetActive(tbControls.Team .. nNameIdx .. "/imgWin", tbData.nResult == DingFengPK.Win)
+            self.pPanel:SetActive(tbControls.Team .. nNameIdx .. "/imgSelect", tbGuessTeam[tbData.nTeamId])
+            if tbData.nTeamId then
+              Ui:Button_BindEvent(self.pPanel, tbControls.Team .. nNameIdx, function()
+                Ui:OpenWindow("UIPKCompetitionTeam", tbData.nTeamId)
+              end)
+            end
+          end
+        end
+      end
+    end
+  end
+end

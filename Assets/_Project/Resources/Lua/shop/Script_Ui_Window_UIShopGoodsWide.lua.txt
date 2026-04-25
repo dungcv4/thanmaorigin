@@ -1,0 +1,124 @@
+Require("CommonScript/Shop/KuangMaiShop.lua")
+local tbWnd = Ui:CreateClass("UIShopGoodsWide", "UIPanel")
+tbWnd.tbControls = {
+  pnlContant = "GoodsList/pnlMask/pnlContant",
+  NotInfo = "GoodsList/pnlMask/NotInfo",
+  ItemCell = "GoodsList/pnlMask/pnlContant/ItemCell"
+}
+tbWnd.tbOnClick = {}
+
+function tbWnd:OnCreate()
+  self.tbWareScroll = Ui:NewLoopScrollView(self, self.ItemCell, "Item")
+  self.nRow = 5
+end
+
+function tbWnd:OnOpen(szShopType, ...)
+  self.szShopType = szShopType or Shop.ShopTypeStr.Stone
+  self:UpdateShopItemList()
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:UpdateShopItemList()
+  self.tbWareList = {}
+  if self.szShopType == Shop.ShopTypeStr.Stone then
+    self.tbWareList = Shop:GetStoneWareAvaliableList()
+  elseif self.szShopType == Shop.ShopTypeStr.ShiTu then
+    self.tbWareList = Shop:GetShiTuWares()
+  elseif self.szShopType == Shop.ShopTypeStr.DrugShop then
+    self.tbWareList = Shop:GetFamilyShopWares(Kin.Def.Building_Shop)
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinShop)
+  elseif self.szShopType == Shop.ShopTypeStr.Remnants then
+    self.tbWareList = Shop:GetRemnantsWares()
+  elseif self.szShopType == Shop.ShopTypeStr.KuangMai then
+    self.tbWareList = Shop:GetKuangMaiShop()
+    ResourceBattleMining:C2SReqMineData()
+  end
+  local nCount = Lib:CountTB(self.tbWareList)
+  self:SetItemSVActive(nCount > 0)
+  
+  local function fnSetItem(tbLoopScroll, nIndex)
+    local nCol = nCount - self.nRow * (nIndex - 1)
+    if nCol > self.nRow then
+      nCol = self.nRow
+    end
+    for i = 1, self.nRow do
+      if i <= nCol then
+        local tbElement = tbLoopScroll:GetGridElement(nIndex, i)
+        local curIndex = (nIndex - 1) * self.nRow + i
+        local tbInfo = self.tbWareList[curIndex]
+        tbElement.pPanel:SetActive("Main", true)
+        local pPanel = tbElement.pPanel
+        local tbWare = Shop:GetAWare(tbInfo.nWareId) or {}
+        tbElement.tbData = tbWare
+        local nPrice = Shop:GetPrice(tbWare, tbWare.szShopType, me)
+        pPanel:Label_SetText("txtMoneyNum", nPrice)
+        if nPrice == tbWare.nPrice or not Shop:IsFamilyShop(tbWare.szShopType) then
+          pPanel:SetActive("imgZK", false)
+          pPanel:Label_SetText("imgZK/txtZK", "")
+        else
+          pPanel:SetActive("imgZK", true)
+          pPanel:Label_SetText("imgZK/txtZK", i18n.GetDiscountText(math.floor(10 * nPrice / tbWare.nPrice + 0.5)))
+        end
+        local szName = KItem.GetItemShowInfo(tbWare.nItemId, me.nFaction, me.nFactionSect, me.nSex)
+        local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        itemGrid:SetItemByTemplate(tbWare.nItemId)
+        itemGrid:SetClickEnable(true, function()
+          self:OnItemClick(tbWare)
+        end)
+        pPanel:Label_SetText("txtTitle", i18n.Parse(szName))
+        local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+        if self.szShopType == Shop.ShopTypeStr.DrugShop then
+          nRemainCount = tbInfo.nRemainCount or -1
+          tbWare.nRemainCount = nRemainCount
+        end
+        if -1 == nRemainCount then
+          pPanel:SetActive("Limit", false)
+          pPanel:Label_SetText("Limit/txtLimitNum", "")
+        else
+          pPanel:SetActive("Limit", true)
+          pPanel:Label_SetText("Limit/txtLimitNum", tostring(nRemainCount))
+        end
+        if 0 == nRemainCount then
+          pPanel:SetActive("imgSoldOutBg", true)
+          pPanel:SetActive("imgSoldOutMark", true)
+        else
+          pPanel:SetActive("imgSoldOutBg", false)
+          pPanel:SetActive("imgSoldOutMark", false)
+        end
+        local szMoney, szMoneyAtlas = Currency:GetIcon(tbWare.szCurrencyType)
+        pPanel:Sprite_SetSprite("imgMoney", szMoney)
+        Ui:Button_BindEvent(pPanel, "", function()
+          self:OnItemClick(tbWare)
+        end, self)
+      else
+        tbLoopScroll:GetGridElement(nIndex, i).pPanel:SetActive("Main", false)
+      end
+    end
+  end
+  
+  self.tbWareScroll:SetElement(math.ceil(nCount / self.nRow), fnSetItem)
+end
+
+function tbWnd:SetItemSVActive(bStatus)
+  if bStatus then
+    self.pPanel:SetActive(self.pnlContant, true)
+    self.pPanel:SetActive(self.NotInfo, false)
+  else
+    self.pPanel:SetActive(self.pnlContant, false)
+    self.pPanel:SetActive(self.NotInfo, true)
+  end
+end
+
+function tbWnd:OnItemClick(tbData)
+  local nRemainCount = Shop:GetShopRemainCount(tbData, me)
+  if self.szShopType == Shop.ShopTypeStr.DrugShop then
+    nRemainCount = tbData.nRemainCount
+  end
+  if 0 == nRemainCount then
+    me.CenterMsg(i18n.Get(Shop.Terms.InsufficientRemainInventory))
+    return
+  end
+  Ui:OpenWindow("UIShopBuy", tbData, true, nRemainCount)
+end

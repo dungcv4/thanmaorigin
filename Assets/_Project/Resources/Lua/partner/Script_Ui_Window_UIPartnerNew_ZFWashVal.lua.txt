@@ -1,0 +1,149 @@
+local tbWnd = Ui:CreateClass("UIPartnerNew_ZFWashVal", "UIPanel")
+local tbControls = {
+  txtMaxed = "txtMaxed",
+  Reset = "ResetBeforeBtns",
+  btnResetNum = "ResetBeforeBtns/btnResetNum",
+  btnAdd = "ResetBeforeBtns/costCell/btnAdd",
+  UIItemGrid = "ResetBeforeBtns/costCell/UIItemGrid",
+  txtCost = "ResetBeforeBtns/costCell/txtPotentialUpCost",
+  Template = "AttributeList/Viewport/Content/Template"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnResetNum = function(self)
+    local tbParam = {
+      self.nSelectIndex
+    }
+    PartnerZhenFa:SendClientReq(PartnerZhenFa.Protocol.ReqWashRandomAttrVal, tbParam, tbParam)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.Template)
+end
+
+function tbWnd:OnOpen()
+  self.nSelectIndex = nil
+  self:UpdateView()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnResetNum, {
+    RedPointMgr.EVENT.PartnerZFWashRandomVal
+  })
+end
+
+function tbWnd:OnClose()
+  self.tbScrollView:Clear()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnResetNum)
+end
+
+function tbWnd:UpdateView()
+  self.tbScrollView:Clear()
+  local bAllReachednMaxLevel = true
+  local nAttrCount = PartnerZhenFa:GetCurRandomAttrCount(me)
+  local nMaxLevel = PartnerZhenFa:GetCurMaxRandomAttrLevel(me)
+  for nIndex = 1, nAttrCount do
+    self.tbScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      local szName, szValue, szDiff, szMaxValue = PartnerZhenFa:GetRandomAttrWashValInfo(nIndex)
+      pPanel:Label_SetText("txtAttribute", szName)
+      local nQuality = PartnerZhenFa:GetRandomAttrQuality(me, nIndex)
+      if not nQuality then
+        LogErr("UIPartnerNew_ZFWashVal:UpdateView Error. GetRandomAttrQuality is nil", nIndex)
+        return
+      end
+      local szColor = PartnerZhenFa.tbAttrColor[nQuality]
+      szColor = Ui.tbColor:GetColorHexByDefineName(szColor)
+      if szDiff then
+        pPanel:Label_SetText("txtAttributeValue", i18n.EasyGet("<color=#{0}>{1}</color>{2}/{3}", szColor, szValue, szDiff, szMaxValue))
+      else
+        pPanel:Label_SetText("txtAttributeValue", i18n.EasyGet("<color=#{0}>{1}</color>/{2}", szColor, szValue, szMaxValue))
+      end
+      local nLevel = me.GetUserValue(PartnerZhenFa.RandomAttrLevelSaveGroup, nIndex)
+      pPanel:Sprite_SetFill("proCell/imgProBar", nLevel / nMaxLevel)
+      bAllReachednMaxLevel = bAllReachednMaxLevel and nLevel == nMaxLevel
+      pPanel:SetActive("Potential1_Effect", false)
+      pPanel:SetActive("imgselected", nIndex == self.nSelectIndex)
+      Ui:Button_BindEvent(pPanel, "Main", function()
+        self.nSelectIndex = nIndex
+        self:UpdateSelectShow()
+      end)
+    end)
+  end
+  if bAllReachednMaxLevel then
+    self.pPanel:SetActive(tbControls.Reset, false)
+    self.pPanel:SetActive(tbControls.txtMaxed, true)
+  else
+    self:UpdateCostShow()
+    self.pPanel:SetActive(tbControls.Reset, true)
+    self.pPanel:SetActive(tbControls.txtMaxed, false)
+  end
+  if self.nSelectIndex then
+    self:UpdateSelectShow()
+  end
+end
+
+function tbWnd:UpdateSelectShow()
+  local nRandomAttrLevel = me.GetUserValue(PartnerZhenFa.RandomAttrLevelSaveGroup, self.nSelectIndex)
+  if nRandomAttrLevel >= PartnerZhenFa:GetCurMaxRandomAttrLevel(me) then
+    self.pPanel:SetActive(tbControls.Reset, false)
+    self.pPanel:SetActive(tbControls.txtMaxed, true)
+  else
+    self.pPanel:SetActive(tbControls.Reset, true)
+    self.pPanel:SetActive(tbControls.txtMaxed, false)
+  end
+  local tbElements = self.tbScrollView:GetAllElement()
+  for nIndex, tbElement in ipairs(tbElements) do
+    tbElement.pPanel:SetActive("imgselected", nIndex == self.nSelectIndex)
+  end
+end
+
+function tbWnd:UpdateCostShow()
+  local tbZFLevelCfg = PartnerZhenFa:GetZFLevelCfg()
+  local nHasCount = me.GetItemCountByTypeInBag(tbZFLevelCfg.nWashValueCostId)
+  local nNeedCount = tbZFLevelCfg.nWashValueCostCount
+  if nHasCount < nNeedCount then
+    self.pPanel:Label_SetText(tbControls.txtCost, i18n.EasyGet("<color=#c50505>{0}/{1}</color>", nHasCount, nNeedCount))
+  else
+    self.pPanel:Label_SetText(tbControls.txtCost, i18n.EasyGet("{0}/{1}", nHasCount, nNeedCount))
+  end
+  local pGrid = Ui:NewExistItemGrid(self, tbControls.UIItemGrid)
+  pGrid:SetItemByTemplate(tbZFLevelCfg.nWashValueCostId, 0)
+  pGrid:SetClickEnable(true)
+  Ui:Button_BindEvent(self.pPanel, tbControls.btnAdd, function()
+    local tbWindow = Ui:GetWindow("UIPartnerNew")
+    if tbWindow then
+      tbWindow:UpdateJumpToWnd(tbZFLevelCfg.nWashValueCostId)
+    end
+  end)
+end
+
+function tbWnd:OnZhenFaRefresh(nRefreshType, nIndex, bAddAttr)
+  if nRefreshType == PartnerZhenFa.tbUIRefreshType.RANDOMVAL_CHANGE and nIndex then
+    local tbElement = self.tbScrollView:GetElement(nIndex)
+    if tbElement then
+      local nQuality = PartnerZhenFa:GetRandomAttrQuality(me, nIndex)
+      if not nQuality then
+        LogErr("UIPartnerNew_ZFWashVal:UpdateView Error. GetRandomAttrQuality is nil", nIndex)
+        return
+      end
+      local _, szValue, szDiff, szMaxValue = PartnerZhenFa:GetRandomAttrWashValInfo(nIndex)
+      local szColor = PartnerZhenFa.tbAttrColor[nQuality]
+      szColor = Ui.tbColor:GetColorHexByDefineName(szColor)
+      if szDiff then
+        tbElement.pPanel:Label_SetText("txtAttributeValue", i18n.EasyGet("<color=#{0}>{1}</color>{2}/{3}", szColor, szValue, szDiff, szMaxValue))
+      else
+        tbElement.pPanel:Label_SetText("txtAttributeValue", i18n.EasyGet("<color=#{0}>{1}</color>/{2}", szColor, szValue, szMaxValue))
+      end
+      local nMaxLevel = PartnerZhenFa:GetCurMaxRandomAttrLevel(me)
+      local nLevel = me.GetUserValue(PartnerZhenFa.RandomAttrLevelSaveGroup, nIndex)
+      tbElement.pPanel:Sprite_SetFill("proCell/imgProBar", nLevel / nMaxLevel)
+      if bAddAttr then
+        tbElement.pPanel:SetActive("Potential1_Effect", false)
+        tbElement.pPanel:SetActive("Potential1_Effect", true)
+      end
+    end
+  end
+  self:UpdateCostShow()
+  if self.nSelectIndex then
+    self:UpdateSelectShow()
+  end
+end

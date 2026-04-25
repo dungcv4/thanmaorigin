@@ -1,0 +1,138 @@
+local tbWnd = Ui:CreateClass("UISelectPortraitFrame", "UIPanel")
+local tbControls = {
+  PortraitTemplate = "panelPortrait/maskLayer/paneBG/PortraitTemplate",
+  imgPortrait = "node/imgBG/Content/RightDesc/HeadTemplate/imgPortrait",
+  imgPortraitFrame = "node/imgBG/Content/RightDesc/HeadTemplate/imgFrame",
+  imgBalloon = "node/imgBG/Content/RightDesc/Img_ChatPop",
+  txtBalloon = "node/imgBG/Content/RightDesc/Img_ChatPop/Text"
+}
+tbWnd.tbControls = tbControls
+local tbIndex2FrameID = {}
+
+function tbWnd:OnCreate()
+  self.nCurIndex = 0
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.PortraitTemplate, function(self, nIndex, tbElement)
+    self:OnSelectPortrait(nIndex)
+  end, true, true)
+end
+
+function tbWnd:OnOpen()
+  RemoteServer.PortraitFrameCmd("SynData")
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.NewPortraitFrame)
+end
+
+function tbWnd:Update()
+  local bShowLocked = true
+  local tbWnd = Ui:GetWindow("UISelectPortrait")
+  if tbWnd then
+    bShowLocked = tbWnd:GetLockedStatus()
+  end
+  self:InitAllPortrait(bShowLocked)
+end
+
+function tbWnd:OnClose()
+  if self.nCurIndex and 0 ~= self.nCurIndex then
+    local pCurPanel = self.tbScrollView:GetElement(self.nCurIndex).pPanel
+    pCurPanel:SetActive("imgSelected", false)
+  end
+  self.nCurIndex = nil
+  self.tbRedPointIndex = {}
+  self.tbScrollView:Clear()
+end
+
+function tbWnd:OnSelectPortrait(nIndex)
+  if not nIndex then
+    Log("PortraitFrame nIndex is Nil")
+  end
+  local pPanel = self.tbScrollView:GetElement(nIndex).pPanel
+  local nFrameIndex = tbIndex2FrameID[nIndex].nFrameIndex
+  local bLocked = tbIndex2FrameID[nIndex].bLocked
+  local szDesc = i18n.Parse(PlayerPortraitFrame.tbPortraitFrameSetting[nFrameIndex].szSourceDesc)
+  local szLeftTime
+  if not bLocked and not PlayerPortraitFrame:IsDefaultProtrait(nFrameIndex) and not PlayerPortraitFrame:IsPermanentPortrait(me, nFrameIndex, PlayerPortraitFrame.tbPortraitData) then
+    local nLeft = PlayerPortraitFrame.tbPortraitData[nFrameIndex].nLimitTime - GetTime()
+    szLeftTime = i18n.EasyGet("{0}\229\144\142\229\136\176\230\156\159", Lib:TimeDesc2(nLeft))
+  end
+  if szLeftTime then
+    szDesc = string.format("%s\239\188\140%s", szDesc, szLeftTime)
+  end
+  if self.nCurIndex and 0 ~= self.nCurIndex then
+    local pCurPanel = self.tbScrollView:GetElement(self.nCurIndex).pPanel
+    pCurPanel:SetActive("imgSelected", false)
+  end
+  pPanel:SetActive("imgSelected", true)
+  self.nCurIndex = nIndex
+  if not bLocked then
+    pPanel:SetActive("imgRedPoint", false)
+    PlayerPortraitFrame.tbRedPointIndex[nFrameIndex] = nil
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PORTRAITUI_UPDATE)
+end
+
+function tbWnd:InitAllPortrait(bShowLocked)
+  self.tbScrollView:Clear()
+  local tbResult = {}
+  local tbLockedResult = {}
+  for nId, tbPortrait in pairs(PlayerPortraitFrame.tbPortraitFrameSetting) do
+    if 1 ~= tbPortrait.nBackup then
+      if 1 == tbPortrait.nDefault or PlayerPortraitFrame:CheckIsInValidTimeAndInSameDay(me, tbPortrait.nId, PlayerPortraitFrame.tbPortraitData) then
+        table.insert(tbResult, {nFrameIndex = nId, bLocked = false})
+      elseif bShowLocked then
+        table.insert(tbLockedResult, {nFrameIndex = nId, bLocked = true})
+      end
+    end
+  end
+  if bShowLocked then
+    for i = 1, #tbLockedResult do
+      table.insert(tbResult, tbLockedResult[i])
+    end
+  end
+  tbIndex2FrameID = tbResult
+  self:_SetElement(tbResult)
+end
+
+function tbWnd:_SetElement(tbShowList)
+  local szIcon = PlayerPortrait:GetIcon(me.nPortrait)
+  for index, value in ipairs(tbShowList) do
+    self.tbScrollView:SetElement(index, function(tbElement)
+      local tbPortrait = PlayerPortraitFrame.tbPortraitFrameSetting[value.nFrameIndex]
+      local bLocked = value.bLocked
+      local pPanel = tbElement.pPanel
+      pPanel:Sprite_SetSprite("imgPortrait", szIcon)
+      PlayerPortraitFrame:SetPortraitFrame(pPanel, "imgFrame", value.nFrameIndex)
+      pPanel:Label_SetText("txtName", i18n.Parse(tbPortrait.szName))
+      if bLocked then
+        pPanel:SetActive("imgLocked", true)
+      end
+      if (not self.nCurIndex or 0 == self.nCurIndex) and tbPortrait.nId == PlayerPortraitFrame:GetMeCurPortraitFrameId(me) then
+        self.nCurIndex = index
+      end
+      if index == self.nCurIndex then
+        pPanel:SetActive("imgSelected", true)
+      else
+        pPanel:SetActive("imgSelected", false)
+      end
+      pPanel:SetActive("imgRedPoint", false)
+      if PlayerPortraitFrame.tbRedPointIndex[tbPortrait.nId] then
+        pPanel:SetActive("imgRedPoint", true)
+      end
+    end)
+  end
+  if self.nCurIndex and self.nCurIndex > #tbShowList then
+    self.nCurIndex = nil
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PORTRAITUI_UPDATE)
+end
+
+function tbWnd:ReqChange()
+  if not self.nCurIndex or 0 == self.nCurIndex then
+    return
+  end
+  PlayerPortraitFrame:ChangePortraitFrame(tbIndex2FrameID[self.nCurIndex].nFrameIndex)
+end
+
+function tbWnd:GetCurPortraitFrameInfo()
+  if self.nCurIndex then
+    return tbIndex2FrameID[self.nCurIndex]
+  end
+end

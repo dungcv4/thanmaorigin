@@ -1,0 +1,103 @@
+local tbWnd = Ui:CreateWindow("UIHanWuEnhance")
+
+function tbWnd:NotifyEvents()
+  return {}
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  equipTemplate = "node/imgBG/ScrollView/Viewport/Content/Template",
+  txtInfoTittle = "node/imgBG/txtInfoTittle",
+  txtInfo = "node/imgBG/txtInfo"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbEnhanceInfo = {}
+  self.pEquipScorllView = Ui:NewScrollView(self, self.equipTemplate, nil, false, false)
+end
+
+function tbWnd:OnOpen()
+  self.tbEnhanceInfo = HanWuYiJi:GetEnhanceInfo()
+  self:UpdateWithEnhanceInfo(self.tbEnhanceInfo)
+end
+
+function tbWnd:UpdateWithEnhanceInfo(tbInfo)
+  self.pEquipScorllView:Clear()
+  for nPart, nEnhanceLv in ipairs(tbInfo) do
+    if HanWuYiJi.EquipPosMap[nPart] and Lib:IsInteger(nEnhanceLv) and nEnhanceLv <= HanWuYiJi.DEF.MAX_ENCHANCE_LV then
+      self.pEquipScorllView:SetElement(nPart, function(tbElement)
+        self:SetElementInfo(tbElement, nPart, nEnhanceLv)
+      end)
+    end
+  end
+end
+
+function tbWnd:SetElementInfo(tbElement, nPart, nLevel)
+  tbElement.pPanel:SetActive("btnEnhance/RedPoint", false)
+  local nEquipPosIndex = nPart
+  local nEnhanceLv = nLevel
+  local nNowShowLv = 0
+  local nNextShowLv = 0
+  local bIsEnhanceMax = nEnhanceLv >= HanWuYiJi.DEF.MAX_ENCHANCE_LV and true or false
+  local tbHanWuYiJiEquipEnhanceData
+  local nEnhanceIndex = true == bIsEnhanceMax and 0 or nEnhanceLv
+  if HanWuYiJi.tbHanWuYiJiEquipEnhanceCfg ~= nil and HanWuYiJi.tbHanWuYiJiEquipEnhanceCfg[nEquipPosIndex] ~= nil then
+    for i = nEnhanceIndex, HanWuYiJi.DEF.MAX_ENCHANCE_LV do
+      if HanWuYiJi.tbHanWuYiJiEquipEnhanceCfg[nEquipPosIndex][i + 1] ~= nil then
+        tbHanWuYiJiEquipEnhanceData = HanWuYiJi.tbHanWuYiJiEquipEnhanceCfg[nEquipPosIndex][i + 1]
+        nNowShowLv = HanWuYiJi.tbHanWuYiJiEquipEnhanceCfg[nEquipPosIndex][i] and HanWuYiJi.tbHanWuYiJiEquipEnhanceCfg[nEquipPosIndex][i].nShowEnhanceLv or 0
+        nNextShowLv = tbHanWuYiJiEquipEnhanceData.nShowEnhanceLv
+        break
+      end
+    end
+    if nil ~= tbHanWuYiJiEquipEnhanceData then
+      if false == bIsEnhanceMax then
+        tbElement.pPanel:Label_SetText("EnhanceInfo/txtEnhanceInfoNow", nNowShowLv)
+        tbElement.pPanel:Label_SetText("EnhanceInfo/txtEnhanceInfoNext", nNextShowLv)
+        tbElement.pPanel:Label_SetText("Cost/txtCostAndHave", i18n.EasyGet("{0}/{1}", me.GetItemCountByTypeInBag(tbHanWuYiJiEquipEnhanceData.nCostItemTemplatedId), tbHanWuYiJiEquipEnhanceData.nCostItemNum))
+        local tbItemGrid = tbElement.tbItemGrid
+        tbItemGrid = tbItemGrid or Ui:NewExistItemGrid(tbElement, "Cost/item/UIItemGrid")
+        tbItemGrid:SetEquipDebris(tbHanWuYiJiEquipEnhanceData.nCostItemTemplatedId)
+        tbItemGrid:SetClickEnable(true)
+        Ui:Button_BindEvent(tbElement.pPanel, "btnEnhance", function()
+          self:OnClickEnhanceBtn(nEquipPosIndex, tbHanWuYiJiEquipEnhanceData)
+        end)
+        if me.GetItemCountByTypeInBag(tbHanWuYiJiEquipEnhanceData.nCostItemTemplatedId) >= tbHanWuYiJiEquipEnhanceData.nCostItemNum then
+          tbElement.pPanel:SetActive("btnEnhance/RedPoint", true)
+        end
+      end
+    else
+      bIsEnhanceMax = true
+      for i = 0, HanWuYiJi.DEF.MAX_ENCHANCE_LV do
+        if HanWuYiJi.tbHanWuYiJiEquipEnhanceCfg[nEquipPosIndex][i + 1] ~= nil then
+          tbHanWuYiJiEquipEnhanceData = HanWuYiJi.tbHanWuYiJiEquipEnhanceCfg[nEquipPosIndex][i + 1]
+          break
+        end
+      end
+    end
+  end
+  if nil ~= tbHanWuYiJiEquipEnhanceData then
+    tbElement.pPanel:Sprite_SetSprite("imgEquip", tbHanWuYiJiEquipEnhanceData.szEquipIcon)
+    tbElement.pPanel:Label_SetText("txtName", HanWuYiJi.tbTagNameFun[nEquipPosIndex]())
+  end
+  tbElement.pPanel:SetActive("EnhanceInfo", not bIsEnhanceMax)
+  tbElement.pPanel:SetActive("Cost", not bIsEnhanceMax)
+  tbElement.pPanel:SetActive("btnEnhance", not bIsEnhanceMax)
+  tbElement.pPanel:SetActive("txtMaxEnhance", bIsEnhanceMax)
+  local nFuShiCount = me.GetMoney("HanWuFuShi")
+  local tbWare = Shop:GetAWare(564)
+  local nPrice = Shop:GetPrice(tbWare, tbWare.szShopType, me)
+  local nCanBuyCount = math.floor(nFuShiCount / nPrice)
+  self.pPanel:Label_SetText(tbControls.txtInfo, i18n.EasyGet("\231\130\185\226\128\156\229\188\186\229\140\150\226\128\157\229\143\175\229\191\171\230\141\183\229\188\186\229\140\150\239\188\140\229\189\147\229\137\141\229\143\175\232\180\173\228\185\176<color=#E02A2A>{0}</color>\228\184\170\229\188\186\229\140\150\229\141\183", nCanBuyCount))
+  self.pPanel:Label_SetText(tbControls.txtInfoTittle, i18n.EasyGet("<color=#866A49>\228\188\145\230\129\175\233\152\182\230\174\181\229\156\168\229\149\134\228\186\186\233\153\132\232\191\145</color>"))
+end
+
+function tbWnd:OnClickEnhanceBtn(nEquipPosIndex, tbHanWuYiJiEquipEnhanceData)
+  HanWuYiJi:OnEnhanceEquip(nEquipPosIndex, tbHanWuYiJiEquipEnhanceData)
+end

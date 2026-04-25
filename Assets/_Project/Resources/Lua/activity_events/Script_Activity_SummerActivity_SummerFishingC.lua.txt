@@ -1,0 +1,292 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.SummerFishing)
+local Protocol = {
+  [tbActivity.Protocol.OnCreateFishBallResp] = "OnCreateFishBallResp",
+  [tbActivity.Protocol.OnFishBallSkillResp] = "OnFishBallSkillResp",
+  [tbActivity.Protocol.OnDestroySkillResp] = "OnDestroySkillResp",
+  [tbActivity.Protocol.OnSyncOneFishDataResp] = "OnSyncOneFishDataResp",
+  [tbActivity.Protocol.OnSyncAllFishDataResp] = "OnSyncAllFishDataResp",
+  [tbActivity.Protocol.OnSelectBait] = "OnSelectBait",
+  [tbActivity.Protocol.OnRemindBuyCreelResp] = "OnRemindBuyCreelResp",
+  [tbActivity.Protocol.OnRemindBaitCompose] = "OnRemindBaitCompose",
+  [tbActivity.Protocol.OnFishingSuccessResp] = "OnFishingSuccessResp",
+  [tbActivity.Protocol.OnSyncActivityStatusResp] = "OnSyncActivityStatusResp"
+}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    me.CenterMsg(i18n.EasyGet("\230\156\141\229\138\161\231\171\175\232\190\147\229\133\165\233\148\153\232\175\175"))
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:OnOpen()
+  self:InitFishBallNpc()
+  self.tbHandInDataCache = {}
+  self.tbAchieveDataCache = {}
+  self.nSaveId = GetGroupKey(self.tbConfig.szSaveKey)
+  self:OnPlayerLogin()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.OnComposeMaterialChange, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, self.OnComposeMaterialChange, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self.OnPlayerLogin, self)
+end
+
+function tbActivity:OnClose()
+  self:UnInitFishBallNpc()
+  self:ResetCache()
+  self.nSaveId = nil
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self)
+end
+
+function tbActivity:LoadSyncData(bStatus)
+  self:OnSyncActivityStatusResp(bStatus)
+end
+
+function tbActivity:OnSyncActivityStatusResp(bStatus)
+  self.bDailyOpenFishing = bStatus
+end
+
+function tbActivity:OnComposeMaterialChange(nItemTemplateId)
+  local pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.ComposeActivity)
+  if pInstance and pInstance:IsOpen() then
+    if not self:IsBaitMaterial(nItemTemplateId) then
+      return
+    end
+    local tbFormula = pInstance:GetFormulas()
+    for nComposeType, _ in pairs(tbFormula) do
+      if pInstance:GetPlayerCanMakeNum(me, nComposeType) > 0 then
+        if not RedPointMgr:CheckEvent(RedPointMgr.EVENT.SummerCompose) then
+          RedPointMgr:LightRedPoint(RedPointMgr.EVENT.SummerCompose)
+        end
+        break
+      end
+    end
+  end
+end
+
+function tbActivity:IsBaitMaterial(nItemTemplateId)
+  local pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.ComposeActivity)
+  if pInstance and pInstance:IsOpen() then
+    for _, nComposeType in pairs(pInstance.ComposeType) do
+      if pInstance:IsMaterial(nItemTemplateId, nComposeType) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function tbActivity:OnPlayerLogin()
+  ActivityMgr:CallServerScript(self.nId, self.Protocol.OnSyncAllFishDataReq)
+end
+
+function tbActivity:OnCreateFishBallResp(nMapId, nLocX, nLocY)
+  if nMapId and nLocX and nLocY then
+    self:AddFishBallNPC(nMapId, nLocX, nLocY)
+  end
+end
+
+function tbActivity:OnRemindBaitCompose()
+  local function fnCompose()
+    Ui:OpenWindow("UICompose_Tip", self.tbConfig.nComposeActivityId)
+  end
+  
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\233\156\128\232\166\129\233\177\188\233\165\181\230\137\141\232\131\189\232\191\155\232\161\140\233\146\147\233\177\188\239\188\140\230\152\175\229\144\166\229\136\182\228\189\156\233\177\188\233\165\181\239\188\159"), {
+    {fnCompose},
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  }, nil, nil, nil)
+end
+
+function tbActivity:OnRemindBuyCreelResp()
+  local function fnBuyCreel()
+    local tbWare = Shop:GetAWare2(Shop.ShopTypeStr.LimitBuy, self.tbConfig.nCreelTemplateId)
+    
+    local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+    if 0 == nRemainCount then
+      me.CenterMsg(i18n.Get(Shop.Terms.InsufficientRemainInventory))
+      return
+    end
+    Ui:OpenWindow("UIShopBuy", tbWare, true)
+  end
+  
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\233\156\128\232\166\129\233\177\188\231\171\191\230\137\141\232\131\189\232\191\155\232\161\140\233\146\147\233\177\188\239\188\140\230\152\175\229\144\166\232\180\173\228\185\176\233\177\188\231\171\191\239\188\159"), {
+    {fnBuyCreel},
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  }, nil, nil, nil)
+end
+
+function tbActivity:OnFishBallSkillResp(nStatusId, nMapId, nLocX, nLocY, nNpcId)
+  if nNpcId and nStatusId == self.FishBallStatus.GET then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_NPC_IN_TALK_RANGE, nNpcId, 3)
+  end
+  if nStatusId then
+    self:FishBallNpcCastSkill(nStatusId, nMapId, nLocX, nLocY)
+  end
+end
+
+function tbActivity:OnDestroySkillResp()
+  self:DelFishBallNPC()
+end
+
+function tbActivity:ResetCache()
+  self.tbHandInDataCache = nil
+  self.tbAchieveDataCache = nil
+end
+
+function tbActivity:OnSyncOneFishDataResp(nFishTemplateId, tbOneHandInData, nTotalScore)
+  self.tbHandInDataCache[nFishTemplateId] = tbOneHandInData
+  self.tbHandInDataCache.nTotalScore = nTotalScore
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SUMMERFISHING_HANDIN_DATA_SYNC, self.tbHandInDataCache, self.tbSortItem)
+end
+
+function tbActivity:OnSyncAllFishDataResp(tbHandInData)
+  self.tbHandInDataCache = tbHandInData
+  self.tbSortItem = self:SortByQuality(tbHandInData)
+end
+
+function tbActivity:SortByQuality(tbHandInData)
+  local tbSortItem = {}
+  for nFishTemplateId, _ in pairs(tbHandInData) do
+    if type(nFishTemplateId) == "number" then
+      local szName, _, _, nQuality = KItem.GetItemShowInfo(nFishTemplateId, me.nFaction, me.nFactionSect, me.nBodySex)
+      table.insert(tbSortItem, {
+        nFishTemplateId = nFishTemplateId,
+        szName = szName,
+        nQuality = nQuality
+      })
+    end
+  end
+  table.sort(tbSortItem, function(tb1, tb2)
+    return tb1.nQuality > tb2.nQuality
+  end)
+  return tbSortItem
+end
+
+function tbActivity:GetHandInData()
+  return self.tbHandInDataCache, self.tbSortItem
+end
+
+function tbActivity:GetShowJumpTo()
+  return true
+end
+
+function tbActivity:IsShowOpen()
+  return self.bDailyOpenFishing
+end
+
+function tbActivity:GetMapInfoList()
+  local tbList = {}
+  for nMapId, tbInfo in pairs(self.tbConfig.tbFishingAwardLocInfo) do
+    table.insert(tbList, {
+      nMapId = nMapId,
+      nMapTemplateId = nMapId,
+      nPosX = tbInfo.nLocAFKX1,
+      nPosY = tbInfo.nLocAFKY1,
+      szName = string.format("%s(1)", Map:GetMapName(nMapId)),
+      szMapName = string.format("%s(1)", Map:GetMapName(nMapId))
+    })
+    table.insert(tbList, {
+      nMapId = nMapId,
+      nMapTemplateId = nMapId,
+      nPosX = tbInfo.nLocAFKX2,
+      nPosY = tbInfo.nLocAFKY2,
+      szName = string.format("%s(2)", Map:GetMapName(nMapId)),
+      szMapName = string.format("%s(2)", Map:GetMapName(nMapId))
+    })
+  end
+  return tbList
+end
+
+function tbActivity:GetJumpMapList()
+  return self:GetMapInfoList()
+end
+
+function tbActivity:GetDialogSetting()
+  local tbSetting = {}
+  local szItemName, nNum
+  local nBaitTemplateId = me.GetUserValue(self.nSaveId, self.SaveID.SelectBaitTemplateId)
+  local tbList = {
+    self.tbConfig.nSpecialBaitTemplateId,
+    self.tbConfig.nNormalBaitTemplateId
+  }
+  for _, nTemplateId in ipairs(tbList) do
+    szItemName = KItem.GetItemShowInfo(nTemplateId)
+    nNum = me.GetItemCountInBags(nTemplateId)
+    table.insert(tbSetting, {
+      szName = i18n.Parse(szItemName),
+      nTemplateId = nTemplateId,
+      bGrey = nNum <= 0,
+      bNotClose = true,
+      bSelected = nBaitTemplateId == nTemplateId
+    })
+  end
+  return tbSetting
+end
+
+function tbActivity:OnClickBaitHelper(nIndex)
+  local tbList = {
+    self.tbConfig.nSpecialBaitTemplateId,
+    self.tbConfig.nNormalBaitTemplateId
+  }
+  if not tbList[nIndex] then
+    return
+  end
+  local nBaitTemplateId = me.GetUserValue(self.nSaveId, self.SaveID.SelectBaitTemplateId)
+  if nBaitTemplateId == tbList[nIndex] then
+    return
+  end
+  if me.GetItemCountByTypeInBag(tbList[nIndex]) <= 0 then
+    me.CenterMsg(i18n.EasyGet("\230\130\168\230\178\161\230\156\137\232\175\165\231\167\141\233\177\188\233\165\181"))
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SUMMERFASHING_BAIT_SYNC)
+    return
+  end
+  self:OnClickBait(tbList[nIndex])
+end
+
+function tbActivity:OnClickBait(nTemplateId)
+  ActivityMgr:CallServerScript(self.nId, self.Protocol.OnSetSelectBaitReq, nTemplateId)
+end
+
+function tbActivity:OnSelectBait(nTemplateId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SUMMERFASHING_BAIT_SYNC, nTemplateId)
+end
+
+function tbActivity:OnFishingSuccessResp()
+  if self.nAutoFishing then
+    Timer:Close(self.nAutoFishing)
+  end
+  if not self.bAuto then
+    return
+  end
+  if not self:GetSelectBait(me) then
+    self.bAuto = false
+    return
+  end
+  self.nAutoFishing = Timer:Register(Env.GAME_FPS, function()
+    local tbUi = Ui:GetWindow("UIHud")
+    if tbUi.nShowNpcPopNpcID then
+      Operation:OnDialogerClicked(tbUi.nShowNpcPopNpcID)
+      Operation:SetNpcSelected(tbUi.nShowNpcPopNpcID, false)
+    end
+  end)
+end
+
+function tbActivity:GetRedPointEventList()
+  return {
+    RedPointMgr.EVENT.SummerAchieve
+  }
+end
+
+function tbActivity:DoCommonJump()
+  if Ui:WindowVisible("UIActivityTemplate") == true then
+    Ui:GetWindow("UIActivityTemplate"):OnOpenWndJumpTo(self.nId)
+  end
+end

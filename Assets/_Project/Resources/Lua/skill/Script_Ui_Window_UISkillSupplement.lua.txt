@@ -1,0 +1,134 @@
+local tbWnd = Ui:CreateWindow("UISkillSupplement")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  ItemTemplate = "node/imgBG/Content/ItemList/Viewport/Content/Template",
+  wndJumpTo = "wndJumpTo",
+  btnEmpty4Raycast = "wndJumpTo/Empty4Raycast",
+  SourceTemplate = "wndJumpTo/imgBG/List/Viewport/Content/Template"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnEmpty4Raycast = function(self)
+    self.pPanel:SetActive(tbControls.wndJumpTo, false)
+  end
+}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose(tbControls.wndJumpTo)
+  self.pStrengthItemScorllView = Ui:NewScrollView(self, tbControls.ItemTemplate, nil, false, false)
+  self.pStrengthItemSourceScorllView = Ui:NewScrollView(self, tbControls.SourceTemplate, function(pPanel, nIndex, tbElement)
+    self:OnSelectSource(nIndex, tbElement)
+  end, false, false)
+end
+
+function tbWnd:OnOpen()
+  self.pPanel:SetActive(tbControls.wndJumpTo, false)
+  self:InitStrengthItemScorllView()
+end
+
+local function SortFunc(strengthItemShowDataA, strengthItemShowDataB)
+  local nItemTemplateIdA = strengthItemShowDataA.ItemTemplateId
+  local szServerSaveKeyA = strengthItemShowDataA.ServerSaveKey
+  local SortIdA = strengthItemShowDataA.SortId
+  local nMaxUseCountA = KItem.GetItemExtParam(nItemTemplateIdA, 1)
+  local nUseCountA = me.GetUserValue(GetGroupKey(szServerSaveKeyA), 1)
+  local nItemTemplateIdB = strengthItemShowDataB.ItemTemplateId
+  local szServerSaveKeyB = strengthItemShowDataB.ServerSaveKey
+  local SortIdB = strengthItemShowDataB.SortId
+  local nMaxUseCountB = KItem.GetItemExtParam(nItemTemplateIdB, 1)
+  local nUseCountB = me.GetUserValue(GetGroupKey(szServerSaveKeyB), 1)
+  local bIsMaxA = 1 == nUseCountA / nMaxUseCountA and 1 or 0
+  local bIsMaxB = 1 == nUseCountB / nMaxUseCountB and 1 or 0
+  if bIsMaxA ~= bIsMaxB then
+    return bIsMaxA < bIsMaxB
+  end
+  if nUseCountA / nMaxUseCountA ~= nUseCountB / nMaxUseCountB then
+    return nUseCountA / nMaxUseCountA > nUseCountB / nMaxUseCountB
+  end
+  return SortIdA < SortIdB
+end
+
+function tbWnd:SetItemElementInfo(tbElement, strengthItemShowData, nIndex)
+  local nItemTemplateId = strengthItemShowData.ItemTemplateId
+  local szServerSaveKey = strengthItemShowData.ServerSaveKey
+  local tbItemGrid = tbElement.tbItemGrid
+  tbItemGrid = tbItemGrid or Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  tbItemGrid:SetItem(nil, nItemTemplateId)
+  local szItemAName, _, _, _ = KItem.GetItemShowInfo(nItemTemplateId)
+  tbElement.pPanel:Label_SetText("txtName", i18n.Parse(szItemAName))
+  local tbInfo = Item:GetItemBaseProp(nItemTemplateId)
+  tbElement.pPanel:Label_SetText("txtDesc", i18n.Parse(tbInfo.szIntro))
+  local nMaxUseCount = KItem.GetItemExtParam(nItemTemplateId, 1)
+  local nUseCount = me.GetUserValue(GetGroupKey(szServerSaveKey), 1)
+  tbElement.pPanel:Label_SetText("txtCount", string.format("%d/%d", nUseCount, nMaxUseCount))
+  if 0 == strengthItemShowData.bOpen or not Item.StrengthItem:IsCurUnlock(me, nItemTemplateId) then
+    tbElement.pPanel:Button_SetEnable("btnGet", false)
+    tbElement.pPanel:Button_SetText("btnGet", i18n.EasyGet("\229\137\141\229\190\128\232\142\183\229\143\150"), "Text")
+  else
+    Ui:Button_BindEvent(tbElement.pPanel, "btnGet", function()
+      self.nSelect = nIndex
+      self.dwTemplateId = nItemTemplateId
+      self:InitStrengthItemSourceScorllView(nIndex)
+      self.pPanel:SetActive(tbControls.wndJumpTo, true)
+    end)
+  end
+end
+
+local tbOperationFnDef = {
+  [1] = function(...)
+    Ui:OpenWindow(...)
+  end,
+  [2] = function(...)
+    MarketStallBase:OpenWindowByItemTempId(...)
+  end
+}
+
+function tbWnd:SetSourceElementInfo(tbElement, tbInfo, nIndex)
+  tbElement.pPanel:Label_SetText("txtName", i18n.Parse(tbInfo.szName))
+  tbElement.pPanel:Label_SetText("txtDesc", i18n.Parse(tbInfo.szDesc))
+end
+
+function tbWnd:InitStrengthItemScorllView()
+  self.pStrengthItemScorllView:Clear()
+  self.tbStrengthItemShowList = {}
+  for i, strengthItemShowData in pairs(Item.StrengthItem.tbStrengthItemShowCfg) do
+    table.insert(self.tbStrengthItemShowList, strengthItemShowData)
+  end
+  table.sort(self.tbStrengthItemShowList, SortFunc)
+  for i, strengthItemShowData in ipairs(self.tbStrengthItemShowList) do
+    self.pStrengthItemScorllView:SetElement(i, function(tbElement)
+      self:SetItemElementInfo(tbElement, strengthItemShowData, i)
+    end)
+  end
+end
+
+function tbWnd:InitStrengthItemSourceScorllView(nIndex)
+  self.pStrengthItemSourceScorllView:Clear()
+  local nSortId = self.tbStrengthItemShowList[nIndex].SortId
+  for nSourceId, tbInfo in ipairs(Item.StrengthItem.tbStrengthItemSource[nSortId]) do
+    self.pStrengthItemSourceScorllView:SetElement(nSourceId, function(tbElement)
+      self:SetSourceElementInfo(tbElement, tbInfo, nSourceId)
+    end)
+  end
+end
+
+function tbWnd:OnSelectSource(nIndex, tbElement)
+  self.pPanel:SetActive(tbControls.wndJumpTo, false)
+  local nSortId = self.tbStrengthItemShowList[self.nSelect].SortId
+  local tbInfo = Item.StrengthItem.tbStrengthItemSource[nSortId] and Item.StrengthItem.tbStrengthItemSource[nSortId][nIndex]
+  local tbnParam = {}
+  for i = 1, 4 do
+    local nParam = tbInfo["Param" .. i]
+    if not Lib:IsEmptyStr(nParam) then
+      nParam = tonumber(nParam) or nParam
+    else
+      nParam = nil
+    end
+    tbnParam["Param" .. i] = nParam
+  end
+  local Fn = tbOperationFnDef[tbInfo.nOperationType]
+  Fn(tbnParam.Param1, tbnParam.Param2, tbnParam.Param3, tbnParam.Param4)
+end

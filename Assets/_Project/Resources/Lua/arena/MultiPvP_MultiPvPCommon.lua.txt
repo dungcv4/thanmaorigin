@@ -1,0 +1,220 @@
+function MultiPvP:ResetTeamGroup(nPlayerId)
+  local pPlayer = KPlayer.GetPlayerObjById(nPlayerId)
+  
+  if not pPlayer then
+    return true
+  end
+  local nTeamId = pPlayer.GetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_TEAMID)
+  if not nTeamId or 0 == nTeamId then
+    return true
+  end
+  local tbAllTeam = MPTeamMgr.tbAllTeam or {}
+  local tbTeam = tbAllTeam[nTeamId]
+  if not tbTeam then
+    pPlayer.SetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_TEAMID, 0)
+    pPlayer.SetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_LASTJOIN, 0)
+    pPlayer.SetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_JOIN_COUNT, 0)
+    Log(i18n.EasyGet("MultiPvP ResetTeamGroup Done!\t{0}\t{1}\tQuitTeam[{2}]-1", pPlayer.szName, pPlayer.dwID, nTeamId))
+    return true
+  end
+  local bRet = false
+  for k, v in pairs(tbTeam[MPTeam.MEMBER]) do
+    if k == nPlayerId then
+      bRet = true
+      break
+    end
+  end
+  if not bRet then
+    pPlayer.SetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_TEAMID, 0)
+    pPlayer.SetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_LASTJOIN, 0)
+    pPlayer.SetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_JOIN_COUNT, 0)
+    Log(i18n.EasyGet("MultiPvP ResetTeamGroup Done!\t{0}\t{1}\tQuitTeam[{2}]-2", pPlayer.szName, pPlayer.dwID, nTeamId))
+  end
+  return true
+end
+
+function MultiPvP:ChkCondition(pPlayer, tbCondition)
+  if tbCondition[MultiPvP.emMsgNotBegin] then
+    if not MultiPvP:IsPreliminaryOpen() then
+      return false, MultiPvP.emMsgNotBegin
+    end
+    if MODULE_GAMESERVER then
+      local nCurMonth = tonumber(os.date("%Y%m", GetTime()))
+      if self:GetOtherData("nLastOpenMonth") ~= nCurMonth then
+        return false, MultiPvP.emMsgNotBegin
+      end
+    end
+  end
+  if tbCondition[MultiPvP.emMsgMinLevel] and pPlayer.nLevel < MultiPvP.Cfg.TEAM_LEVEL then
+    return false, MultiPvP.emMsgMinLevel, {
+      MultiPvP.Cfg.TEAM_LEVEL
+    }
+  end
+  if tbCondition[MultiPvP.emMsgNotTeamCaptain] and pPlayer.dwTeamID > 0 and not TeamMgr:IsCaptain(pPlayer) then
+    return false, MultiPvP.emMsgNotTeamCaptain
+  end
+  if tbCondition[MultiPvP.emMsgTeamMemeberErr] and pPlayer.dwTeamID > 0 then
+    local tbMember = TeamMgr:GetMembers(pPlayer.dwTeamID)
+    if tbCondition[MultiPvP.emMsgTeamMemeberErr] and #tbMember > MultiPvP:GetSeasonSettingValue("nMemberNeed", true) then
+      return false, MultiPvP.emMsgTeamMemeberErr, {
+        MultiPvP:GetSeasonSettingValue("nMemberNeed", true)
+      }
+    end
+  end
+  if MODULE_GAMESERVER then
+    if tbCondition[MultiPvP.emMsgNeedBattleTeam] and self:ResetTeamGroup(pPlayer.dwID) and self:GetBattleTeamId(pPlayer.dwID) <= 0 then
+      return false, MultiPvP.emMsgNeedBattleTeam, {
+        pPlayer.szName
+      }
+    end
+  elseif tbCondition[MultiPvP.emMsgNeedBattleTeam] and self:GetBattleTeamId(pPlayer.dwID) <= 0 then
+    return false, MultiPvP.emMsgNeedBattleTeam, {
+      pPlayer.szName
+    }
+  end
+  if tbCondition[MultiPvP.emMsgBattleTeamCaptain] and not MPTeamMgr:OpearateTeamByPlayer(pPlayer.dwID, MPTeam.IsCaptain) then
+    return false, MultiPvP.emMsgBattleTeamCaptain, {
+      pPlayer.szName
+    }
+  end
+  if MODULE_GAMESERVER and pPlayer.dwTeamID > 0 then
+    local tbMember = TeamMgr:GetMembers(pPlayer.dwTeamID)
+    if tbMember then
+      for _, nPlayerId in pairs(tbMember) do
+        if nPlayerId ~= pPlayer.dwID then
+          local pMember = KPlayer.GetPlayerObjById(nPlayerId)
+          if not pMember then
+            if tbCondition[MultiPvP.emMsgMemberOffline] then
+              return false, MultiPvP.emMsgMemberOffline
+            end
+          else
+            if tbCondition[MultiPvP.emMsgMemberMinLevel] and pMember.nLevel < MultiPvP.Cfg.TEAM_LEVEL then
+              return false, MultiPvP.emMsgMemberMinLevel, {
+                pMember.szName,
+                MultiPvP.Cfg.TEAM_LEVEL
+              }
+            end
+            if tbCondition[MultiPvP.emMsgMemberSafeMap] and not Map:IsCityMap(pMember.nMapTemplateId) and not Map:IsFieldFightMap(pMember.nMapTemplateId) then
+              return false, MultiPvP.emMsgMemberSafeMap, {
+                pMember.szName
+              }
+            end
+            if tbCondition[MultiPvP.emMsgMemberNotSafePoint] and Map:IsFieldFightMap(pMember.nMapTemplateId) and pMember.nFightMode ~= Npc.FIGHT_MODE.emFightMode_None then
+              return false, MultiPvP.emMsgMemberNotSafePoint, {
+                pMember.szName
+              }
+            end
+            if tbCondition[MultiPvP.emMsgMemberAloneState] and not pMember.nState == Player.emPLAYER_STATE_ALONE then
+              return false, MultiPvP.emMsgMemberAloneState, {
+                pMember.szName
+              }
+            end
+            if tbCondition[MultiPvP.emMsgMemberHaveTeam] and self:ResetTeamGroup(pMember.dwID) and self:GetBattleTeamId(pMember.dwID) > 0 then
+              return false, MultiPvP.emMsgMemberHaveTeam, {
+                pMember.szName
+              }
+            end
+          end
+        end
+      end
+    end
+  end
+  if tbCondition[MultiPvP.emMsgSafeMap] and not Map:IsCityMap(pPlayer.nMapTemplateId) and not Map:IsFieldFightMap(pPlayer.nMapTemplateId) then
+    return false, MultiPvP.emMsgSafeMap
+  end
+  if tbCondition[MultiPvP.emMsgNotSafePoint] and Map:IsFieldFightMap(pPlayer.nMapTemplateId) and pPlayer.nFightMode ~= Npc.FIGHT_MODE.emFightMode_None then
+    return false, MultiPvP.emMsgNotSafePoint
+  end
+  if tbCondition[MultiPvP.emMsgAloneState] and not pPlayer.nState == Player.emPLAYER_STATE_ALONE then
+    return false, MultiPvP.emMsgAloneState
+  end
+  if tbCondition[MultiPvP.emMsgHaveTeam] and self:ResetTeamGroup(pPlayer.dwID) and self:GetBattleTeamId(pPlayer.dwID) > 0 then
+    return false, MultiPvP.emMsgHaveTeam
+  end
+  if tbCondition[MultiPvP.emMsgWeekOverCount] and self:ChkWeekJoinEnough(pPlayer.dwID) then
+    return false, MultiPvP.emMsgWeekOverCount
+  end
+  if tbCondition[MultiPvP.emMsgTotalOverCount] and self:ChkTotalJoinEnough(pPlayer.dwID) then
+    return false, MultiPvP.emMsgTotalOverCount
+  end
+  if tbCondition[MultiPvP.emMsgJoinOverCount] and self:ChkDailyJoinEnough(pPlayer.dwID) then
+    return false, MultiPvP.emMsgJoinOverCount
+  end
+  return true
+end
+
+function MultiPvP:ChkConditionAndSendMsg(pPlayer, tbCondition)
+  if not pPlayer then
+    LogErr("MultiPvP:ChkConditionAndSendMsg pPlayer is nil ")
+    return false
+  end
+  local bRet = true
+  local nCode, tbParam
+  bRet, nCode, tbParam = self:ChkCondition(pPlayer, tbCondition)
+  if not bRet then
+    if MODULE_GAMECLIENT then
+      self:MsgCode(pPlayer.dwID, nCode, table.unpack(tbParam or {}))
+    end
+    if MODULE_GAMESERVER then
+      if not pPlayer.dwTeamID or pPlayer.dwTeamID <= 0 then
+        self:MsgCode(pPlayer.dwID, nCode, table.unpack(tbParam or {}))
+      else
+        local tbMember = TeamMgr:GetMembers(pPlayer.dwTeamID) or {}
+        if #tbMember <= 0 then
+          self:MsgCode(pPlayer.dwID, nCode, table.unpack(tbParam or {}))
+        end
+        for _, nMemberId in pairs(tbMember) do
+          self:MsgCode(nMemberId, nCode, table.unpack(tbParam or {}))
+        end
+      end
+    end
+  end
+  return bRet
+end
+
+function MultiPvP:GetBattleTeamId(nPlayerId)
+  local pPlayer = KPlayer.GetPlayerObjById(nPlayerId)
+  if not pPlayer then
+    return 0
+  end
+  if MODULE_GAMESERVER then
+    MPTeam:ChkCleanTeamId(pPlayer)
+  end
+  return pPlayer.GetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_TEAMID)
+end
+
+function MultiPvP:IsInMatchList(tbMatchList, nTeamId)
+  for k, v in pairs(tbMatchList) do
+    if v.nTeamId == nTeamId then
+      return k
+    end
+  end
+  return false
+end
+
+function MultiPvP:GetNowPhase(tbMatchList)
+  for i = 1, MultiPvP.PHASE_INIT do
+    if tbMatchList[i] and Lib:CountTB(tbMatchList[i]) > 0 then
+      return i
+    end
+  end
+  return 0
+end
+
+function MultiPvP:MsgCode(nPlayerId, nCode, ...)
+  if MODULE_GAMESERVER then
+    local pPlayer = KPlayer.GetPlayerObjById(nPlayerId)
+    if not pPlayer then
+      return
+    end
+    pPlayer.CallClientScript("MultiPvP:MsgCode", nPlayerId, nCode, ...)
+  elseif MODULE_GAMECLIENT then
+    local szMsg = ""
+    if (...) then
+      szMsg = i18n.Get(MultiPvP.tbMsg[nCode](), ...)
+    else
+      szMsg = MultiPvP.tbMsg[nCode]()
+    end
+    Ui:OpenWindow("UIMessageBox", szMsg)
+  end
+end

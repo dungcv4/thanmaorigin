@@ -1,0 +1,182 @@
+local tbWnd = Ui:CreateClass("UIPlayerGuide", "UIPanel")
+tbWnd.StateCalendar = 1
+tbWnd.StateActivityCountDown = 2
+tbWnd.StateDefault = tbWnd.StateCalendar
+tbWnd.State2Time = {
+  [tbWnd.StateCalendar] = 10,
+  [tbWnd.StateActivityCountDown] = 1
+}
+
+function tbWnd:OnCreate()
+  Ui:Button_BindEvent(self.pPanel, "Guide", function()
+    self:GoGuideEvent()
+  end)
+  self.nState = self.StateDefault
+end
+
+function tbWnd:OnOpen()
+  self:TimerRenew()
+  self:UpdateGuide()
+end
+
+function tbWnd:OnClose()
+  if self.nTimerId then
+    Timer:Close(self.nTimerId)
+    self.nTimerId = nil
+  end
+end
+
+function tbWnd:TimerRenew(nNewInterval)
+  if self.nTimerId then
+    Timer:Close(self.nTimerId)
+  end
+  self.nTimerId = Timer:Register(Env.GAME_FPS * (nNewInterval or self.State2Time[self.nState]), self.UpdateGuide, self)
+end
+
+function tbWnd:GoGuideEvent()
+  if self.nState == self.StateCalendar then
+    if not self.tbGuideInfo or not self.tbGuideInfo.szGuideFunc then
+      return
+    end
+    if PlayerGuide.tbButtonFuncs[self.tbGuideInfo.szGuideFunc] then
+      PlayerGuide.tbButtonFuncs[self.tbGuideInfo.szGuideFunc](self.tbGuideInfo.szGuideParam)
+    end
+  end
+end
+
+function tbWnd:CheckState()
+  local nState = self.StateDefault
+  if FubenUIController.bPlayerGuideCountDownShow and FubenUIController.tbRightCenterParam and FubenUIController:IsShowRightCenterTimer() then
+    nState = self.StateActivityCountDown
+  end
+  if nState ~= self.nState then
+    if self.State2Time[nState] ~= self.State2Time[self.nState] then
+      self:TimerRenew(self.State2Time[nState])
+    end
+    self.nState = nState
+  end
+end
+
+function tbWnd:UpdateGuide()
+  if HanWuYiJi:IsInFubenMap(me) or GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    self.pPanel:SetActive("Main", false)
+    return
+  end
+  self:CheckState()
+  if self.nState == self.StateCalendar then
+    self:UpdateCalendar()
+  elseif self.nState == self.StateActivityCountDown then
+    self:UpdateActivityCountDown()
+  end
+  return 1
+end
+
+function tbWnd:GetGuide()
+  for _, tbInfo in ipairs(PlayerGuide.tbGuideContent) do
+    local bCheck = tbInfo.szJoinCount and not Lib:IsEmptyStr(tbInfo.szJoinCount)
+    local bHaveCount = true
+    if bCheck then
+      local funcGetLastTime = PlayerGuide.tbActLimitTimes[tbInfo.szJoinCount]
+      local nLastTime = 1
+      if funcGetLastTime then
+        nLastTime = funcGetLastTime()
+      else
+        nLastTime = PlayerGuide.tbActLimitTimes.Other(tbInfo.szJoinCount)
+      end
+      bHaveCount = nLastTime > 0
+    end
+    local szCheckFunc = tbInfo.szCheckFunc
+    local bCheckOpen = true
+    if szCheckFunc then
+      local tbFunc = PlayerGuide.tbCheckFunc[szCheckFunc]
+      if tbFunc then
+        bCheckOpen = tbFunc()
+      end
+    end
+    if me.nLevel >= tbInfo.nLevel and self:CheckTimeFrame(tbInfo) and bHaveCount and CanaryRelease:IsCalendarActive(tbInfo.nActivityId) and bCheckOpen then
+      local fn = PlayerGuide.tbGuideFunc[tbInfo.szFuncName]
+      if fn and fn(tbInfo.tbParam) then
+        return tbInfo
+      end
+    end
+  end
+end
+
+function tbWnd:CheckTimeFrame(tbInfo)
+  local szOpenTime = tbInfo.szBeginTimeFrame
+  local szCloseTime = tbInfo.szCloseTimeFrame
+  local nCurWeekDay = Lib:GetLocalWeekDay(GetTime())
+  if not string.find(tbInfo.szWeekFlag, nCurWeekDay) then
+    return false
+  end
+  local nCurTime = GetTime()
+  if not Lib:IsEmptyStr(szOpenTime) and not Lib:IsEmptyStr(szCloseTime) then
+    local nOpenServerTime = Lib:CalcTimeFrameOpenTime(szOpenTime)
+    local nCloseServerTime = Lib:CalcTimeFrameOpenTime(szCloseTime)
+    if nCurTime >= nOpenServerTime and nCurTime < nCloseServerTime then
+      return true
+    end
+  elseif not Lib:IsEmptyStr(szOpenTime) and Lib:IsEmptyStr(szCloseTime) then
+    local nOpenServerTime = Lib:CalcTimeFrameOpenTime(szOpenTime)
+    if nCurTime >= nOpenServerTime then
+      return true
+    end
+  elseif Lib:IsEmptyStr(szOpenTime) and not Lib:IsEmptyStr(szCloseTime) then
+    local nCloseServerTime = Lib:CalcTimeFrameOpenTime(szCloseTime)
+    if nCurTime < nCloseServerTime then
+      return true
+    end
+  else
+    return true
+  end
+  return false
+end
+
+function tbWnd:IsShowGuideMap()
+  local nMapId = me.nMapTemplateId
+  if Map:IsFieldFightMap(nMapId) or Map:IsCityMap(nMapId) or Map:IsBossMap(nMapId) or Map:IsTongMap(nMapId) then
+    return true
+  end
+  return false
+end
+
+function tbWnd:UpdateCalendar()
+  local tbGuide = self:GetGuide()
+  local bRet = self:IsShowGuideMap()
+  self.pPanel:SetActive("Main", bRet and (tbGuide and true or false))
+  self.tbGuideInfo = tbGuide
+  if not tbGuide then
+    return 1
+  end
+  self.pPanel:Label_SetChildText("Guide", "Limite", i18n.Parse(tbGuide.szDesc))
+  self.pPanel:Label_SetChildText("Guide", "Name", i18n.Parse(tbGuide.szName))
+  return 1
+end
+
+function tbWnd:OnMapEnter()
+  self:UpdateGuide()
+end
+
+function tbWnd:OnChangePlayerLevel()
+  self:UpdateGuide()
+end
+
+function tbWnd:OnActivityStateChange()
+  self:UpdateGuide()
+end
+
+function tbWnd:UpdateActivityCountDown()
+  local tbParam = FubenUIController.tbRightCenterParam
+  local nLastTime = tbParam.nTime - GetTime()
+  if nLastTime < 0 then
+    self.pPanel:SetActive("Main", false)
+    return 1
+  end
+  self.pPanel:SetActive("Main", true)
+  self.pPanel:Label_SetChildText("Guide", "Name", i18n.Parse(tbParam.szTitle))
+  local szDesc = Lib:TimeDesc(nLastTime)
+  local szColor = Ui.tbColor:GetColorByType("ClassifyParameter")
+  szDesc = string.format("<color=#%s>%s</color>", szColor, szDesc)
+  self.pPanel:Label_SetChildText("Guide", "Limite", szDesc)
+  return 1
+end

@@ -1,0 +1,556 @@
+local tbWnd = Ui:CreateWindow("UIPartnerSkillShow")
+tbWnd.tbControls = {
+  goSkillAdd = "imgBG/SkillAdd",
+  goSkillLevelUp = "imgBG/SkillLevelUp",
+  btnClose = "btnClose",
+  imgIcon = "imgBG/SkillLevelUp/imgIconBG/imgIcon",
+  txtName = "imgBG/SkillLevelUp/txtName",
+  txtLevel = "imgBG/SkillLevelUp/txtLevel",
+  goLevelUpCost = "imgBG/SkillLevelUp/LevelUpCost",
+  UIItemGridLevelUp = "imgBG/SkillLevelUp/LevelUpCost/UIItemGrid",
+  txtCostLevelUp = "imgBG/SkillLevelUp/LevelUpCost/txtCost",
+  btnLevelUp = "imgBG/SkillLevelUp/btnLevelUp",
+  goBreakthroughCost = "imgBG/SkillLevelUp/BreakthroughCost",
+  UIItemGridBreakthrough = "imgBG/SkillLevelUp/BreakthroughCost/UIItemGrid",
+  txtCostBreakthrough = "imgBG/SkillLevelUp/BreakthroughCost/txtCost",
+  btnBreakthrough = "imgBG/SkillLevelUp/btnBreakthrough",
+  btnReplace = "imgBG/SkillLevelUp/btnReplace",
+  txtLevelUpTip = "imgBG/SkillLevelUp/LevelUpInfo/%s/txtLevelTip",
+  txtAttribute = "imgBG/SkillLevelUp/LevelUpInfo/%s/Attribute%d",
+  goLevelUpInfo = "imgBG/SkillLevelUp/LevelUpInfo",
+  txtDesc = "imgBG/SkillLevelUp/LevelUpInfo/txtDesc",
+  goAttributeObj = "imgBG/SkillLevelUp/LevelUpInfo/%s",
+  goSkillTemplate = "imgBG/SkillAdd/SkillList/Viewport/Content/Template",
+  btnGet = "imgBG/SkillAdd/btnGet",
+  wndJumpTo = "wndJumpTo",
+  goJumpToTemplate = "wndJumpTo/imgBG/List/Viewport/Content/Template"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnLevelUp = function(self)
+    self:SkillLevelUp()
+  end,
+  btnBreakthrough = function(self)
+    self:SkillBreakThrough()
+  end,
+  btnReplace = function(self)
+    self:OpenSkillAddViewWhenHaveSkill()
+  end,
+  btnGet = function(self)
+    self:UpdateJumpToInfo()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbSkillAddScrollView = Ui:NewScrollView(self, self.goSkillTemplate, nil, false, true)
+  self.tbJumpToScrollView = Ui:NewScrollView(self, self.goJumpToTemplate, nil, false, true)
+  for i = 1, 3 do
+    self.pPanel:Label_SetText(string.format(self.txtAttribute, "Now", i), "")
+    self.pPanel:Label_SetText(string.format(self.txtAttribute, "Next", i), "")
+  end
+  self.grid = Ui:NewExistItemGrid(self, self.UIItemGridLevelUp)
+  self.grid:SetItemByTemplate(Partner.nPartnerSkillBookFragmentItemId, 0)
+  self.grid:SetClickEnable(true)
+  self.grid2 = Ui:NewExistItemGrid(self, self.UIItemGridBreakthrough)
+  self.grid2:SetItemByTemplate(Partner.nPartnerSkillBookFragmentItemId, 0)
+  self.grid2:SetClickEnable(true)
+end
+
+function tbWnd:UpdateSkillLearnInfo()
+  self:OnOpen(1, self.tbCurPartner, self.nSkillIndex)
+end
+
+function tbWnd:OnOpen(nOpenType, tbCurPartner, nSkillIndex, bOtherPlayer, pAsyncRole)
+  self.tbCurPartner = tbCurPartner
+  self.nSkillIndex = nSkillIndex
+  self.pPanel:SetActive(self.btnGet, false)
+  self.pPanel:SetActive(self.wndJumpTo, false)
+  if 1 == nOpenType then
+    local nSkillId, nSkillLevel, nSkillExp = tbCurPartner.GetSkillInfo(nSkillIndex)
+    self.pPanel:SetActive(self.goSkillAdd, false)
+    self.pPanel:SetActive(self.goSkillLevelUp, true)
+    self.pPanel:SetActive(self.btnLevelUp, true)
+    self.pPanel:SetActive(self.btnBreakthrough, false)
+    self.pPanel:SetActive(self.btnReplace, true)
+    self.pPanel:SetActive(self.txtLevel, true)
+    self.pPanel:SetActive(self.goLevelUpInfo, true)
+    self.pPanel:SetActive(string.format(self.goAttributeObj, "Now"), true)
+    self.pPanel:SetActive(string.format(self.goAttributeObj, "Next"), true)
+    self.pPanel:SetActive(self.txtDesc, true)
+    self.pPanel:SetActive(self.goLevelUpCost, true)
+    self.pPanel:SetActive(self.goBreakthroughCost, false)
+    self.pPanel:Label_SetText(self.txtName, i18n.Parse(Partner.tbPartnerSkillSetting[nSkillId].szName))
+    self.pPanel:Label_SetText(self.txtLevel, i18n.EasyGet("\231\173\137\231\186\167{0}", nSkillLevel))
+    self.pPanel:Sprite_SetSprite(self.imgIcon, Partner.tbPartnerSkillSetting[nSkillId].szIconPath)
+    local szAttribVale = "szAttribValue" .. nSkillLevel
+    local szNextLevelAttribVale = "szAttribValue" .. nSkillLevel + 1
+    local nSkillBookId = Partner.tbSkillBookSetting.tbSkillId2BookId[nSkillId]
+    local tbImproveTypeGroup = Lib:SplitStr(Partner.tbPartnerSkillSetting[nSkillId].szAttrib, "|")
+    local tbImproveValueGroup = Lib:SplitStr(Partner.tbPartnerSkillSetting[nSkillId][szAttribVale], "|")
+    local tbNextLevelImproveValueGroup = Lib:SplitStr(Partner.tbPartnerSkillSetting[nSkillId][szNextLevelAttribVale] or "", "|")
+    for i = 1, #tbImproveTypeGroup do
+      local szImproveType = tbImproveTypeGroup[i]
+      local tbImproveValue = Lib:SplitStr2Num(tbImproveValueGroup[i], ",")
+      local tbImproveValueNextLevel = Lib:SplitStr2Num(tbNextLevelImproveValueGroup[i], ",")
+      local szDescNow, szValueNow = FightSkill:GetMagicDescSplit(szImproveType, tbImproveValue)
+      local tbNowSkillMagicDesc = i18n.EasyGet("{0}: {1}\n", szDescNow, szValueNow)
+      self.pPanel:SetActive(string.format(self.txtAttribute, "Now", i), true)
+      self.pPanel:Label_SetText(string.format(self.txtAttribute, "Now", i), tbNowSkillMagicDesc)
+      if #tbImproveValueNextLevel > 0 then
+        local szDescNext, szValueNext = FightSkill:GetMagicDescSplit(szImproveType, tbImproveValueNextLevel)
+        local tbNextSkillMagicDesc = i18n.EasyGet("{0}: {1}\n", szDescNext, szValueNext)
+        self.pPanel:SetActive(string.format(self.txtAttribute, "Next", i), true)
+        self.pPanel:Label_SetText(string.format(self.txtAttribute, "Next", i), tbNextSkillMagicDesc)
+      end
+    end
+    self.pPanel:Label_SetText(self.txtDesc, i18n.Parse(Partner.tbPartnerSkillSetting[nSkillId].szDesc))
+    local nSkillBookLevelUpItemId = Partner.tbSkillBookSetting.tbBookInfo[nSkillBookId].nLevelupId
+    local nSkillBookBreakThroughItemId = Partner.tbSkillBookSetting.tbBookInfo[nSkillBookId].nGradeupId
+    local nPartnerQualityLevel = Partner.tbAllPartnerInfo[tbCurPartner.nTemplateId].nQualityLevel
+    local nSkillLevelLimit = Partner.SkillLevelQuality[nPartnerQualityLevel]
+    self.grid:SetItemByTemplate(nSkillBookLevelUpItemId, 0)
+    self.grid2:SetItemByTemplate(nSkillBookBreakThroughItemId, 0)
+    if nSkillLevel == nSkillLevelLimit then
+      self.pPanel:Label_SetText(self.txtCostLevelUp, i18n.EasyGet("\229\183\178\230\187\161\231\186\167"))
+      self.pPanel:Label_SetText(string.format(self.txtAttribute, "Next", 1), i18n.EasyGet("\229\183\178\232\190\190\230\156\128\233\171\152\231\173\137\231\186\167"))
+      self.pPanel:Label_SetText(string.format(self.txtAttribute, "Next", 2), "")
+      self.pPanel:Label_SetText(string.format(self.txtAttribute, "Next", 3), "")
+      self.pPanel:SetActive(self.goLevelUpCost, false)
+      self.pPanel:SetActive(self.goBreakthroughCost, false)
+      self.pPanel:SetActive(self.btnLevelUp, false)
+      self.pPanel:SetActive(self.btnBreakthrough, false)
+    elseif 0 == GetTimeFrameState(Partner.SkillLevelTimeFrame[nSkillLevel + 1]) then
+      self.pPanel:Label_SetText(string.format(self.txtAttribute, "Next", 1), i18n.EasyGet("{0}\229\144\142\232\167\163\233\148\129", Calendar:GetTimeframeName(Partner.SkillLevelTimeFrame[nSkillLevel + 1])))
+      self.pPanel:Label_SetText(string.format(self.txtAttribute, "Next", 2), "")
+      self.pPanel:Label_SetText(string.format(self.txtAttribute, "Next", 3), "")
+      self.pPanel:SetActive(self.goLevelUpCost, false)
+      self.pPanel:SetActive(self.goBreakthroughCost, false)
+      self.pPanel:SetActive(self.btnLevelUp, false)
+      self.pPanel:SetActive(self.btnBreakthrough, false)
+    else
+      local nSkillLevelUpItemCost = Partner.tbSkillBookSetting.tbBookInfo[nSkillBookId].tbSkillValue[nSkillLevel]
+      local nSkillLevelUpItemCount = me.GetItemCountInBags(nSkillBookLevelUpItemId)
+      local nSkillBreakThroughItemCount = me.GetItemCountInBags(nSkillBookBreakThroughItemId)
+      local nSkillBreakThroughItemNeeded = Partner.tbSkillBookSetting.tbBookInfo[nSkillBookId].tbGradeValue[nSkillLevel]
+      if nSkillExp == nSkillLevelUpItemCost then
+        self.pPanel:SetActive(self.goLevelUpCost, false)
+        self.pPanel:SetActive(self.goBreakthroughCost, true)
+        self.pPanel:SetActive(self.btnLevelUp, false)
+        self.pPanel:SetActive(self.btnBreakthrough, true)
+        self.pPanel:Label_SetText(self.txtCostBreakthrough, nSkillBreakThroughItemCount .. " / " .. nSkillBreakThroughItemNeeded)
+      else
+        self.pPanel:SetActive(self.goLevelUpCost, true)
+        self.pPanel:SetActive(self.goBreakthroughCost, false)
+        self.pPanel:SetActive(self.btnLevelUp, true)
+        self.pPanel:SetActive(self.btnBreakthrough, false)
+        self.pPanel:Label_SetText(self.txtCostLevelUp, nSkillLevelUpItemCount .. " / " .. nSkillLevelUpItemCost - nSkillExp)
+      end
+    end
+  elseif 2 == nOpenType then
+    self.pPanel:SetActive(self.goSkillAdd, true)
+    self.pPanel:SetActive(self.goSkillLevelUp, false)
+    self:UpdateSkillAddListInfo()
+  elseif 3 == nOpenType then
+    self.pPanel:SetActive(self.goSkillAdd, false)
+    self.pPanel:SetActive(self.goSkillLevelUp, true)
+    self.pPanel:SetActive(self.btnLevelUp, false)
+    self.pPanel:SetActive(self.btnBreakthrough, false)
+    self.pPanel:SetActive(self.btnReplace, false)
+    self.pPanel:SetActive(self.txtLevel, false)
+    self.pPanel:SetActive(self.goLevelUpInfo, true)
+    self.pPanel:SetActive(string.format(self.goAttributeObj, "Now"), false)
+    self.pPanel:SetActive(string.format(self.goAttributeObj, "Next"), false)
+    self.pPanel:SetActive(self.txtDesc, true)
+    self.pPanel:SetActive(self.goLevelUpCost, false)
+    self.pPanel:SetActive(self.goBreakthroughCost, false)
+    self.pPanel:Label_SetText(self.txtName, i18n.Parse(FightSkill:GetSkillName(nSkillIndex)))
+    self.pPanel:Sprite_SetSprite(self.imgIcon, FightSkill:GetSkillIconAtlas(nSkillIndex))
+    self.pPanel:Label_SetText(self.txtDesc, i18n.Parse(FightSkill.tbAllSkillSetting[nSkillIndex].szDesc))
+  elseif 4 == nOpenType then
+    local nQuality = Partner.tbAllPartnerInfo[tbCurPartner.nTemplateId].nQualityLevel
+    local nFightPower = tbCurPartner.nFightPower
+    local szProtectSkillName, szProtectSkillIcon = Partner:GetPartnerProtectSkillNameAndIconPath(nil, nSkillIndex)
+    self.pPanel:SetActive(self.goSkillAdd, false)
+    self.pPanel:SetActive(self.goSkillLevelUp, true)
+    self.pPanel:SetActive(self.btnLevelUp, false)
+    self.pPanel:SetActive(self.btnBreakthrough, false)
+    self.pPanel:SetActive(self.btnReplace, false)
+    self.pPanel:SetActive(self.txtLevel, true)
+    self.pPanel:SetActive(self.goLevelUpCost, false)
+    self.pPanel:SetActive(self.goBreakthroughCost, false)
+    self.pPanel:SetActive(self.goLevelUpInfo, true)
+    self.pPanel:SetActive(string.format(self.goAttributeObj, "Now"), true)
+    self.pPanel:SetActive(string.format(self.goAttributeObj, "Next"), true)
+    self.pPanel:SetActive(self.txtDesc, true)
+    self.pPanel:Label_SetText(self.txtName, i18n.Parse(szProtectSkillName))
+    local nSkillLevel = Partner:GetProtectSkillLevel(nQuality, nFightPower)
+    local nPartnerProtectExtraLevel
+    if bOtherPlayer and pAsyncRole then
+      nPartnerProtectExtraLevel = pAsyncRole.nPartnerProtectExtraLevel or 0
+    else
+      nPartnerProtectExtraLevel = me.nPartnerProtectExtraLevel or 0
+    end
+    if nPartnerProtectExtraLevel and nPartnerProtectExtraLevel > 0 then
+      self.pPanel:Label_SetText(self.txtLevel, i18n.EasyGet("\231\173\137\231\186\167 {0}\239\188\136{1}+{2}\239\188\137 / {3}", nSkillLevel + nPartnerProtectExtraLevel, nSkillLevel, nPartnerProtectExtraLevel, #Partner.ProtectSkillLevel))
+    else
+      self.pPanel:Label_SetText(self.txtLevel, i18n.EasyGet("\231\173\137\231\186\167 {0} / {1}", nSkillLevel, #Partner.ProtectSkillLevel))
+    end
+    nSkillLevel = nSkillLevel + nPartnerProtectExtraLevel
+    self.pPanel:Sprite_SetSprite(self.imgIcon, szProtectSkillIcon)
+    local tbNowSkillMagicDesc = {}
+    local tbNextSkillMagicDesc = {}
+    local tbProtectSkillInfo = Partner.tbProtectSkillSetting[nSkillIndex]
+    if 0 == nSkillLevel then
+      table.insert(tbNowSkillMagicDesc, i18n.EasyGet("\230\151\160\230\149\136\230\158\156"))
+    else
+      for i = 1, 3 do
+        local szAttribName = tbProtectSkillInfo["Attrib" .. i .. "Type"]
+        local tbAttribValue = Lib:SplitStr2Num(tbProtectSkillInfo["Attrib" .. i .. "Value1"], ",")
+        local tbAttribSection = Lib:SplitStr2Num(tbProtectSkillInfo["szLevelupSection" .. i], ",")
+        if "" ~= szAttribName then
+          for _, nValue in pairs(tbAttribSection) do
+            tbAttribValue[nValue] = tbAttribValue[nValue] * nSkillLevel
+          end
+          local szDescNow, szValueNow = FightSkill:GetMagicDescSplit(szAttribName, tbAttribValue)
+          table.insert(tbNowSkillMagicDesc, szDescNow .. " : " .. szValueNow)
+        end
+      end
+    end
+    if nSkillLevel >= #Partner.ProtectSkillLevel then
+      for i = 1, #tbNowSkillMagicDesc do
+        self.pPanel:SetActive(string.format(self.txtAttribute, "Now", i), true)
+        self.pPanel:Label_SetText(string.format(self.txtAttribute, "Now", i), tbNowSkillMagicDesc[i])
+      end
+      for i = 1, 3 do
+        self.pPanel:SetActive(string.format(self.txtAttribute, "Next", i), false)
+      end
+      self.pPanel:Label_SetText(self.txtDesc, i18n.EasyGet("\229\183\178\232\190\190\229\136\176\230\156\128\229\164\167\231\173\137\231\186\167"))
+    else
+      for i = 1, 3 do
+        local szAttribName = tbProtectSkillInfo["Attrib" .. i .. "Type"]
+        local tbAttribValue = Lib:SplitStr2Num(tbProtectSkillInfo["Attrib" .. i .. "Value1"], ",")
+        local tbAttribSection = Lib:SplitStr2Num(tbProtectSkillInfo["szLevelupSection" .. i], ",")
+        if "" ~= szAttribName then
+          for _, nValue in pairs(tbAttribSection) do
+            tbAttribValue[nValue] = tbAttribValue[nValue] * (nSkillLevel + 1)
+          end
+          local szDescNow, szValueNow = FightSkill:GetMagicDescSplit(szAttribName, tbAttribValue)
+          table.insert(tbNextSkillMagicDesc, szDescNow .. " : " .. szValueNow)
+        end
+      end
+      for i = 1, #tbNowSkillMagicDesc do
+        self.pPanel:SetActive(string.format(self.txtAttribute, "Now", i), true)
+        self.pPanel:Label_SetText(string.format(self.txtAttribute, "Now", i), tbNowSkillMagicDesc[i])
+      end
+      for i = 1, #tbNextSkillMagicDesc do
+        self.pPanel:SetActive(string.format(self.txtAttribute, "Next", i), true)
+        self.pPanel:Label_SetText(string.format(self.txtAttribute, "Next", i), tbNextSkillMagicDesc[i])
+      end
+      local nFightPowerNextLevel = Partner:GetProtectSkillNextLevelFightPowerNeeded(nQuality, nFightPower)
+      self.pPanel:Label_SetText(self.txtDesc, i18n.EasyGet("\229\144\140\228\188\180\230\136\152\229\138\155\232\190\190\229\136\176<color=#C5B505>{0}</color>\229\143\175\229\141\135\231\186\167", nFightPowerNextLevel))
+    end
+  elseif 5 == nOpenType then
+    local szProtectSkillName, szProtectSkillIcon = Partner:GetPartnerProtectSkillNameAndIconPath(nil, nSkillIndex)
+    self.pPanel:SetActive(self.goSkillAdd, false)
+    self.pPanel:SetActive(self.goSkillLevelUp, true)
+    self.pPanel:SetActive(self.btnLevelUp, false)
+    self.pPanel:SetActive(self.btnReplace, false)
+    self.pPanel:SetActive(self.btnBreakthrough, false)
+    self.pPanel:SetActive(self.goBreakthroughCost, false)
+    self.pPanel:SetActive(self.txtLevel, true)
+    self.pPanel:SetActive(self.txtCostLevelUp, false)
+    self.pPanel:SetActive(self.UIItemGridLevelUp, false)
+    self.pPanel:SetActive(self.goLevelUpInfo, true)
+    self.pPanel:SetActive(string.format(self.goAttributeObj, "Now"), true)
+    self.pPanel:SetActive(string.format(self.goAttributeObj, "Next"), true)
+    self.pPanel:SetActive(self.txtDesc, false)
+    self.pPanel:Label_SetText(self.txtName, i18n.Parse(szProtectSkillName))
+    self.pPanel:Label_SetText(self.txtLevel, i18n.EasyGet("\231\173\137\231\186\1670"))
+    self.pPanel:Sprite_SetSprite(self.imgIcon, szProtectSkillIcon)
+    local nSkillLevel = 0
+    local tbNowSkillMagicDesc = {}
+    local tbNextSkillMagicDesc = {}
+    local tbProtectSkillInfo = Partner.tbProtectSkillSetting[nSkillIndex]
+    if 0 == nSkillLevel then
+      table.insert(tbNowSkillMagicDesc, i18n.EasyGet("\230\151\160\230\149\136\230\158\156"))
+    else
+      for i = 1, 3 do
+        local szAttribName = tbProtectSkillInfo["Attrib" .. i .. "Type"]
+        local tbAttribValue = Lib:SplitStr2Num(tbProtectSkillInfo["Attrib" .. i .. "Value1"], ",")
+        local tbAttribSection = Lib:SplitStr2Num(tbProtectSkillInfo["szLevelupSection" .. i], ",")
+        if "" ~= szAttribName then
+          for _, nValue in pairs(tbAttribSection) do
+            tbAttribValue[nValue] = tbAttribValue[nValue] * nSkillLevel
+          end
+          local szDescNow, szValueNow = FightSkill:GetMagicDescSplit(szAttribName, tbAttribValue)
+          table.insert(tbNowSkillMagicDesc, szDescNow .. " : " .. szValueNow)
+        end
+      end
+    end
+    if nSkillLevel >= #Partner.ProtectSkillLevel then
+      for i = 1, #tbNowSkillMagicDesc do
+        self.pPanel:SetActive(string.format(self.txtAttribute, "Now", i), true)
+        self.pPanel:Label_SetText(string.format(self.txtAttribute, "Now", i), tbNowSkillMagicDesc[i])
+      end
+      for i = 1, 3 do
+        self.pPanel:SetActive(string.format(self.txtAttribute, "Next", i), false)
+      end
+      self.pPanel:Label_SetText(self.txtDesc, i18n.EasyGet("\229\183\178\232\190\190\229\136\176\230\156\128\229\164\167\231\173\137\231\186\167"))
+    else
+      for i = 1, 3 do
+        local szAttribName = tbProtectSkillInfo["Attrib" .. i .. "Type"]
+        local tbAttribValue = Lib:SplitStr2Num(tbProtectSkillInfo["Attrib" .. i .. "Value1"], ",")
+        local tbAttribSection = Lib:SplitStr2Num(tbProtectSkillInfo["szLevelupSection" .. i], ",")
+        if "" ~= szAttribName then
+          for _, nValue in pairs(tbAttribSection) do
+            tbAttribValue[nValue] = tbAttribValue[nValue] * (nSkillLevel + 1)
+          end
+          local szDescNow, szValueNow = FightSkill:GetMagicDescSplit(szAttribName, tbAttribValue)
+          table.insert(tbNextSkillMagicDesc, szDescNow .. " : " .. szValueNow)
+        end
+      end
+      for i = 1, #tbNowSkillMagicDesc do
+        self.pPanel:SetActive(string.format(self.txtAttribute, "Now", i), true)
+        self.pPanel:Label_SetText(string.format(self.txtAttribute, "Now", i), tbNowSkillMagicDesc[i])
+      end
+      for i = 1, #tbNextSkillMagicDesc do
+        self.pPanel:SetActive(string.format(self.txtAttribute, "Next", i), true)
+        self.pPanel:Label_SetText(string.format(self.txtAttribute, "Next", i), tbNextSkillMagicDesc[i])
+      end
+    end
+  elseif 6 == nOpenType then
+    local szAwakeningSkillName, szAwakeningSkillIcon = Partner:GetPartnerAwakeningSkillNameAndIconPath(nil, nSkillIndex)
+    self.pPanel:SetActive(self.goSkillAdd, false)
+    self.pPanel:SetActive(self.goSkillLevelUp, true)
+    self.pPanel:SetActive(self.btnLevelUp, false)
+    self.pPanel:SetActive(self.btnBreakthrough, false)
+    self.pPanel:SetActive(self.btnReplace, false)
+    self.pPanel:SetActive(self.txtLevel, true)
+    self.pPanel:SetActive(self.goLevelUpCost, false)
+    self.pPanel:SetActive(self.goBreakthroughCost, false)
+    self.pPanel:SetActive(self.goLevelUpInfo, true)
+    self.pPanel:SetActive(string.format(self.goAttributeObj, "Now"), true)
+    self.pPanel:SetActive(string.format(self.goAttributeObj, "Next"), true)
+    self.pPanel:SetActive(self.txtDesc, true)
+    self.pPanel:Label_SetText(self.txtName, i18n.Parse(szAwakeningSkillName))
+    if self.tbCurPartner then
+      self.pPanel:Label_SetText(self.txtLevel, i18n.EasyGet("\231\173\137\231\186\167 {0}", self.tbCurPartner.GetPartnerJueXingLevel()))
+    else
+      self.pPanel:Label_SetText(self.txtLevel, i18n.EasyGet("\231\173\137\231\186\167 {0}", 0))
+    end
+    self.pPanel:Sprite_SetSprite(self.imgIcon, szAwakeningSkillIcon)
+    local nSkillLevel = 0
+    if self.tbCurPartner then
+      nSkillLevel = self.tbCurPartner.GetPartnerJueXingLevel()
+    end
+    local tbNowSkillMagicDesc = {}
+    local tbNextSkillMagicDesc = {}
+    local tbAwakeningSkillInfo = Partner.tbJueXingSkillSetting[nSkillIndex]
+    if 0 == nSkillLevel then
+      table.insert(tbNowSkillMagicDesc, i18n.EasyGet("\230\151\160\230\149\136\230\158\156"))
+    else
+      for i = 1, 3 do
+        local szAttribName = tbAwakeningSkillInfo["Attrib" .. i .. "Type"]
+        local tbAttribValue = Lib:SplitStr2Num(tbAwakeningSkillInfo["Attrib" .. i .. "Value1"], ",")
+        local tbAttribSection = Lib:SplitStr2Num(tbAwakeningSkillInfo["szLevelupSection" .. i], ",")
+        if "" ~= szAttribName then
+          for _, nValue in pairs(tbAttribSection) do
+            tbAttribValue[nValue] = tbAttribValue[nValue] * nSkillLevel
+          end
+          local szDescNow, szValueNow = FightSkill:GetMagicDescSplit(szAttribName, tbAttribValue)
+          table.insert(tbNowSkillMagicDesc, szDescNow .. " : " .. szValueNow)
+        end
+      end
+    end
+    for i = 1, 3 do
+      local szAttribName = tbAwakeningSkillInfo["Attrib" .. i .. "Type"]
+      local tbAttribValue = Lib:SplitStr2Num(tbAwakeningSkillInfo["Attrib" .. i .. "Value1"], ",")
+      local tbAttribSection = Lib:SplitStr2Num(tbAwakeningSkillInfo["szLevelupSection" .. i], ",")
+      if "" ~= szAttribName then
+        for _, nValue in pairs(tbAttribSection) do
+          tbAttribValue[nValue] = tbAttribValue[nValue] * (nSkillLevel + 1)
+        end
+        local szDescNow, szValueNow = FightSkill:GetMagicDescSplit(szAttribName, tbAttribValue)
+        table.insert(tbNextSkillMagicDesc, szDescNow .. " : " .. szValueNow)
+      end
+    end
+    for i = 1, #tbNowSkillMagicDesc do
+      self.pPanel:SetActive(string.format(self.txtAttribute, "Now", i), true)
+      self.pPanel:Label_SetText(string.format(self.txtAttribute, "Now", i), tbNowSkillMagicDesc[i])
+    end
+    for i = 1, #tbNextSkillMagicDesc do
+      self.pPanel:SetActive(string.format(self.txtAttribute, "Next", i), true)
+      self.pPanel:Label_SetText(string.format(self.txtAttribute, "Next", i), tbNextSkillMagicDesc[i])
+    end
+    self.pPanel:Label_SetText(self.txtDesc, i18n.EasyGet("\230\143\144\229\141\135\229\144\140\228\188\180\232\167\137\233\134\146\231\173\137\231\186\167\229\143\175\229\141\135\231\186\167"))
+  end
+  if bOtherPlayer then
+    self:HideInteractiveInfo()
+  end
+end
+
+function tbWnd:OnClose()
+  for i = 1, 3 do
+    self.pPanel:Label_SetText(string.format(self.txtAttribute, "Now", i), "")
+    self.pPanel:Label_SetText(string.format(self.txtAttribute, "Next", i), "")
+  end
+end
+
+function tbWnd:UpdateSkillAddListInfo()
+  local nTempItemId = -1
+  local tbHaveSkillBookInfo = me.GetItemListInBag("PartnerSkillBook", 200)
+  local nPlayerSeries = Partner.tbAllPartnerInfo[self.tbCurPartner.nTemplateId].nSeries
+  local nSkillBookNowHaveNum = Lib:CountTB(tbHaveSkillBookInfo)
+  self.pPanel:SetActive(self.btnGet, nSkillBookNowHaveNum <= 0)
+  self.tbSkillAddScrollView:Clear()
+  local nSKillCanUseCount = 0
+  for i = 1, nSkillBookNowHaveNum do
+    if tbHaveSkillBookInfo[i].dwTemplateId ~= nTempItemId then
+      local nSKillBookSeries = Partner.tbSkillBookSetting.tbBookInfo[tbHaveSkillBookInfo[i].dwTemplateId].nSeries
+      if 0 == nSKillBookSeries or nSKillBookSeries == nPlayerSeries then
+        nSKillCanUseCount = nSKillCanUseCount + 1
+        self.tbSkillAddScrollView:SetElement(nSKillCanUseCount, function(tbElement)
+          self:SetSkillAddInfo(tbElement, tbElement.pPanel, tbHaveSkillBookInfo[i], true)
+        end)
+      end
+    end
+    nTempItemId = tbHaveSkillBookInfo[i].dwTemplateId
+  end
+  for i = 1, nSkillBookNowHaveNum do
+    if tbHaveSkillBookInfo[i].dwTemplateId ~= nTempItemId then
+      local nSKillBookSeries = Partner.tbSkillBookSetting.tbBookInfo[tbHaveSkillBookInfo[i].dwTemplateId].nSeries
+      if 0 ~= nSKillBookSeries and nSKillBookSeries ~= nPlayerSeries then
+        nSKillCanUseCount = nSKillCanUseCount + 1
+        self.tbSkillAddScrollView:SetElement(nSKillCanUseCount, function(tbElement)
+          self:SetSkillAddInfo(tbElement, tbElement.pPanel, tbHaveSkillBookInfo[i], false)
+        end)
+      end
+    end
+    nTempItemId = tbHaveSkillBookInfo[i].dwTemplateId
+  end
+end
+
+function tbWnd:SetSkillAddInfo(tbElement, pPanel, tbSkillInfo, bCanUse)
+  pPanel:Button_SetEnable("btnAdd", bCanUse)
+  local skillBookId = tbSkillInfo.dwId
+  local skillBookTemplateId = tbSkillInfo.dwTemplateId
+  pPanel:Label_SetText("txtName", i18n.Parse(tbSkillInfo.szName))
+  Ui:Button_BindEvent(pPanel, "btnAdd", function()
+    local nSkillId = self.tbCurPartner.GetSkillInfo(self.nSkillIndex)
+    
+    local function funcOK()
+      RemoteServer.CallPartnerFunc("UseSkillBook", self.tbCurPartner.dwId, skillBookId, self.nSkillIndex)
+      local tbWnd = Ui:GetWindow("UIPartnerSkillShow")
+      if tbWnd then
+        tbWnd:Close()
+      end
+    end
+    
+    if nSkillId > 0 then
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\231\161\174\232\174\164\230\155\191\230\141\162\229\144\140\228\188\180\230\138\128\232\131\189\239\188\140\229\142\159\230\138\128\232\131\189\231\173\137\231\186\167\229\176\134\232\162\171\233\135\141\231\189\174\228\184\1861\231\186\167\229\185\182\232\191\148\232\191\152\228\184\128\229\174\154\230\149\176\233\135\143\231\154\132\230\138\128\232\131\189\230\174\139\231\175\135\239\188\159"), {
+        {funcOK},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      })
+    else
+      RemoteServer.CallPartnerFunc("UseSkillBook", self.tbCurPartner.dwId, skillBookId, self.nSkillIndex)
+      self:Close()
+    end
+  end, self)
+  local grid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  grid:SetItemByTemplate(skillBookTemplateId, 0)
+  grid:SetClickEnable(true)
+end
+
+function tbWnd:OpenSkillAddViewWhenHaveSkill()
+  self.pPanel:SetActive(self.goSkillAdd, true)
+  self:UpdateSkillAddListInfo()
+end
+
+function tbWnd:SkillLevelUp()
+  RemoteServer.CallPartnerFunc("SkillBookLevelUp", self.tbCurPartner.dwId, self.nSkillIndex)
+end
+
+function tbWnd:SkillBreakThrough()
+  RemoteServer.CallPartnerFunc("SkillBookBreakThrough", self.tbCurPartner.dwId, self.nSkillIndex)
+end
+
+function tbWnd:HideInteractiveInfo()
+  self.pPanel:SetActive(self.btnLevelUp, false)
+  self.pPanel:SetActive(self.goLevelUpCost, false)
+  self.pPanel:SetActive(self.btnReplace, false)
+  self.pPanel:SetActive(self.btnBreakthrough, false)
+  self.pPanel:SetActive(self.goBreakthroughCost, false)
+end
+
+function tbWnd:UpdateJumpToInfo()
+  self.pPanel:SetActive(self.wndJumpTo, true)
+  self.tbJumpToScrollView:Clear()
+  for i, tbWayInfo in ipairs(self.GETTING_WAY.SkillBook) do
+    if not tbWayInfo.szTimeFrame or 0 ~= GetTimeFrameState(tbWayInfo.szTimeFrame) then
+      self.tbJumpToScrollView:SetElement(i, function(tbElement)
+        tbElement.pPanel:Label_SetText("txtName", tbWayInfo.szTitle())
+        tbElement.pPanel:Label_SetText("txtDesc", tbWayInfo.szDesc())
+        tbElement.pPanel:Button_BindEvent("Main", function()
+          tbWayInfo.func()
+          self:Close()
+        end)
+      end)
+    end
+  end
+end
+
+tbWnd.GETTING_WAY = {
+  SkillBook = {
+    {
+      szTitle = function()
+        return i18n.EasyGet("\230\138\128\232\131\189\228\185\166\230\138\189\229\143\150")
+      end,
+      szDesc = function()
+        return i18n.EasyGet("\233\128\154\232\191\135\230\138\128\232\131\189\228\185\166\230\138\189\229\143\150\232\142\183\229\190\151")
+      end,
+      func = function()
+        Ui:OpenWindow("UISkillBookPickingNew")
+      end
+    },
+    {
+      szTitle = function()
+        return i18n.EasyGet("\230\139\141\229\141\150")
+      end,
+      szDesc = function()
+        return i18n.EasyGet("\229\143\130\228\184\142\230\139\141\229\141\150\232\142\183\229\190\151")
+      end,
+      func = function()
+        Ui:OpenWindow("UIAuction")
+      end
+    },
+    {
+      szTitle = function()
+        return i18n.EasyGet("\229\149\134\228\188\154\228\187\187\229\138\161")
+      end,
+      szDesc = function()
+        return i18n.EasyGet("\229\143\130\228\184\142\229\149\134\228\188\154\228\187\187\229\138\161\232\142\183\229\190\151")
+      end,
+      func = function()
+        Calendar:OpenCalendarToActId(8)
+      end,
+      szTimeFrame = "OpenLevel49"
+    },
+    {
+      szTitle = function()
+        return i18n.EasyGet("\230\165\188\229\133\176\229\143\164\229\159\142")
+      end,
+      szDesc = function()
+        return i18n.EasyGet("\229\143\130\228\184\142\230\165\188\229\133\176\229\143\164\229\159\142\232\142\183\229\190\151")
+      end,
+      func = function()
+        Calendar:OpenCalendarToActId(24)
+      end,
+      szTimeFrame = "OpenLevel49"
+    }
+  }
+}

@@ -1,0 +1,437 @@
+Require("CommonScript/lib.lua")
+Require("CommonScript/Task/TaskAction_public.lua")
+Require("CommonScript/Task/TaskOption_public.lua")
+Task.CFG_TASK_DIALOG = {}
+Task.tbAllOptionLogic = {
+  gotopos = Task.tbOption_GoToPos,
+  gotonpc = Task.tbOption_GoToNpc,
+  showmsg = Task.tbOption_ShowMsg,
+  dialog = Task.tbOption_Dialog,
+  centermsg = Task.tbOption_CenterMsg
+}
+Task.tbAllActionLogic = {
+  gotonpc = Task.tbLogic_GotoNpc,
+  getitemfromnpc = Task.tbLogic_GetItemFromNpc,
+  senditem = Task.tbLogic_SendItem,
+  dialog = Task.tbLogic_Dialog,
+  killnpc = Task.tbLogic_KillNpc,
+  giveitem = Task.tbLogic_GiveItem,
+  switchstepbranch = Task.tbLogic_SwitchStepBranch,
+  switchtaskbranch = Task.tbLogic_SwitchTaskBranch,
+  dialogmanynpc = Task.tbLogic_DialogManyNpc,
+  gather = Task.tbLogic_Gather,
+  killsharenpc = Task.tbLogic_KillShareNpc,
+  switchaward = Task.tbLogic_SwitchAward,
+  gotopos = Task.tbLogic_GoToPos,
+  useitem = Task.tbLogic_UseItem,
+  killcostget = Task.tbLogic_KillCostGet,
+  sit = Task.tbLogic_Sit,
+  endTask = Task.tbLogic_End,
+  selectfactionsect = Task.tbLogic_SelectFactionSect,
+  changefaction = Task.tbLogic_ChangeFaction,
+  convoy = Task.tbLogic_Convoy,
+  custom = Task.tbLogic_Custom
+}
+
+function Task:GetOptionLogic(szOptType)
+  return self.tbAllOptionLogic[szOptType]
+end
+
+function Task:GetLogic(szAction)
+  return self.tbAllActionLogic[szAction]
+end
+
+function Task:GetTaskStepNum(nTaskId)
+  if not self.CFG_DETAIL[nTaskId] then
+    return 0
+  end
+  return Lib:CountTB(self.CFG_DETAIL[nTaskId])
+end
+
+function Task:GetDetailCfg(nTaskId, nStep, nBranch)
+  if not (self.CFG_DETAIL[nTaskId] and self.CFG_DETAIL[nTaskId][nStep]) or not self.CFG_DETAIL[nTaskId][nStep][nBranch] then
+    return
+  end
+  return self.CFG_DETAIL[nTaskId][nStep][nBranch]
+end
+
+function Task:GetTaskShowStepNum(nTaskId)
+  local tbTaskCfg = self:GetTaskCfg(nTaskId)
+  if not tbTaskCfg then
+    return 0
+  end
+  return tbTaskCfg.nStepNum
+end
+
+function Task:GetTaskCfg(nTaskId)
+  if self.CFG_TASK_MAIN[nTaskId] then
+    return self.CFG_TASK_MAIN[nTaskId]
+  end
+  if self.CFG_TASK_SUB[nTaskId] then
+    return self.CFG_TASK_SUB[nTaskId]
+  end
+end
+
+function Task:GetTaskType(nTaskId)
+  if self.CFG_TASK_MAIN[nTaskId] then
+    return self.TASK_TYPE_MAIN
+  end
+  if self.CFG_TASK_SUB[nTaskId] then
+    return self.TASK_TYPE_SUB
+  end
+end
+
+function Task:GetTaskLogWay(nTaskId)
+  local nTaskType = Task:GetTaskType(nTaskId)
+  return nTaskType and nTaskType == self.TASK_TYPE_MAIN and Env.LogWay_Task or Env.LogWay_SubTask
+end
+
+function Task:DoAction(pPlayer, tbInfo)
+  local szAction = tbInfo.szAction
+  local tbLogic = self:GetLogic(szAction)
+  if not self:CheckCondition(pPlayer, tbInfo.nTaskId) then
+    return
+  end
+  if MODULE_GAMESERVER then
+    tbLogic:DoAction_Server(pPlayer, tbInfo)
+  else
+    tbLogic:DoAction_Client(pPlayer, tbInfo)
+  end
+end
+
+function Task:CheckCondition(pPlayer, nTaskId)
+  if MODULE_GAMESERVER then
+    return self:CheckCondition_Server(pPlayer, nTaskId)
+  else
+    return self:CheckCondition_Client(pPlayer, nTaskId)
+  end
+end
+
+function Task:IsTaskFinished(pPlayer, nTaskId)
+  local tbTaskData
+  if MODULE_GAMESERVER then
+    tbTaskData = self:GetTaskData(pPlayer)
+  else
+    tbTaskData = self.tbTaskData or {}
+  end
+  local bRet = false
+  local tbFinishedTaskIdList = tbTaskData.tbFinishedTaskIdList or {}
+  for _, nId in pairs(tbFinishedTaskIdList) do
+    if nId == nTaskId then
+      bRet = true
+      break
+    end
+  end
+  return bRet
+end
+
+function Task:IsTaskDoing(pPlayer, nTaskId)
+  local tbTaskData
+  if MODULE_GAMESERVER then
+    tbTaskData = self:GetTaskData(pPlayer)
+  else
+    tbTaskData = self.tbTaskData or {}
+  end
+  local tbCurTaskList = tbTaskData.tbCurTaskList or {}
+  return tbCurTaskList[nTaskId] and true or false
+end
+
+function Task:ParseActionCfg(tbInfo)
+  local szAction = tbInfo.szAction
+  local tbLogic = self:GetLogic(szAction)
+  assert(tbLogic, string.format("can not find tbLogic, szAction = %s", szAction))
+  tbLogic:ParseCfg(tbInfo)
+  Task.CFG_DETAIL[tbInfo.nTaskId][tbInfo.nStep][tbInfo.nBranch].szTarget = tbInfo.szTarget
+  Task.CFG_DETAIL[tbInfo.nTaskId][tbInfo.nStep][tbInfo.nBranch].bAutoStart = tbInfo.bAutoStart
+end
+
+function Task:ParseOptionCfg(tbInfo)
+  local szOptType = tbInfo.szOptType
+  if szOptType and "" ~= szOptType then
+    local tbLogic = self:GetOptionLogic(szOptType)
+    assert(tbLogic, string.format("can not find tbLogic, szOptType = %s", szOptType))
+    if tbLogic then
+      tbLogic:ParseCfg(tbInfo)
+    end
+  end
+end
+
+function Task:ParseDialogMsg(szDialogId)
+  local nDialogId = tonumber(szDialogId)
+  local tbInfo = self.CFG_TASK_DIALOG[nDialogId]
+  if not tbInfo then
+    error(string.format("nDialogId=%d not found", nDialogId))
+  end
+  local tbDialog = {}
+  tbDialog.szIdentity = tbInfo.szIdentity
+  tbDialog.szDialogMsg = tbInfo.szDialogMsg
+  tbDialog.tbChoice = {}
+  if tbInfo.nChoiceNum <= 0 then
+    tbDialog.nChoiceNum = 1
+    tbDialog.nRightChoice = 1
+    tbDialog.tbChoice[1] = {}
+    tbDialog.tbChoice[1].szChoice = i18n.EasyGet("\228\184\139\228\184\128\230\173\165")
+    tbDialog.tbChoice[1].szWrongMsg = ""
+  else
+    tbDialog.nChoiceNum = tbInfo.nChoiceNum
+    tbDialog.nRightChoice = tbInfo.nRightChoice
+    for i = 1, tbDialog.nChoiceNum do
+      tbDialog.tbChoice[i] = {
+        szChoice = tbInfo[string.format("szChoice%d", i)],
+        szWrongMsg = tbInfo[string.format("szWrongMsg%d", i)]
+      }
+    end
+  end
+  if tbDialog.nChoiceNum ~= #tbDialog.tbChoice then
+    error(string.format("szDialog = %s, nChoiceNum = %s, #tbDialog.tbChoice = %s", tbDialog.szDialogMsg, tbDialog.nChoiceNum, #tbDialog.tbChoice))
+  end
+  if tbDialog.nChoiceNum < 1 or tbDialog.nChoiceNum > 4 then
+    error(string.format("szDialog = %s, nChoiceNum = %s", tbDialog.szDialogMsg, tbDialog.nChoiceNum))
+  end
+  if tbDialog.nRightChoice < 1 or tbDialog.nRightChoice > tbDialog.nChoiceNum then
+    error(string.format("szDialog = %s, tbDialog.nRightChoice = %s", tbDialog.szDialogMsg, tbDialog.nRightChoice))
+  end
+  return tbDialog
+end
+
+function Task:Dialog(tbLogic, pPlayer, tbInfo, nIndex, tbDialog, bIsLastStep)
+  local szIdentity = tbDialog.szIdentity
+  local szDialogMsg = "<auto_next>" .. tbDialog.szDialogMsg
+  local nDlgType = Task.DLG_TARGET_TYPE_INVALID
+  if "me" == szIdentity then
+    nDlgType = Task.DLG_TARGET_TYPE_ME
+  elseif "him" == szIdentity then
+    nDlgType = Task.DLG_TARGET_TYPE_HIM
+  else
+    local nTargetNpcTemplateId = tonumber(szIdentity)
+    if nTargetNpcTemplateId then
+      nDlgType = Task.DLG_TARGET_TYPE_SPENPC
+    end
+  end
+  local vNpc
+  if nDlgType == Task.DLG_TARGET_TYPE_ME then
+    vNpc = pPlayer.GetNpc()
+  elseif nDlgType == Task.DLG_TARGET_TYPE_HIM then
+    local tbNpc, nCount = KNpc.GetAroundNpcListByTemplateId(pPlayer.GetNpc(), tbInfo.nNpcTemplateId, 5000)
+    if nCount > 0 then
+      vNpc = tbNpc[1]
+    end
+  elseif nDlgType == Task.DLG_TARGET_TYPE_SPENPC then
+    vNpc = tonumber(szIdentity)
+  end
+  local tbOpt = {}
+  for nChoiceIndex, tbChoice in ipairs(tbDialog.tbChoice) do
+    if tbDialog.nRightChoice == nChoiceIndex then
+      table.insert(tbOpt, {
+        Text = tbChoice.szChoice,
+        Callback = tbLogic.Dialog,
+        Param = {
+          tbLogic,
+          pPlayer,
+          tbInfo,
+          nIndex + 1
+        }
+      })
+    else
+      table.insert(tbOpt, {
+        Text = tbChoice.szChoice,
+        Callback = self.__Dialog_SelectWrong,
+        Param = {
+          self,
+          nDlgType,
+          tbChoice.szWrongMsg,
+          pPlayer,
+          vNpc
+        }
+      })
+    end
+  end
+  local tbDialogInfo = {Text = szDialogMsg, OptList = tbOpt}
+  if tbLogic.EndTalk then
+    tbDialogInfo.tbSkip = {
+      Callback = tbLogic.EndTalk,
+      Param = {
+        tbLogic,
+        pPlayer,
+        tbInfo,
+        nIndex + 1
+      }
+    }
+  end
+  if nDlgType == Task.DLG_TARGET_TYPE_ME then
+    Dialog:Show(tbDialogInfo, pPlayer, vNpc, bIsLastStep)
+  elseif nDlgType == Task.DLG_TARGET_TYPE_HIM then
+    if nil ~= vNpc then
+      Dialog:Show(tbDialogInfo, pPlayer, vNpc, bIsLastStep)
+    end
+  elseif nDlgType == Task.DLG_TARGET_TYPE_SPENPC then
+    Dialog:ShowNpcDialog(tbDialogInfo, pPlayer, vNpc, bIsLastStep)
+  end
+end
+
+function Task:__Dialog_SelectWrong(nDlgType, szMsg, pPlayer, vNpc)
+  if nDlgType == Task.DLG_TARGET_TYPE_ME then
+    Dialog:Show(szMsg, pPlayer, vNpc)
+  elseif nDlgType == Task.DLG_TARGET_TYPE_HIM then
+    Dialog:Show(szMsg, pPlayer, vNpc)
+  elseif nDlgType == Task.DLG_TARGET_TYPE_SPENPC then
+    Dialog:ShowNpcDialog(szMsg, pPlayer, tonumber(vNpc))
+  end
+end
+
+function Task:ParseAwardString(szAward)
+  local tbAwardList = Lib:GetAwardFromString(szAward)
+  return tbAwardList
+end
+
+function Task:__LoadFile_BindAwardItem(tbAward)
+  for _, tbInfo in pairs(tbAward) do
+    if "Item" == tbInfo[1] or "ItemUnsafe" == tbInfo[1] then
+      tbInfo[1] = "ItemUnsafe"
+      tbInfo[4] = tbInfo[4] or {}
+      tbInfo[4].nTradeLimitType = Item.eTRADELIMITTYPE.NONE
+    end
+  end
+end
+
+function Task:__LoadFile_MainTask()
+  self.CFG_TASK_MAIN = Lib:LoadTabFileEx("Setting/Task/maintask.tab", "dssddsss", "nTaskId", {
+    "nTaskId",
+    "szTaskName",
+    "szDesc",
+    "nStepNum",
+    "nNextTaskId",
+    "szAward",
+    "szCondition",
+    "szUiShowAward"
+  }, nil, nil, nil, false)
+  for _, tbInfo in pairs(self.CFG_TASK_MAIN) do
+    tbInfo.nTaskType = self.TASK_TYPE_MAIN
+    tbInfo.tbAward = self:ParseAwardString(tbInfo.szAward)
+    tbInfo.tbUiShowAward = self:ParseAwardString(tbInfo.szUiShowAward)
+    tbInfo.tbCondition = self:ParseCondition(tbInfo.szCondition)
+    self:__LoadFile_BindAwardItem(tbInfo.tbAward)
+  end
+  self.CFG_TASK_MAIN = SetReadOnly(self.CFG_TASK_MAIN)
+end
+
+function Task:__LoadFile_SubTask()
+  self.CFG_TASK_SUB = Lib:LoadTabFileEx("Setting/Task/subtask.tab", "dssddsss", "nTaskId", {
+    "nTaskId",
+    "szTaskName",
+    "szDesc",
+    "nStepNum",
+    "nNextTaskId",
+    "szAward",
+    "szCondition",
+    "szTrigger"
+  }, nil, nil, nil, false)
+  for _, tbInfo in pairs(self.CFG_TASK_SUB) do
+    tbInfo.nTaskType = self.TASK_TYPE_SUB
+    tbInfo.tbAward = self:ParseAwardString(tbInfo.szAward)
+    tbInfo.tbCondition = self:ParseCondition(tbInfo.szCondition)
+    tbInfo.tbTrigger = self:ParseTrigger(tbInfo.szTrigger)
+    self:__LoadFile_BindAwardItem(tbInfo.tbAward)
+  end
+  self.CFG_TASK_SUB = SetReadOnly(self.CFG_TASK_SUB)
+end
+
+function Task:__LoadFile_TaskDetail()
+  local tbConfigs = Lib:LoadTabFileEx("Setting/Task/taskdetail.tab", "ddddssssssssssssssssssssssssssssssssssssssssssssss", "", {
+    "nTaskId",
+    "nStep",
+    "nBranch",
+    "bAutoStart",
+    "szTarget",
+    "szAction",
+    "param1",
+    "param2",
+    "param3",
+    "param4",
+    "param5",
+    "param6",
+    "param7",
+    "param8",
+    "param9",
+    "param10",
+    "param11",
+    "param12",
+    "param13",
+    "param14",
+    "param15",
+    "param16",
+    "param17",
+    "param18",
+    "param19",
+    "param20",
+    "param21",
+    "param22",
+    "param23",
+    "param24",
+    "param25",
+    "param26",
+    "param27",
+    "param28",
+    "param29",
+    "param30",
+    "param31",
+    "param32",
+    "szOptTriggerTime",
+    "szOptType",
+    "OptParam1",
+    "OptParam2",
+    "OptParam3",
+    "OptParam4",
+    "OptParam5",
+    "OptParam6",
+    "OptParam7",
+    "OptParam8",
+    "OptParam9",
+    "OptParam10"
+  })
+  for _, tbInfo in pairs(tbConfigs) do
+    self:ParseActionCfg(tbInfo)
+    self:ParseOptionCfg(tbInfo)
+  end
+end
+
+function Task:__LoadFile_TaskDialog()
+  self.CFG_TASK_DIALOG = Lib:LoadTabFileEx("Setting/Task/taskdialog.tab", "dssdddsdsdsds", "nId", {
+    "nId",
+    "szIdentity",
+    "szDialogMsg",
+    "nChoiceNum",
+    "nRightChoice",
+    "nChoice1",
+    "szWrongMsg1",
+    "nChoice2",
+    "szWrongMsg2",
+    "nChoice3",
+    "szWrongMsg3",
+    "nChoice4",
+    "szWrongMsg4"
+  })
+  self.CFG_TASK_DIALOG = SetReadOnly(self.CFG_TASK_DIALOG)
+end
+
+function Task:__LoadFile_Recommed()
+  self.CFG_TASK_RECOMMED = {}
+  self.CFG_TASK_RECOMMED = SetReadOnly(self.CFG_TASK_RECOMMED)
+end
+
+function Task:LoadFile()
+  self:__LoadFile_TaskDialog()
+  self:__LoadFile_MainTask()
+  self:__LoadFile_SubTask()
+  self:__LoadFile_TaskDetail()
+  self:__LoadFile_Recommed()
+  self.tbAllTaskSet = {}
+  for nTaskId, _ in pairs(self.CFG_TASK_MAIN) do
+    self.tbAllTaskSet[nTaskId] = true
+  end
+  for nTaskId, _ in pairs(self.CFG_TASK_SUB) do
+    self.tbAllTaskSet[nTaskId] = true
+  end
+end
+
+Task:LoadFile()

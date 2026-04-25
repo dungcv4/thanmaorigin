@@ -1,0 +1,302 @@
+local ErrorMsg = {
+  [Trade.ERR.OTHER_SIDE_NOT_ONLINE] = Trade.MSG.OTHER_SIDE_NOT_ONLINE,
+  [Trade.ERR.OTHER_SIDE_TRADDING] = Trade.MSG.OTHER_SIDE_TRADDING,
+  [Trade.ERR.OUR_SIDE_TRADDING] = Trade.MSG.OUR_SIDE_TRADDING,
+  [Trade.ERR.OTHER_SIDE_REFUSE] = Trade.MSG.OTHER_SIDE_REFUSE,
+  [Trade.ERR.ALREADY_INVITE_HIM] = Trade.MSG.ALREADY_INVITE_HIM,
+  [Trade.ERR.CANNOT_TRADE_THIS_MAP] = Trade.MSG.CANNOT_TRADE_THIS_MAP,
+  [Trade.ERR.NOT_IN_SAME_MAP] = Trade.MSG.NOT_IN_SAME_MAP,
+  [Trade.ERR.ITEM_CANNOT_TRADE] = Trade.MSG.ITEM_CANNOT_TRADE,
+  [Trade.ERR.ITEM_COUNT_NOT_ENOUGH] = Trade.MSG.ITEM_COUNT_NOT_ENOUGH,
+  [Trade.ERR.ITEM_NOT_EXIST] = Trade.MSG.ITEM_NOT_EXIST,
+  [Trade.ERR.ITEM_OVER_LIMIT] = Trade.MSG.ITEM_OVER_LIMIT,
+  [Trade.ERR.MONEY_NOT_ENOUGH] = Trade.MSG.MONEY_NOT_ENOUGH,
+  [Trade.ERR.MONEY_OVER_LIMIT] = Trade.MSG.MONEY_OVER_LIMIT,
+  [Trade.ERR.WAIT_OTHER_SIDE_LOCK] = Trade.MSG.WAIT_OTHER_SIDE_LOCK,
+  [Trade.ERR.OTHER_SIDE_LOCK] = Trade.MSG.OTHER_SIDE_LOCK,
+  [Trade.ERR.OTHER_SIDE_UNLOCK] = Trade.MSG.OTHER_SIDE_UNLOCK,
+  [Trade.ERR.WAIT_OTHER_SIDE_CONFIRM] = Trade.MSG.WAIT_OTHER_SIDE_CONFIRM,
+  [Trade.ERR.OTHER_SIDE_CONFIRM] = Trade.MSG.OTHER_SIDE_CONFIRM,
+  [Trade.ERR.OTHER_SIDE_CANCEL] = Trade.MSG.OTHER_SIDE_CANCEL,
+  [Trade.ERR.SELF_IN_FIGHT_MODE] = Trade.MSG.SELF_IN_FIGHT_MODE,
+  [Trade.ERR.OTHER_IN_FIGHT_MODE] = Trade.MSG.OTHER_IN_FIGHT_MODE,
+  [Trade.ERR.INVITE_NOT_EXIST] = Trade.MSG.INVITE_NOT_EXIST,
+  [Trade.ERR.PROCESSOR_NOT_EXIST] = Trade.MSG.PROCESSOR_NOT_EXIST,
+  [Trade.ERR.ROLEID_ERROR] = Trade.MSG.ROLEID_ERROR,
+  [Trade.ERR.IN_INVITE_CD] = Trade.MSG.IN_INVITE_CD,
+  [Trade.ERR.SELF_NOT_IN_TRADDING] = Trade.MSG.SELF_NOT_IN_TRADDING,
+  [Trade.ERR.OTHER_NOT_IN_TRADDING] = Trade.MSG.OTHER_NOT_IN_TRADDING,
+  [Trade.ERR.IN_LOCK] = Trade.MSG.IN_LOCK,
+  [Trade.ERR.IN_CONFIRM] = Trade.MSG.IN_CONFIRM,
+  [Trade.ERR.SELF_IN_UNLOCK] = Trade.MSG.SELF_IN_UNLOCK,
+  [Trade.ERR.OTHER_IN_UNLOCK] = Trade.MSG.OTHER_IN_UNLOCK,
+  [Trade.ERR.TRADE_ITEM_ROOM_FULL] = Trade.MSG.TRADE_ITEM_ROOM_FULL,
+  [Trade.ERR.ITEM_OVER_LIMIT_AFTER] = Trade.MSG.ITEM_OVER_LIMIT_AFTER,
+  [Trade.ERR.MONEY_NOT_ENOUGH_AFTER] = Trade.MSG.MONEY_NOT_ENOUGH_AFTER,
+  [Trade.ERR.MONEY_OVER_LIMIT_AFTER] = Trade.MSG.MONEY_OVER_LIMIT_AFTER,
+  [Trade.ERR.ITEM_BELONG_ERROR] = Trade.MSG.ITEM_BELONG_ERROR,
+  [Trade.ERR.ITEM_CAN_NOT_TRADE] = Trade.MSG.ITEM_CAN_NOT_TRADE,
+  [Trade.ERR.UNKNOWN_ERROR] = Trade.MSG.UNKNOWN_ERROR
+}
+
+function Trade:GetErrorMsg(nErrorCode, ...)
+  local szMsg = ErrorMsg[nErrorCode]
+  if szMsg then
+    return i18n.Get(szMsg, ...)
+  else
+    assert(szMsg, nErrorCode)
+  end
+end
+
+function Trade:OnServerResult(nErrorCode, tbParam)
+  local szMsg = Trade:GetErrorMsg(nErrorCode, table.unpack(tbParam or {}))
+  if szMsg then
+    me.CenterMsg(szMsg)
+  end
+end
+
+function Trade:MakeMoneyDecision(dwNewMoney)
+  local bRet, nErrorCode = Trade:CheckSelfCommon()
+  if not bRet then
+    me.CenterMsg(Trade:GetErrorMsg(nErrorCode))
+    return
+  end
+  if not Trade:CheckMoneyEnough(me, dwNewMoney) then
+    me.CenterMsg(i18n.Get(Trade.MSG.MONEY_NOT_ENOUGH))
+    return
+  end
+  if Trade.CheckLock(self.TradeProcessor, me.dwID) then
+    me.CenterMsg(i18n.Get(Trade.MSG.IN_LOCK))
+    return
+  end
+  if dwNewMoney > Lib.nMaxCInt then
+    self:CenterMsgByCode(Trade.ErrCode.MONEY_OVER_LIMIT)
+    return false
+  end
+  RemoteServer.OnTradeRequest("MakeMoneyDecision", dwNewMoney)
+  return true
+end
+
+function Trade:OnMoneyChange(dwPlayerId, dwNewValue)
+  self.TradeProcessor.SetPlayerTradeMoney(dwPlayerId, dwNewValue)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TRADE_MONEY_CHANGE, dwPlayerId)
+end
+
+function Trade:DoInviteTrade(dwPlayerId)
+  local pNpc = KNpc.GetByPlayerId(dwPlayerId)
+  if not pNpc then
+    me.CenterMsg(i18n.Get(Trade.MSG.OTHER_SIDE_NOT_ONLINE))
+    return
+  end
+  local bRet, nErrorCode = Trade:CheckDistance(pNpc)
+  if not bRet then
+    me.CenterMsg(Trade:GetErrorMsg(nErrorCode))
+    return
+  end
+  bRet, nErrorCode = Trade:CheckSelfCommon()
+  if not bRet then
+    me.CenterMsg(Trade:GetErrorMsg(nErrorCode))
+    return
+  end
+  if Trade:CheckIsTradding(me) then
+    me.CenterMsg(i18n.Get(Trade.MSG.OUR_SIDE_TRADDING))
+    return
+  end
+  RemoteServer.OnTradeRequest("Invite", dwPlayerId)
+end
+
+function Trade:DoAcceptTrade(dwPlayerId)
+  local pNpc = KNpc.GetByPlayerId(dwPlayerId)
+  if not pNpc then
+    me.CenterMsg(i18n.Get(Trade.MSG.OTHER_SIDE_NOT_ONLINE))
+    return
+  end
+  local bRet, nErrorCode = Trade:CheckDistance(pNpc)
+  if not bRet then
+    me.CenterMsg(Trade:GetErrorMsg(nErrorCode))
+    self:DoRefuseTrade(dwPlayerId)
+    return
+  end
+  bRet, nErrorCode = Trade:CheckSelfCommon()
+  if not bRet then
+    me.CenterMsg(Trade:GetErrorMsg(nErrorCode))
+    self:DoRefuseTrade(dwPlayerId)
+    return
+  end
+  if Trade:CheckIsTradding(me) then
+    me.CenterMsg(i18n.Get(Trade.MSG.OUR_SIDE_TRADDING))
+    self:DoRefuseTrade(dwPlayerId)
+    return
+  end
+  RemoteServer.OnTradeRequest("Accept", dwPlayerId)
+end
+
+function Trade:DoRefuseTrade(dwPlayerId)
+  RemoteServer.OnTradeRequest("Refuse", dwPlayerId)
+end
+
+function Trade:OnStartTrade(tbOtherInfo)
+  self.TradeProcessor.SetPlayers(me.dwID, tbOtherInfo.dwTradeRoleId)
+  self.TradeProcessor.StartTrade()
+  Ui:OpenWindow("UITrade", tbOtherInfo)
+end
+
+function Trade:DoCancelTrade()
+  RemoteServer.OnTradeRequest("Cancel")
+end
+
+function Trade:OnCancel(dwPlayerId, szPlayerName)
+  if dwPlayerId ~= me.dwID or szPlayerName ~= me.szName then
+    me.CenterMsg(i18n.Get(Trade.MSG.OTHER_SIDE_CANCEL, szPlayerName), true)
+  end
+  self:Clear()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TRADE_CANCEL)
+end
+
+function Trade:MakeItemDecision(nOperation, dwItemId, nCount)
+  local bRet, nErrorCode = Trade:CheckSelfCommon()
+  if not bRet then
+    me.CenterMsg(Trade:GetErrorMsg(nErrorCode))
+    return
+  end
+  if Trade.CheckLock(self.TradeProcessor, me.dwID) then
+    me.CenterMsg(i18n.Get(Trade.MSG.IN_LOCK))
+    return
+  end
+  if nOperation == Trade.Operation.ADD and not self:CheckOneItemAdd(me, dwItemId, nCount) then
+    me.CenterMsg(i18n.Get(Trade.MSG.UNKNOWN_ERROR))
+    return
+  end
+  if nOperation == Trade.Operation.ADD and not self:CheckItemCanTrade(dwItemId) then
+    me.CenterMsg(i18n.Get(Trade.MSG.ITEM_CAN_NOT_TRADE))
+    return
+  end
+  local tbTradeItemList = self.TradeProcessor.GetItemList(me.dwID)
+  if nOperation == Trade.Operation.ADD and #tbTradeItemList >= self.nMaxTradeItemRoom then
+    me.CenterMsg(i18n.Get(Trade.MSG.TRADE_ITEM_ROOM_FULL))
+    return
+  end
+  RemoteServer.OnTradeRequest("MakeItemDecision", nOperation, dwItemId, nCount)
+end
+
+function Trade:OnItemAdd(dwPlayerId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TRADE_CHANGE_ITEM, dwPlayerId == me.dwID, Trade.Operation.ADD)
+end
+
+function Trade:OnItemCountChange(dwPlayerId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TRADE_CHANGE_ITEM, dwPlayerId == me.dwID, Trade.Operation.ADD, true)
+end
+
+function Trade:OnItemRemove(dwPlayerId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TRADE_CHANGE_ITEM, dwPlayerId == me.dwID, Trade.Operation.REMOVE)
+end
+
+function Trade:MakeTradeDecision(nToState)
+  local bRet, nErrorCode = Trade:CheckSelfCommon()
+  if not bRet then
+    me.CenterMsg(Trade:GetErrorMsg(nErrorCode))
+    return
+  end
+  bRet, nErrorCode = self:CheckTradeStateDecision(self.TradeProcessor, nToState)
+  if not bRet then
+    me.CenterMsg(Trade:GetErrorMsg(nErrorCode))
+    return
+  end
+  RemoteServer.OnTradeRequest("MakeTradeDecision", nToState)
+end
+
+function Trade:OnLockTrade(dwPlayerId)
+  self.TradeProcessor.SetPlayerTradeState(dwPlayerId, Trade.STATE.LOCK)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TRADE_STATE_CHANGE)
+end
+
+function Trade:OnCancelLockTrade(dwPlayerId)
+  self.TradeProcessor.SetPlayerTradeState(dwPlayerId, Trade.STATE.EXCHANGING)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TRADE_STATE_CHANGE)
+end
+
+function Trade:OnConfirmTrade(dwPlayerId)
+  self.TradeProcessor.SetPlayerTradeState(dwPlayerId, Trade.STATE.CONFIRM)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TRADE_STATE_CHANGE)
+end
+
+function Trade:OnFinishTrade()
+  self.TradeProcessor.FinishTrade()
+  self:Clear()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TRADE_FINISH, "OnTradeFinish")
+end
+
+function Trade:OnTimer()
+  if me.nIsP2PTrading <= 0 then
+    return true
+  end
+  local dwOtherId = self.TradeProcessor.GetOtherPlayerId(me.dwID)
+  local pNpc = KNpc.GetByPlayerId(dwOtherId)
+  if not pNpc then
+    self:DoCancelTrade()
+    return true
+  end
+  if me.nMapTemplateId ~= pNpc.nMapTemplateId then
+    self:DoCancelTrade()
+    return true
+  end
+  local nDistance = me.GetNpc().GetDistance(pNpc.nId)
+  if nDistance < 0 or nDistance >= Trade.nDistance then
+    self:DoCancelTrade()
+    return true
+  end
+  return true
+end
+
+function Trade:Clear()
+  self.TradeProcessor.CancelTrade()
+end
+
+function Trade:GetSelfTradeItemList()
+  local tbItemInfoList = self.TradeProcessor.GetItemList(me.dwID)
+  local tbItemObjList = {}
+  for _, tbInfo in pairs(tbItemInfoList) do
+    tbItemObjList[tbInfo.nReferenceItemId] = {
+      pItem = KItem.GetItemObj(tbInfo.nItemId),
+      pReferenceItem = KItem.GetItemObj(tbInfo.nReferenceItemId)
+    }
+  end
+  return tbItemObjList
+end
+
+function Trade:GetOtherTradeItemList()
+  local dwOtherId = self.TradeProcessor.GetOtherPlayerId(me.dwID)
+  local tbItemInfoList = self.TradeProcessor.GetItemList(dwOtherId)
+  local tbItemObjList = {}
+  for _, tbInfo in pairs(tbItemInfoList) do
+    tbItemObjList[tbInfo.nItemId] = KItem.GetItemObj(tbInfo.nItemId)
+  end
+  return tbItemObjList
+end
+
+function Trade:GetBothMoney()
+  local dwOtherId = self.TradeProcessor.GetOtherPlayerId(me.dwID)
+  return self.TradeProcessor.GetPlayerTradeMoney(me.dwID), self.TradeProcessor.GetPlayerTradeMoney(dwOtherId)
+end
+
+function Trade:GetBothState()
+  local dwOtherId = self.TradeProcessor.GetOtherPlayerId(me.dwID)
+  return self.TradeProcessor.GetPlayerTradeState(me.dwID), self.TradeProcessor.GetPlayerTradeState(dwOtherId)
+end
+
+function Trade:Init()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_P2PTRADEADDITEM, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_P2PTRADECHANGEITEMCOUNT, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_P2PTRADEREMOVEITEM, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_P2PTRADEADDITEM, self.OnItemAdd, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_P2PTRADECHANGEITEMCOUNT, self.OnItemCountChange, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_P2PTRADEREMOVEITEM, self.OnItemRemove, self)
+  self.TradeProcessor = GetGlobalP2PTradeProcessor()
+  if self.nTimerId then
+    Timer:Close(self.nTimerId)
+    self.nTimerId = nil
+  end
+  self.nTimerId = Timer:Register(Env.GAME_FPS, self.OnTimer, self)
+end
+
+Trade:Init()

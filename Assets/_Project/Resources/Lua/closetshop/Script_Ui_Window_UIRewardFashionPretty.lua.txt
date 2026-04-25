@@ -1,0 +1,330 @@
+local tbWnd = Ui:CreateWindow("UIRewardFashionPretty")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_RANKBOARD_DATA,
+      self.OnSynRankData,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_FASHION_DATA_CHANGE,
+      self.OnFashionDataChange,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_FASHIONPRETTY_STAGEREWARD,
+      self.OnFashionPrettyStageReward,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnRanking = "node/imgBG/btnReward",
+  btnStageAward = "node/imgBG/btnRewardYuanBao",
+  btnClose = "node/imgBG/btnClose",
+  StageReward = "node/imgBG/Content/Reword01",
+  txtStageMyPrettyValue = "node/imgBG/Content/Reword01/Rank/txtMyInfoLabelName2/txtMyInfoLabelValue2",
+  StageTemplate = "node/imgBG/Content/Reword01/Scroll View/Viewport/Content/Template",
+  RankingReward = "node/imgBG/Content/Reword02",
+  txtMyRanking = "node/imgBG/Content/Reword02/Rank/txtMyInfoLabelName1/txtMyInfoLabelValue1",
+  txtRankingMyPrettyValue = "node/imgBG/Content/Reword02/Rank/txtMyInfoLabelValue2",
+  RankTemplate = "node/imgBG/Content/Reword02/Scroll View/Viewport/Content/Template",
+  txtPage = "node/imgBG/Content/Reword02/Info/txtPage",
+  btnPrePage = "node/imgBG/Content/Reword02/Info/btnPrePage",
+  btnNextPage = "node/imgBG/Content/Reword02/Info/btnNextPage",
+  btnFirstPage = "node/imgBG/Content/Reword02/Info/btnFirstPage",
+  btnLastPage = "node/imgBG/Content/Reword02/Info/btnLastPage",
+  RankScrollView = "node/imgBG/Content/Reword02/Scroll View"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnRanking = function(self)
+    self:OnClickRanking()
+  end,
+  btnStageAward = function(self)
+    self:OnClickStageAward()
+  end,
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnPrePage = function(self)
+    self:PrePage()
+  end,
+  btnNextPage = function(self)
+    self:NextPage()
+  end,
+  btnLastPage = function(self)
+    self:LastPage()
+  end,
+  btnFirstPage = function(self)
+    self:FirstPage()
+  end
+}
+tbWnd.nMaxNoRank = 3
+
+function tbWnd:OnCreate()
+  self.tbRankScrollView = Ui:NewScrollView(self, tbControls.RankTemplate)
+  self.tbStageScrollView = Ui:NewScrollView(self, tbControls.StageTemplate)
+  self.tbRankAward = FashionPretty:GetRankAward()
+  self.tbStageAward = FashionPretty:GetStageAward()
+end
+
+function tbWnd:OnOpen()
+  self:UpdatePage()
+  self:UpdateRank()
+  self:UpdateMyRank()
+  self:UpdateStageAward()
+  self:OnClickRanking()
+  self:RegistRedPoint()
+end
+
+function tbWnd:OnClose()
+  self:UnRegistRedPoint()
+  self.tbRankScrollView:Clear()
+  self.tbStageScrollView:Clear()
+end
+
+function tbWnd:RegistRedPoint()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnStageAward, {
+    RedPointMgr.EVENT.FashionPrettyStageAward
+  })
+end
+
+function tbWnd:UnRegistRedPoint()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnStageAward)
+end
+
+function tbWnd:OnClickRanking()
+  self.pPanel:SetActive(tbControls.StageReward, false)
+  self.pPanel:SetActive(tbControls.RankingReward, true)
+  self.pPanel:ButtonGroup_SetSelect(tbControls.btnRanking, true)
+  self.pPanel:ButtonGroup_SetSelect(tbControls.btnStageAward, false)
+end
+
+function tbWnd:OnClickStageAward()
+  self.pPanel:SetActive(tbControls.StageReward, true)
+  self.pPanel:SetActive(tbControls.RankingReward, false)
+  self.pPanel:ButtonGroup_SetSelect(tbControls.btnRanking, false)
+  self.pPanel:ButtonGroup_SetSelect(tbControls.btnStageAward, true)
+  if self.tbStageScrollView and self.tbStageScrollView:GetCount() > 0 then
+    self.tbStageScrollView:ScrollToIndex(1, false)
+  end
+end
+
+function tbWnd:FirstPage()
+  if 1 == self.nCurPage then
+    return
+  end
+  self.nCurPage = 1
+  self:UpdateRank()
+end
+
+function tbWnd:LastPage()
+  if self.nCurPage == self.nMaxPage then
+    return
+  end
+  self.nCurPage = self.nMaxPage
+  self:UpdateRank()
+end
+
+function tbWnd:PrePage()
+  if self.nCurPage <= 1 then
+    return
+  end
+  self.nCurPage = self.nCurPage - 1
+  self:UpdateRank()
+end
+
+function tbWnd:NextPage()
+  if self.nCurPage >= self.nMaxPage then
+    return
+  end
+  self.nCurPage = self.nCurPage + 1
+  self:UpdateRank()
+end
+
+function tbWnd:UpdateRank()
+  self.pPanel:Label_SetText(tbControls.txtPage, string.format("%d/%d", self.nCurPage, self.nMaxPage))
+  self.tbPageRankData = RankBoard:CheckUpdateData(RankBoard.RankType.PrettyValue, self.nCurPage)
+  if self.tbPageRankData then
+    self:RefreshRankScrollView()
+  else
+    self.pPanel:SetActive(tbControls.RankScrollView, false)
+  end
+end
+
+function tbWnd:UpdatePage()
+  local tbRankInfo = RankBoard.tbMyRankInfo[RankBoard.RankType.PrettyValue] or {}
+  local nMaxNum = tbRankInfo.nLength or 0
+  if not self.nCurPage then
+    self.nCurPage = 1
+  end
+  self.nMaxPage = math.max(math.ceil(nMaxNum / RankBoard.PAGE_NUM), 1)
+end
+
+function tbWnd:RefreshRankScrollView()
+  self.pPanel:SetActive(tbControls.RankScrollView, true)
+  self.tbRankScrollView:Clear()
+  for nIndex = 1, RankBoard.PAGE_NUM do
+    self.tbRankScrollView:SetElement(nIndex, function(tbElement)
+      self:_SetRankElement(tbElement, nIndex)
+    end)
+  end
+end
+
+function tbWnd:_SetRankElement(tbElement, nIndex)
+  local tbRankData = self.tbPageRankData[nIndex]
+  local nRank = (self.nCurPage - 1) * RankBoard.PAGE_NUM + nIndex
+  if tbRankData then
+    nRank = tbRankData.nPosition
+    tbElement.pPanel:Label_SetText("txtRank", tbRankData.nValue)
+    tbElement.pPanel:Label_SetText("txtPlayerName", tbRankData.szName)
+    Ui:SetVipLevelEffect(tbElement.pPanel, tbRankData.nVipLevel, "txtPlayerName")
+    Ui:Button_BindEvent(tbElement.pPanel, "btnName", function()
+      if tbRankData.dwUnitID ~= me.dwID then
+        if tbRankData.dwTongId and tbRankData.dwTongId > 0 then
+          tbRankData.szKinOrTongName = tbRankData.szTongName
+        elseif tbRankData.dwKinId and tbRankData.dwKinId > 0 then
+          tbRankData.szKinOrTongName = tbRankData.szKinName
+        else
+          tbRankData.szKinOrTongName = ""
+        end
+        Ui:OpenWindow("UIRightPopUpMenu", "roleselectFromUI", tbRankData, self, 450, -160)
+      end
+    end)
+  else
+    local tbInfo = FashionPretty:GetRankAwardInfoByRank(nRank)
+    Ui:SetVipLevelEffect(tbElement.pPanel, 0, "txtPlayerName")
+    if tbInfo then
+      tbElement.pPanel:Label_SetText("txtRank", "-")
+      tbElement.pPanel:Label_SetText("txtPlayerName", i18n.EasyGet("\230\154\130\230\151\160"))
+    else
+      tbElement.pPanel:SetActive("Txt_Num", false)
+      tbElement.pPanel:SetActive("UIRankNo", false)
+      tbElement.pPanel:SetActive("ItemCell", false)
+      tbElement.pPanel:Label_SetText("txtRank", "")
+      tbElement.pPanel:Label_SetText("txtPlayerName", "")
+      return
+    end
+  end
+  if nRank <= self.nMaxNoRank then
+    tbElement.pPanel:SetActive("UIRankNo", true)
+    tbElement.pPanel:SetActive("Txt_Num", false)
+    tbElement.pPanel:SetActive("UIRankNo/imgNO1", 1 == nRank)
+    tbElement.pPanel:SetActive("UIRankNo/imgNO2", 2 == nRank)
+    tbElement.pPanel:SetActive("UIRankNo/imgNO3", 3 == nRank)
+  else
+    tbElement.pPanel:SetActive("Txt_Num", true)
+    tbElement.pPanel:SetActive("UIRankNo", false)
+    tbElement.pPanel:Label_SetText("Txt_Num", nRank)
+  end
+  local tbInfo = FashionPretty:GetRankAwardInfoByRank(nRank)
+  if tbInfo then
+    tbElement.pPanel:SetActive("ItemCell", true)
+    tbElement.tbItemGridView = Ui:NewItemGridView(tbElement, "ItemCell/reward")
+    local tbAward = Award:GetAward(tbInfo.nAwardId, tbInfo.nShowAwardKey)
+    for nId, tbStageAward in ipairs(tbAward) do
+      tbElement.tbItemGridView:SetItem(nId, tbStageAward, true)
+    end
+  else
+    tbElement.pPanel:SetActive("ItemCell", false)
+  end
+end
+
+function tbWnd:UpdateMyRank()
+  local nPrettyValue = Fashion:GetPrettyValue(me)
+  local nRank, _ = RankBoard:GetMyRankInfo(RankBoard.RankType.PrettyValue)
+  if nRank and nRank > 0 then
+    self.pPanel:Label_SetText(tbControls.txtMyRanking, nRank)
+  else
+    self.pPanel:Label_SetText(tbControls.txtMyRanking, i18n.EasyGet("\230\156\170\228\184\138\230\166\156"))
+  end
+  self.pPanel:Label_SetText(tbControls.txtRankingMyPrettyValue, nPrettyValue)
+end
+
+function tbWnd:UpdateStageAward()
+  local nPrettyValue = Fashion:GetPrettyValue(me)
+  self.pPanel:Label_SetText(tbControls.txtStageMyPrettyValue, nPrettyValue)
+  local tbShowStageAward = self:GetArrayStageAward()
+  if Lib:IsEmptyTB(tbShowStageAward) then
+    LogErr("UIRewardFashionPretty:UpdateStageAward error. GetArrayStageAward is empty table!!")
+    return
+  end
+  self.tbStageScrollView:Clear()
+  for nIndex, tbStageAward in ipairs(tbShowStageAward) do
+    self.tbStageScrollView:SetElement(nIndex, function(tbElement)
+      self:_SetStageElement(tbElement, tbStageAward.nIndex)
+    end)
+  end
+  self.tbStageScrollView:ScrollToIndex(1, false)
+end
+
+function tbWnd:GetArrayStageAward()
+  local tbReceived = {}
+  local tbNotReceived = {}
+  for nIndex, tbStageAward in ipairs(self.tbStageAward) do
+    tbStageAward.nIndex = nIndex
+    if FashionPretty:HaveReceived(nIndex) then
+      table.insert(tbNotReceived, tbStageAward)
+    else
+      table.insert(tbReceived, tbStageAward)
+    end
+  end
+  local tbList = Lib:MergeTable(tbReceived, tbNotReceived)
+  return tbList
+end
+
+function tbWnd:_SetStageElement(tbElement, nIndex)
+  local nPrettyValue = Fashion:GetPrettyValue(me)
+  local tbAwardInfo = self.tbStageAward[nIndex]
+  local tbStageAwards = Award:GetAward(tbAwardInfo.nAwardId, tbAwardInfo.nShowAwardKey)
+  tbElement.tbItemGridView = Ui:NewItemGridView(tbElement, "ItemCell/reward")
+  for nId, tbStageAward in ipairs(tbStageAwards) do
+    tbElement.tbItemGridView:SetItem(nId, tbStageAward, true)
+  end
+  tbElement.pPanel:Label_SetText("txtInfo", tbAwardInfo.nStage)
+  if FashionPretty:HaveReceived(nIndex) then
+    tbElement.pPanel:SetActive("prg", false)
+    tbElement.pPanel:SetActive("btnReceive", false)
+    tbElement.pPanel:SetActive("imgComplete", true)
+  else
+    tbElement.pPanel:SetActive("imgComplete", false)
+    if nPrettyValue >= tbAwardInfo.nStage then
+      tbElement.pPanel:SetActive("prg", false)
+      tbElement.pPanel:SetActive("btnReceive", true)
+      tbElement.pPanel:SetActive("imgComplete", false)
+      Ui:Button_BindEvent(tbElement.pPanel, "btnReceive", function()
+        FashionPretty:ReceiveStageRewardsReq(nIndex)
+      end)
+      RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, "btnReceive", {
+        RedPointMgr.EVENT.FashionPrettyStageAward
+      })
+    else
+      tbElement.pPanel:SetActive("prg", true)
+      tbElement.pPanel:SetActive("btnReceive", false)
+      tbElement.pPanel:SetActive("imgComplete", false)
+      tbElement.pPanel:Sprite_SetFillAmount("prg/imgBar", 0, nPrettyValue / tbAwardInfo.nStage, 1)
+      tbElement.pPanel:Label_SetText("prg/txtPrg", nPrettyValue .. "/" .. tbAwardInfo.nStage)
+    end
+  end
+end
+
+function tbWnd:OnSynRankData(szKey, nPage)
+  if szKey ~= RankBoard.RankType.PrettyValue or self.nCurPage ~= nPage then
+    return
+  end
+  self:UpdatePage()
+  self:UpdateRank()
+  self:UpdateMyRank()
+  self:RefreshRankScrollView()
+end
+
+function tbWnd:OnFashionDataChange()
+  self:UpdateMyRank()
+end
+
+function tbWnd:OnFashionPrettyStageReward()
+  self:UpdateStageAward()
+end

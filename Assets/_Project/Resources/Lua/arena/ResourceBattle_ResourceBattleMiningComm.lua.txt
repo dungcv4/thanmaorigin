@@ -1,0 +1,231 @@
+Require("CommonScript/Partner/PartnerCommon.lua")
+Require("CommonScript/ResourceBattle/ResourceBattleMiningCfg.lua")
+Require("CommonScript/Npc/NpcDefine.lua")
+Require("CommonScript/Item/Class/KuangMaiJingHua.lua")
+ResourceBattleMining.GROUP_KEY = GetGroupKey("ResourceBattleMining")
+ResourceBattleMining.SAVE_ID = {
+  MiningBeginTime = 2,
+  MiningDay = 3,
+  MineCxt = {
+    {
+      MineLv = 6,
+      MineWuxing = 7,
+      Miners = {
+        8,
+        9,
+        10
+      }
+    },
+    {
+      MineLv = 11,
+      MineWuxing = 12,
+      Miners = {
+        13,
+        14,
+        15
+      }
+    }
+  }
+}
+ResourceBattleMining.Def = {
+  MinerMax = 3,
+  REF_TIME = 14400,
+  MINE_LAST_DAY = 7
+}
+ResourceBattleMining.FakeTongMine = {
+  bIsOpen = false,
+  nMineLv = 4,
+  tbWuxing = {4, 5}
+}
+
+function ResourceBattleMining:GetPlayerLastMine(pPlayer)
+  local nMineLv = 0
+  local tbWuxing = {}
+  for _, v in ipairs(self.SAVE_ID.MineCxt) do
+    nMineLv = pPlayer.GetUserValue(self.GROUP_KEY, v.MineLv)
+    table.insert(tbWuxing, pPlayer.GetUserValue(self.GROUP_KEY, v.MineWuxing))
+  end
+  local tbMines = {nMineLv, tbWuxing}
+  return tbMines
+end
+
+function ResourceBattleMining:IsSystemOpen(pPlayer)
+  local tbMines = self:GetTongMine(pPlayer)
+  if not tbMines then
+    return false
+  end
+  return true
+end
+
+function ResourceBattleMining:IsDoMiningTime()
+  local nNow = GetTime()
+  local nZeroTime = Lib:GetTodayZeroHour(nNow)
+  local tempCfg = ResourceBattleMining.Cfg.DAY_OPEN_TIME
+  local nBegin = nZeroTime + tempCfg[1] * 3600 + tempCfg[2] * 60 + tempCfg[3]
+  tempCfg = ResourceBattleMining.Cfg.DAY_CLOSE_TIME
+  local nEnd = nZeroTime + tempCfg[1] * 3600 + tempCfg[2] * 60 + tempCfg[3]
+  if nBegin >= nEnd then
+    nEnd = nEnd + 86400
+  end
+  return nNow >= nBegin and nNow < nEnd
+end
+
+function ResourceBattleMining:IsMinerSet(pPlayer)
+  for nMineIndex, v in ipairs(self.SAVE_ID.MineCxt) do
+    for nMinerPosIndex, _ in ipairs(v.Miners) do
+      local nPartnerId = self:GetPlayerCurMiner(pPlayer, nMineIndex, nMinerPosIndex)
+      if 0 ~= nPartnerId then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function ResourceBattleMining:IsMinerFullSet(pPlayer)
+  for nMineIndex, v in ipairs(self.SAVE_ID.MineCxt) do
+    for nMinerPosIndex, _ in ipairs(v.Miners) do
+      local nPartnerId = self:GetPlayerCurMiner(pPlayer, nMineIndex, nMinerPosIndex)
+      if 0 == nPartnerId then
+        return false
+      end
+    end
+  end
+  return true
+end
+
+function ResourceBattleMining:CanSetMiner(pPlayer, bNotCheckSystemOpen)
+  if not bNotCheckSystemOpen and not self:IsSystemOpen(pPlayer) then
+    return false, i18n.Get(ResourceBattleMining.Cfg.TXT_NOT_MINING_SYSTEM_OPEN)
+  end
+  if self:HasMined(pPlayer) then
+    return false, i18n.Get(ResourceBattleMining.Cfg.TXT_NEED_DEAL_LAST_MINING)
+  end
+  if not self:IsDoMiningTime() then
+    return false, i18n.Get(ResourceBattleMining.Cfg.TXT_NOT_MINING_TIME)
+  end
+  if self:IsMinedToday(pPlayer) then
+    return false, i18n.Get(ResourceBattleMining.Cfg.TXT_TODAY_ALREADY_MINED)
+  end
+  return true
+end
+
+function ResourceBattleMining:HasMined(pPlayer)
+  local nMiningBeginTime = pPlayer.GetUserValue(self.GROUP_KEY, self.SAVE_ID.MiningBeginTime)
+  return 0 ~= nMiningBeginTime
+end
+
+function ResourceBattleMining:IsMinedToday(pPlayer)
+  local nToday = Lib:GetLocalDay(GetTime() - ResourceBattleMining.Def.REF_TIME)
+  local nRecord = pPlayer.GetUserValue(self.GROUP_KEY, self.SAVE_ID.MiningDay)
+  return nRecord == nToday
+end
+
+function ResourceBattleMining:CalLeftMineTime(pPlayer)
+  local nNow = GetTime()
+  local nMiningBeginTime = pPlayer.GetUserValue(self.GROUP_KEY, self.SAVE_ID.MiningBeginTime)
+  local nEndTime = nMiningBeginTime + ResourceBattleMining.Cfg.MINING_TIME
+  if nNow < nEndTime then
+    return nEndTime - nNow
+  end
+  return 0
+end
+
+function ResourceBattleMining:IsDoneMined(pPlayer)
+  if not self:HasMined(pPlayer) then
+    return true
+  end
+  local nLeftTime = self:CalLeftMineTime(pPlayer)
+  return nLeftTime <= 0
+end
+
+function ResourceBattleMining:GetPlayerCurMiner(pPlayer, nMineIndex, nMinerIndex)
+  if not self.SAVE_ID.MineCxt[nMineIndex] then
+    return 0
+  end
+  if not self.SAVE_ID.MineCxt[nMineIndex].Miners[nMinerIndex] then
+    return 0
+  end
+  local nSaveID = self.SAVE_ID.MineCxt[nMineIndex].Miners[nMinerIndex]
+  return pPlayer.GetUserValue(self.GROUP_KEY, nSaveID)
+end
+
+function ResourceBattleMining:CalMineAwardMultiplier(nMineLv, nMineWuxing, tbTempPosList)
+  local nBaseMul = self.Cfg.MineAwardMultiplier[nMineLv] or 0
+  local nPartnerMul = 0
+  for i = 1, ResourceBattleMining.Def.MinerMax do
+    local nPartnerId = tbTempPosList and tbTempPosList[i]
+    if nPartnerId > 0 then
+      local tbPartnerInfo = Partner:GetPartnerInfo(nPartnerId)
+      if tbPartnerInfo then
+        nPartnerMul = nPartnerMul + ResourceBattleMining.Cfg.PartnerQualityAwardMultiplier[tbPartnerInfo.nQualityLevel]
+        if tbPartnerInfo.nSeries == nMineWuxing then
+          nPartnerMul = nPartnerMul + ResourceBattleMining.Cfg.WUXING_AWARD_MULTIPLIER
+        end
+      end
+    end
+  end
+  return nBaseMul, nPartnerMul
+end
+
+function ResourceBattleMining:CalTotalMineAwardMultiplier(tbAllMineInfo)
+  local nTotalAwardMul = 0
+  for nMineIndex, tbMine in pairs(tbAllMineInfo) do
+    local nBaseMul, nPartnerMul = ResourceBattleMining:CalMineAwardMultiplier(tbMine.nMineLv, tbMine.nMineWuxing, tbMine.tbMinePos)
+    if nBaseMul > 0 and nPartnerMul > 0 then
+      nTotalAwardMul = nTotalAwardMul + nBaseMul
+      nTotalAwardMul = nTotalAwardMul + nPartnerMul
+    end
+  end
+  return nTotalAwardMul
+end
+
+function ResourceBattleMining:CalMineAward(tbAllMineInfo)
+  local nTotalAwardMul = ResourceBattleMining:CalTotalMineAwardMultiplier(tbAllMineInfo)
+  local nCount = math.ceil(ResourceBattleMining.Cfg.MineAward.BaseCount / 100 * nTotalAwardMul)
+  local tbAward = {}
+  table.insert(tbAward, {
+    "Item",
+    ResourceBattleMining.Cfg.MineAward.KuangMaiJingHuaItemID,
+    nCount
+  })
+  return tbAward, nTotalAwardMul
+end
+
+function ResourceBattleMining:CalMineLevel(nRank)
+  for _, v in ipairs(ResourceBattleMining.Cfg.RankToMineLevel) do
+    if nRank <= v[1] then
+      return v[2]
+    end
+  end
+  return 0
+end
+
+function ResourceBattleMining:GenMineWuxing()
+  local tbAll = {}
+  for i = Npc.emSERIES_TYPE.SERIES_METAL, Npc.emSERIES_TYPE.SERIES_EARTH do
+    table.insert(tbAll, i)
+  end
+  Lib:SmashTable(tbAll)
+  local tbRet = {}
+  for i = 1, ResourceBattleMining.Cfg.MINE_GEN_NUM do
+    table.insert(tbRet, tbAll[i])
+  end
+  return tbRet
+end
+
+function ResourceBattleMining:GetAllMineInfo(pPlayer)
+  local tbAllMineInfo = {}
+  for i, tbMine in ipairs(self.SAVE_ID.MineCxt) do
+    local temp = {}
+    temp.nMineLv = pPlayer.GetUserValue(self.GROUP_KEY, tbMine.MineLv)
+    temp.nMineWuxing = pPlayer.GetUserValue(self.GROUP_KEY, tbMine.MineWuxing)
+    local tbMinPos = {}
+    for _, nSaveID in ipairs(tbMine.Miners) do
+      table.insert(tbMinPos, pPlayer.GetUserValue(self.GROUP_KEY, nSaveID))
+    end
+    temp.tbMinePos = tbMinPos
+    table.insert(tbAllMineInfo, temp)
+  end
+  return tbAllMineInfo
+end

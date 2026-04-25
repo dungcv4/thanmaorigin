@@ -1,0 +1,298 @@
+local tbWnd = Ui:CreateWindow("UIStronger")
+tbWnd.tbButtonGroupKey = {
+  [1] = "node/imgBG/Content/Prop/ProplList/Mask/PropCent/btn1",
+  [2] = "node/imgBG/Content/Prop/ProplList/Mask/PropCent/btn2",
+  [3] = "node/imgBG/Content/Prop/ProplList/Mask/PropCent/btn3",
+  [4] = "node/imgBG/Content/Prop/ProplList/Mask/PropCent/btn4",
+  [5] = "node/imgBG/Content/Prop/ProplList/Mask/PropCent/btn5",
+  [6] = "node/imgBG/Content/Prop/ProplList/Mask/PropCent/btn6",
+  [7] = "node/imgBG/Content/Prop/ProplList/Mask/PropCent/btn7"
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_REFRESH_UISTRONG,
+      self.Refresh,
+      self
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  AwardPreviewPanel = "AwardPreviewPanel",
+  Template = "node/imgBG/Content/Prop/SkillPiontList/Mask/SkillPiontCent/Template",
+  txtCurPower = "node/imgBG/Content/FightingNum/txtNow",
+  txtRecommendPower = "node/imgBG/Content/FightingNum/txtRecommend",
+  btnAwardPreview = "node/imgBG/Content/FightingNum/btnAwardPreview",
+  AwardTemplate = "AwardPreviewPanel/imgBG/Scroll View/Viewport/Content/Template",
+  AwardNode1 = "node/imgBG/Content/FightingNum/imgBarBg/icon01/item",
+  AwardNode2 = "node/imgBG/Content/FightingNum/imgBarBg/icon02/item",
+  AwardNode3 = "node/imgBG/Content/FightingNum/imgBarBg/icon03/item",
+  imgBar = "node/imgBG/Content/FightingNum/imgBarBg/imgbar",
+  btnInfo = "node/imgBG/txtTitle/btnInfo",
+  wndJumpTo = "node/wndJumpTo",
+  JumpToEmpty4Raycast = "node/wndJumpTo/Empty4Raycast",
+  WayTemplate = "node/wndJumpTo/imgBG/List/Viewport/Content/Template"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self.pPanel:SetActive(self.wndJumpTo, false)
+    self.tbWayScrollView:Clear()
+    self:Close()
+  end,
+  btnAwardPreview = function(self)
+    self.pPanel:SetActive(self.AwardPreviewPanel, true)
+    self:OpenAwardPreview()
+  end,
+  btnInfo = function(self)
+    Ui:OnHelpClicked("Stronger")
+  end,
+  JumpToEmpty4Raycast = function(self)
+    self.pPanel:SetActive(self.wndJumpTo, false)
+    self.tbWayScrollView:Clear()
+  end
+}
+local tbFnCheckShowWay = {
+  [5] = function(nTaskId)
+    return not Task:IsTaskFinished(me, nTaskId)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbButtonGroup = Ui:NewButtonGroup(self, self.tbButtonGroupKey, true, function(self, nIndex)
+    self.nClickSystem = nIndex
+    self:BtnSystemClick(nIndex)
+    self:UpdateBtnGroupSelect(nIndex)
+    self.tbScrollView:PlayItemGridAnimation()
+  end)
+  for index, value in ipairs(self.tbButtonGroupKey) do
+    self.pPanel:Label_SetText(value .. "/All/txtName", Stronger.tbSystem[index]())
+  end
+  self.tbScrollView = Ui:NewScrollView(self, self.Template)
+  self.tbAwardScrollView = Ui:NewScrollView(self, self.AwardTemplate)
+  self.tbWayScrollView = Ui:NewScrollView(self, self.WayTemplate)
+  self:SetClickEmptyToClose(self.AwardPreviewPanel)
+end
+
+function tbWnd:OnOpen()
+  self.pPanel:SetActive(self.AwardPreviewPanel, false)
+  self:Refresh()
+  self:RegistRedPoint()
+end
+
+function tbWnd:Refresh()
+  self:UpdateTopAward()
+  self.tbButtonGroup:Select(self.nClickSystem or 1)
+  self:UpdateLeftButton()
+end
+
+function tbWnd:UpdateTopAward()
+  local nFightPower = Stronger.nFightPower or 0
+  local nRecommendTotal = Stronger.tbRecommendTotal[me.nLevel].FightPower or 0
+  self.pPanel:Label_SetText(self.txtCurPower, i18n.EasyGet("\229\189\147\229\137\141\230\136\152\229\138\155 {0}", nFightPower))
+  self.pPanel:Label_SetText(self.txtRecommendPower, i18n.EasyGet("\230\142\168\232\141\144\230\136\152\229\138\155 {0}", nRecommendTotal))
+  local nStage = Stronger:GetCurStage()
+  for nIdx, tbItem in ipairs(Stronger.tbAwardsCfg[nStage]) do
+    local szNodePath = "node/imgBG/Content/FightingNum/imgBarBg/icon0"
+    local tbGrid = Ui:NewExistItemGrid(self, string.format("%s%d/item/UIItemGrid", szNodePath, nIdx))
+    if Currency:Valid(tbItem.AwardType) then
+      tbGrid:SetGenericItem({
+        tbItem.AwardType,
+        tbItem.Count
+      })
+    else
+      tbGrid:SetGenericItem({
+        "Item",
+        tbItem.AwardId,
+        tbItem.Count
+      })
+    end
+    tbGrid:SetClickEnable(true)
+    self.pPanel:Label_SetText(string.format("%s%d/txtNum", szNodePath, nIdx), tbItem.FightPower)
+    local bHaveGet = 1 == me.GetUserValue(GetGroupKey("Stronger"), tbItem.UserValueKey)
+    local bCanGrab = nFightPower >= tbItem.FightPower and not bHaveGet
+    self.pPanel:SetActive(string.format("%s%d/btn_Effect", szNodePath, nIdx), bCanGrab)
+    self.pPanel:SetActive(string.format("%s%d/BtnCanGrab", szNodePath, nIdx), bCanGrab)
+    self.pPanel:Button_BindEvent(string.format("%s%d/BtnCanGrab", szNodePath, nIdx), function()
+      RemoteServer.StrongerAwardGrab(tbItem.UserValueKey)
+    end)
+    self.pPanel:SetActive(string.format("%s%d/item/imgRecieved", szNodePath, nIdx), bHaveGet)
+  end
+  local nStartVal = 1 == nStage and 0 or Stronger.tbAwardsCfg[nStage - 1][3].FightPower
+  local nEndVal = Stronger.tbAwardsCfg[nStage][3].FightPower
+  local nFill = 0
+  if nFightPower <= Stronger.tbAwardsCfg[nStage][1].FightPower then
+    local nFrontVal = nFightPower - nStartVal
+    local nBackVal = Stronger.tbAwardsCfg[nStage][1].FightPower - nStartVal
+    nFill = nFrontVal / nBackVal * 0.394
+  elseif nFightPower <= Stronger.tbAwardsCfg[nStage][2].FightPower then
+    local nFrontVal = nFightPower - Stronger.tbAwardsCfg[nStage][1].FightPower
+    local nBackVal = Stronger.tbAwardsCfg[nStage][2].FightPower - Stronger.tbAwardsCfg[nStage][1].FightPower
+    nFill = nFrontVal / nBackVal * 0.302 + 0.394
+  else
+    local nFrontVal = nFightPower - Stronger.tbAwardsCfg[nStage][2].FightPower
+    local nBackVal = Stronger.tbAwardsCfg[nStage][3].FightPower - Stronger.tbAwardsCfg[nStage][2].FightPower
+    nFill = nFrontVal / nBackVal * 0.304 + 0.696
+    nFill = nFill > 1 and 1 or nFill
+  end
+  self.pPanel:GetObject(self.imgBar):GetComponent(Ui.Image).fillAmount = nFill
+end
+
+function tbWnd:BtnSystemClick(nIndex)
+  self.tbScrollView:Reset()
+  local tbData = Stronger.tbStrongerConfig[nIndex]
+  local tbTempData = {}
+  for nIdx, tbInfo in ipairs(tbData) do
+    if Stronger:CheckTimeFrame(tbInfo.TimeFrame) and me.nLevel >= tbInfo.LevelLimit then
+      table.insert(tbTempData, tbInfo)
+    end
+  end
+  for nIdx, tbInfo in ipairs(tbTempData) do
+    self.tbScrollView:SetElement(nIdx, function(tbElement)
+      tbElement.pPanel:Label_SetText("All/PropPiont/txtTitle", i18n.Parse(tbInfo.Name))
+      local nCurFightPower = Stronger:GetFightPowerByType(tbInfo.Data) or 0
+      local szJudge, nRecommendFightPower, szGradeSprite = Stronger:GetDetailFightPowerJudge(tbInfo.szName, me.nLevel, nCurFightPower)
+      tbElement.pPanel:Label_SetText("All/imgGrade/txtGrade", szJudge)
+      tbElement.pPanel:Sprite_SetSprite("All/imgGrade", szGradeSprite)
+      local nValue = nCurFightPower / nRecommendFightPower
+      local nSlider = nValue
+      tbElement.pPanel:GetObject("All/imgBarBg/imgbar"):GetComponent(Ui.Image).fillAmount = nSlider
+      Ui:Button_BindEvent(tbElement.pPanel, "All/btnPromote", function()
+        local action = tbInfo.Action
+        if action and "" ~= action then
+          load("return " .. action)()
+        end
+      end)
+    end)
+  end
+end
+
+function tbWnd:UpdateLeftButton()
+  for nIdx = 1, Lib:CountTB(Stronger.tbStrongerConfig) do
+    local bArrowShow = false
+    local bLeftButtonShow = false
+    for _, tbInfo in ipairs(Stronger.tbStrongerConfig[nIdx]) do
+      local nCurFightPower = Stronger:GetFightPowerByType(tbInfo.Data) or 0
+      local _, nRecommendFightPower = Stronger:GetDetailFightPowerJudge(tbInfo.szName, me.nLevel, nCurFightPower)
+      if nCurFightPower < nRecommendFightPower then
+        bArrowShow = true
+        break
+      end
+    end
+    for _, tbInfo in ipairs(Stronger.tbStrongerConfig[nIdx]) do
+      if Stronger:CheckTimeFrame(tbInfo.TimeFrame) then
+        bLeftButtonShow = true
+        break
+      end
+    end
+    self.pPanel:SetActive(self.tbButtonGroupKey[nIdx], bLeftButtonShow)
+    self.pPanel:SetActive(string.format("%s/All/MarkUp", self.tbButtonGroupKey[nIdx]), bArrowShow)
+  end
+end
+
+function tbWnd:OpenAwardPreview()
+  local nRowCount = Lib:CountTB(Stronger.tbAwardsCfg)
+  self.tbAwardScrollView:Reset()
+  for nIdx = 1, nRowCount do
+    if 1 ~= GetTimeFrameState(Stronger.tbAwardsCfg[nIdx][1].TimeFrame) then
+      return
+    end
+    self.tbAwardScrollView:SetElement(nIdx, function(tbElement)
+      for nIndex, tbAward in ipairs(Stronger.tbAwardsCfg[nIdx]) do
+        if 1 ~= GetTimeFrameState(tbAward.TimeFrame) then
+          tbElement.pPanel:SetActive(string.format("AwardNode%d", nIndex), false)
+        else
+          local tbGrid = Ui:NewExistItemGrid(tbElement, string.format("AwardNode%d/Item/UIItemGrid", nIndex))
+          if Currency:Valid(tbAward.AwardType) then
+            tbGrid:SetGenericItem({
+              tbAward.AwardType,
+              tbAward.Count
+            })
+          else
+            tbGrid:SetGenericItem({
+              "Item",
+              tbAward.AwardId,
+              tbAward.Count
+            })
+          end
+          tbGrid:SetClickEnable(true)
+          tbElement.pPanel:Label_SetText(string.format("AwardNode%d/txtPower", nIndex), tbAward.FightPower)
+          local bHaveGet = 1 == me.GetUserValue(GetGroupKey("Stronger"), tbAward.UserValueKey)
+          tbElement.pPanel:SetActive(string.format("AwardNode%d/CantGrab", nIndex), bHaveGet)
+        end
+      end
+    end)
+  end
+end
+
+function tbWnd:UpdateBtnGroupSelect(nIndex)
+  for index, value in ipairs(Stronger.tbSystem) do
+    self.pPanel:SetActive(string.format("node/imgBG/Content/Prop/ProplList/Mask/PropCent/btn%d/All/imgSlected", index), false)
+  end
+end
+
+function tbWnd:OnClickEmptyClose()
+  self.pPanel:SetActive(self.AwardPreviewPanel, false)
+end
+
+function tbWnd:OnClose()
+  self:UnRegistRedPoint()
+end
+
+function tbWnd:RegistRedPoint()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.AwardNode1, {
+    RedPointMgr.EVENT.Stronger1
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.AwardNode2, {
+    RedPointMgr.EVENT.Stronger2
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.AwardNode3, {
+    RedPointMgr.EVENT.Stronger3
+  })
+end
+
+function tbWnd:UnRegistRedPoint()
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.AwardNode1)
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.AwardNode2)
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.AwardNode3)
+end
+
+function tbWnd:OpenEquipBaseWnd()
+  local szWayName = "szEquipBase"
+  self:ShowWayButtons(szWayName)
+end
+
+function tbWnd:ShowWayButtons(szWayName, ...)
+  self.tbWayScrollView:Clear()
+  local tbStrongerCfg = Stronger.StrongerMultiCfg[szWayName]
+  local tbStrongWayCfg = Stronger.StrongerWayCfg
+  local nIndex = 1
+  for i, wayID in pairs(tbStrongerCfg.tbWay) do
+    local bShow = true
+    if tbFnCheckShowWay[wayID] then
+      bShow = tbFnCheckShowWay[wayID](...)
+    end
+    if bShow then
+      local tbWayInfo = tbStrongWayCfg[wayID]
+      self.tbWayScrollView:SetElement(nIndex, function(tbElement)
+        tbElement.pPanel:Label_SetText("txtName", i18n.Parse(tbWayInfo.szWayName))
+        tbElement.pPanel:Label_SetText("txtDesc", i18n.Parse(tbWayInfo.szWayDesc))
+        Ui:Button_BindEvent(tbElement.pPanel, "", function()
+          tbWayInfo.fnOnTrack()
+          self.pPanel:SetActive(self.wndJumpTo, false)
+          self.tbWayScrollView:Clear()
+        end)
+      end)
+      nIndex = nIndex + 1
+    end
+  end
+  self.pPanel:SetActive(self.wndJumpTo, true)
+end
+
+function tbWnd:OpenMijiWnd()
+  local nSecretBookSubTaskId = 10028
+  local szWayName = "szMiji"
+  self:ShowWayButtons(szWayName, nSecretBookSubTaskId)
+end

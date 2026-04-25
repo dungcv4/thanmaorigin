@@ -1,0 +1,131 @@
+Require("CommonScript/Item/EquipJingZhu/EquipJingZhuCfg.lua")
+Require("CommonScript/Item/EquipJingZhu/AutoJingZhuCfg.lua")
+local EquipJingZhu = Item.EquipJingZhu
+local AutoJingZhu = Item.AutoJingZhu
+AutoJingZhu.tbAction = {ACTION_LEVEL_UP = 1, ACTION_BREAK = 2}
+
+function AutoJingZhu:AutoJingZhuOneStep(nShowFailTextPos)
+  local nChoosePos, nAction
+  for _, nPos in ipairs(Item.tbSortToEquipPos) do
+    local nThisPosLevel = EquipJingZhu:GetJingZhuLevel(me, nPos)
+    local nPosAction, _ = self:GetPosCanDoAction(nPos)
+    if nil ~= nPosAction and (nil == nChoosePos or nThisPosLevel < EquipJingZhu:GetJingZhuLevel(me, nChoosePos) or nThisPosLevel == EquipJingZhu:GetJingZhuLevel(me, nChoosePos) and EquipJingZhu:GetJingZhuBreakLevel(me, nPos) < EquipJingZhu:GetJingZhuBreakLevel(me, nChoosePos)) then
+      nChoosePos = nPos
+      nAction = nPosAction
+    end
+  end
+  if nAction == self.tbAction.ACTION_LEVEL_UP then
+    EquipJingZhu:JingZhuReq(nChoosePos)
+  elseif nAction == self.tbAction.ACTION_BREAK then
+    EquipJingZhu:JingZhuBreakReq(nChoosePos)
+  end
+  if nil ~= nAction then
+    self.nTimerId = Timer:Register(10, function()
+      if self.bInAutoJingZhu then
+        self:AutoJingZhuOneStep(nil)
+      end
+    end)
+    local tbWnd = Ui:GetWindow("UIAutoJingzhu")
+    if nil ~= tbWnd then
+      tbWnd:RemoveStopReasonText()
+    end
+  else
+    self:StopAutoJingZhu()
+    if nil == nShowFailTextPos then
+      nShowFailTextPos = self.nLastChoosePos
+    end
+    if nil ~= nShowFailTextPos then
+      local _, szFailText = self:GetPosCanDoAction(nShowFailTextPos)
+      if nil ~= szFailText then
+        if szFailText == EquipJingZhu:GetCanNotJingZhuTextByReason(EquipJingZhu.tbCanNotJingZhuReason.LackCoin) then
+          GainCurrency:ReadyForJump("Coin")
+        else
+          me.CenterMsg(szFailText)
+        end
+        local tbWnd = Ui:GetWindow("UIAutoJingzhu")
+        if nil ~= tbWnd then
+          tbWnd:AddStopReasonText(szFailText)
+        end
+      end
+    end
+  end
+  if nil ~= nChoosePos then
+    self.nLastChoosePos = nChoosePos
+  end
+end
+
+function AutoJingZhu:GetPosCanDoAction(nPos)
+  local nAction, szFailText
+  local bCanJingZhu, emCanNotJingZhuReason = EquipJingZhu:CanJingZhu(me, nPos)
+  if bCanJingZhu then
+    nAction = self.tbAction.ACTION_LEVEL_UP
+  elseif emCanNotJingZhuReason == EquipJingZhu.tbCanNotJingZhuReason.NeedBreak then
+    local bCanBreak, emCanNotBreakReason = EquipJingZhu:CanJZBreak(me, nPos)
+    if bCanBreak then
+      nAction = self.tbAction.ACTION_BREAK
+    else
+      szFailText = EquipJingZhu:GetCanNotBreakTextByReason(emCanNotBreakReason)
+    end
+  else
+    szFailText = EquipJingZhu:GetCanNotJingZhuTextByReason(emCanNotJingZhuReason)
+  end
+  return nAction, szFailText
+end
+
+function AutoJingZhu:OpenWindowAndStart(nShowFailTextPos)
+  Ui:OpenWindow("UIAutoJingzhu")
+  self:StartAutoJingZhu(nShowFailTextPos)
+end
+
+function AutoJingZhu:StartAutoJingZhu(nShowFailTextPos)
+  self:SetUIAndValueIsAutoJingZhu(true)
+  if self.nTimerId == nil then
+    self:AutoJingZhuOneStep(nShowFailTextPos)
+  end
+end
+
+function AutoJingZhu:StopAutoJingZhu()
+  self:SetUIAndValueIsAutoJingZhu(false)
+  if self.nTimerId ~= nil then
+    Timer:Close(self.nTimerId)
+    self.nTimerId = nil
+  end
+end
+
+function AutoJingZhu:SetUIAndValueIsAutoJingZhu(bValue)
+  local tbWnd = Ui:GetWindow("UIAutoJingzhu")
+  if nil ~= tbWnd then
+    tbWnd:OnIsAutoChange(bValue)
+  end
+  self.bInAutoJingZhu = bValue
+end
+
+function AutoJingZhu:GetNeedShowJingZhuStoneId()
+  local min = 1
+  local max = #AutoJingZhu.JingZhuStoneId
+  local nMinJingZhuLevel = EquipJingZhu:GetMinJingZhuLevel(me)
+  while min < max do
+    local middle = math.floor((min + max) / 2)
+    if nMinJingZhuLevel < AutoJingZhu.JingZhuStoneShowLevel[middle] then
+      max = middle
+    else
+      min = middle + 1
+    end
+  end
+  return AutoJingZhu.JingZhuStoneId[min]
+end
+
+function AutoJingZhu:GetNeedShowMeteoricIronId()
+  local min = 1
+  local max = #AutoJingZhu.MeteoricIronId
+  local nMinJingZhuLevel = EquipJingZhu:GetMinJingZhuLevel(me)
+  while min < max do
+    local middle = math.floor((min + max) / 2)
+    if nMinJingZhuLevel <= AutoJingZhu.MeteoricIronShowLevel[middle] then
+      max = middle
+    else
+      min = middle + 1
+    end
+  end
+  return AutoJingZhu.MeteoricIronId[min]
+end

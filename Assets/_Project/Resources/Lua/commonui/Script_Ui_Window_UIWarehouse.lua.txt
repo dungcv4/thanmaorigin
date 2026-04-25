@@ -1,0 +1,354 @@
+local tbWnd = Ui:CreateWindow("UIWarehouse")
+local tbToggle = Ui.tbToggle
+local tbRefreshCondition = Ui.tbRefreshCondition
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.UpdateItemList
+    },
+    {
+      EventNotify.emNOTIFY_EXPAND_BAG_COUNT,
+      self.UpdateItemCount
+    },
+    {
+      EventNotify.emNOTIFY_EXPAND_BOX_COUNT,
+      self.UpdateItemCount
+    },
+    {
+      EventNotify.emNOTIFY_MAP_ENTER,
+      self.OnEnterMap
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  btnClose = "imgBG/BG/btnClose",
+  boxItemSV = "imgBG/List/Warehouse/bagItemSV",
+  goBoxItemCell = "imgBG/List/Warehouse/bagItemSV/BIViewport/BIContent/ItemCell",
+  txtBoxNumber = "imgBG/List/Warehouse/txtGroup/txtnumber",
+  btnBoxPlus = "imgBG/List/Warehouse/txtGroup/btnPlus",
+  bagItemSV = "imgBG/List/Bag/bagItemSV",
+  goBagItemCell = "imgBG/List/Bag/bagItemSV/BIViewport/BIContent/ItemCell",
+  txtBagNumber = "imgBG/List/Bag/txtGroup/txtnumber",
+  btnBagPlus = "imgBG/List/Bag/txtGroup/btnPlus",
+  btnBoxItemKindTotal = "imgBG/List/Warehouse/btnGroup/btnItemKindTotal",
+  btnBoxItemKindPartner = "imgBG/List/Warehouse/btnGroup/btnItemKindPartner",
+  btnBoxItemKindStone = "imgBG/List/Warehouse/btnGroup/btnItemKindStone",
+  btnBoxItemKindEquip = "imgBG/List/Warehouse/btnGroup/btnItemKindEquip",
+  btnBoxItemKindNormal = "imgBG/List/Warehouse/btnGroup/btnItemKindNormal",
+  btnBagItemKindTotal = "imgBG/List/Bag/btnGroup/btnItemKindTotal",
+  btnBagItemKindPartner = "imgBG/List/Bag/btnGroup/btnItemKindPartner",
+  btnBagItemKindStone = "imgBG/List/Bag/btnGroup/btnItemKindStone",
+  btnBagItemKindEquip = "imgBG/List/Bag/btnGroup/btnItemKindEquip",
+  btnBagItemKindNormal = "imgBG/List/Bag/btnGroup/btnItemKindNormal",
+  toggleQuickWithdraw = "imgBG/List/Warehouse/toggleQuickWithdraw"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnBoxPlus = function(self)
+    Item:RequestExpandBoxCount()
+  end,
+  btnBagPlus = function(self)
+    Item:RequestExpandBagCount()
+  end
+}
+tbWnd.tbOnToggleClick = {
+  toggleQuickWithdraw = function(self, isOn)
+    self.bAutoQuickWithdraw = isOn
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbBoxItemKindGroup = Ui:NewButtonGroup(self, {
+    [1] = self.btnBoxItemKindNormal,
+    [2] = self.btnBoxItemKindEquip,
+    [3] = self.btnBoxItemKindStone,
+    [4] = self.btnBoxItemKindPartner,
+    [tbToggle.TogAll] = self.btnBoxItemKindTotal
+  }, true, function(self, nIndex)
+    self:UpdateBoxItemList()
+    self.pPanel:ScrollRect_SetVerticalNormalizedPosition(self.boxItemSV, 1)
+  end)
+  self.tbBagItemKindGroup = Ui:NewButtonGroup(self, {
+    [1] = self.btnBagItemKindNormal,
+    [2] = self.btnBagItemKindEquip,
+    [3] = self.btnBagItemKindStone,
+    [4] = self.btnBagItemKindPartner,
+    [tbToggle.TogAll] = self.btnBagItemKindTotal
+  }, true, function(self, nIndex)
+    self:UpdateBagItemList()
+    self.pPanel:ScrollRect_SetVerticalNormalizedPosition(self.bagItemSV, 1)
+  end)
+  self.tbBagScrollView = Ui:NewLoopScrollView(self, self.goBagItemCell, "Item")
+  self.tbBoxScrollView = Ui:NewLoopScrollView(self, self.goBoxItemCell, "Item")
+  self.nRow = 5
+  self.bShowSeries = false
+end
+
+function tbWnd:OnOpen()
+  self.bAutoQuickWithdraw = false
+  self.pPanel:Toggle_SetChecked(self.toggleQuickWithdraw, false)
+  self.tbBoxItemKindGroup:Select(tbToggle.TogAll)
+  self.tbBagItemKindGroup:Select(tbToggle.TogAll)
+  self:UpdateItemList()
+end
+
+function tbWnd:CheckWarehouseCanUse()
+  local weekCardLeft = WeekMonthCard:GetWeekCardLeftDay(me)
+  local bMonthCardState = WeekMonthCard:CheckMonthCardState(me)
+  if weekCardLeft > 0 or bMonthCardState then
+    return true
+  else
+    return false
+  end
+end
+
+function tbWnd:UpdateItemList()
+  self:UpdateBoxItemList()
+  self:UpdateBagItemList()
+  self.bLock = false
+end
+
+function tbWnd:UpdateItemCount()
+  self:UpdateBoxCount()
+  self:UpdateBagCount()
+end
+
+function tbWnd:UpdateBoxItemList()
+  local tbAllItemBoxList = Warehouse:GetItemBagList(tbToggle.TogAll)
+  if nil ~= tbAllItemBoxList then
+    self.nAllBoxItemCount = Lib:CountTB(tbAllItemBoxList)
+  else
+    self.nAllBoxItemCount = 0
+  end
+  local nCurBoxItemKind = self.tbBoxItemKindGroup:GetKey()
+  self.nCurBoxItemKind = nCurBoxItemKind
+  self.tbBoxItemList = Warehouse:GetItemBagList(nCurBoxItemKind)
+  self:UpdateBoxItemSV()
+  self:UpdateBoxCount()
+end
+
+function tbWnd:UpdateBagItemList()
+  local tbAllItemBagList = Bag:GetItemBagList(tbToggle.TogAll)
+  if nil ~= tbAllItemBagList then
+    self.nAllItemCount = Lib:CountTB(tbAllItemBagList)
+  else
+    self.nAllItemCount = 0
+  end
+  local nCurBagItemKind = self.tbBagItemKindGroup:GetKey()
+  self.nCurBagItemKind = nCurBagItemKind
+  self.tbItemList = Bag:GetItemBagList(nCurBagItemKind)
+  self:UpdateItemSV()
+  self:UpdateBagCount()
+end
+
+function tbWnd:UpdateItemSV()
+  local nCount = 0
+  if self.tbItemList ~= nil then
+    nCount = Lib:CountTB(self.tbItemList)
+  end
+  local nMaxCount = me.GetMaxCountInBag()
+  
+  local function fnSetItem(tbLoopScroll, nIndex)
+    local nCol = nMaxCount - self.nRow * (nIndex - 1)
+    if nCol > self.nRow then
+      nCol = self.nRow
+    end
+    for i = 1, self.nRow do
+      if i <= nCol then
+        local itemObj = tbLoopScroll:GetGridElement(nIndex, i)
+        local curIndex = (nIndex - 1) * self.nRow + i
+        itemObj.pPanel:SetActive("Main", true)
+        local itemGrid = Ui:NewExistItemGrid(itemObj, "UIItemGrid")
+        self:SaveItemGrid(nIndex, i, itemGrid)
+        if curIndex <= nCount then
+          itemGrid:SetActive(true)
+          local tbItem = self.tbItemList[curIndex]
+          local nItemId = tbItem and tbItem.nItemId
+          local nShowCount = tbItem and tbItem.nShowCount
+          itemGrid.szItemOpt = "Warehouse_ItemBag"
+          itemGrid:SetItem(nItemId, nil, {
+            bShowTip = true,
+            bShowSeries = self.bShowSeries
+          }, nil, nil, nil, nil, nShowCount)
+          itemGrid:SetClickEnable(true, function()
+            if self.bAutoQuickWithdraw then
+              if self.bLock then
+                return
+              else
+                self.bLock = true
+              end
+              self:MoveItemFromBagToBox(nItemId)
+            else
+              Item:ShowItemDetail(itemGrid)
+            end
+          end)
+          itemObj.pPanel:SetDoubleClick("UIItemGrid/ItemLayer", function()
+            self:MoveItemFromBagToBox(nItemId)
+          end)
+        else
+          itemGrid:SetEmpty()
+          itemGrid:SetActive(false)
+        end
+      else
+        tbLoopScroll:GetGridElement(nIndex, i).pPanel:SetActive("Main", false)
+      end
+    end
+  end
+  
+  self.tbBagScrollView:SetElement(math.ceil(nMaxCount / self.nRow), fnSetItem)
+end
+
+function tbWnd:UpdateBoxItemSV()
+  local nCount = 0
+  if self.tbBoxItemList ~= nil then
+    nCount = Lib:CountTB(self.tbBoxItemList)
+  end
+  local nMaxCount = me.GetMaxCountInBox()
+  
+  local function fnSetItem(tbLoopScroll, nIndex)
+    local nCol = nMaxCount - self.nRow * (nIndex - 1)
+    if nCol > self.nRow then
+      nCol = self.nRow
+    end
+    for i = 1, self.nRow do
+      if i <= nCol then
+        local itemObj = tbLoopScroll:GetGridElement(nIndex, i)
+        local curIndex = (nIndex - 1) * self.nRow + i
+        itemObj.pPanel:SetActive("Main", true)
+        local itemGrid = Ui:NewExistItemGrid(itemObj, "UIItemGrid")
+        self:SaveBoxItemGrid(nIndex, i, itemGrid)
+        if curIndex <= nCount then
+          itemGrid:SetActive(true)
+          local tbItem = self.tbBoxItemList[curIndex]
+          local nItemId = tbItem and tbItem.nItemId
+          local nShowCount = tbItem and tbItem.nShowCount
+          itemGrid.szItemOpt = "Warehouse_ItemBox"
+          itemGrid:SetItem(nItemId, nil, {
+            bShowTip = true,
+            bShowSeries = self.bShowSeries
+          }, nil, nil, nil, nil, nShowCount)
+          itemGrid:SetClickEnable(true, function()
+            if self.bAutoQuickWithdraw then
+              if self.bLock then
+                return
+              else
+                self.bLock = true
+              end
+              self:MoveItemFromBoxToBag(nItemId)
+            else
+              Item:ShowItemDetail(itemGrid)
+            end
+          end)
+          itemObj.pPanel:SetDoubleClick("UIItemGrid/ItemLayer", function()
+            self:MoveItemFromBoxToBag(nItemId)
+          end)
+        else
+          itemGrid:SetEmpty()
+          itemGrid:SetActive(false)
+        end
+      else
+        tbLoopScroll:GetGridElement(nIndex, i).pPanel:SetActive("Main", false)
+      end
+    end
+  end
+  
+  self.tbBoxScrollView:SetElement(math.ceil(nMaxCount / self.nRow), fnSetItem)
+end
+
+function tbWnd:SaveItemGrid(nRow, nCol, itemGrid)
+  self.tbItemGridSave = self.tbItemGridSave or {}
+  self.tbItemGridSave[nRow] = self.tbItemGridSave[nRow] or {}
+  self.tbItemGridSave[nRow][nCol] = itemGrid
+end
+
+function tbWnd:GetItemGrid(nRow, nCol)
+  if self.tbItemGridSave ~= nil and self.tbItemGridSave[nRow] ~= nil then
+    return self.tbItemGridSave[nRow][nCol]
+  else
+    return nil
+  end
+end
+
+function tbWnd:SaveBoxItemGrid(nRow, nCol, itemGrid)
+  self.tbBoxItemGridSave = self.tbBoxItemGridSave or {}
+  self.tbBoxItemGridSave[nRow] = self.tbBoxItemGridSave[nRow] or {}
+  self.tbBoxItemGridSave[nRow][nCol] = itemGrid
+end
+
+function tbWnd:GetBoxItemGrid(nRow, nCol)
+  if self.tbBoxItemGridSave ~= nil and self.tbBoxItemGridSave[nRow] ~= nil then
+    return self.tbBoxItemGridSave[nRow][nCol]
+  else
+    return nil
+  end
+end
+
+function tbWnd:UpdateBoxCount()
+  local nMaxCount = me.GetMaxCountInBox()
+  self.pPanel:Label_SetText(self.txtBoxNumber, string.format("%d/%d", self.nAllBoxItemCount or 0, nMaxCount or 0))
+  if nMaxCount >= Item.MAX_BOX_EXPAND then
+    self.pPanel:SetActive(self.btnBoxPlus, false)
+  else
+    self.pPanel:SetActive(self.btnBoxPlus, true)
+  end
+end
+
+function tbWnd:UpdateBagCount()
+  local nMaxCount = me.GetMaxCountInBag()
+  self.pPanel:Label_SetText(self.txtBagNumber, string.format("%d/%d", self.nAllItemCount or 0, nMaxCount or 0))
+  local nExtMaxCnt = 0
+  if Item.ZhenYuan:IsSystemOpen(me) then
+    nExtMaxCnt = Item.ZhenYuan.nBagMaxCnt
+  end
+  if nMaxCount >= Item.MAX_BAG_EXPAND + nExtMaxCnt then
+    self.pPanel:SetActive(self.btnBagPlus, false)
+  else
+    self.pPanel:SetActive(self.btnBagPlus, true)
+  end
+end
+
+function tbWnd:MoveItemFromBagToBox(nIndex)
+  local pItem = KItem.GetItemObj(nIndex)
+  if not pItem then
+    return
+  end
+  local tbBaseInfo = Item:GetItemBaseProp(pItem.dwTemplateId)
+  if tbBaseInfo.bForbidToBox and 1 == tbBaseInfo.bForbidToBox then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\141\229\143\175\229\173\152\229\133\165\228\187\147\229\186\147"))
+    return
+  end
+  if me.GetFreeBoxCount() <= 0 then
+    me.CenterMsg(i18n.EasyGet("\229\176\145\228\190\160\228\187\147\229\186\147\229\183\178\230\187\161\239\188\140\230\151\160\230\179\149\229\173\152\229\133\165\231\137\169\229\147\129"))
+    return
+  end
+  if pItem.nPos ~= Item.EITEMPOS_BAG then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\141\229\156\168\232\131\140\229\140\133\229\134\133"))
+    return
+  end
+  RemoteServer.MoveItemFromBagToBox(nIndex)
+end
+
+function tbWnd:MoveItemFromBoxToBag(nIndex)
+  local pItem = KItem.GetItemObj(nIndex)
+  if not pItem then
+    return
+  end
+  if me.GetFreeBagCount() <= 0 then
+    me.CenterMsg(i18n.EasyGet("\229\176\145\228\190\160\232\131\140\229\140\133\229\183\178\230\187\161\239\188\140\230\151\160\230\179\149\229\143\150\229\135\186\231\137\169\229\147\129"))
+    return
+  end
+  if pItem.nPos ~= Item.EITEMPOS_BOX then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\141\229\156\168\228\187\147\229\186\147\229\134\133"))
+    return
+  end
+  RemoteServer.MoveItemFromBoxToBag(nIndex)
+end
+
+function tbWnd:OnEnterMap()
+  self:Close()
+end

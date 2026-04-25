@@ -1,0 +1,118 @@
+Require("CommonScript/Currency/Currency.lua")
+Require("CommonScript/Color/ColorCom.lua")
+Require("CommonScript/ChangeFaction/ChangeFactionCom.lua")
+ChangeFaction.ERR_HANDLER = {
+  [ChangeFaction.ERR_INVALID_SECTION] = function(tbParam)
+    me.CenterMsg(i18n.Get(ChangeFaction.TERMS.ERR_INVALID_SECTION))
+  end,
+  [ChangeFaction.ERR_DUPLICATE_SECTION] = function(tbParam)
+    me.CenterMsg(i18n.Get(ChangeFaction.TERMS.ERR_DUPLICATE_SECTION))
+  end,
+  [ChangeFaction.ERR_NO_MONEY] = function(tbParam)
+    me.CenterMsg(i18n.Get(ChangeFaction.TERMS.ERR_NO_MONEY, Currency:GetName(ChangeFaction.DEFINE.COST_TYPE), ChangeFaction.DEFINE.COST_NUM))
+  end,
+  [ChangeFaction.ERR_COOLING_DOWN] = function(tbParam)
+    local nLeftTime = table.unpack(tbParam)
+    local szLeftTime = Lib:TimeDesc(nLeftTime)
+    local szCDTime = Lib:TimeDesc12(ChangeFaction.DEFINE.CHANGE_CD)
+    local szHighlightColor = Ui.tbColor:GetColorHexByDefineName(ChangeFaction.DEFINE.TEXT_HIGHLIGHT_COLOR)
+    me.MsgBox(i18n.Get(ChangeFaction.TERMS.ERR_COOLING_DOWN, szCDTime, szHighlightColor, szLeftTime))
+  end,
+  [ChangeFaction.ERR_INVALID_PARAMETER] = function(tbParam)
+    me.CenterMsg(i18n.Get(ChangeFaction.TERMS.ERR_INVALID_PARAMETER))
+  end,
+  [ChangeFaction.ERR_INVALID_FACTION] = function(tbParam)
+    me.CenterMsg(i18n.Get(ChangeFaction.TERMS.ERR_INVALID_FACTION))
+  end,
+  [ChangeFaction.ERR_REPEAT_SECTION] = function(tbParam)
+    me.CenterMsg(i18n.Get(ChangeFaction.TERMS.ERR_REPEAT_SECTION))
+  end,
+  [ChangeFaction.ERR_NOTIN_XISUIDAO] = function(tbParam)
+    me.CenterMsg(i18n.Get(ChangeFaction.TERMS.ERR_NOTIN_XISUIDAO))
+  end,
+  [ChangeFaction.ERR_MASK_SKILL_STATUS] = function(tbParam)
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\230\151\160\230\179\149\229\136\135\230\141\162"))
+  end
+}
+
+function ChangeFaction:ApplyChangeFactionSect(nFactionSect)
+  local bRet, nErr, tbParam = self:CanChangeFactionSect(me, nFactionSect)
+  if not bRet and nErr then
+    self.ERR_HANDLER[nErr](tbParam)
+    return
+  end
+  
+  local function fnConfirm()
+    RemoteServer.RequestChangeFactionSect(nFactionSect)
+  end
+  
+  if me.nLevel <= self.DEFINE.FREE_LEVEL_LIMIT then
+    fnConfirm()
+    return
+  end
+  local szHighlightColor = Ui.tbColor:GetColorHexByDefineName(self.DEFINE.TEXT_HIGHLIGHT_COLOR)
+  local szMoneyName = Currency:GetName(self.DEFINE.COST_TYPE)
+  local szSectName = Faction:GetSectName(me.nFaction, nFactionSect)
+  local szMsg = i18n.Get(self.TERMS.COST_CONFIRM, szHighlightColor, self.DEFINE.COST_NUM, szMoneyName, szHighlightColor, szSectName)
+  me.MsgBox(szMsg, {
+    {
+      i18n.szOk,
+      fnConfirm
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function ChangeFaction:OnChangeFactionSectResult(bRet, nErr, tbParam)
+  if not bRet then
+    self.ERR_HANDLER[nErr](tbParam)
+    return
+  end
+end
+
+function ChangeFaction:OnChangeFactionResult(nFaction, nFactionSect)
+  local nOldFaction = me.nFaction
+  me.SetFaction(nFaction, nFactionSect, me.GetNpc().GetBodySex())
+  me.CenterMsg(i18n.EasyGet("\233\151\168\230\180\190\229\136\135\230\141\162\230\136\144\229\138\159"))
+  if not HanWuYiJi:IsInFubenMap(me) and not DingFengPK:ChkPlayerInMapEx(me) and not LouLanMiZong:IsInFubenMap(me) then
+    local function FnOk()
+      Ui:OpenWindow("UISkill")
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.Get(ChangeFaction.TERMS.RET_CHANGE_SUCCESS), {
+      {FnOk},
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_FACTION, nOldFaction, nFaction)
+end
+
+function ChangeFaction:OnChangeFactionOrSectResult(nFaction, nFactionSect)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_FACTION_SECT, nFaction, nFactionSect)
+end
+
+function ChangeFaction:OnChangeFactionAddSkill(nFactionSkillAdd, bIsApply)
+  if bIsApply then
+    me.ApplyMagicAttrib("faction_skill_add_all", nFactionSkillAdd, 1)
+  else
+    me.RemoveMagicAttrib("faction_skill_add_all", nFactionSkillAdd, 1)
+  end
+  if Ui:WindowVisible("UISkill") then
+    Ui:GetWindow("UISkill"):UpdateFactView()
+  end
+end
+
+function ChangeFaction:ApplyChangeFaction(nFaction, nFactionSect, nSex)
+  nFactionSect = nFactionSect or me.nFactionSect
+  local bRet, nErr, tbParam = self:CanChangeFaction(me, nFaction, nFactionSect, nSex)
+  if not bRet then
+    self.ERR_HANDLER[nErr](tbParam)
+    return
+  end
+  RemoteServer.RequestChangeFaction(nFaction, nFactionSect, nSex)
+end

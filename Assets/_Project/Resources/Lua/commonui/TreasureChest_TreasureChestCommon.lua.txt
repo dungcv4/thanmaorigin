@@ -1,0 +1,157 @@
+TreasureChest.SAVE_GROUP = GetGroupKey("TreasureChest")
+
+function TreasureChest:LoadFile()
+  self.tbTypeCfg = Lib:LoadTabFileEx("Setting/BaiBaoXiang/BBXAwardType.tab", "dsddd", "AwardType", {
+    "AwardType",
+    "Name",
+    "ShowTemplateId1",
+    "ShowTemplateId2",
+    "ShowTemplateId3"
+  })
+  self.tbTypeCfg = SetReadOnly(self.tbTypeCfg)
+  local tbAwardValue = Lib:LoadTabFileEx("Setting/BaiBaoXiang/BBXAward.tab", "dddddd", nil, {
+    "AwardType",
+    "Level",
+    "AwardId",
+    "BetTypeKey1",
+    "BetTypeKey2",
+    "BetTypeKey3"
+  })
+  self.tbAwardValue = {}
+  for _, tbInfo in pairs(tbAwardValue or {}) do
+    self.tbAwardValue[tbInfo.AwardType] = self.tbAwardValue[tbInfo.AwardType] or {}
+    local tbTypeInfo = self.tbAwardValue[tbInfo.AwardType]
+    tbTypeInfo[tbInfo.Level] = {
+      nAwardId = tbInfo.AwardId,
+      tbBetTypeKey = {
+        tbInfo.BetTypeKey1,
+        tbInfo.BetTypeKey2,
+        tbInfo.BetTypeKey3
+      }
+    }
+  end
+  self.tbAwardValue = SetReadOnly(self.tbAwardValue)
+end
+
+TreasureChest:LoadFile()
+TreasureChest.SAVE_LEVEL = 1
+TreasureChest.SAVE_TIMES = 2
+TreasureChest.SAVE_TYPE = 3
+TreasureChest.SAVE_BET_TYPE = 4
+TreasureChest.SAVE_GRID = 5
+TreasureChest.SAVE_OVERFLOW = 6
+TreasureChest.SAVE_CONTINUE = 7
+TreasureChest.SAVE_INTERVAL = 8
+TreasureChest.SAVE_LASTLEVEL = 9
+TreasureChest.bOpenTreasureChest = true
+TreasureChest.nShellTemplateId = 30962
+TreasureChest.NEED_TIME_INTERVAL = 2
+TreasureChest.MAX_LEVEL = 6
+TreasureChest.MAX_EXTRA = 20000
+TreasureChest.TOTAL_RAND = 10000
+TreasureChest.MIN_SHELL = 500
+TreasureChest.PER_ADD_USE = 50
+TreasureChest.STAT_SHELL_MULT = 100
+TreasureChest.FORGE_USE = 20
+TreasureChest.ONCE_FORGE_MAX = 100
+TreasureChest.GLOBAL_CONGRATULATE_TYPE = 1
+TreasureChest.WORLD_CONGRATULATE_TYPE = 2
+TreasureChest.RANK_NUM = 20
+TreasureChest.CONGRATULATE_CFG = {
+  [TreasureChest.GLOBAL_CONGRATULATE_TYPE] = {
+    {5, 1},
+    {4, 3}
+  },
+  [TreasureChest.WORLD_CONGRATULATE_TYPE] = {
+    {4, 1},
+    {3, 3}
+  }
+}
+TreasureChest.Protocol = {
+  GetResult = 1,
+  GetAward = 2,
+  GetPoolCoin = 3,
+  ForgeGoldShell = 4,
+  GetRankList = 5
+}
+TreasureChest.tbBetTypeSetting = {
+  [1] = {1, 2},
+  [2] = {5, 10},
+  [3] = {25, 50}
+}
+TreasureChest.EXCHANGE_TYPE = {AWARD = 1, SHELL = 2}
+TreasureChest.nChestQuality = 6
+TreasureChest.tbLvQuality = {
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  7
+}
+TreasureChest.tbOverFlowRatio = {20, 50}
+TreasureChest.AWD_TYPE_CHEST = 5
+TreasureChest.AWD_TYPE_SHELL = 6
+
+function TreasureChest:GetLevelColor(nLevel)
+  local nQuality = self.tbLvQuality[nLevel]
+  local _, szColor = Item:GetQualityColor(nQuality)
+  return szColor or ""
+end
+
+function TreasureChest:GetMultColor(nAwardNum)
+  local tbBetTypeSetting = self.tbBetTypeSetting
+  local nQuality = 0
+  if nAwardNum == tbBetTypeSetting[1][1] then
+    nQuality = 2
+  elseif nAwardNum == tbBetTypeSetting[2][1] then
+    nQuality = 3
+  elseif nAwardNum == tbBetTypeSetting[3][1] then
+    nQuality = 4
+  end
+  local _, szColor = Item:GetQualityColor(nQuality)
+  return szColor or ""
+end
+
+function TreasureChest:CheckAllowGetResult(pPlayer, nBetType)
+  if not (pPlayer and nBetType) or self:CheckState() == false then
+    return 0
+  end
+  local nInterval = pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_INTERVAL)
+  if GetTime() - nInterval < self.NEED_TIME_INTERVAL then
+    return 0
+  end
+  local nUseCount = (self.tbBetTypeSetting[nBetType] or {})[2]
+  if not nUseCount then
+    return 0
+  end
+  local bOverflow = pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_OVERFLOW)
+  if 1 == bOverflow then
+    return 0
+  end
+  local nTimes = pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_TIMES)
+  local bContinue = pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_CONTINUE)
+  if nTimes > 0 and 0 == bContinue then
+    return 0
+  end
+  local nHaveBetType = pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_BET_TYPE)
+  if nHaveBetType <= 0 then
+    local nCurNum = pPlayer.GetItemCountByTypeInBag(self.nShellTemplateId)
+    if nUseCount > nCurNum then
+      return 0
+    end
+  end
+  return 1
+end
+
+function TreasureChest:CheckState()
+  if 1 ~= GetTimeFrameState("OpenDay2B") then
+    return false
+  end
+  if MODULE_GAMECLIENT then
+    return OnOffController:Check(OnOffController.KEY.TreasureChest)
+  end
+  return self.bOpenTreasureChest
+end

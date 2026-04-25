@@ -1,0 +1,337 @@
+local tbWnd = Ui:CreateWindow("UIQiHun")
+local QiHun = Item.QiHun
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_QIHUN_COMPOSE_FINISH,
+      self.NotifyCompose,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_QIHUN_REFINE_RESULT,
+      self.NotifyReforge,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_QIHUN_REFINE_RANK,
+      self.OnSyncRefineRank
+    },
+    {
+      EventNotify.emNOTIFY_QIHUN_SPLIT_FINISH,
+      self.NotifySplit
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnSyncItemEvent
+    }
+  }
+end
+
+local tbControls = {
+  btnHelp = "node/imgBg/Title/btnHelp",
+  btnClose = "node/imgBg/Close/btnClose",
+  btnCompose = "node/imgBg/PanelOptList/btnCompose",
+  btnReforge = "node/imgBg/PanelOptList/btnRefine",
+  btnSplit = "node/imgBg/PanelOptList/btnSplit",
+  PanelCompose = "node/imgBg/PanelCompose",
+  PanelReforge = "node/imgBg/PanelRefine",
+  PanelSplit = "node/imgBg/PanelSplit",
+  PanelQiHunList = "node/imgBg/RightWnd/PanelQiHunList",
+  PanelRefineRank = "node/imgBg/LeftWnd/PanelRefineRank",
+  wndRate = "wndRate",
+  btnShop = "node/imgBg/RightWnd/PanelQiHunList/btnShop",
+  templateQiHun = "node/imgBg/RightWnd/PanelQiHunList/ScrollView/Viewport/Content/templateQiHun",
+  highRankTemplate = "node/imgBg/LeftWnd/PanelRefineRank/ScrollViewHigh/Viewport/Content/highRankTemplate",
+  lowRankTemplate = "node/imgBg/LeftWnd/PanelRefineRank/ScrollViewLow/Viewport/Content/lowRankTemplate",
+  txtRate = "wndRate/imgBg/txtRate"
+}
+tbWnd.tbControls = tbControls
+tbWnd.PANEL_TYPE_COMPOSE = 1
+tbWnd.PANEL_TYPE_REGORGE = 2
+tbWnd.PANEL_TYPE_SPLIT = 3
+tbWnd.PANEL_SETTING = {
+  [tbWnd.PANEL_TYPE_COMPOSE] = {
+    CLASS = "UIQiHunCompose",
+    OBJ = tbControls.PanelCompose,
+    BTN = tbControls.btnCompose,
+    OpenFunc = function()
+      return true
+    end
+  },
+  [tbWnd.PANEL_TYPE_REGORGE] = {
+    CLASS = "UIQiHunReforge",
+    OBJ = tbControls.PanelReforge,
+    BTN = tbControls.btnReforge,
+    OpenFunc = function()
+      return true
+    end
+  },
+  [tbWnd.PANEL_TYPE_SPLIT] = {
+    CLASS = "UIQiHunSplit",
+    OBJ = tbControls.PanelSplit,
+    BTN = tbControls.btnSplit,
+    OpenFunc = function()
+      return true
+    end
+  }
+}
+tbWnd.tbOnClick = {
+  btnHelp = function(self)
+    Ui:OnHelpClicked("QiHun")
+  end,
+  btnShop = function(self)
+    Ui:OpenWindow("UIShop", 2)
+  end,
+  btnClose = function(self)
+    if self.nPanelType == self.PANEL_TYPE_REGORGE then
+      local nCurReforgeLevel = QiHun:GetCurReforgeLevel(me)
+      if nCurReforgeLevel > 0 then
+        local function fnOk()
+          self:Close()
+        end
+        
+        Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\231\161\174\232\174\164\229\143\150\229\135\186\229\153\168\233\173\130?"), {
+          {fnOk},
+          {}
+        })
+      else
+        self:Close()
+      end
+    else
+      self:Close()
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbTabControl = Ui:NewTabControl(self, self.PANEL_SETTING)
+  self.tbQiHunScrollView = Ui:NewScrollView(self, tbControls.templateQiHun, function(self, nIndex, tbElement)
+    self:OnSelectQiHun(nIndex, tbElement)
+  end)
+  self.highRankScroll = Ui:NewScrollView(self, tbControls.highRankTemplate)
+  self.lowRankScroll = Ui:NewScrollView(self, tbControls.lowRankTemplate)
+  QiHun:ApplyRankData()
+  self:SetClickEmptyToClose(tbControls.wndRate)
+end
+
+function tbWnd:OnOpen(nSelectPanel, nItemTemplateId)
+  self.nSelectIndex = nil
+  self:UpdateQiHunSV()
+  if not self.tbTabControl:OnOpen(nSelectPanel) then
+    return
+  end
+  self.nPanelType = self.tbTabControl.nPanelType
+  if nItemTemplateId then
+    for i = 1, #self.tbQiHunItem do
+      if self.tbQiHunItem[i][1] == nItemTemplateId then
+        self.tbQiHunScrollView:SelectElement(i)
+        break
+      end
+    end
+  else
+    self.tbQiHunScrollView:GoTop()
+  end
+  Item.QiHun:ApplyRankData()
+  self:RefineRankUpdate()
+end
+
+function tbWnd:OnClose()
+  self.tbTabControl:OnClose()
+  self.tbQiHunScrollView:ClearSelected()
+end
+
+function tbWnd:OnPanelChange(nPanelType)
+  self.nPanelType = nPanelType
+end
+
+function tbWnd:UpdateQiHunSV(nSubLevel)
+  self.tbQiHunItem = Item.QiHun:GetQiHunItemNum()
+  if nSubLevel then
+    for i = 1, #self.tbQiHunItem do
+      if self.tbQiHunItem[i][3] == nSubLevel then
+        self.tbQiHunItem[i][2] = self.tbQiHunItem[i][2] - 1
+        if self.tbQiHunItem[i][2] <= 0 then
+          table.remove(self.tbQiHunItem, i)
+        end
+        break
+      end
+    end
+  end
+  self.tbQiHunScrollView:Reset()
+  for i = 1, #self.tbQiHunItem do
+    self.tbQiHunScrollView:SetElement(i, function(tbElement)
+      local nTemplate = self.tbQiHunItem[i][1]
+      local nCount = self.tbQiHunItem[i][2]
+      local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      itemGrid:SetItemByTemplate(nTemplate, nCount)
+      itemGrid:SetClickEnable(true)
+      local szName = Item:GetName(nTemplate, me)
+      local nQuality = Item:GetQuality(nTemplate)
+      local _, szColor = Item:GetQualityColor(nQuality)
+      tbElement.pPanel:Label_SetText("txtName", i18n.EasyGet("<color=#{0}>{1}</color>", szColor, szName))
+      if self.nSelectIndex == i then
+        tbElement.pPanel:SetActive("imgSelected", true)
+      else
+        tbElement.pPanel:SetActive("imgSelected", false)
+      end
+    end)
+  end
+end
+
+function tbWnd:OnSelectQiHun(nIndex, tbElement)
+  if self.nSelectIndex then
+    local tbOldElement = self.tbQiHunScrollView:GetElement(self.nSelectIndex)
+    tbOldElement.pPanel:SetActive("imgSelected", false)
+  end
+  self.nSelectIndex = nIndex
+  tbElement.pPanel:SetActive("imgSelected", true)
+  self.tbTabControl:UpdateSubPanel(self.nPanelType, "OnSelectQiHun")
+end
+
+function tbWnd:GetSelectLevel()
+  if not self.nSelectIndex or not self.tbQiHunItem[self.nSelectIndex] then
+    return nil
+  end
+  local nRet = Item.QiHun:GetLevelByTemplateId(self.tbQiHunItem[self.nSelectIndex][1])
+  return nRet
+end
+
+function tbWnd:ShowRate()
+  local szDesc = ""
+  local nLevel = self:GetSelectLevel()
+  if self.nPanelType == self.PANEL_TYPE_COMPOSE then
+    if not nLevel then
+      szDesc = i18n.EasyGet("\230\156\170\233\128\137\230\139\169\229\153\168\233\173\130\239\188\140\230\151\160\230\179\149\232\174\161\231\174\151\229\133\183\228\189\147\230\166\130\231\142\135")
+    elseif not Item.QiHun.tbComposeInfo[nLevel] then
+      szDesc = i18n.EasyGet("\229\189\147\229\137\141\233\128\137\230\139\169\229\153\168\233\173\130\230\151\160\230\179\149\231\187\167\231\187\173\229\144\136\230\136\144")
+    else
+      local tbCfg = Item.QiHun.tbComposeInfo[nLevel]
+      local nAllWeight = 0
+      for i = 1, #tbCfg do
+        nAllWeight = nAllWeight + tbCfg[i][2]
+      end
+      local nFailWeight = 0
+      for i = 1, #tbCfg do
+        if -2 == tbCfg[i][1] or -1 == tbCfg[i][1] then
+          nFailWeight = nFailWeight + tbCfg[i][2]
+        end
+      end
+      local nFailRate = nFailWeight / nAllWeight
+      local szFailRate = string.format("%.2f", nFailRate * 100)
+      local szSuccessRate = string.format("%.2f", (1 - nFailRate) * 100)
+      local szQiHunText = ""
+      for i = 1, #tbCfg - 1 do
+        if -2 ~= tbCfg[i][1] and -1 ~= tbCfg[i][1] then
+          szQiHunText = szQiHunText .. i18n.EasyGet("\227\128\144\229\153\168\233\173\130\194\183{0}\231\186\167\227\128\145", tbCfg[i][1]) .. "\227\128\129"
+        end
+      end
+      szQiHunText = szQiHunText .. i18n.EasyGet("\227\128\144\229\153\168\233\173\130\194\183{0}\231\186\167\227\128\145", tbCfg[#tbCfg][1])
+      if nFailRate <= 0 then
+        szDesc = i18n.EasyGet("\230\156\172\230\172\161\229\153\168\233\173\130\229\144\136\230\136\144\229\144\142\231\154\132\230\166\130\231\142\135\229\177\149\231\164\186\228\184\186\239\188\154{0}%\230\136\144\229\138\159\239\188\140\232\142\183\229\190\151\228\184\128\228\184\170{1}", szSuccessRate, szQiHunText)
+      else
+        szDesc = i18n.EasyGet("\230\156\172\230\172\161\229\153\168\233\173\130\229\144\136\230\136\144\229\144\142\231\154\132\230\166\130\231\142\135\229\177\149\231\164\186\228\184\186\239\188\154{0}%\229\164\177\232\180\165\239\188\140\230\166\130\231\142\135\230\141\159\229\164\1771-2\228\184\170\229\144\136\230\136\144\229\153\168\233\173\130\239\188\140{1}%\230\136\144\229\138\159\239\188\140\230\166\130\231\142\135\232\142\183\229\190\151{2}\228\185\139\228\184\173\231\154\132\228\184\128\228\184\170", szFailRate, szSuccessRate, szQiHunText)
+      end
+    end
+  elseif self.nPanelType == self.PANEL_TYPE_REGORGE then
+    szDesc = i18n.EasyGet("3-10\231\186\167\229\153\168\233\173\130\229\143\175\232\191\155\232\161\140\233\135\141\233\147\184\227\128\130\233\135\141\233\147\184\229\153\168\233\173\130\230\156\13755%\230\166\130\231\142\135\230\136\144\229\138\159\239\188\140\232\142\183\229\190\151\229\164\154\228\184\170\229\153\168\233\173\130\230\136\150\230\155\180\233\171\152\231\186\167\231\154\132\229\153\168\233\173\130\239\188\15545%\230\166\130\231\142\135\229\164\177\232\180\165\239\188\140\229\153\168\233\173\130\231\162\142\232\163\130\229\185\182\232\191\148\232\191\152\233\147\182\228\184\164\227\128\130\230\175\143\230\172\161\230\148\190\229\133\165\233\135\141\233\147\184\231\130\137\231\154\132\229\153\168\233\173\130\230\156\128\229\164\154\229\143\175\228\187\165\232\191\158\231\187\173\233\135\141\233\147\1848\230\172\161\227\128\130")
+  end
+  self.pPanel:Label_SetText(tbControls.txtRate, szDesc)
+  self.pPanel:SetActive(tbControls.wndRate, true)
+end
+
+function tbWnd:ResetSelectQiHun(nLevel, nSubLevel)
+  self.nSelectIndex = nil
+  self.tbQiHunScrollView:ClearSelected()
+  self:UpdateQiHunSV(nSubLevel)
+  self.tbQiHunScrollView:GoTop()
+  local nTemplateId = QiHun.tbLevelInfo[nLevel][1]
+  for i, tbV in ipairs(self.tbQiHunItem) do
+    if tbV[1] == nTemplateId then
+      self.nSelectIndex = i
+      break
+    end
+  end
+  if self.nSelectIndex then
+    self.tbQiHunScrollView:ScrollToIndex(self.nSelectIndex, true)
+  end
+end
+
+function tbWnd:NotifyCompose(nOldLevel, nNewLevel)
+  self:ResetSelectQiHun(nOldLevel)
+  self.tbTabControl:UpdateSubPanel(self.PANEL_TYPE_COMPOSE, "OnComposeRsp", nOldLevel, nNewLevel)
+end
+
+function tbWnd:NotifyReforgeGetBack(nInitLevel)
+  self:ResetSelectQiHun(nInitLevel)
+  self.tbTabControl:UpdateSubPanel(self.PANEL_TYPE_REGORGE, "ReforgeGetBack")
+end
+
+function tbWnd:NotifyReforge(nintial_level, nOldLevel, nNewLevel)
+  self:ResetSelectQiHun(nintial_level, nNewLevel)
+  self.tbTabControl:UpdateSubPanel(self.PANEL_TYPE_REGORGE, "UpdateResultView", nOldLevel, nNewLevel)
+end
+
+function tbWnd:NotifySplit(nLevel)
+  self:ResetSelectQiHun(nLevel)
+  self.tbTabControl:UpdateSubPanel(self.PANEL_TYPE_SPLIT, "SplitRsp")
+end
+
+function tbWnd:OnSyncRefineRank()
+  self:RefineRankUpdate()
+end
+
+function tbWnd:RefineRankUpdate()
+  self.lowRankScroll:GoTop()
+  self.highRankScroll:Reset()
+  self.lowRankScroll:Reset()
+  local tbRankData = QiHun.tbRankData or {}
+  if tbRankData.tbHigh then
+    for nIndex, tbInfo in ipairs(tbRankData.tbHigh) do
+      self.highRankScroll:SetElement(nIndex, function(tbElement)
+        local szName = tbInfo[1]
+        local nOldLevel = tbInfo[2]
+        local nNewLevel = tbInfo[3]
+        local nServerId = tbInfo[4]
+        local nOptType = tbInfo[5]
+        nOptType = nOptType or Item.QiHun.ReforgeType
+        local _, szColorOld = Item:GetQualityColor(Item:GetQuality(QiHun.tbLevelInfo[nOldLevel][1]))
+        local _, szColorNew = Item:GetQualityColor(Item:GetQuality(QiHun.tbLevelInfo[nNewLevel][1]))
+        local pPanel = tbElement.pPanel
+        if nOptType == Item.QiHun.ReforgeType then
+          local szRank = i18n.EasyGet("<color=#FFC107>{0}\230\156\141{1}</color>\239\188\154<color=#{2}>{3}\231\186\167</color>\233\135\141\233\147\184\229\135\186<color=#{4}>{5}\231\186\167</color>", nServerId, szName, szColorOld, nOldLevel, szColorNew, nNewLevel)
+          pPanel:Label_SetText("txtMsg", szRank)
+        else
+          local szRank = i18n.EasyGet("<color=#FFC107>{0}\230\156\141{1}</color>\239\188\154<color=#{2}>{3}\231\186\167</color>\229\144\136\230\136\144\229\135\186<color=#{4}>{5}\231\186\167</color>", nServerId, szName, szColorOld, nOldLevel, szColorNew, nNewLevel)
+          pPanel:Label_SetText("txtMsg", szRank)
+        end
+      end)
+    end
+  end
+  if tbRankData.tbLow then
+    for nIndex, tbInfo in ipairs(tbRankData.tbLow) do
+      self.lowRankScroll:SetElement(nIndex, function(tbElement)
+        local szName = tbInfo[1]
+        local nOldLevel = tbInfo[2]
+        local nNewLevel = tbInfo[3]
+        local nServerId = tbInfo[4]
+        local nOptType = tbInfo[5]
+        nOptType = nOptType or Item.QiHun.ReforgeType
+        local _, szColorOld = Item:GetQualityColor(Item:GetQuality(QiHun.tbLevelInfo[nOldLevel][1]))
+        local _, szColorNew = Item:GetQualityColor(Item:GetQuality(QiHun.tbLevelInfo[nNewLevel][1]))
+        local pPanel = tbElement.pPanel
+        if nOptType == Item.QiHun.ReforgeType then
+          local szRank = i18n.EasyGet("<color=#FFC107>{0}\230\156\141{1}</color>\239\188\154<color=#{2}>{3}\231\186\167</color>\233\135\141\233\147\184\229\135\186<color=#{4}>{5}\231\186\167</color>", nServerId, szName, szColorOld, nOldLevel, szColorNew, nNewLevel)
+          pPanel:Label_SetText("txtMsg", szRank)
+        else
+          local szRank = i18n.EasyGet("<color=#FFC107>{0}\230\156\141{1}</color>\239\188\154<color=#{2}>{3}\231\186\167</color>\229\144\136\230\136\144\229\135\186<color=#{4}>{5}\231\186\167</color>", nServerId, szName, szColorOld, nOldLevel, szColorNew, nNewLevel)
+          pPanel:Label_SetText("txtMsg", szRank)
+        end
+      end)
+    end
+  end
+end
+
+function tbWnd:OnSyncItemEvent(nItemId, bUpdateAll)
+  self:UpdateQiHunSV()
+end

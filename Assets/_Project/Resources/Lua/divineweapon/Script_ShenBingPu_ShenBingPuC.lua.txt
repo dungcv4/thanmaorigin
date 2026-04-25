@@ -1,0 +1,370 @@
+Require("CommonScript/ShenBingPu/ShenBingPuCommon.lua")
+local ShenBingPuC = Item.ShenBingPu
+ShenBingPuC.CLIENT_CMD = {
+  [ShenBingPuC.Protocol.Enhance] = "OnEnhanceResp",
+  [ShenBingPuC.Protocol.Compose] = "OnComposeResp",
+  [ShenBingPuC.Protocol.Recycle] = "OnRecycleResp",
+  [ShenBingPuC.Protocol.Activate] = "OnActivateResp",
+  [ShenBingPuC.Protocol.Identify] = "OnIdentifyResp",
+  [ShenBingPuC.Protocol.SyncSuitAttrib] = "OnSyncSuitAttribResp",
+  [ShenBingPuC.Protocol.SyncAttrib] = "OnSyncAttribResp"
+}
+
+function ShenBingPuC:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnSyncItemEvent,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_DEL_ITEM,
+      self.OnDelItem,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.OnChangeMoney,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL,
+      self.OnLevelChange,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_USE_UNUSE_EQUIP,
+      self.OnUseUnUseEquip,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_PLAYER_FIRST_LOGIN_TODAY,
+      self.OnFirstLogin,
+      self
+    }
+  }
+end
+
+function ShenBingPuC:OnFirstLogin()
+  self:RefreshExternOnceRedPoint()
+end
+
+function ShenBingPuC:OnSyncItemEvent()
+  self:RefreshBagEntranceRedPoint()
+  self:RefreshExternOnceRedPoint()
+end
+
+function ShenBingPuC:OnDelItem()
+  self:RefreshBagEntranceRedPoint()
+  self:RefreshExternOnceRedPoint()
+end
+
+function ShenBingPuC:OnChangeMoney()
+  self:RefreshBagEntranceRedPoint()
+  self:RefreshExternOnceRedPoint()
+end
+
+function ShenBingPuC:OnLevelChange()
+  self:RefreshBagEntranceRedPoint()
+  self:RefreshExternOnceRedPoint()
+end
+
+function ShenBingPuC:OnUseUnUseEquip()
+  self:RefreshBagEntranceRedPoint()
+  self:RefreshExternOnceRedPoint()
+end
+
+function ShenBingPuC:RefreshExternOnceRedPoint()
+  local tbClass = Ui:GetClass("UIDivineWeapon")
+  if tbClass and tbClass.CheckHasRedPointInside then
+    local bRet = tbClass:CheckHasRedPointInside()
+    if bRet and not RedPointMgr:CheckEvent(RedPointMgr.EVENT.ShenBingExternOnce) then
+      RedPointMgr:LightRedPoint(RedPointMgr.EVENT.ShenBingExternOnce)
+    elseif not bRet and RedPointMgr:CheckEvent(RedPointMgr.EVENT.ShenBingExternOnce) then
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ShenBingExternOnce)
+    end
+  end
+end
+
+function ShenBingPuC:RefreshBagEntranceRedPoint()
+  local tbClass = Ui:GetClass("UIDivineWeapon")
+  if tbClass and tbClass.CheckHasRedPointInside then
+    local bRet = tbClass:CheckHasRedPointInside()
+    if bRet and not RedPointMgr:CheckEvent(RedPointMgr.EVENT.ShenBingBagEntrance) then
+      RedPointMgr:LightRedPoint(RedPointMgr.EVENT.ShenBingBagEntrance)
+    elseif not bRet and RedPointMgr:CheckEvent(RedPointMgr.EVENT.ShenBingBagEntrance) then
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ShenBingBagEntrance)
+    end
+  end
+end
+
+function ShenBingPuC:ServerRequest(nProtocol, ...)
+  if not ShenBingPuC.CLIENT_CMD[nProtocol] or not self[ShenBingPuC.CLIENT_CMD[nProtocol]] then
+    Lib:LogFormat("ShenBingPuC: ServerRequest failed, invalid protocol = %s, nPlayerId = %d", nProtocol, me.dwID)
+    return
+  end
+  self[ShenBingPuC.CLIENT_CMD[nProtocol]](self, ...)
+end
+
+function ShenBingPuC:OnActivateResp(nSlot)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SHENGBING_ACTIVATE_SUCCESS, nSlot)
+end
+
+function ShenBingPuC:OnEnhanceResp(nSlot, nMainAttrIndex, nHistoryLevel, nAddLevel)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SHENGBING_ENHANCE_SUCCESS, nSlot, nMainAttrIndex, nHistoryLevel, nAddLevel)
+end
+
+function ShenBingPuC:OnIdentifyResp(nSeedTemplateId, nNewWeaponId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SHENGBING_IDENTIFY_SUCCESS, nSeedTemplateId, nNewWeaponId)
+end
+
+function ShenBingPuC:OnRecycleResp(tbTemplateList)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SHENGBING_RECYCLE_SUCCESS, tbTemplateList)
+end
+
+function ShenBingPuC:OnComposeResp(nResult, nNewWeaponId, nNewTemplateId, nMainItemId)
+  if 1 == nResult then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SHENGBING_COMPOSE_SUCCESS, nResult, nNewWeaponId, nNewTemplateId, 0)
+  else
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SHENGBING_COMPOSE_FAIL, nResult, 0, 0, nMainItemId)
+  end
+end
+
+function ShenBingPuC:CallServerScript(nProtocol, ...)
+  RemoteServer.RequestShenBingPu(nProtocol, ...)
+end
+
+function ShenBingPuC:DoEnhanceReq(nWeaponId, nMaterialId)
+  local bRet, szMsg = self:CheckCanEnhanceV2(nWeaponId)
+  if not bRet then
+    if not Lib:IsEmptyStr(szMsg) then
+      me.CenterMsg(szMsg)
+    end
+    return false
+  end
+  local pWeapon = KItem.GetItemObj(nWeaponId)
+  local nSlot = Item:GetExtEquipSlot(pWeapon)
+  self:CallServerScript(self.Protocol.Enhance, nSlot, nMaterialId)
+  return true
+end
+
+function ShenBingPuC:DoRecycleForBatchSell(tbItemList)
+  local tbSellItem = {}
+  for _, nItemId in pairs(tbItemList) do
+    local pItem = me.GetItemInBag(nItemId)
+    if not pItem or not self:CheckIsShenBingPu(pItem) and pItem.szClass ~= "ShenBingPuSeed" then
+      return
+    end
+    tbSellItem[nItemId] = tbSellItem[nItemId] or 0
+    tbSellItem[nItemId] = tbSellItem[nItemId] + pItem.nCount
+  end
+  self:DoRecycleReq(tbSellItem)
+end
+
+function ShenBingPuC:DoRecycleReq(tbItemId)
+  for nItemId, nCount in pairs(tbItemId) do
+    local pItem = me.GetItemInBag(nItemId)
+    if not pItem or not self:CheckIsShenBingPu(pItem) and pItem.szClass ~= "ShenBingPuSeed" or nCount > pItem.nCount then
+      return
+    end
+  end
+  if Lib:CountTB(tbItemId) <= 0 then
+    return
+  end
+  self:CallServerScript(self.Protocol.Recycle, tbItemId)
+end
+
+function ShenBingPuC:DoIdentifyReq(nSeedId)
+  local pSeed = me.GetItemInBag(nSeedId)
+  if not pSeed or pSeed.szClass ~= "ShenBingPuSeed" then
+    return
+  end
+  local tbInfo = Item:GetItemBaseProp(pSeed.dwTemplateId)
+  if tbInfo and tbInfo.nRequireLevel and tbInfo.nRequireLevel > me.nTotalLevel then
+    me.CenterMsg(i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179\239\188\140\228\184\141\232\131\189\233\137\180\229\174\154"))
+    return
+  end
+  local szCurrencyType, nPrice = self:GetIdentifyCost(pSeed.dwTemplateId)
+  local nOwnNum = me.GetMoney(szCurrencyType)
+  if nPrice > nOwnNum then
+    local function funcOK()
+      GainCurrency:DirectJump(szCurrencyType)
+    end
+    
+    local function funcCancel()
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\232\142\183\229\143\150\239\188\159", Currency:GetName(szCurrencyType)), {
+      {funcOK},
+      {funcCancel}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+    return
+  else
+    local function funcOK()
+      self:CallServerScript(self.Protocol.Identify, nSeedId)
+    end
+    
+    local function funcCancel()
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\130\168\231\161\174\229\174\154\232\166\129\232\138\177\232\180\185{0}{1}\230\157\165\233\137\180\229\174\154\230\173\164\232\163\133\229\164\135\229\144\151\239\188\159", nPrice, Currency:GetName(szCurrencyType)), {
+      {funcOK},
+      {funcCancel}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  end
+end
+
+function ShenBingPuC:DoActivateReq(nWeaponId)
+  local pWeapon = KItem.GetItemObj(nWeaponId)
+  if not pWeapon then
+    return
+  end
+  local nSlot = Item:GetExtEquipSlot(pWeapon)
+  if self:CheckHasActivate(me, nSlot) then
+    return
+  end
+  self:CallServerScript(self.Protocol.Activate, nSlot)
+end
+
+function ShenBingPuC:DoComposeReq(nWeaponId1, nWeaponId2)
+  local pEquip1 = me.GetItemInBag(nWeaponId1)
+  local pEquip2 = me.GetItemInBag(nWeaponId2)
+  local bRet, szMsg = self:CheckCanCompose(pEquip1, pEquip2)
+  if bRet then
+    self:CallServerScript(self.Protocol.Compose, nWeaponId1, nWeaponId2)
+  elseif not Lib:IsEmptyStr(szMsg) then
+    me.CenterMsg(szMsg)
+  end
+end
+
+function ShenBingPuC:OnSyncSuitAttribResp(tbPrevSuitAttr, tbCurSuitAttr)
+  self:DoMultiRemoveMagicAttr(me, tbPrevSuitAttr)
+  self:DoMultiApplyMagicAttr(me, tbCurSuitAttr)
+end
+
+function ShenBingPuC:OnSyncAttribResp(tbAllAttr, bApply)
+  if bApply then
+    self:DoMultiApplyMagicAttr(me, tbAllAttr)
+  else
+    self:DoMultiRemoveMagicAttr(me, tbAllAttr)
+  end
+end
+
+function ShenBingPuC:CheckCanEnhanceV2(nWeaponId)
+  local pWeapon = KItem.GetItemObj(nWeaponId)
+  if not pWeapon or not ShenBingPuC:CheckIsShenBingPu(pWeapon) then
+    return false, ""
+  end
+  local nCurMaterialId = ShenBingPuC:GetCurIterMaterial() or 0
+  local nSlot = Item:GetExtEquipSlot(pWeapon)
+  local bRet, szMsg = ShenBingPuC:CheckCanEnhance(me, nSlot, nCurMaterialId)
+  if not bRet then
+    return false, szMsg
+  end
+  local nOwnMaterialNum = me.GetItemCountInBags(nCurMaterialId)
+  local nMinRequireNum = ShenBingPuC:GetEnhanceCostNumByIter(me, nSlot)
+  if ShenBingPuC:CheckHasDailySaleCount(me) then
+    nMinRequireNum = math.floor(nMinRequireNum * Item.ShenBingPu.CFG.nDailtSaleOff / 10)
+  end
+  if nOwnMaterialNum < nMinRequireNum then
+    return false, i18n.EasyGet("\230\157\144\230\150\153\228\184\141\232\182\179")
+  end
+  local nOwnCoinNum = me.GetMoney(Currency.TYPE.Coin)
+  local nMinCoinRequireNum = ShenBingPuC:GetEnhanceCostCoinByIter(me, nSlot)
+  if ShenBingPuC:CheckHasDailySaleCount(me) then
+    nMinCoinRequireNum = math.floor(nMinCoinRequireNum * Item.ShenBingPu.CFG.nDailtSaleOff / 10)
+  end
+  if nOwnCoinNum < nMinCoinRequireNum then
+    return false, i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179")
+  end
+  return true, ""
+end
+
+function ShenBingPuC:CheckSlotHasReplaceChoice(nSlot)
+  if not self:CheckIsValidSlot(nSlot) then
+    return false
+  end
+  local tbAllWeapon = self:GetAllShenBingPuItemInBagBySlot(me, nSlot)
+  local nCurSlotFightPower = 0
+  local pUsingWeapon = self:GetUsingShenBingPuBySlot(me, nSlot)
+  if pUsingWeapon then
+    nCurSlotFightPower = self:GetWeaponFightPower(me, pUsingWeapon)
+  end
+  for _, pWeapon in ipairs(tbAllWeapon) do
+    if me.nTotalLevel >= pWeapon.nUseLevel and nCurSlotFightPower < self:GetWeaponFightPower(me, pWeapon) then
+      return true
+    end
+  end
+  return false
+end
+
+function ShenBingPuC:CheckAllHasReplaceChoiceSlot()
+  local tbAllSlot = {}
+  for i = Item.ShenBingPu.WEAPON_1, Item.ShenBingPu.WEAPON_3 do
+    tbAllSlot[i] = self:CheckSlotHasReplaceChoice(i)
+  end
+  return tbAllSlot
+end
+
+function ShenBingPuC:CheckSlotCanEnhance(nSlot)
+  if not self:CheckIsValidSlot(nSlot) then
+    return false
+  end
+  local pUsingWeapon = self:GetUsingShenBingPuBySlot(me, nSlot)
+  if not pUsingWeapon then
+    return false
+  end
+  local bRet, _ = self:CheckCanEnhanceV2(pUsingWeapon.dwId)
+  return bRet
+end
+
+function ShenBingPuC:CheckAllCanEnhanceSlot()
+  local tbAllSlot = {}
+  for i = Item.ShenBingPu.WEAPON_1, Item.ShenBingPu.WEAPON_3 do
+    tbAllSlot[i] = self:CheckSlotCanEnhance(i)
+  end
+  return tbAllSlot
+end
+
+function ShenBingPuC:CheckSlotCanActivate(nSlot)
+  local pUsingWeapon = self:GetUsingShenBingPuBySlot(me, nSlot)
+  if not pUsingWeapon then
+    return false
+  end
+  local bRet = self:CheckHasActivate(me, nSlot)
+  if true == bRet or nil == bRet then
+    return false
+  else
+    local szCurIteration = self:GetCurIteration()
+    local nMaterialId, nNeedNum = self:GetActivateCost(szCurIteration)
+    if not Lib:IsInteger(nMaterialId) or not Lib:IsInteger(nNeedNum) then
+      return false
+    end
+    local nOwnNum = me.GetItemCountInBags(nMaterialId)
+    return nNeedNum <= nOwnNum
+  end
+end
+
+function ShenBingPuC:CheckAllCanActivateSlot()
+  local tbAllSlot = {}
+  for i = Item.ShenBingPu.WEAPON_1, Item.ShenBingPu.WEAPON_3 do
+    tbAllSlot[i] = self:CheckSlotCanActivate(i)
+  end
+  return tbAllSlot
+end
+
+function ShenBingPuC:InitNotifyEvent()
+  local tbNotifyEvents = self:NotifyEvents()
+  for _, tbEvent in ipairs(tbNotifyEvents) do
+    EventNotify:UnRegistNotify(tbEvent[1], tbEvent[3])
+    EventNotify:RegistNotify(tbEvent[1], tbEvent[2], tbEvent[3])
+  end
+end
+
+ShenBingPuC:InitNotifyEvent()

@@ -1,0 +1,144 @@
+local tbWnd = Ui:CreateWindow("UISocialJieYiKick")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_JIEYI_DATA,
+      self.Refresh
+    },
+    {
+      EventNotify.emNoTIFY_SYNC_FRIEND_DATA,
+      self.Refresh
+    },
+    {
+      EventNotify.emNOTIFY_MAP_SWITCH,
+      self.Close
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  Template = "node/imgBG/Content/imgList/List/Template",
+  imgList = "node/imgBG/Content/imgList",
+  NotInfo = "node/imgBG/Content/NotInfo"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbJieYiList = Ui:NewLoopScrollView(self, tbControls.Template)
+end
+
+function tbWnd:OnOpen()
+  self:Refresh()
+end
+
+function tbWnd:Refresh()
+  if not self:Visible() then
+    return
+  end
+  local tbJieYiData = SocialJieYi:GetJieYiData()
+  if not tbJieYiData then
+    self:Close()
+    return
+  end
+  local tbRoleInfo = {}
+  local szKinOrTongName
+  if me.dwTongId > 0 then
+    szKinOrTongName = Tong:GetTongName(me.dwTongId)
+  elseif me.dwKinId > 0 then
+    szKinOrTongName = Kin:GetKinName(me.dwKinId)
+  end
+  tbRoleInfo[#tbRoleInfo + 1] = {
+    dwID = me.dwID,
+    szName = me.szName,
+    nPortrait = me.nPortrait,
+    nFaction = me.nFaction,
+    nLevel = me.nLevel,
+    dwKinId = me.dwKinId,
+    szKinOrTongName = szKinOrTongName,
+    tbChuanGong = nil,
+    nVipLevel = me.GetVipLevel(),
+    nState = Player.emPLAYER_STATE_NORMAL
+  }
+  for dwRoleId, _ in pairs(tbJieYiData.tbBrothers) do
+    if dwRoleId ~= me.dwID then
+      local tbInfo = FriendShip:GetFriendDataInfo(dwRoleId)
+      if tbInfo then
+        tbRoleInfo[#tbRoleInfo + 1] = {
+          dwID = tbInfo.dwID,
+          szName = tbInfo.szName,
+          nPortrait = tbInfo.nPortrait,
+          nFaction = tbInfo.nFaction,
+          nLevel = tbInfo.nLevel,
+          dwKinId = tbInfo.dwKinId,
+          szKinOrTongName = tbInfo.szKinOrTongName,
+          tbChuanGong = tbInfo.tbChuanGong,
+          nVipLevel = tbInfo.nVipLevel,
+          nState = tbInfo.nState
+        }
+      end
+    end
+  end
+  local bHaveList = #tbRoleInfo > 0
+  self.pPanel:SetActive(tbControls.imgList, bHaveList)
+  self.pPanel:SetActive(tbControls.NotInfo, not bHaveList)
+  if bHaveList then
+    self.tbJieYiList:SetElement(#tbRoleInfo, function(tbLoopScroll, i)
+      local tbElement = tbLoopScroll:GetElement(i)
+      if not tbElement then
+        return
+      end
+      local tbRoleData = tbRoleInfo[i]
+      if not tbRoleData then
+        return
+      end
+      local pPanel = tbElement.pPanel
+      local bSelf = tbRoleData.dwID == me.dwID
+      pPanel:SetActive("PortraitObj/Portrait/Image/OutlineObj", tbRoleData.nState ~= Player.emPLAYER_STATE_NORMAL)
+      pPanel:Sprite_SetSprite("PortraitObj/Portrait/Image", PlayerPortrait:GetIcon(tbRoleData.nPortrait))
+      PlayerPortraitFrame:SetPortraitFrame(pPanel, "PortraitObj/PortraitFrame", tbRoleData.nPortraitFrame)
+      pPanel:Label_SetText("PortraitObj/Level/Text", tbRoleData.nLevel)
+      pPanel:Sprite_SetSprite("PortraitObj/imgFactionIcon", Faction:GetIcon(tbRoleData.nFaction))
+      if not bSelf then
+        Ui:Button_BindEvent(pPanel, "PortraitObj", function()
+          local tbData = {
+            dwRoleId = tbRoleData.dwID,
+            szName = tbRoleData.szName,
+            nPortrait = tbRoleData.nPortrait,
+            nFaction = tbRoleData.nFaction,
+            nLevel = tbRoleData.nLevel,
+            dwKinId = tbRoleData.dwKinId,
+            szKinOrTongName = tbRoleData.szKinOrTongName,
+            tbChuanGong = tbRoleData.tbChuanGong,
+            nVipLevel = tbRoleData.nVipLevel
+          }
+          Ui:OpenWindow("UIRightPopUpMenu", "friend", tbData, tbElement, 420, -200)
+        end, self)
+      else
+        Ui:Button_UnBindEvent(pPanel, "PortraitObj")
+      end
+      pPanel:Label_SetText("txtName", tbRoleData.szName)
+      pPanel:SetActive("btnRemove", not bSelf)
+      pPanel:SetActive("btnQuit", bSelf)
+      Ui:Button_BindEvent(pPanel, "btnQuit", self.ApplyQuit, self)
+      Ui:Button_BindEvent(pPanel, "btnRemove", self.KickMember, self, tbRoleData.dwID)
+    end)
+  end
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:ApplyQuit()
+  SocialJieYi:ApplyQuit()
+end
+
+function tbWnd:KickMember(dwRoleId)
+  SocialJieYi:ApplyKick(dwRoleId)
+end

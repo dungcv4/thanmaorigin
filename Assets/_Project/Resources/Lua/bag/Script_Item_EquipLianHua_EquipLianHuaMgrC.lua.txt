@@ -1,0 +1,149 @@
+Require("CommonScript/Item/EquipLianHua/EquipLianHuaCfg.lua")
+Require("Script/Ui/Common/RedPointMgr.lua")
+local EquipLianHua = Item.EquipLianHua
+EquipLianHua.tbGradeScoreAddText = {
+  [1] = function()
+    return i18n.EasyGet("\231\167\152\231\177\141\230\138\128\232\131\189")
+  end,
+  [2] = function()
+    return i18n.EasyGet("\228\184\138\233\152\181\229\144\140\228\188\180\230\138\164\228\184\187\230\138\128\232\131\189")
+  end
+}
+EquipLianHua.tbGradeScoreAddValue = {
+  [1] = EquipLianHua.nSecretAddSkillLevel,
+  [2] = EquipLianHua.nPartnerProtectAddSkillLevel
+}
+EquipLianHua.tbEquipPos2RedPoint = {
+  [Item.EQUIPPOS_HELM] = RedPointMgr.EVENT.HelmLianHua,
+  [Item.EQUIPPOS_ARMOR] = RedPointMgr.EVENT.ArmorLianHua,
+  [Item.EQUIPPOS_BELT] = RedPointMgr.EVENT.BeltLianHua,
+  [Item.EQUIPPOS_CUFF] = RedPointMgr.EVENT.CuffLianHua,
+  [Item.EQUIPPOS_BOOTS] = RedPointMgr.EVENT.BootsLianHua,
+  [Item.EQUIPPOS_WEAPON] = RedPointMgr.EVENT.WeaponLianHua,
+  [Item.EQUIPPOS_NECKLACE] = RedPointMgr.EVENT.NecklaceLianHua,
+  [Item.EQUIPPOS_RING] = RedPointMgr.EVENT.RingLianHua,
+  [Item.EQUIPPOS_PENDANT] = RedPointMgr.EVENT.PendantLianHua,
+  [Item.EQUIPPOS_AMULET] = RedPointMgr.EVENT.AmuletLianHua
+}
+EquipLianHua.tbEquipPos2NamePrefix = {
+  [Item.EQUIPPOS_HELM] = function()
+    return i18n.EasyGet("\233\128\144\233\185\191")
+  end,
+  [Item.EQUIPPOS_ARMOR] = function()
+    return i18n.EasyGet("\230\173\166\229\168\129")
+  end,
+  [Item.EQUIPPOS_BELT] = function()
+    return i18n.EasyGet("\233\128\144\233\185\191")
+  end,
+  [Item.EQUIPPOS_CUFF] = function()
+    return i18n.EasyGet("\233\128\141\233\129\165")
+  end,
+  [Item.EQUIPPOS_BOOTS] = function()
+    return i18n.EasyGet("\233\128\141\233\129\165")
+  end,
+  [Item.EQUIPPOS_WEAPON] = function()
+    return i18n.EasyGet("\233\128\144\233\185\191")
+  end,
+  [Item.EQUIPPOS_NECKLACE] = function()
+    return i18n.EasyGet("\233\128\144\233\185\191")
+  end,
+  [Item.EQUIPPOS_RING] = function()
+    return i18n.EasyGet("\230\173\166\229\168\129")
+  end,
+  [Item.EQUIPPOS_PENDANT] = function()
+    return i18n.EasyGet("\233\128\141\233\129\165")
+  end,
+  [Item.EQUIPPOS_AMULET] = function()
+    return i18n.EasyGet("\230\173\166\229\168\129")
+  end
+}
+EquipLianHua.nLianHuaQuality = 7
+
+function EquipLianHua:OnLoginC()
+  self:LoadFightPowerSetting()
+  self.szLHGradeScoreTimeFrame = ""
+  for _, tbInfo in ipairs(self.tbGradeScoreInfo) do
+    if 1 == GetTimeFrameState(tbInfo.szTimeFrame) then
+      self.szLHGradeScoreTimeFrame = tbInfo.szTimeFrame
+    else
+      break
+    end
+  end
+end
+
+function EquipLianHua:CheckIsShowWindow()
+  if not self:CheckIsOpen() then
+    return false
+  end
+  local tbEquip = me.GetEquips()
+  for k, v in pairs(tbEquip) do
+    if k <= Item.EQUIPPOS_AMULET then
+      local pEquip = KItem.GetItemObj(v)
+      if pEquip and pEquip.nLevel >= Item.EquipLianHua.tbMinLeveLimit[k] then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function EquipLianHua:LianHuaReq(nEquipPos)
+  RemoteServer.OnEquipLianHuaRequest("LianHuaReq", nEquipPos)
+end
+
+function EquipLianHua:LianHuaRsp(nEquipPos, nOldLevel)
+  local pEquip = me.GetEquipByPos(nEquipPos)
+  if pEquip and not me.IsMaskPlayerAttr() then
+    self:ApplyAttrib(me, pEquip, self:GetLianHuaLevel(me, pEquip.nEquipPos))
+  end
+  if 0 == nOldLevel then
+    self:OnLianHuaActive(me, nEquipPos)
+  end
+  me.CenterMsg(i18n.EasyGet("\231\130\188\229\140\150\230\136\144\229\138\159"))
+  if Ui:WindowVisible("UIEquipment") then
+    Ui:GetWindow("UIEquipment"):NotifyEquipLianHua("showeffect")
+  end
+  self:OnCheckRedPoint()
+  Item.Stone:OnCheckRedPoint()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_EQUIP_LIANHUA_SUCCEED)
+end
+
+function EquipLianHua:FactionChange(nOldFaction, nFaction)
+  local tbEquipList = {}
+  local tbLianhuaLevel = {}
+  for i = Item.EQUIPPOS_HELM, Item.EQUIPPOS_AMULET do
+    local pEquip = me.GetEquipByPos(i)
+    tbLianhuaLevel[i] = self:GetLianHuaLevel(me, i)
+    if pEquip then
+      tbEquipList[i] = pEquip
+    end
+  end
+  Item.EquipLianHua:UpdateAllEquipAttr(me.GetNpc(), tbEquipList, false, tbLianhuaLevel)
+  Item.EquipLianHua:UpdateAllEquipAttr(me.GetNpc(), tbEquipList, true, tbLianhuaLevel)
+end
+
+function EquipLianHua:OnCheckRedPoint()
+  for nPos, nRedPoint in pairs(self.tbEquipPos2RedPoint) do
+    if self:CanLianHua(me, nPos) then
+      RedPointMgr:LightRedPoint(nRedPoint)
+    else
+      RedPointMgr:FadeRedPoint(nRedPoint)
+    end
+  end
+end
+
+function EquipLianHua:OnSyncItemLimitTime()
+  if not PlayerEvent.bLogin then
+    return
+  end
+  self:OnCheckRedPoint()
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_FACTION, EquipLianHua)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_FACTION, EquipLianHua.FactionChange, EquipLianHua)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, EquipLianHua)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, EquipLianHua.OnCheckRedPoint, EquipLianHua)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM_TIME_LIMIT, EquipLianHua)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM_TIME_LIMIT, EquipLianHua.OnSyncItemLimitTime, EquipLianHua)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, EquipLianHua)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, EquipLianHua.OnCheckRedPoint, EquipLianHua)

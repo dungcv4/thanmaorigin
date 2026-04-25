@@ -1,0 +1,263 @@
+Require("CommonScript/Currency/Currency.lua")
+Require("CommonScript/LifeSkill/LifeSkillCfg.lua")
+LifeSkill.ERROR = {
+  NOT_LEARN_RECIPE = 1,
+  NOT_ENOUGH_MATERIAL = 2,
+  NOT_ENOUGH_MONEY = 3,
+  NOT_ENOUGH_BAG = 4,
+  NOT_LEARN_SKILL = 5,
+  MAX_SKILL_LEVEL = 6,
+  NOT_SPECIAL_SKILL = 7,
+  LEVELUP_SUCCESS = 7,
+  NEXT_LEVEL_REQUIRE_TIPS = 8
+}
+LifeSkill.Protocol = {
+  C2SLevelUp = 1,
+  C2SCraft = 2,
+  C2SRequestData = 3,
+  C2SComfirmSetSpecialty = 4,
+  C2SSetTodaySecondConfirm = 5,
+  C2SForgetSpecialty = 6
+}
+LifeSkill.nRandomAttrXiYouQuality = 6
+LifeSkill.nRandomAttrJingLiangQuality = 4
+LifeSkill.GROUP_KEY = GetGroupKey("LifeSkill")
+LifeSkill.FREE_FORGET_RECORD_DATA_INDEX = 3
+LifeSkill.QualitySixFailureKeyList = {
+  [1] = 4,
+  [2] = 5,
+  [3] = 6,
+  [4] = 7
+}
+LifeSkill.nRequireLevelOffset = 3
+LifeSkill.tbWayHandle = {
+  OpenShop = function(tbInfo)
+    local nWareId = tonumber(tbInfo.Param1)
+    return function()
+      Shop:OpenShopBuyWidDefault(nil, nil, nWareId)
+    end
+  end,
+  OpenWelfare = function(tbInfo)
+    return function()
+      Ui:OpenWindow("UIWelfare", "PANEL_TYPE_WEEK_MONTH_CARD")
+    end
+  end
+}
+
+function LifeSkill:Init()
+  if not Currency:Valid(LifeSkill.LevelUpCurrencyType) then
+    error(string.format("[LifeSkill] LevelUp Currency=%s not valid", LifeSkill.LevelUpCurrencyType))
+    return
+  end
+  self.tbLevel = Lib:EasyLoadTabFile("Setting/LifeSkill/LifeSkillLevel.tab", {"nSkillId", "nLevel"})
+  for nSkillId, tbSkillLevelInfo in pairs(self.tbLevel) do
+    for nLevel, _ in pairs(tbSkillLevelInfo) do
+      if nLevel > LifeSkill.MaxLevel then
+        error(string.format("[LifeSkill] Level(%d) > MaxLevel(%d) Currency=%s not valid", nLevel, LifeSkill.MaxLevel))
+        return
+      end
+    end
+  end
+  self.tbSkills = Lib:LoadTabFileEx("Setting/LifeSkill/LifeSkill.tab", "sdsssdd", "nSkillId", {
+    "szName",
+    "nSkillId",
+    "szBtnName",
+    "szNormalIcon",
+    "szSelectedIcon",
+    "nTeacherId",
+    "nMapTemplateId"
+  })
+  self.tbTeachers = {}
+  self.tbSkillRecipes = {}
+  for nSkillId, v in pairs(self.tbSkills) do
+    self.tbSkillRecipes[nSkillId] = {}
+    for nLevel = 1, LifeSkill.MaxLevel do
+      self.tbSkillRecipes[nSkillId][nLevel] = {}
+    end
+    self.tbTeachers[v.nTeacherId] = v
+  end
+  self.tbRecipes = Lib:LoadTabFileEx("Setting/LifeSkill/Recipe.tab", "dsssdsddddddddddddddsdd", "nRecipeId", {
+    "nRecipeId",
+    "szName",
+    "szDescParam",
+    "szIcon",
+    "nEquipPos",
+    "szCurrencyType",
+    "nSkill",
+    "nLevel",
+    "nCost",
+    "nMaterialId",
+    "nMaterialCount",
+    "nProduct1Id",
+    "nProduct1Rate",
+    "nProduct2Id",
+    "nProduct2Rate",
+    "nProduct3Id",
+    "nProduct3Rate",
+    "nGuaranteedProductId",
+    "nOtherId",
+    "nOtherRate",
+    "szCurrencyType2",
+    "nCost2",
+    "nOtherNums"
+  })
+  for nRecipeId, tbRecipe in pairs(self.tbRecipes) do
+    local tbProducts = {}
+    local tbProductRate = {}
+    if tbRecipe.nSkill > 0 then
+      table.insert(self.tbSkillRecipes[tbRecipe.nSkill][tbRecipe.nLevel], tbRecipe)
+    end
+    if not Currency:Valid(tbRecipe.szCurrencyType) then
+      error(string.format("[LifeSkill] currency=%s not valid", tbRecipe.szCurrencyType))
+      return
+    end
+    if not Currency:Valid(tbRecipe.szCurrencyType2) then
+      error(string.format("[LifeSkill] currency=%s not valid", tbRecipe.szCurrencyType2))
+      return
+    end
+    local nNeedBagCount = 0
+    local nTotalRate = 0
+    for i = 1, 3 do
+      local szIdKey = string.format("nProduct%dId", i)
+      local szRateKey = string.format("nProduct%dRate", i)
+      if tbRecipe[szIdKey] > 0 then
+        table.insert(tbProducts, tbRecipe[szIdKey])
+        table.insert(tbProductRate, tbRecipe[szRateKey])
+        nTotalRate = nTotalRate + tbRecipe[szRateKey]
+      end
+    end
+    if #tbProducts > 0 then
+      nNeedBagCount = nNeedBagCount + 1
+    end
+    if tbRecipe.nOtherId > 0 then
+      nNeedBagCount = nNeedBagCount + 1
+    end
+    if nTotalRate ~= LifeSkill.MaxRandValue then
+      error(string.format("[LifeSkill] product total rate=%d %%", math.floor(nTotalRate * 100 / LifeSkill.MaxRandValue)))
+      return
+    end
+    tbRecipe.tbProducts = tbProducts
+    tbRecipe.tbProductRate = tbProductRate
+    tbRecipe.nNeedBagCount = nNeedBagCount
+  end
+  self.tbOther = Lib:LoadTabFileEx("Setting/LifeSkill/LifeSkillOther.tab", "dds", "nLevel", {
+    "nLevel",
+    "nCost",
+    "szOpenTime"
+  })
+  self:__LoadFile_WayFile()
+end
+
+function LifeSkill:__LoadFile_WayFile()
+  self.CFG_WAY = {}
+  local szFile = "Setting/LifeSkill/LifeSkillWay.tab"
+  self.CFG_WAY = Lib:LoadTabFileEx(szFile, "sdssss", "nWayId", {
+    "szWayName",
+    "nWayId",
+    "szWayDesc",
+    "szWayType",
+    "Param1",
+    "Param2",
+    "Param3"
+  })
+  for _, tbInfo in ipairs(self.CFG_WAY) do
+    if tbInfo.szWayType and tbInfo.szWayType ~= "" then
+      local handle = LifeSkill.tbWayHandle[tbInfo.szWayType]
+      if handle then
+        tbInfo.fnOnTrack = handle(tbInfo)
+      end
+    end
+  end
+  self.CFG_WAY = SetReadOnly(self.CFG_WAY)
+end
+
+function LifeSkill:GetCraftCostCoefficient()
+  return LifeSkill.nCraftCostCoefficient
+end
+
+function LifeSkill:CheckMaterial(tbRecipeInfo)
+  if tbRecipeInfo.nMaterialId > 0 and tbRecipeInfo.nMaterialCount > 0 then
+    local nCount = me.GetItemCountInBags(tbRecipeInfo.nMaterialId)
+    if nCount < tbRecipeInfo.nMaterialCount then
+      return false
+    end
+  end
+  return true
+end
+
+function LifeSkill:CheckIsCanLifeSkillLvUp(nSkillId, nLevel)
+  local tbLevel = self.tbLevel[nSkillId][nLevel + 1]
+  if not tbLevel then
+    return false
+  elseif me.nLevel >= tbLevel.nPlayerLevel and me.GetMoney(LifeSkill.LevelUpCurrencyType) >= tbLevel.nCost then
+    return true
+  else
+    return false
+  end
+end
+
+function LifeSkill:GetCurLifeSkillCount()
+  local tbPlayerData = LifeSkill:GetClientData()
+  local count = 0
+  for i, v in pairs(tbPlayerData.tbSkills) do
+    count = count + 1
+  end
+  return count
+end
+
+function LifeSkill:GetLifeSkillInfo(nSkillId)
+  return self.tbSkills[nSkillId]
+end
+
+function LifeSkill:GetCanCraftMaxLevel(nSkillId, nPlayerLevel)
+  local min = 1
+  local max = self.MaxLevel
+  while min < max do
+    local middle = math.ceil((min + max) / 2)
+    if nPlayerLevel >= self.tbLevel[nSkillId][middle].nPlayerLevel then
+      min = middle
+    else
+      max = middle - 1
+    end
+  end
+  return min
+end
+
+function LifeSkill:IsCanFreeForgetSpecialty(pPlayer)
+  return pPlayer.nLevel <= self.FreeForgetLevelLimit and pPlayer.GetUserValue(self.GROUP_KEY, self.FREE_FORGET_RECORD_DATA_INDEX) < self.FreeForgetTimeLimit
+end
+
+function LifeSkill:GetEquipPosByRecipeId(nRecipeId)
+  if nRecipeId and self.tbRecipes[nRecipeId] then
+    return self.tbRecipes[nRecipeId].nEquipPos or 0
+  else
+    return 0
+  end
+end
+
+function LifeSkill:GetOtherRateByRecipeId(nRecipeId)
+  local tbRecipeInfo = self.tbRecipes[nRecipeId]
+  if not tbRecipeInfo or not tbRecipeInfo.nOtherRate then
+    return
+  end
+  local nRatePercent = math.floor(tbRecipeInfo.nOtherRate / self.MaxRandValue * 100)
+  return nRatePercent
+end
+
+function LifeSkill:GetProductRequieLvByRecipeId(nRecipeId)
+  local tbRecipeInfo = self.tbRecipes[nRecipeId]
+  if not tbRecipeInfo or not tbRecipeInfo.szDescParam then
+    return
+  end
+  local nRequireLevel = tonumber(tbRecipeInfo.szDescParam)
+  return nRequireLevel
+end
+
+function LifeSkill:IsDoubleRateOpen()
+  if 1 ~= GetTimeFrameState(LifeSkill.DoubleRateTimeframe) then
+    return false
+  end
+  return true
+end
+
+LifeSkill:Init()

@@ -1,0 +1,694 @@
+local tbWnd = Ui:CreateClass("UIEquipEnhance", "UIPanel")
+local tbControls = {
+  goEquipTemplate = "panelEquipList/imgList/List/Template",
+  goEquipGrid = "panelEnhance/EquipInfo/UIItemGrid",
+  txtEquipName = "panelEnhance/EquipInfo/txtEquipName",
+  goEnhancePossibleLevel1 = "panelEnhance/EquipInfo/EnhancePossibleLevel1",
+  goEnhancePossibleLevel2 = "panelEnhance/EquipInfo/EnhancePossibleLevel2",
+  goXuanJingBag = "panelEnhance/EnhanceMaterial/XuanjingBag",
+  goBagItemGrid = "panelEnhance/EnhanceMaterial/XuanjingBag/Item",
+  goSelItemGrid = "panelEnhance/EnhanceMaterial/CostXuanjing/Item",
+  btnCompose = "panelEnhance/EnhanceMaterial/btnXuanjingCompose",
+  btnAutoAdd = "panelEnhance/EnhanceMaterial/btnAutoAdd",
+  goAttribute = "panelEnhance/AttributePreview/Attribute",
+  txtEnhanceCost = "panelEnhance/panelEnhance/txtEnhanceCost",
+  btnEnhance = "panelEnhance/panelEnhance/btnEnhance",
+  txtCount = "panelEnhance/panelEnhance/txtCount",
+  Success_Effect = "Success_Effect",
+  Fail_Effect = "Fail_Effect",
+  txtFail = "Fail_Effect/txtSuccess",
+  txtSuccess = "Success_Effect/txtSuccess",
+  txtXuanjingCostTips = "panelEnhance/EquipInfo/txtXuanjingCostTips",
+  txtDesc = "panelEnhance/AttributePreview/txtDesc",
+  txtTips = "panelEnhance/panelEnhance/txtTips"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnCompose = function(self)
+    Ui:OpenWindow("UIXuanJingCompose")
+  end,
+  btnAutoAdd = function(self)
+    local bRet, szMsg = self:CanPutOnXuanJing()
+    if not bRet then
+      me.CenterMsg(szMsg)
+      return
+    end
+    self:OnClickAutoAdd()
+  end,
+  btnEnhance = function(self)
+    self:OnClickEnhance()
+  end
+}
+tbWnd.EQUIPPOS_GROUP = {
+  {
+    Item.EQUIPPOS_WEAPON
+  },
+  {
+    Item.EQUIPPOS_ARMOR
+  },
+  {
+    Item.EQUIPPOS_HELM,
+    Item.EQUIPPOS_CUFF,
+    Item.EQUIPPOS_BELT,
+    Item.EQUIPPOS_BOOTS
+  },
+  {
+    Item.EQUIPPOS_NECKLACE,
+    Item.EQUIPPOS_PENDANT,
+    Item.EQUIPPOS_AMULET,
+    Item.EQUIPPOS_RING
+  }
+}
+tbWnd.ATTR_NUM_LIMIT = 2
+
+function tbWnd:OnCreate()
+  self.tbEquipScrollView = Ui:NewScrollView(self, self.goEquipTemplate, self.SwitchEquip, false, true)
+  self.tbEquipGrid = Ui:NewExistItemGrid(self, self.goEquipGrid)
+  self.tbEquipGrid:SetClickEnable(true)
+  self.tbBagItemGridView = Ui:NewItemGridView(self, self.goBagItemGrid)
+  self.tbSelItemGridView = Ui:NewItemGridView(self, self.goSelItemGrid)
+  self.pPanel:SetActive(self.Fail_Effect, false)
+  self.pPanel:SetActive(self.Success_Effect, false)
+end
+
+function tbWnd:OnOpen(nEquipPos)
+  self.pPanel:Label_SetText(self.txtFail, i18n.EasyGet("\229\188\186\229\140\150\229\164\177\232\180\165"))
+  self.pPanel:Label_SetText(self.txtSuccess, i18n.EasyGet("\229\188\186\229\140\150\230\136\144\229\138\159"))
+  self:UpdateView(nEquipPos)
+  self.tbEquipScrollView:PlayAnimation()
+end
+
+function tbWnd:OnClose()
+  if self.nSuccessEffectTimer then
+    Timer:Close(self.nSuccessEffectTimer)
+  end
+  if self.nFailEffectTimer then
+    Timer:Close(self.nFailEffectTimer)
+  end
+  self.nSuccessEffectTimer = nil
+  self.nFailEffectTimer = nil
+  self.pPanel:SetActive(self.Fail_Effect, false)
+  self.pPanel:SetActive(self.Success_Effect, false)
+  if self.tbEnhanceEffect then
+    self.pPanel:DeleteObject(self.tbEnhanceEffect.szKey)
+  end
+  self.tbEnhanceEffect = nil
+  self.nEquipPosIndex = nil
+  self.HasAutoAdd = nil
+end
+
+function tbWnd:InitItem()
+  self.tbBagItemList = {}
+  for nLv = #Item.EquipEnhance.XUANJING_ITEM, 1, -1 do
+    local nNum = me.GetItemCountInBags(Item.EquipEnhance.XUANJING_ITEM[nLv])
+    if 0 ~= nNum then
+      table.insert(self.tbBagItemList, {nLv = nLv, nNum = nNum})
+    end
+  end
+  self.tbSelItemList = {}
+  self.HasAutoAdd = false
+end
+
+function tbWnd:ShowEquip()
+  self.tbEquipScrollView:Reset()
+  self.tbEquipList = {}
+  local tbEquip = me.GetEquips()
+  for k, v in pairs(tbEquip) do
+    if k <= Item.EQUIPPOS_AMULET then
+      local pEquip = KItem.GetItemObj(v)
+      table.insert(self.tbEquipList, {
+        pEquip,
+        Item.tbEquipSort[pEquip.nEquipPos]
+      })
+    end
+  end
+  
+  local function fnDamageCmp(a, b)
+    return a[2] < b[2]
+  end
+  
+  table.sort(self.tbEquipList, fnDamageCmp)
+  for nIndex, v in ipairs(self.tbEquipList) do
+    local pEquip = v[1]
+    self.tbEquipScrollView:SetElement(nIndex, function(tbElement)
+      if not tbElement.tbEquipGrid then
+        tbElement.tbEquipGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbElement.tbEquipGrid:SetClickEnable(true, self.SwitchEquip, self, nIndex)
+      end
+      tbElement.tbEquipGrid:SetItem(pEquip.dwId, pEquip.dwTemplateId)
+      tbElement.pPanel:Label_SetText("txtEquipName", Item:GetName(pEquip.dwTemplateId, me))
+      local nEquipEnhanceLevel = Item.EquipEnhance:GetEquipEnhanceLevel(me, pEquip.nEquipPos)
+      if not Item.EquipWuLian:IsWuLianOpenC(nEquipEnhanceLevel, pEquip.nLevel) then
+        tbElement.pPanel:SetActive("imgWuLian", false)
+        tbElement.pPanel:Label_SetText("txtEnhanceLevel", i18n.EasyGet("\229\188\186\229\140\150\231\173\137\231\186\167"))
+        tbElement.pPanel:Label_SetText("txtEnhanceLevel/txtEnhanceLevelValue", nEquipEnhanceLevel)
+      else
+        tbElement.pPanel:SetActive("imgWuLian", true)
+        local nWuLianLevel = Item.EquipWuLian:GetEquipWuLianLevel(me, pEquip.nEquipPos)
+        tbElement.pPanel:Label_SetText("txtEnhanceLevel", i18n.EasyGet("\230\173\166\231\130\188\231\173\137\231\186\167"))
+        tbElement.pPanel:Label_SetText("txtEnhanceLevel/txtEnhanceLevelValue", nWuLianLevel)
+      end
+      RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, "Main", {
+        Item.EquipEnhance.EQUIPPOS_2_REDPOINT[pEquip.nEquipPos]
+      })
+    end)
+    table.insert(self.tbEquipPosList, pEquip.nEquipPos)
+  end
+end
+
+function tbWnd:SwitchEquip(nIndex)
+  if self.nEquipPosIndex == nIndex and not self.bUpdateView then
+    return
+  end
+  self.bUpdateView = nil
+  self.nEquipPosIndex = nIndex
+  for nId = 1, self.tbEquipScrollView:GetCount() do
+    local tbElement = self.tbEquipScrollView:GetElement(nId)
+    tbElement.pPanel:SetActive("imgSelected", nId == self.nEquipPosIndex)
+  end
+  local pEquip = me.GetEquipByPos(self.tbEquipPosList[self.nEquipPosIndex])
+  local nLevel = Item.EquipEnhance:GetEquipEnhanceLevel(me, pEquip.nEquipPos)
+  if not Item.EquipWuLian:IsWuLianOpenC(nLevel, pEquip.nLevel) then
+    self.pPanel:Label_SetText(self.txtFail, i18n.EasyGet("\229\188\186\229\140\150\229\164\177\232\180\165"))
+    self.pPanel:Label_SetText(self.txtSuccess, i18n.EasyGet("\229\188\186\229\140\150\230\136\144\229\138\159"))
+    self.pPanel:Label_SetText(self.txtTips, i18n.EasyGet("\226\128\187\230\155\180\230\141\162\232\163\133\229\164\135\230\151\182\228\188\154\228\191\157\231\149\153\229\188\186\229\140\150\231\173\137\231\186\167"))
+    self.pPanel:Label_SetText(self.txtDesc, i18n.EasyGet("\229\188\186\229\140\150\229\138\160\230\136\144\233\162\132\232\167\136"))
+    self.pPanel:Button_SetText(self.btnEnhance, i18n.EasyGet("\229\188\186\229\140\150"), "Text")
+    self.bIsEnhance = true
+  else
+    self.pPanel:Label_SetText(self.txtFail, i18n.EasyGet("\230\173\166\231\130\188\229\164\177\232\180\165"))
+    self.pPanel:Label_SetText(self.txtSuccess, i18n.EasyGet("\230\173\166\231\130\188\230\136\144\229\138\159"))
+    self.pPanel:Label_SetText(self.txtTips, i18n.EasyGet("\226\128\187\230\155\180\230\141\162\232\163\133\229\164\135\230\151\182\228\188\154\228\191\157\231\149\153\230\173\166\231\130\188\231\173\137\231\186\167"))
+    self.pPanel:Label_SetText(self.txtDesc, i18n.EasyGet("\230\173\166\231\130\188\229\138\160\230\136\144\233\162\132\232\167\136"))
+    self.pPanel:Button_SetText(self.btnEnhance, i18n.EasyGet("\230\173\166\231\130\188"), "Text")
+    self.bIsEnhance = false
+  end
+  self:InitItem()
+  self:ShowEnhance()
+  self:ShowEnhanceCount()
+end
+
+function tbWnd:ShowEnhance()
+  self:ClearEnhance()
+  if not self.tbEquipPosList[self.nEquipPosIndex] then
+    return
+  end
+  local pEquip = me.GetEquipByPos(self.tbEquipPosList[self.nEquipPosIndex])
+  if not pEquip then
+    return
+  end
+  self.tbEquipGrid:SetItem(pEquip.dwId, pEquip.dwTemplateId)
+  self.pPanel:Label_SetText(self.txtEquipName, Item:GetName(pEquip.dwTemplateId, me))
+  for nId, tbItem in ipairs(self.tbBagItemList) do
+    self.tbBagItemGridView:SetItem(nId, {
+      "Item",
+      Item.EquipEnhance.XUANJING_ITEM[tbItem.nLv],
+      tbItem.nNum
+    }, true, self.OnClickBagItem, self, nId)
+  end
+  local nPlusId = #self.tbBagItemList + 1
+  if nPlusId <= #Item.EquipEnhance.XUANJING_ITEM then
+    local szPath = self.tbBagItemGridView:GetItemKey(nPlusId) .. "/imgPlus"
+    self.pPanel:Button_SetEnable(szPath, true)
+    Ui:Button_BindEvent(self.pPanel, szPath, self.OnClickBuyItem, self)
+    self.pPanel:SetActive(szPath, true)
+  end
+  for nId, nLv in ipairs(self.tbSelItemList) do
+    self.tbSelItemGridView:SetItem(nId, {
+      "Item",
+      Item.EquipEnhance.XUANJING_ITEM[nLv],
+      1
+    }, true, self.OnClickSelItem, self, nId)
+  end
+  local nPos = pEquip.nEquipPos
+  local nOrgLv = 0
+  if self.bIsEnhance then
+    nOrgLv = Item.EquipEnhance:GetEquipEnhanceLevel(me, pEquip.nEquipPos)
+  else
+    nOrgLv = Item.EquipWuLian:GetEquipWuLianLevel(me, pEquip.nEquipPos)
+  end
+  local nReqVal = 0
+  local nNewLv = nOrgLv + 1
+  local nPercent = 0
+  local nCalcUse = 0
+  if 0 ~= #self.tbSelItemList then
+    local nUseVal, nCalcVal, nCalcLv, nCalcPercent
+    if self.bIsEnhance then
+      nUseVal, nCalcVal, nCalcLv, nCalcPercent = Item.EquipEnhance:CalcEnhanceRate(nPos, nOrgLv, self.tbSelItemList, pEquip, me)
+    else
+      nUseVal, nCalcVal, nCalcLv, nCalcPercent = Item.EquipWuLian:CalcWuLianRate(nPos, nOrgLv, self.tbSelItemList, pEquip, me)
+    end
+    if nCalcVal and nCalcLv and nCalcPercent then
+      nReqVal = nCalcVal
+      nNewLv = nCalcLv
+      nPercent = nCalcPercent
+      nCalcUse = nUseVal
+    end
+  else
+    local bRet = self:CanPutOnXuanJing()
+    if not bRet then
+      nNewLv = nOrgLv
+    end
+  end
+  local nXuanJingValLv1 = KItem.GetBaseValue(Item.EquipEnhance.XUANJING_ITEM[1])
+  self.pPanel:SetActive(self.goEnhancePossibleLevel1, true)
+  self.pPanel:Label_SetText(self.goEnhancePossibleLevel1 .. "/txtLevel", i18n.EasyGet("{0}\231\186\167", nOrgLv))
+  self.pPanel:Label_SetText(self.goEnhancePossibleLevel1 .. "/txtNextLevel", i18n.EasyGet("{0}\231\186\167", nNewLv))
+  if nXuanJingValLv1 <= nCalcUse - nReqVal then
+    self.pPanel:Label_SetText(self.goEnhancePossibleLevel1 .. "/txtPossibility", string.format("%d%%", nPercent))
+    self.pPanel:SetActive(self.txtXuanjingCostTips, true)
+  elseif nXuanJingValLv1 > nCalcUse - nReqVal and nPercent >= 100 then
+    self.pPanel:Label_SetText(self.goEnhancePossibleLevel1 .. "/txtPossibility", string.format("%d%%", 100))
+    self.pPanel:SetActive(self.txtXuanjingCostTips, false)
+  else
+    self.pPanel:Label_SetText(self.goEnhancePossibleLevel1 .. "/txtPossibility", string.format("%d%%", nPercent))
+    self.pPanel:SetActive(self.txtXuanjingCostTips, false)
+  end
+  local tbBaseAttrList = pEquip.GetBaseAttrib()
+  local tbEnhanceAttrVal
+  if self.bIsEnhance then
+    tbEnhanceAttrVal = Item.EquipEnhance.ENHANCE_ATTR_VAL[nPos]
+  else
+    tbEnhanceAttrVal = Item.EquipWuLian.WULIAN_ATTR_VAL[nPos]
+  end
+  for nId, tbBaseAttr in ipairs(tbBaseAttrList) do
+    if nId <= self.ATTR_NUM_LIMIT then
+      local szName = FightSkill:GetMagicDescSplit(tbBaseAttr.szName, tbBaseAttr.tbValue)
+      local _, szOrgVal, szNewVal = "", "+0", "+0"
+      if tbEnhanceAttrVal[nOrgLv] and tbEnhanceAttrVal[nOrgLv][nId] then
+        _, szOrgVal = FightSkill:GetMagicDescSplit(tbBaseAttr.szName, tbEnhanceAttrVal[nOrgLv][nId])
+      end
+      if tbEnhanceAttrVal[nNewLv] and tbEnhanceAttrVal[nNewLv][nId] then
+        _, szNewVal = FightSkill:GetMagicDescSplit(tbBaseAttr.szName, tbEnhanceAttrVal[nNewLv][nId])
+      end
+      self.pPanel:Label_SetText(string.format("%s%d%s", self.goAttribute, nId, "/txtAttribute"), szName)
+      self.pPanel:Label_SetText(string.format("%s%d%s", self.goAttribute, nId, "/txtValue"), szOrgVal)
+      self.pPanel:Label_SetText(string.format("%s%d%s", self.goAttribute, nId, "/txtNewValue"), szNewVal)
+      self.pPanel:SetActive(self.goAttribute .. nId, true)
+    end
+  end
+  self.pPanel:Label_SetText(self.txtEnhanceCost, math.floor(nReqVal * Item.EquipEnhance.ENHANCE_COST_XUANJING_TO_COIN / Item.EquipEnhance.RATE_BASE))
+  self.pPanel:Button_SetEnable(self.btnEnhance, 0 ~= #self.tbSelItemList)
+  local szPath = Item.EquipEnhance:GetGridEffectPath(nOrgLv)
+  if self.bIsEnhance and szPath then
+    if not self.tbEnhanceEffect then
+      self.tbEnhanceEffect = {}
+      self.tbEnhanceEffect.szPath = szPath
+      self.tbEnhanceEffect.szKey = self.pPanel:DynamicLoadGameObject(self.goEquipGrid .. "/Enhance", szPath, "effect")
+      self.pPanel:SetSortingOrder(self.tbEnhanceEffect.szKey, 2)
+    elseif szPath ~= self.tbEnhanceEffect.szPath then
+      self.tbEnhanceEffect.szPath = szPath
+      self.pPanel:DeleteObject(self.tbEnhanceEffect.szKey)
+      self.tbEnhanceEffect.szKey = self.pPanel:DynamicLoadGameObject(self.goEquipGrid .. "/Enhance", szPath, "effect")
+      self.pPanel:SetSortingOrder(self.tbEnhanceEffect.szKey, 2)
+    end
+  elseif self.tbEnhanceEffect then
+    self.pPanel:DeleteObject(self.tbEnhanceEffect.szKey)
+    self.tbEnhanceEffect = nil
+  end
+end
+
+function tbWnd:ClearEnhance()
+  self.tbEquipGrid:SetEmpty()
+  self.pPanel:Label_SetText(self.txtEquipName, "")
+  self.pPanel:SetActive(self.goEnhancePossibleLevel1, false)
+  self.pPanel:SetActive(self.goEnhancePossibleLevel2, false)
+  for nId = 1, #Item.EquipEnhance.XUANJING_ITEM do
+    self.tbBagItemGridView:SetEmpty(nId, true)
+    local szPath = self.tbBagItemGridView:GetItemKey(nId) .. "/imgPlus"
+    self.pPanel:SetActive(szPath, false)
+    self.pPanel:Button_SetEnable(szPath, false)
+  end
+  for nId = 1, Item.EquipEnhance.ENHANCE_NUM_LIMIT do
+    self.tbSelItemGridView:SetEmpty(nId, true)
+  end
+  for nId = 1, self.ATTR_NUM_LIMIT do
+    self.pPanel:SetActive(self.goAttribute .. nId, false)
+  end
+  self.pPanel:Label_SetText(self.txtEnhanceCost, "")
+  self.pPanel:Button_SetEnable(self.btnEnhance, false)
+end
+
+function tbWnd:ShowEnhanceCount()
+  local nEquipPos = self.tbEquipPosList[self.nEquipPosIndex]
+  if nEquipPos then
+    local nCurNum = DegreeCtrl:GetDegree(me, Item.EquipEnhance.POS_2_DEGREE[nEquipPos])
+    local nMaxNum = DegreeCtrl:GetMaxDegree(Item.EquipEnhance.POS_2_DEGREE[nEquipPos], me)
+    self.pPanel:Label_SetText(self.txtCount, i18n.EasyGet("\228\187\138\230\151\165\230\172\161\230\149\176\239\188\154{0}/{1}", nCurNum, nMaxNum))
+  else
+    self.pPanel:Label_SetText(self.txtCount, "0/0")
+  end
+end
+
+function tbWnd:OnClickBagItem(nIndex)
+  local tbItem = self.tbBagItemList[nIndex]
+  if not tbItem then
+    return
+  end
+  local bRet, szMsg = self:CanPutOnXuanJing()
+  if not bRet then
+    me.CenterMsg(szMsg)
+    return
+  end
+  if #self.tbSelItemList >= Item.EquipEnhance.ENHANCE_NUM_LIMIT then
+    return
+  end
+  table.insert(self.tbSelItemList, tbItem.nLv)
+  if tbItem.nNum > 1 then
+    tbItem.nNum = tbItem.nNum - 1
+  else
+    table.remove(self.tbBagItemList, nIndex)
+  end
+  self.HasAutoAdd = false
+  self:ShowEnhance()
+end
+
+function tbWnd:OnClickSelItem(nIndex)
+  local nLv = self.tbSelItemList[nIndex]
+  if not nLv then
+    return
+  end
+  local bFound = false
+  for nId, tbItem in ipairs(self.tbBagItemList) do
+    if nLv == tbItem.nLv then
+      tbItem.nNum = tbItem.nNum + 1
+      bFound = true
+      break
+    elseif nLv > tbItem.nLv then
+      table.insert(self.tbBagItemList, nId, {nLv = nLv, nNum = 1})
+      bFound = true
+      break
+    end
+  end
+  if not bFound then
+    table.insert(self.tbBagItemList, {nLv = nLv, nNum = 1})
+  end
+  table.remove(self.tbSelItemList, nIndex)
+  self.HasAutoAdd = false
+  self:ShowEnhance()
+end
+
+function tbWnd:OnClickBuyItem()
+  Ui:OpenWindow("UIShop", Shop.ShopType2ViewIndex.YuanBao)
+end
+
+function tbWnd:OnClickAutoAdd()
+  if not me.GetEquipByPos(self.tbEquipPosList[self.nEquipPosIndex]) then
+    return
+  end
+  local pEquip = me.GetEquipByPos(self.tbEquipPosList[self.nEquipPosIndex])
+  local nPos = pEquip.nEquipPos
+  local nOrgLv
+  if self.bIsEnhance then
+    nOrgLv = Item.EquipEnhance:GetEquipEnhanceLevel(me, pEquip.nEquipPos)
+  else
+    nOrgLv = Item.EquipWuLian:GetEquipWuLianLevel(me, pEquip.nEquipPos)
+  end
+  local _, _, _, nPercent
+  if self.bIsEnhance then
+    _, _, _, nPercent = Item.EquipEnhance:CalcEnhanceRate(nPos, nOrgLv, self.tbSelItemList, pEquip, me)
+  else
+    _, _, _, nPercent = Item.EquipWuLian:CalcWuLianRate(nPos, nOrgLv, self.tbSelItemList, pEquip, me)
+  end
+  if not self.HasAutoAdd then
+    self:InitItem()
+    self:TryAutoAdd()
+    self.HasAutoAdd = true
+    self:ShowEnhance()
+  elseif self.bIsEnhance then
+    if nPercent >= 100 then
+      me.CenterMsg(i18n.EasyGet("\229\188\186\229\140\150\230\166\130\231\142\135\229\183\178\232\190\190100%"))
+    end
+  elseif nPercent >= 100 then
+    me.CenterMsg(i18n.EasyGet("\230\173\166\231\130\188\230\166\130\231\142\135\229\183\178\232\190\190100%"))
+  end
+  if self.bIsEnhance then
+    _, _, _, nPercent = Item.EquipEnhance:CalcEnhanceRate(nPos, nOrgLv, self.tbSelItemList, pEquip, me)
+  else
+    _, _, _, nPercent = Item.EquipWuLian:CalcWuLianRate(nPos, nOrgLv, self.tbSelItemList, pEquip, me)
+  end
+  if nPercent < 100 then
+    if #self.tbBagItemList > 0 and #self.tbSelItemList == Item.EquipEnhance.ENHANCE_NUM_LIMIT then
+      me.CenterMsg(i18n.EasyGet("\230\151\160\230\179\149\230\148\190\229\133\165\230\155\180\229\164\154\231\142\132\230\153\182"))
+    else
+      me.CenterMsg(i18n.EasyGet("\231\142\132\230\153\182\228\184\141\232\182\179"))
+    end
+  end
+end
+
+function tbWnd:RemoveItemFromBag(nLv, tbBagItem)
+  for i = 1, #tbBagItem do
+    local Item = tbBagItem[i]
+    if Item.nLv == nLv then
+      if Item.nNum > 1 then
+        tbBagItem[i].nNum = tbBagItem[i].nNum - 1
+      elseif 1 == Item.nNum then
+        table.remove(tbBagItem, i)
+      end
+      return true
+    end
+  end
+  return false
+end
+
+function tbWnd:AddItemToBag(nLv, tbBagItem)
+  for i = 1, #tbBagItem do
+    local Item = tbBagItem[i]
+    if Item.nLv == nLv then
+      if Item.nNum > 1 then
+        tbBagItem[i].nNum = tbBagItem[i].nNum + 1
+        break
+      end
+    elseif nLv > Item.nLv or i == #tbBagItem then
+      table.insert(tbBagItem, i, {nLv = nLv, nNum = 1})
+      break
+    end
+  end
+end
+
+function tbWnd:TryAutoAdd()
+  local pEquip = me.GetEquipByPos(self.tbEquipPosList[self.nEquipPosIndex])
+  local nPos = pEquip.nEquipPos
+  local nOrgLv
+  if self.bIsEnhance then
+    nOrgLv = Item.EquipEnhance:GetEquipEnhanceLevel(me, pEquip.nEquipPos)
+  else
+    nOrgLv = Item.EquipWuLian:GetEquipWuLianLevel(me, pEquip.nEquipPos)
+  end
+  local tbBagItemList = Lib:CopyTB(self.tbBagItemList)
+  local tbAddItemList = {}
+  local nIndex = 1
+  local tbAddItemFull = {}
+  local tbAddItemNot = {}
+  while nIndex <= #tbBagItemList and not (#tbAddItemList >= Item.EquipEnhance.ENHANCE_NUM_LIMIT) do
+    if tbBagItemList[nIndex] then
+      table.insert(tbAddItemList, tbBagItemList[nIndex].nLv)
+      self:RemoveItemFromBag(tbBagItemList[nIndex].nLv, tbBagItemList)
+      local _, _, _, nPercent
+      if self.bIsEnhance then
+        _, _, _, nPercent = Item.EquipEnhance:CalcEnhanceRate(nPos, nOrgLv, tbAddItemList, pEquip, me)
+      else
+        _, _, _, nPercent = Item.EquipWuLian:CalcWuLianRate(nPos, nOrgLv, tbAddItemList, pEquip, me)
+      end
+      if nPercent < 100 and 0 == #tbAddItemFull then
+        tbAddItemNot = Lib:CopyTB(tbAddItemList)
+      elseif nPercent >= 100 then
+        tbAddItemFull = Lib:CopyTB(tbAddItemList)
+        local removedItemLv = table.remove(tbAddItemList)
+        self:AddItemToBag(removedItemLv, tbBagItemList)
+        nIndex = nIndex + 1
+      end
+    else
+      nIndex = nIndex + 1
+    end
+  end
+  if 0 ~= #tbAddItemFull then
+    for i = 1, #tbAddItemFull do
+      self:RemoveItemFromBag(tbAddItemFull[i], self.tbBagItemList)
+      self.tbSelItemList = tbAddItemFull
+    end
+  else
+    for i = 1, #tbAddItemNot do
+      self:RemoveItemFromBag(tbAddItemNot[i], self.tbBagItemList)
+      self.tbSelItemList = tbAddItemNot
+    end
+  end
+end
+
+function tbWnd:OnClickEnhance()
+  if not me.GetEquipByPos(self.tbEquipPosList[self.nEquipPosIndex]) then
+    return
+  end
+  
+  local function DoEnhanceReq()
+    if self.bIsEnhance then
+      Item.EquipEnhance:EnhanceReq(me, self.tbEquipPosList[self.nEquipPosIndex], self.tbSelItemList)
+    else
+      Item.EquipWuLian:WuLianReqC(me, self.tbEquipPosList[self.nEquipPosIndex], self.tbSelItemList)
+    end
+  end
+  
+  DoEnhanceReq()
+end
+
+function tbWnd:UpdateView(nEquipPos)
+  self.tbEquipPosList = {}
+  self.tbBagItemList = {}
+  self.tbSelItemList = {}
+  self.tbEquipList = {}
+  self:InitItem()
+  self:ShowEquip()
+  self:ShowEnhance()
+  local nEquipPosIndex = self.nEquipPosIndex or 1
+  if nEquipPos then
+    for nIndex, nPos in ipairs(self.tbEquipPosList) do
+      if nPos == nEquipPos then
+        nEquipPosIndex = nIndex
+        break
+      end
+    end
+  end
+  self.bUpdateView = true
+  self.tbEquipScrollView:SelectElement(nEquipPosIndex)
+  self.tbEquipScrollView:ScrollToIndex(nEquipPosIndex)
+end
+
+function tbWnd:UpdateViewBySelfPosIndex()
+  self.tbEquipPosList = {}
+  self.tbBagItemList = {}
+  self.tbSelItemList = {}
+  self.tbEquipList = {}
+  self:InitItem()
+  self:ShowEquip()
+  self:ShowEnhance()
+  self.tbEquipScrollView:SelectElement(self.nEquipPosIndex or 1)
+  self.tbEquipScrollView:ScrollToIndex(self.nEquipPosIndex or 1)
+end
+
+function tbWnd:NotifyEnhance(szType, ...)
+  if "Enhance" == szType or "WuLian" == szType then
+    local bSuccess, nEquipPos = table.unpack({
+      ...
+    })
+    if bSuccess then
+      self:UpdateView(nEquipPos)
+      self:ShowSuccessEffect()
+    else
+      self:InitItem()
+      self:ShowEnhance()
+      self:ShowFailEffect()
+    end
+    self:ShowEnhanceCount()
+  elseif "Item" == szType then
+    local nItemId, _, nAddNum = table.unpack({
+      ...
+    })
+    local pItem = me.GetItemInAllSpace(nItemId)
+    if pItem and pItem.szClass == Item.EquipEnhance.ITEM_CLASS then
+      self:SyncBagItem(pItem.nLevel, nAddNum)
+    end
+  end
+end
+
+function tbWnd:ShowSuccessEffect()
+  if self.nSuccessEffectTimer then
+    Timer:Close(self.nSuccessEffectTimer)
+    Ui:CloseWindow("UIUpgradeEffect")
+  end
+  if self.bIsEnhance then
+    Ui:OpenUpgradeEffect(i18n.EasyGet("\229\188\186\229\140\150\230\136\144\229\138\159"))
+  else
+    Ui:OpenUpgradeEffect(i18n.EasyGet("\230\173\166\231\130\188\230\136\144\229\138\159"))
+  end
+  self.nSuccessEffectTimer = Timer:Register(Env.GAME_FPS, function()
+    Ui:CloseWindow("UIUpgradeEffect")
+    self.nSuccessEffectTimer = nil
+  end)
+end
+
+function tbWnd:ShowFailEffect()
+  if self.nFailEffectTimer then
+    Timer:Close(self.nFailEffectTimer)
+    self.pPanel:SetActive(self.Fail_Effect, false)
+  end
+  self.pPanel:SetActive(self.Fail_Effect, true)
+  self.nFailEffectTimer = Timer:Register(Env.GAME_FPS, function()
+    self.pPanel:SetActive(self.Fail_Effect, false)
+    self.nFailEffectTimer = nil
+  end)
+end
+
+function tbWnd:NotifyXuanJingCompose()
+  self:UpdateViewBySelfPosIndex()
+end
+
+function tbWnd:CanPutOnXuanJing()
+  local nEquipPos = self.tbEquipPosList[self.nEquipPosIndex]
+  local pEquip = me.GetEquipByPos(nEquipPos)
+  local nOrgLv, nUseVal, nReqVal, nNewLv, nPercent
+  if self.bIsEnhance then
+    nOrgLv = Item.EquipEnhance:GetEquipEnhanceLevel(me, pEquip.nEquipPos)
+    nUseVal, nReqVal, nNewLv, nPercent = Item.EquipEnhance:CalcEnhanceRate(nEquipPos, nOrgLv, self.tbSelItemList, pEquip, me)
+    if not nNewLv or pEquip.nLevel < Item.EquipEnhance.ENHANCE_LV[nNewLv].LV_REQ or 1 ~= GetTimeFrameState(Item.EquipEnhance.ENHANCE_LV[nNewLv].TIMEFRAME_REQ) then
+      return false, i18n.EasyGet("\229\183\178\232\190\190\229\188\186\229\140\150\228\184\138\233\153\144")
+    end
+    local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, pEquip.nEquipPos)
+    if nNewLv > Item.EquipEnhance:GetEnhanceLvLimit(pEquip, nLianHuaLevel) then
+      return false, i18n.EasyGet("\229\183\178\232\190\190\229\188\186\229\140\150\228\184\138\233\153\144")
+    end
+    if nNewLv == Item.EquipEnhance:GetEnhanceLvLimit(pEquip, nLianHuaLevel) and nPercent >= 100 then
+      return false, i18n.EasyGet("\230\148\190\229\133\165\231\154\132\231\142\132\230\153\182\229\183\178\232\190\190\229\188\186\229\140\150\228\184\138\233\153\144")
+    end
+  else
+    nOrgLv = Item.EquipWuLian:GetEquipWuLianLevel(me, pEquip.nEquipPos)
+    nUseVal, nReqVal, nNewLv, nPercent = Item.EquipWuLian:CalcWuLianRate(nEquipPos, nOrgLv, self.tbSelItemList, pEquip, me)
+    if not nNewLv then
+      return false, i18n.EasyGet("\229\183\178\232\190\190\230\173\166\231\130\188\228\184\138\233\153\144")
+    end
+    local nLV_REQ, TIMEFRAME_REQ = Item.EquipWuLian:GetLimitLevelAndTimeframe(nNewLv)
+    if nLV_REQ > pEquip.nLevel or 1 ~= GetTimeFrameState(TIMEFRAME_REQ) then
+      return false, i18n.EasyGet("\229\183\178\232\190\190\230\173\166\231\130\188\228\184\138\233\153\144")
+    end
+    if nNewLv == Item.EquipWuLian:GetWuLianLvLimit(pEquip) and nPercent >= 100 then
+      return false, i18n.EasyGet("\230\148\190\229\133\165\231\154\132\231\142\132\230\153\182\229\183\178\232\190\190\230\173\166\231\130\188\228\184\138\233\153\144")
+    end
+  end
+  return true
+end
+
+function tbWnd:GetXuanJingShowIndexFromLevel(nLevel)
+  for index, value in ipairs(self.tbBagItemList) do
+    if value.nLv == nLevel then
+      return index
+    end
+  end
+  return nil
+end
+
+function tbWnd:GetXuanJingInBagUIItemGrid(nLevel)
+  for nIndex, value in ipairs(self.tbBagItemList) do
+    if value.nLv == nLevel then
+      return self.tbBagItemGridView:GetUIItemGridByIndex(nIndex)
+    end
+  end
+  return nil
+end
+
+function tbWnd:SyncBagItem(nLv, nNum)
+  local bFound = false
+  for nId, tbItem in ipairs(self.tbBagItemList) do
+    if nLv == tbItem.nLv then
+      tbItem.nNum = tbItem.nNum + nNum
+      bFound = true
+      break
+    elseif nLv > tbItem.nLv then
+      table.insert(self.tbBagItemList, nId, {nLv = nLv, nNum = nNum})
+      bFound = true
+      break
+    end
+  end
+  if not bFound then
+    table.insert(self.tbBagItemList, {nLv = nLv, nNum = nNum})
+  end
+  self:ShowEnhance()
+end

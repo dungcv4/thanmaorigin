@@ -1,0 +1,491 @@
+local tbWnd = Ui:CreateClass("UIClosetShopNew_Recommend", "UIPanel")
+local tbControls = {
+  txtCountdown = "txtCountdown/Time",
+  Template = "Scroll View/Viewport/Content/Cell1"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbCellType = {Single = 1, Suit = 2}
+tbWnd.tbNpcDir = {
+  Default = 0,
+  [Npc.NpcResPartsDef.npc_part_horse] = 1
+}
+
+function tbWnd:OnCreate()
+  self.tbGridView = Ui:NewSuperGridView(self, tbControls.Template, self.SetElement)
+  self.pPanel:Label_SetText(tbControls.txtCountdown, "")
+end
+
+function tbWnd:CloseTimer()
+  if self.nCloseTimer then
+    Timer:Close(self.nCloseTimer)
+    self.nCloseTimer = nil
+  end
+  if self.nDelayRefreshFitterTimer then
+    Timer:Close(self.nDelayRefreshFitterTimer)
+    self.nDelayRefreshFitterTimer = nil
+  end
+end
+
+function tbWnd:ClosePanel()
+  self:CloseTimer()
+  local tbUIClosetShopNew = Ui:GetWindow("UIClosetShopNew")
+  if tbUIClosetShopNew then
+    tbUIClosetShopNew:SetActiveRecommend(false)
+  end
+end
+
+function tbWnd:ArrangeSingle()
+  local tbFashions = {}
+  for _, tbPart in ipairs(self.tbPartSetting) do
+    if Fashion:CheckCanShowPart(tbPart.nPartId) then
+      local tbItems = Shop:GetFashionSinglesByPart(tbPart.nPartId, tbPart.nLayer)
+      if tbItems then
+        for _, tbItem in ipairs(tbItems) do
+          if tbItem.bShowNewTip then
+            tbItem.nCurDir = nil
+            tbItem.nCellType = tbWnd.tbCellType.Single
+            table.insert(tbFashions, tbItem)
+          end
+        end
+      end
+    end
+  end
+  local tbRecord = {}
+  for nIndex = #tbFashions, 1, -1 do
+    local tbFashion = tbFashions[nIndex]
+    if not tbRecord[tbFashion.nId] then
+      tbRecord[tbFashion.nId] = true
+    else
+      table.remove(tbFashions, nIndex)
+    end
+  end
+  local tbDiscount = {}
+  local tbNormal = {}
+  for _, tbFashion in ipairs(tbFashions) do
+    if tbFashion.nDiscountPrice and tbFashion.nDiscountPrice > 0 then
+      table.insert(tbDiscount, tbFashion)
+    else
+      table.insert(tbNormal, tbFashion)
+    end
+  end
+  
+  local function fnSort(a, b)
+    return a.nSort > b.nSort
+  end
+  
+  table.sort(tbDiscount, fnSort)
+  table.sort(tbNormal, fnSort)
+  self.tbSingles = Lib:MergeTable(tbDiscount, tbNormal)
+end
+
+function tbWnd:ArrangeSuit()
+  local tbFashionSuit = {}
+  local tbShops = Shop:GetFashionSuitShop()
+  for nIndex, tbShop in ipairs(tbShops) do
+    if Shop:CheckFashionSuitShopOpen(nIndex) and (not tbShop.nPart or Fashion:CheckCanShowPart(tbShop.nPart)) then
+      local tbSuits = Shop:GetFashionSuitsByShopId(nIndex)
+      for _, tbSuit in ipairs(tbSuits) do
+        if tbSuit.bShowNewTip then
+          tbSuit.nCurDir = nil
+          tbSuit.nCellType = tbWnd.tbCellType.Suit
+          table.insert(tbFashionSuit, tbSuit)
+        end
+      end
+    end
+  end
+  local tbRecord = {}
+  for nIndex = #tbFashionSuit, 1, -1 do
+    local tbSuit = tbFashionSuit[nIndex]
+    if not tbRecord[tbSuit.nSuitId] then
+      tbRecord[tbSuit.nSuitId] = true
+    else
+      table.remove(tbFashionSuit, nIndex)
+    end
+  end
+  local tbDiscount = {}
+  local tbNormal = {}
+  for _, tbSuit in ipairs(tbFashionSuit) do
+    if tbSuit.nDiscountPrice and tbSuit.nDiscountPrice > 0 then
+      table.insert(tbDiscount, tbSuit)
+    else
+      table.insert(tbNormal, tbSuit)
+    end
+  end
+  
+  local function fnSort(a, b)
+    return a.nSort > b.nSort
+  end
+  
+  table.sort(tbDiscount, fnSort)
+  table.sort(tbNormal, fnSort)
+  self.tbSuits = Lib:MergeTable(tbDiscount, tbNormal)
+end
+
+function tbWnd:SetElement(tbElement, tbData, nIndex)
+  if tbData.nCellType == tbWnd.tbCellType.Single then
+    if self.tbSwitchSingleId[nIndex] then
+      self:SetElement(tbElement, tbData.tbSuit, nIndex)
+    else
+      self:OnSetSingleElement(tbElement, tbData, nIndex)
+    end
+  elseif tbData.nCellType == tbWnd.tbCellType.Suit then
+    self:OnSetSuitElement(tbElement, tbData, nIndex)
+  end
+end
+
+function tbWnd:OnSetSingleElement(tbElement, tbSingle, nIndex)
+  local tbSetting = Fashion:GetFashionSetting(me, tbSingle.nFashionID)
+  if not tbSetting then
+    LogErr("UIClosetShopNew_Recommend:OnSetSingleElement, get fashion setting is nil by fashionId", tbSingle.nFashionID)
+    return
+  end
+  local pPanel = tbElement.pPanel
+  self:_SetSingleInfo(pPanel, tbSingle, tbSetting)
+  self:_SetSingleUIModel(pPanel, tbSingle, tbSetting)
+  Ui:Button_BindEvent(pPanel, "btnBuy", function()
+    Ui:OpenWindow("UIClosetBuy", self.tbCellType.Single, tbSingle.nId)
+  end)
+  local tbSuit = tbSingle.tbSuit
+  tbSuit = tbSuit or Shop:GetFashionSuitBySingleItemId(tbSingle.nId)
+  if tbSuit then
+    tbSuit.nCellType = tbWnd.tbCellType.Suit
+    tbSingle.tbSuit = tbSuit
+    Ui:Button_BindEvent(pPanel, "btnSwitch", function()
+      self.tbSwitchSingleId[nIndex] = tbSingle.nId
+      self:SetElement(tbElement, tbSuit, nIndex)
+    end)
+    pPanel:SetActive("btnSwitch", true)
+  else
+    pPanel:SetActive("btnSwitch", false)
+  end
+end
+
+function tbWnd:_SetSingleInfo(pPanel, tbSingle, tbSetting)
+  pPanel:SetActive("attributeTitle1", true)
+  pPanel:SetActive("attributeTitle2", false)
+  pPanel:SetActive("attributeTitle3", false)
+  pPanel:Label_SetText("txtName", i18n.Parse(tbSingle.szName))
+  local _, tbPart = Fashion:GetPartConfigByPartId(tbSetting.nPart, tbSetting.nLayer)
+  if not tbPart then
+    LogErr("UIClosetShopNew_Recommend:_SetSingleInfo, get part config is nil by partId", tbSetting.nPart)
+    return
+  end
+  pPanel:Label_SetText("txtTitle1", i18n.EasyGet("\229\141\149\229\147\129\239\188\154{0}", i18n.Parse(tbPart.szName)))
+  pPanel:Label_SetText("attributeTitle1/txtPretty", i18n.EasyGet("\233\173\133\229\138\155\229\128\188+{0}", tbSetting.nPrettyValue))
+  pPanel:Label_SetText("attributeTitle1/txtAttributeTitle", i18n.EasyGet("{0}\239\188\154", i18n.Parse(tbPart.szName)))
+  if Fashion.AttrCfg[tbSingle.nFashionID] then
+    local szMagicName = Fashion.AttrCfg[tbSingle.nFashionID][1]
+    local tbMagic = {
+      table.unpack(Fashion.AttrCfg[tbSingle.nFashionID], 2)
+    }
+    local szFinalName, szFinalValue = FightSkill:GetMagicDescSplit(szMagicName, tbMagic)
+    local szAttribute = string.format("%s%s", szFinalName, szFinalValue)
+    pPanel:SetActive("attributeTitle1/txtAttribute", true)
+    pPanel:Label_SetText("attributeTitle1/txtAttribute", szAttribute)
+  else
+    pPanel:SetActive("attributeTitle1/txtAttribute", false)
+  end
+  pPanel:ContentSizeFitter_Refresh("attributeTitle1")
+  local szMoneyIcon = Currency:GetIcon(tbSingle.szMoneyType)
+  pPanel:Sprite_SetSprite("Cost/CurrentPrice/imgMoney", szMoneyIcon)
+  local nDiscountPrice = Shop:GetFashionItemDiscountPrice(tbSingle.nId)
+  if nDiscountPrice > 0 then
+    pPanel:SetActive("Cost/CostDiscounts", true)
+    pPanel:Sprite_SetSprite("Cost/CostDiscounts/imgMoney", szMoneyIcon)
+    pPanel:Label_SetText("Cost/CostDiscounts/txtCost", tbSingle.nPrice)
+    pPanel:Label_SetText("Cost/CurrentPrice/txtCost", nDiscountPrice)
+    pPanel:SetActive("imgDiscountsBg", true)
+    pPanel:Label_SetText("imgDiscountsBg/txtDiscounts", i18n.GetDiscountText(tbSingle.nDiscount / 10))
+  else
+    pPanel:SetActive("imgDiscountsBg", false)
+    pPanel:SetActive("Cost/CostDiscounts", false)
+    pPanel:Label_SetText("Cost/CurrentPrice/txtCost", tbSingle.nPrice)
+  end
+end
+
+function tbWnd:_GetNewSuitByFashionId(nFashionId)
+  for _, tbSuit in ipairs(self.tbSuits) do
+    for _, tbItem in ipairs(tbSuit.tbGroup) do
+      if tbItem.nFashionID == nFashionId then
+        return tbSuit
+      end
+    end
+  end
+  return nil
+end
+
+function tbWnd:_SetSingleUIModel(pPanel, tbSingle, tbSetting)
+  local objResPreview = pPanel:GetObject("NpcModel")
+  tbSingle.nSwipeOffset = tbSingle.nSwipeOffset or 0
+  local comResPreview = objResPreview:GetComponent(Ui.UINpcModel)
+  local tbFashionResId, tbEffectResId = Fashion:GetWearingResIdList()
+  if tbSetting.nLayer == Npc.NpcPartLayerDef.npc_part_layer_effect then
+    local nWearFashionId = Fashion:GetWearingFashionIdByPart(tbSetting.nPart)
+    if Fashion:IsMatchEffect(nWearFashionId, tbSingle.nFashionID) then
+      tbEffectResId[tbSetting.nPart] = tbSetting.nResId
+    else
+      local tbSuit = self:_GetNewSuitByFashionId(tbSingle.nFashionID)
+      if not tbSuit then
+        LogErr("UIClosetShopNew_Recommend:OnSetSingleElement, get newSuit is nil by fashionId", tbSingle.nFashionID)
+        return
+      end
+      tbSingle.tbSuit = tbSuit
+      for _, tbItem in ipairs(tbSuit.tbGroup) do
+        local tbItemSetting = Fashion:GetFashionSetting(me, tbItem.nFashionID)
+        if tbItemSetting and tbItemSetting.nLayer == Npc.NpcPartLayerDef.npc_part_layer_effect then
+          tbEffectResId[tbSetting.nPart] = tbItemSetting.nResId
+        elseif tbItemSetting then
+          tbFashionResId[tbSetting.nPart] = tbItemSetting.nResId
+        end
+      end
+    end
+  else
+    local nWearEffectId = Fashion:GetWearingEffectFashionIdByPart(me, tbSetting.nPart)
+    if not Fashion:IsMatchEffect(tbSingle.nFashionID, nWearEffectId) then
+      tbEffectResId[tbSetting.nPart] = 0
+    end
+    tbFashionResId[tbSetting.nPart] = tbSetting.nResId
+  end
+  local bHorse = tbSetting.nPart == Npc.NpcResPartsDef.npc_part_horse
+  comResPreview:ShowModel(me.nSex, 1, tbFashionResId[Npc.NpcResPartsDef.npc_part_body], tbFashionResId[Npc.NpcResPartsDef.npc_part_weapon], tbFashionResId[Npc.NpcResPartsDef.npc_part_mantle], bHorse and tbFashionResId[Npc.NpcResPartsDef.npc_part_horse] or 0, tbFashionResId[Npc.NpcResPartsDef.npc_part_head], tbFashionResId[Npc.NpcResPartsDef.npc_part_wind], tbEffectResId[Npc.NpcResPartsDef.npc_part_weapon], bHorse and tbEffectResId[Npc.NpcResPartsDef.npc_part_horse] or 0)
+  if not tbSingle.nCurDir then
+    if self.tbNpcDir[tbSetting.nPart] then
+      tbSingle.nCurDir = self.tbNpcDir[tbSetting.nPart]
+    else
+      tbSingle.nCurDir = self.tbNpcDir.Default
+    end
+  end
+  comResPreview:SetDir(math.floor(tbSingle.nCurDir))
+  local pSwipe = pPanel:GetSwipe("NpcModel/HitZone")
+  if pSwipe then
+    pSwipe:RemoveEvent()
+  end
+  pPanel:Swipe_BindEvent("NpcModel/HitZone", function(pos)
+    tbSingle.nSwipeOffset = tbSingle.nSwipeOffset or 0
+    tbSingle.nSwipeOffset = tbSingle.nSwipeOffset + pos.x * 0.1
+    local nDir = (tbSingle.nCurDir - tbSingle.nSwipeOffset) % 8
+    if nDir == tbSingle.nCurDir then
+      return
+    end
+    tbSingle.nSwipeOffset = 0
+    tbSingle.nCurDir = nDir
+    comResPreview:SetDir(math.floor(tbSingle.nCurDir))
+  end)
+  Ui:Button_BindEvent(pPanel, "btnLeft", function()
+    tbSingle.nCurDir = (tbSingle.nCurDir + 1) % 8
+    comResPreview:SetDir(math.floor(tbSingle.nCurDir))
+  end)
+  Ui:Button_BindEvent(pPanel, "btnRight", function()
+    tbSingle.nCurDir = (tbSingle.nCurDir - 1) % 8
+    comResPreview:SetDir(math.floor(tbSingle.nCurDir))
+  end)
+end
+
+function tbWnd:OnSetSuitElement(tbElement, tbSuit, nIndex)
+  local pPanel = tbElement.pPanel
+  self:_OnSetSuitInfo(pPanel, tbSuit)
+  self:_SetSuitUIModel(pPanel, tbSuit)
+  Ui:Button_BindEvent(pPanel, "btnBuy", function()
+    Ui:OpenWindow("UIClosetBuy", self.tbCellType.Suit, tbSuit.nSuitId)
+  end)
+  local nSingleId = self.tbSwitchSingleId[nIndex]
+  if nSingleId then
+    local tbSingle = Shop:GetFashionItem(nSingleId)
+    tbSingle.nDiscountPrice = Shop:GetFashionItemDiscountPrice(nSingleId)
+    Ui:Button_BindEvent(pPanel, "btnSwitch", function()
+      self.tbSwitchSingleId[nIndex] = nil
+      self:SetElement(tbElement, tbSingle, nIndex)
+    end)
+    pPanel:SetActive("btnSwitch", true)
+  else
+    pPanel:SetActive("btnSwitch", false)
+  end
+end
+
+function tbWnd:_OnSetSuitInfo(pPanel, tbSuit)
+  pPanel:SetActive("attributeTitle1", false)
+  pPanel:Label_SetText("txtName", i18n.Parse(tbSuit.szSuitName))
+  local nTotalPrice = 0
+  local tbSuitPart = {}
+  local tbAttrDesc = {}
+  local tbPrettyDesc = {}
+  for nId, tbItem in ipairs(tbSuit.tbGroup) do
+    local tbSetting = Fashion:GetFashionSetting(me, tbItem.nFashionID)
+    if not tbSetting then
+      LogErr("UIClosetShopNew_Recommend:_OnSetSuitInfo, get fashion setting is nil by fashionId", tbItem.nFashionID)
+      return
+    end
+    nTotalPrice = nTotalPrice + tbItem.nPrice
+    local _, tbPart = Fashion:GetPartConfigByPartId(tbSetting.nPart, tbSetting.nLayer)
+    if not tbPart then
+      LogErr("UIClosetShopNew_Recommend:_OnSetSuitInfo, get part config is nil by partId", tbSetting.nPart)
+      return
+    end
+    table.insert(tbSuitPart, i18n.Parse(tbPart.szName))
+    table.insert(tbPrettyDesc, i18n.EasyGet("\233\173\133\229\138\155\229\128\188+{0}", tbSetting.nPrettyValue))
+    if Fashion.AttrCfg[tbItem.nFashionID] then
+      local szMagicName = Fashion.AttrCfg[tbItem.nFashionID][1]
+      local tbMagic = {
+        table.unpack(Fashion.AttrCfg[tbItem.nFashionID], 2)
+      }
+      local szFinalName, szFinalValue = FightSkill:GetMagicDescSplit(szMagicName, tbMagic)
+      local szAttribute = string.format("%s%s", szFinalName, szFinalValue)
+      tbAttrDesc[nId] = szAttribute
+    end
+  end
+  local szAttrPath = ""
+  local szPartPath = ""
+  local szPrettyPath = ""
+  if Lib:IsEmptyTB(tbAttrDesc) then
+    pPanel:SetActive("attributeTitle2", true)
+    pPanel:SetActive("attributeTitle3", false)
+    szPartPath = "attributeTitle2/attributeTitle%d/txtAttributeTitle"
+    szPrettyPath = "attributeTitle2/attributeTitle%d/txtPretty"
+  else
+    pPanel:SetActive("attributeTitle3", true)
+    pPanel:SetActive("attributeTitle2", false)
+    szPartPath = "attributeTitle3/attributeTitleCell%d/txtAttributeTitle"
+    szPrettyPath = "attributeTitle3/attributeTitleCell%d/txtAttributeTitle/txtPretty"
+    szAttrPath = "attributeTitle3/attributeTitleCell%d/txtAttributeTitle/txtPretty/txtAttribute"
+  end
+  for nId, szPartName in ipairs(tbSuitPart) do
+    if not Lib:IsEmptyStr(szAttrPath) then
+      if tbAttrDesc[nId] then
+        pPanel:SetActive(string.format(szAttrPath, nId), true)
+        pPanel:Label_SetText(string.format(szAttrPath, nId), tbAttrDesc[nId])
+      else
+        pPanel:SetActive(string.format(szAttrPath, nId), false)
+      end
+    end
+    pPanel:Label_SetText(string.format(szPartPath, nId), i18n.EasyGet("{0}\239\188\154", szPartName))
+    pPanel:Label_SetText(string.format(szPrettyPath, nId), tbPrettyDesc[nId])
+  end
+  pPanel:ContentSizeFitter_Refresh("attributeTitle2")
+  pPanel:ContentSizeFitter_Refresh("attributeTitle3")
+  local szSuitDesc = Lib:ConcatStr(tbSuitPart, "+")
+  szSuitDesc = i18n.EasyGet("\229\165\151\232\163\133\229\140\133\229\144\171\239\188\154{0}", szSuitDesc)
+  pPanel:Label_SetText("txtTitle1", szSuitDesc)
+  local szMoneyIcon = Currency:GetIcon(tbSuit.szMoneyType)
+  pPanel:Sprite_SetSprite("Cost/CurrentPrice/imgMoney", szMoneyIcon)
+  pPanel:Sprite_SetSprite("Cost/CostDiscounts/imgMoney", szMoneyIcon)
+  pPanel:SetActive("Cost/CostDiscounts", true)
+  local nDiscountPrice = Shop:GetFashionSuitDiscountPrice(tbSuit.nSuitId)
+  if nDiscountPrice > 0 then
+    pPanel:Label_SetText("Cost/CurrentPrice/txtCost", nDiscountPrice)
+    pPanel:Label_SetText("Cost/CostDiscounts/txtCost", tbSuit.nPrice)
+    pPanel:SetActive("imgDiscountsBg", true)
+    pPanel:Label_SetText("imgDiscountsBg/txtDiscounts", i18n.GetDiscountText(tbSuit.nSuitDiscount / 10))
+  else
+    pPanel:SetActive("imgDiscountsBg", false)
+    pPanel:Label_SetText("Cost/CurrentPrice/txtCost", tbSuit.nPrice)
+    pPanel:Label_SetText("Cost/CostDiscounts/txtCost", nTotalPrice)
+  end
+end
+
+function tbWnd:_SetSuitUIModel(pPanel, tbSuit)
+  local objResPreview = pPanel:GetObject("NpcModel")
+  tbSuit.nSwipeOffset = tbSuit.nSwipeOffset or 0
+  local comResPreview = objResPreview:GetComponent(Ui.UINpcModel)
+  local bHorse = false
+  local tbFashionResId, tbEffectResId = Fashion:GetWearingResIdList()
+  for _, tbItem in ipairs(tbSuit.tbGroup) do
+    local tbSetting = Fashion:GetFashionSetting(me, tbItem.nFashionID)
+    if not tbSetting then
+      LogErr("UIClosetShopNew_Recommend:_SetSuitUIModel, get fashion setting is nil by fashionId", tbItem.nFashionID)
+      return
+    end
+    if tbSetting.nLayer == Npc.NpcPartLayerDef.npc_part_layer_effect then
+      tbEffectResId[tbSetting.nPart] = tbSetting.nResId
+    else
+      tbFashionResId[tbSetting.nPart] = tbSetting.nResId
+    end
+    if tbSetting.nPart == Npc.NpcResPartsDef.npc_part_horse then
+      bHorse = true
+    end
+    if not tbSuit.nCurDir then
+      if self.tbNpcDir[tbSetting.nPart] then
+        tbSuit.nCurDir = self.tbNpcDir[tbSetting.nPart]
+      else
+        tbSuit.nCurDir = self.tbNpcDir.Default
+      end
+    end
+  end
+  comResPreview:ShowModel(me.nSex, 1, tbFashionResId[Npc.NpcResPartsDef.npc_part_body], tbFashionResId[Npc.NpcResPartsDef.npc_part_weapon], tbFashionResId[Npc.NpcResPartsDef.npc_part_mantle], bHorse and tbFashionResId[Npc.NpcResPartsDef.npc_part_horse] or 0, tbFashionResId[Npc.NpcResPartsDef.npc_part_head], tbFashionResId[Npc.NpcResPartsDef.npc_part_wind], tbEffectResId[Npc.NpcResPartsDef.npc_part_weapon], bHorse and tbEffectResId[Npc.NpcResPartsDef.npc_part_horse] or 0)
+  comResPreview:SetDir(math.floor(tbSuit.nCurDir))
+  local pSwipe = pPanel:GetSwipe("NpcModel/HitZone")
+  if pSwipe then
+    pSwipe:RemoveEvent()
+  end
+  pPanel:Swipe_BindEvent("NpcModel/HitZone", function(pos)
+    tbSuit.nSwipeOffset = tbSuit.nSwipeOffset or 0
+    tbSuit.nSwipeOffset = tbSuit.nSwipeOffset + pos.x * 0.1
+    local nDir = (tbSuit.nCurDir - tbSuit.nSwipeOffset) % 8
+    if nDir == tbSuit.nCurDir then
+      return
+    end
+    tbSuit.nSwipeOffset = 0
+    tbSuit.nCurDir = nDir
+    comResPreview:SetDir(math.floor(tbSuit.nCurDir))
+  end)
+  Ui:Button_BindEvent(pPanel, "btnLeft", function()
+    tbSuit.nCurDir = (tbSuit.nCurDir + 1) % 8
+    comResPreview:SetDir(math.floor(tbSuit.nCurDir))
+  end)
+  Ui:Button_BindEvent(pPanel, "btnRight", function()
+    tbSuit.nCurDir = (tbSuit.nCurDir - 1) % 8
+    comResPreview:SetDir(math.floor(tbSuit.nCurDir))
+  end)
+end
+
+function tbWnd:ShowCountDownTime()
+  local nCloseTime = Shop:GetNewFashionEndTime()
+  if nCloseTime <= 0 then
+    self:ClosePanel()
+    return
+  end
+  if self.nCloseTimer then
+    Timer:Close(self.nCloseTimer)
+    self.nCloseTimer = nil
+  end
+  self.nCountDownTime = nCloseTime - GetTime()
+  self.nCloseTimer = Timer:Register(Env.GAME_FPS, function()
+    if not self.nCountDownTime or self.nCountDownTime <= 0 then
+      return false
+    end
+    self.nCountDownTime = self.nCountDownTime - 1
+    if self.nCountDownTime < 0 then
+      self:ClosePanel()
+      return false
+    end
+    self.pPanel:Label_SetText(tbControls.txtCountdown, Lib:TimeDesc2(self.nCountDownTime))
+    return true
+  end)
+end
+
+function tbWnd:RefreshFitter(nCount)
+  for nIndex = 1, nCount do
+    local tbElement = self.tbGridView:GetElement(nIndex)
+    if tbElement and tbElement.pPanel then
+      tbElement.pPanel:ContentSizeFitter_Refresh("attributeTitle1")
+      tbElement.pPanel:ContentSizeFitter_Refresh("attributeTitle2")
+      tbElement.pPanel:ContentSizeFitter_Refresh("attributeTitle3")
+    end
+  end
+end
+
+function tbWnd:UpdateView()
+  self.tbPartSetting = Fashion:GetFashionPartConfig()
+  self:ArrangeSuit()
+  self:ArrangeSingle()
+  local tbFashions = Lib:MergeTable(self.tbSuits, self.tbSingles)
+  if not tbFashions or #tbFashions <= 0 then
+    self:ClosePanel()
+    return
+  end
+  self:ShowCountDownTime()
+  self.tbSwitchSingleId = {}
+  self.tbGridView:SetAllElement(tbFashions)
+  self.tbGridView:MovePanelToFirstItem()
+  self.nDelayRefreshFitterTimer = Timer:Register(3, self.RefreshFitter, self, #tbFashions)
+  Shop:TryFadeNewRecommendRedPoint()
+end

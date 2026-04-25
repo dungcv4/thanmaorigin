@@ -1,0 +1,216 @@
+local tbWnd = {}
+Ui:SetClass("UITabControl", tbWnd)
+
+function Ui:NewTabControl(tbOwner, ...)
+  local tbClass = Ui:NewClass(Ui:GetClass("UITabControl"))
+  tbClass.tbOwner = tbOwner
+  tbClass:OnCreate(...)
+  return tbClass
+end
+
+function tbWnd:OnCreate(tbPanelCfg)
+  self.tbPanelCfg = tbPanelCfg
+  self.tbBtn = {}
+  self.pPanel = self.tbOwner.pPanel
+  self.tbPanelList = {}
+  self.tbClass2Panel = {}
+  for nType, tbInfo in ipairs(self.tbPanelCfg) do
+    self.tbBtn[nType] = tbInfo.BTN
+    if not tbPanelCfg.PARENT_PATH then
+      if not self.tbClass2Panel[tbInfo.CLASS] then
+        self.tbClass2Panel[tbInfo.CLASS] = Ui:CreatePanel(tbInfo.CLASS, tbInfo.OBJ, self.tbOwner)
+        self.pPanel:SetActive(tbInfo.OBJ, false)
+      end
+      self.tbPanelList[nType] = self.tbClass2Panel[tbInfo.CLASS]
+    end
+  end
+  self.tbPanelBtnGroup = Ui:NewButtonGroup(self, self.tbBtn, true, self.SwitchPanel)
+  if not self.tbOwner._tbTabCtrl then
+    self.tbOwner._tbTabCtrl = {}
+  end
+  self.tbOwner._tbTabCtrl[self] = 1
+end
+
+function tbWnd:OnOpen(nPanelType, ...)
+  self.nPanelType = nil
+  if nil == nPanelType then
+    nPanelType = self:GetOpenPanel()
+    if not nPanelType then
+      self.tbOwner:Close()
+      me.CenterMsg(i18n.EasyGet("\231\179\187\231\187\159\229\176\154\230\156\170\229\188\128\229\144\175\239\188\129"))
+      return false
+    end
+  else
+    if not self.tbPanelCfg[nPanelType] then
+      LogErr(string.format("ui_name:%s UITabControl nPanelType OnOpen error!!!", self.tbOwner.ClassName))
+      self.tbOwner:Close()
+      return false
+    end
+    if self.tbPanelCfg[nPanelType].OpenFunc and not self.tbPanelCfg[nPanelType].OpenFunc() then
+      self.tbOwner:Close()
+      me.CenterMsg(i18n.EasyGet("\231\179\187\231\187\159\229\176\154\230\156\170\229\188\128\229\144\175\239\188\129"))
+      return false
+    end
+  end
+  for nIndex, tbInfo in ipairs(self.tbPanelCfg) do
+    if tbInfo.OpenFunc and not tbInfo.OpenFunc() then
+      self.pPanel:SetActive(self.tbBtn[nIndex], false)
+    else
+      self.pPanel:SetActive(self.tbBtn[nIndex], true)
+    end
+  end
+  self.nPanelType = nPanelType
+  self:ChangePanelStatus(true)
+  if self.tbPanelList[self.nPanelType] and self.tbPanelList[self.nPanelType].OnOpen then
+    self.tbPanelList[self.nPanelType]:OnOpen(...)
+  end
+  self.tbPanelBtnGroup:Select(nPanelType)
+  return true
+end
+
+function tbWnd:ChangePanelStatus(status)
+  if self.tbPanelCfg.PARENT_PATH then
+    self:DynamicPanel(self.nPanelType)
+  end
+  self.pPanel:SetActive(self.tbPanelCfg[self.nPanelType].OBJ, status)
+  if self.tbPanelCfg[self.nPanelType].tbControls and type(self.tbPanelCfg[self.nPanelType].tbControls) == "table" then
+    for _, tbControl in pairs(self.tbPanelCfg[self.nPanelType].tbControls) do
+      self.pPanel:SetActive(tbControl[1], tbControl[2])
+    end
+  end
+end
+
+function tbWnd:SwitchPanel(nIndex)
+  if self.nPanelType == nIndex then
+    return
+  end
+  if self.tbOwner.CheckCanSwitch then
+    local bRet = self.tbOwner:CheckCanSwitch(nIndex)
+    if not bRet then
+      return
+    end
+  end
+  if self.nPanelType then
+    self:ChangePanelStatus(false)
+    if self.tbPanelList[self.nPanelType] and self.tbPanelList[self.nPanelType].OnClose then
+      self.tbPanelList[self.nPanelType]:OnClose()
+    end
+  end
+  self.nPanelType = nIndex
+  self:ChangePanelStatus(true)
+  if self.tbOwner.SwitchPanel then
+    self.tbOwner:SwitchPanel(self.nPanelType)
+  else
+    if self.tbPanelList[self.nPanelType] and self.tbPanelList[self.nPanelType].OnOpen then
+      self.tbPanelList[self.nPanelType]:OnOpen()
+    end
+    if self.tbOwner.OnPanelChange then
+      self.tbOwner:OnPanelChange(self.nPanelType)
+    end
+  end
+end
+
+function tbWnd:GetOpenPanel()
+  for nSelectPanel, tbInfo in ipairs(self.tbPanelCfg) do
+    if not tbInfo.OpenFunc or tbInfo.OpenFunc() then
+      return nSelectPanel
+    end
+  end
+end
+
+function tbWnd:OnClose()
+  if self.nPanelType then
+    self:ChangePanelStatus(false)
+  end
+  if self.tbPanelList[self.nPanelType] and self.tbPanelList[self.nPanelType].OnClose then
+    self.tbPanelList[self.nPanelType]:OnClose()
+  end
+end
+
+function tbWnd:UpdateSubPanel(nPanelType, szFuncName, ...)
+  if self.nPanelType ~= nPanelType and -1 ~= nPanelType then
+    return
+  end
+  if self.tbPanelList[self.nPanelType] and self.tbPanelList[self.nPanelType][szFuncName] and type(self.tbPanelList[self.nPanelType][szFuncName]) == "function" then
+    local bSuccess, Ret1 = Lib:CallBack({
+      self.tbPanelList[self.nPanelType][szFuncName],
+      self.tbPanelList[self.nPanelType],
+      ...
+    })
+    if bSuccess and Ret1 then
+      return Ret1
+    end
+  end
+end
+
+function tbWnd:UpdateButtonGroup()
+  if not self.tbPanelCfg then
+    return
+  end
+  for nIndex, tbInfo in ipairs(self.tbPanelCfg) do
+    if tbInfo.OpenFunc and not tbInfo.OpenFunc() then
+      self.pPanel:SetActive(self.tbBtn[nIndex], false)
+    else
+      self.pPanel:SetActive(self.tbBtn[nIndex], true)
+    end
+  end
+end
+
+function tbWnd:SelectPanel(nPanelType)
+  self.tbPanelBtnGroup:Select(nPanelType)
+end
+
+function tbWnd:DynamicPanel(nPanelType)
+  local tbInfo = self.tbPanelCfg[nPanelType]
+  if not self.tbClass2Panel[tbInfo.CLASS] then
+    if tbInfo.PREFAB_PATH then
+      tbInfo.OBJ = self.pPanel:DynamicLoadGameObject(self.tbPanelCfg.PARENT_PATH, tbInfo.PREFAB_PATH, tbInfo.CLASS)
+    end
+    self.tbClass2Panel[tbInfo.CLASS] = Ui:CreatePanel(tbInfo.CLASS, tbInfo.OBJ, self.tbOwner)
+  end
+  self.tbPanelList[nPanelType] = self.tbClass2Panel[tbInfo.CLASS]
+end
+
+function tbWnd:UpdateData(tbPanelCfg)
+  self.tbPanelCfg = tbPanelCfg
+  self.tbBtn = {}
+  self.tbPanelList = {}
+  local tbOldClass2Panel = self.tbClass2Panel
+  self.tbClass2Panel = {}
+  for nType, tbInfo in ipairs(self.tbPanelCfg) do
+    self.tbBtn[nType] = tbInfo.BTN
+    if not tbPanelCfg.PARENT_PATH then
+      if tbOldClass2Panel[tbInfo.CLASS] then
+        self.tbClass2Panel[tbInfo.CLASS] = tbOldClass2Panel[tbInfo.CLASS]
+      elseif not self.tbClass2Panel[tbInfo.CLASS] then
+        self.tbClass2Panel[tbInfo.CLASS] = Ui:CreatePanel(tbInfo.CLASS, tbInfo.OBJ, self.tbOwner)
+        self.pPanel:SetActive(tbInfo.OBJ, false)
+      end
+      self.tbPanelList[nType] = self.tbClass2Panel[tbInfo.CLASS]
+    elseif tbOldClass2Panel[tbInfo.CLASS] then
+      self.tbClass2Panel[tbInfo.CLASS] = tbOldClass2Panel[tbInfo.CLASS]
+      self.tbPanelList[nType] = self.tbClass2Panel[tbInfo.CLASS]
+    end
+  end
+  self.tbPanelBtnGroup:UpdateBtnKeyList(self.tbBtn)
+end
+
+function tbWnd:ClearSelected()
+  self:OnClose()
+  self.tbPanelBtnGroup:ClearSelected()
+  self.nPanelType = nil
+end
+
+function tbWnd:OnDestroy()
+  self.tbPanelBtnGroup:OnDestroy()
+  self.tbOwner._tbTabCtrl[self] = nil
+  self.pPanel = nil
+end
+
+function tbWnd:GetCurPanelType()
+  return self.nPanelType
+end
+
+function tbWnd:GetSubPanel(nType)
+  return self.tbPanelList[nType]
+end

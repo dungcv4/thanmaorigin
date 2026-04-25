@@ -1,0 +1,489 @@
+local tbWnd = Ui:CreateWindow("UIGiftSystem")
+local MAX_INPUT_VALUE = 999999
+
+function tbWnd:NotifyEvents()
+  local tbRegEvent = {
+    {
+      EventNotify.emNOTIFY_SEND_GIFT_SUCCESS,
+      self.OnSendSuccess,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SYN_GIFT_DATA_FINISH,
+      self.OnSynGiftDataSuccess,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SHOP_BUY_RESULT,
+      self.OnBuyGiftSuccess,
+      self
+    }
+  }
+  return tbRegEvent
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnGive = "node/imgBG/btnGive",
+  txtAdd = "node/imgBG/txtAdd",
+  txtNum = "node/imgBG/txtNum",
+  txtLevel = "node/imgBG/Panel/txtLevel",
+  txtNoFriend = "node/imgBG/txtNoFriend",
+  txtSelectFriend = "node/imgBG/txtSelectFriend",
+  txtValue = "node/imgBG/Panel/txtQinMiDuValue",
+  imgValue = "node/imgBG/Panel/imgQinMiDu",
+  txtBuffNum = "node/imgBG/Panel/QinMiDuBuff/txtBuffNum",
+  txtNextLevelBuffNum = "node/imgBG/Panel/QinMiDuBuff/txtNextLevelNum",
+  Panel = "node/imgBG/Panel",
+  UIAddAndSubGroup = "node/imgBG/UIAddAndSubGroup",
+  FriendTemplate = "node/imgBG/FriendScrollView/paneBG/FriendTemplate",
+  ItemTemplate = "node/imgBG/ItemScrollView/MaskLayer/BG/Item",
+  FriendScrollView = "node/imgBG/FriendScrollView",
+  ItemScrollView = "node/imgBG/ItemScrollView",
+  txtBuffTips = "node/imgBG/Panel/QinMiDuBuff/txtBuffTips",
+  txtAddType = "node/imgBG/Panel/Text"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    if self.nOpenTimer then
+      Timer:Close(self.nOpenTimer)
+      self.nOpenTimer = nil
+    end
+    if self.nOnSendSuccessTimer then
+      Timer:Close(self.nOnSendSuccessTimer)
+      self.nOnSendSuccessTimer = nil
+    end
+    self:Close()
+  end,
+  btnGive = function(self)
+    if not self.nItemIndex or 0 == self.nItemIndex then
+      me.CenterMsg(i18n.EasyGet("\232\175\183\229\133\136\233\128\137\230\139\169\228\186\136\228\187\165\232\181\160\233\128\129\231\154\132\231\164\188\231\137\169"))
+      return
+    elseif not self.nSend or self.nSend < 1 then
+      if self.nRemainSend > 0 then
+        me.CenterMsg(i18n.EasyGet("\230\149\176\233\135\143\232\191\135\228\189\142\239\188\140\230\151\160\230\179\149\232\181\160\233\128\129"))
+        return
+      else
+        me.CenterMsg(i18n.EasyGet("\230\175\143\230\151\165\229\143\175\232\181\160\233\128\1295\228\184\170\239\188\140\229\183\178\232\190\190\228\184\138\233\153\144"))
+        return
+      end
+    end
+    self.nSendGiftType = self.nGiftType
+    RemoteServer.SendGift(self.nGiftType, self.nCurDwId, self.nSend)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbFriendScrollView = Ui:NewScrollView(self, self.FriendTemplate, function(self, nIndex, tbElement)
+    self:FriendOnClick(nIndex, tbElement)
+  end)
+  self.tbItemScrollView = Ui:NewScrollView(self, self.ItemTemplate)
+  self.AddAndSubGroup = Ui:NewExistAddAndSubGroup(self, self.UIAddAndSubGroup)
+  self.AddAndSubGroup:SetNumPadPos(-600, -50)
+  self.AddAndSubGroup:BindEvent(function(nValue)
+    local nResult = self:UpdateNumberInput(nValue)
+    return nResult
+  end, nil, nil, nil, {})
+  self.ItemPath = {}
+end
+
+function tbWnd:OnOpen(nFriendDwId, nGiftId)
+  self.nSendGiftType = nil
+  Gift:UpdateGiftData()
+  FriendShip:RequestUpdateFriendInfo()
+  self.nFriendDwId = nFriendDwId
+  self.nOpenGiftId = nGiftId
+  self.nGiftType = 0
+  local tbAllFriend = FriendShip:GetAllFriendData()
+  if not next(tbAllFriend) then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\178\161\230\156\137\229\165\189\229\143\139"))
+    return 0
+  end
+  local nGiftSex = Gift.GiftSex[self.nOpenGiftId]
+  self:UpdateAllFriendData(self.nFriendDwId, nGiftSex)
+  if not self.nCurDwId then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\178\161\230\156\137\229\165\189\229\143\139\229\156\168\231\186\191"))
+    self:InitUIInfo(false)
+    return 0
+  else
+    self:InitUIInfo(true)
+  end
+  self.nOpenTimer = Timer:Register(Env.GAME_FPS * 0.2, self.UpdatePanel, self)
+end
+
+function tbWnd:UpdatePanel()
+  local nGiftSex = Gift.GiftSex[self.nOpenGiftId]
+  self:UpdateAllFriendData(self.nFriendDwId, nGiftSex)
+  if not self.nCurDwId then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\178\161\230\156\137\229\165\189\229\143\139\229\156\168\231\186\191"))
+    self:InitUIInfo(false)
+    return 0
+  else
+    self:InitUIInfo(true)
+  end
+  self:UpdateFriendList()
+  self:InitBaseData()
+end
+
+function tbWnd:InitUIInfo(bHaveFriend)
+  self.pPanel:SetActive(self.btnGive, bHaveFriend)
+  self.pPanel:SetActive(self.txtAdd, bHaveFriend)
+  self.pPanel:SetActive(self.Panel, bHaveFriend)
+  self.pPanel:SetActive(self.txtNum, bHaveFriend)
+  self.pPanel:SetActive(self.FriendScrollView, bHaveFriend)
+  self.pPanel:SetActive(self.ItemScrollView, bHaveFriend)
+  self.pPanel:SetActive(self.UIAddAndSubGroup, bHaveFriend)
+  self.pPanel:SetActive(self.txtNoFriend, not bHaveFriend)
+  self.pPanel:SetActive(self.txtSelectFriend, not bHaveFriend)
+end
+
+function tbWnd:OnSynGiftDataSuccess()
+  self:UpdateGiftList()
+end
+
+function tbWnd:InitBaseData()
+  self.nCurDwId = self.tbAllFriend[self.nSelectFriendIndex or 1].dwID
+  self.nFaction = self.tbAllFriend[self.nSelectFriendIndex or 1].nFaction
+  self.szName = self.tbAllFriend[self.nSelectFriendIndex or 1].szName
+  self.nSex = self.tbAllFriend[self.nSelectFriendIndex or 1].nSex
+end
+
+function tbWnd:FriendOnClick(nIndex, tbElement)
+  self.nCurDwId = tbElement.dwID
+  self.nFaction = tbElement.nFaction
+  self.szName = tbElement.szName
+  self.nSex = tbElement.nSex
+  self.nHave = 0
+  self.nSend = 0
+  self.nItemIndex = 0
+  self.nMaxInputCount = 0
+  self.nRemainSend = 0
+  self.AddAndSubGroup:SetInputValue(0)
+  self:UpdateGiftList()
+  self:UpdateBottomInfo()
+  self.nSelectFriendIndex = nIndex
+  self:SelectGift()
+end
+
+function tbWnd:UpdateFriendList()
+  local function fnSetItem(itemObj, nIdx)
+    local tbRoleInfo = self.tbAllFriend[nIdx]
+    
+    if not tbRoleInfo then
+      return
+    end
+    local szName = tbRoleInfo.szName or self.tbAllFriend[nIdx].szWantedName
+    local nLevel = tbRoleInfo.nLevel
+    local tbPortraitObjPanel = Ui:NewExistPortraitObjPanel(itemObj, "PortraitObj")
+    tbPortraitObjPanel:SetRoleIcon(tbRoleInfo.nPortrait)
+    tbPortraitObjPanel:SetPortraitFrame(tbRoleInfo.nPortraitFrame)
+    tbPortraitObjPanel:SetFactionIcon(tbRoleInfo.nFaction)
+    tbPortraitObjPanel:SetLevel(nLevel)
+    itemObj.pPanel:Label_SetText("txtPlayerName", szName)
+    itemObj.pPanel:SetActive("MarkObj/Mark_Teacher", tbRoleInfo.bMaster)
+    if tbRoleInfo.bPrentice then
+      local tbMPData = MasterPrentice:GetMPData(me.dwID, tbRoleInfo.dwRoleId)
+      if tbMPData and tbMPData.status == MasterPrentice.Def.STATUS_AFTER_APPENTICE then
+        itemObj.pPanel:Label_SetText("MarkObj/Mark_Student", i18n.EasyGet("\229\183\178\229\135\186\229\184\136"))
+      end
+    end
+    itemObj.pPanel:SetActive("MarkObj/Mark_Student", tbRoleInfo.bPrentice)
+    itemObj.dwID = tbRoleInfo.dwID
+    itemObj.nFaction = tbRoleInfo.nFaction
+    itemObj.nSex = tbRoleInfo.nSex
+    itemObj.szName = szName
+  end
+  
+  self.tbFriendScrollView:Reset()
+  for i = 1, #self.tbAllFriend do
+    self.tbFriendScrollView:SetElement(i, function(tbElement)
+      fnSetItem(tbElement, i)
+    end)
+  end
+  if Lib:CountTB(self.tbAllFriend) > 0 then
+    self.tbFriendScrollView:SelectElement(1)
+  end
+end
+
+function tbWnd:UpdateGiftList()
+  self.tbAllGift, self.tbGiftIndex = Gift:GetAllCanSendGift(self.nSex, self.nCurDwId)
+  self.ItemPath = {}
+  
+  local function fnSetItem(itemObj, index)
+    local nId = self.tbAllGift[index].nItemId
+    local nHave = me.GetItemCountByTypeInBag(nId)
+    local pPanel = itemObj.pPanel
+    local szName, nIcon, nView, nQuality = KItem.GetItemShowInfo(nId, self.nFaction)
+    local szIconAtlas, szIconSprite = Item:GetIcon(nIcon)
+    pPanel:Sprite_SetSprite("UIItemGrid/ItemLayer", szIconSprite)
+    local obj = pPanel:GetObject("UIItemGrid/Base")
+    if obj then
+      local QualityEffect = obj:GetComponent(Ui.ItemQualityEffect)
+      QualityEffect:SetQuality(nQuality)
+    end
+    pPanel:SetActive("UIItemGrid/ItemLayer", true)
+    pPanel:SetActive("UIItemGrid/TagTip", false)
+    pPanel:SetActive("UIItemGrid/CDLayer", false)
+    pPanel:Label_SetText("UIItemGrid/LabelSuffix", nHave)
+    pPanel:SetActive("imgSelect", false)
+    Ui:Button_BindEvent(pPanel, "btnSelect", self.SelectItem, self, index)
+    self.ItemPath[index] = string.format("node/imgBG/ItemScrollView/MaskLayer/BG/Element%d", index)
+  end
+  
+  self.tbItemScrollView:Reset()
+  for i = 1, #self.tbAllGift do
+    self.tbItemScrollView:SetElement(i, function(tbElement)
+      fnSetItem(tbElement, i)
+    end)
+  end
+end
+
+function tbWnd:SelectItem(nIndex)
+  local tbData = self.tbAllGift[nIndex]
+  local nHave = me.GetItemCountByTypeInBag(tbData.nItemId)
+  self.nItemIndex = nIndex
+  if 0 == nHave then
+    Shop:OpenShopBuyWidDefault(tbData.nItemId)
+  else
+    for i = 1, #self.ItemPath do
+      if i ~= nIndex then
+        local nTmpHave = me.GetItemCountByTypeInBag(self.tbAllGift[i].nItemId)
+        local pObj = self.ItemPath[i]
+        self.pPanel:SetActive(pObj .. "/imgSelect", false)
+        self.pPanel:Label_SetText(pObj .. "/UIItemGrid/LabelSuffix", nTmpHave)
+      end
+    end
+    self.nHave = nHave
+    self.nGiftType = tbData.nGiftType
+    self.nRemainSend = Gift:RemainTimes(self.nCurDwId, self.nGiftType)
+    self.nMaxInputCount = math.min(self.nHave, self.nRemainSend)
+    self.AddAndSubGroup:SetInputValue(1)
+    self.pPanel:SetActive(self.ItemPath[nIndex] .. "/imgSelect", true)
+    self.nSend = self.nMaxInputCount > 0 and 1 or 0
+    if 0 == self.nSend then
+      self.AddAndSubGroup:SetInputValue(0)
+      self.pPanel:Label_SetText(self.ItemPath[self.nItemIndex] .. "/UIItemGrid/LabelSuffix", string.format("%d", self.nHave))
+    else
+      self.pPanel:Label_SetText(self.ItemPath[self.nItemIndex] .. "/UIItemGrid/LabelSuffix", string.format("%d/%d", self.nSend, self.nHave))
+    end
+    self:UpdateBottomInfo()
+  end
+end
+
+function tbWnd:SelectGift()
+  self.nHave = 0
+  self.nSend = 0
+  self.nItemIndex = 0
+  self.nMaxInputCount = 0
+  self.nRemainSend = 0
+  self.AddAndSubGroup:SetInputValue(0)
+  if self.nOpenGiftId then
+    if self.bHasGiftSexFriend then
+      local nIndex = self.tbGiftIndex[self.nOpenGiftId] or 1
+      self:SelectItem(nIndex)
+    elseif Gift.GiftSex[self.nOpenGiftId] == Gift.Sex.Both then
+      local szMsg = i18n.EasyGet("\230\154\130\230\151\160\229\165\189\229\143\139\229\156\168\231\186\191")
+      me.CenterMsg(szMsg)
+    else
+      local szGiftSex = 0 == Gift.GiftSex[self.nOpenGiftId] and i18n.EasyGet("\231\148\183\230\128\167") or i18n.EasyGet("\229\165\179\230\128\167")
+      me.CenterMsg(i18n.EasyGet("\230\154\130\230\151\160{0}\232\167\146\232\137\178\229\165\189\229\143\139\229\156\168\231\186\191", szGiftSex))
+    end
+    self.nOpenGiftId = nil
+  elseif self.nSendGiftType then
+    local nNowGiftId = Gift.AllItem[self.nSendGiftType][self.nSex]
+    local nHave = me.GetItemCountByTypeInBag(nNowGiftId)
+    if nHave > 0 then
+      local nIndex = self.tbGiftIndex[nNowGiftId] or 1
+      self:SelectItem(nIndex)
+    else
+      for i = 1, Lib:CountTB(Gift.GiftType) do
+        local nItemId = Gift.AllItem[i][self.nSex]
+        local nHave = me.GetItemCountByTypeInBag(nItemId)
+        if nHave > 0 then
+          local nIndex = self.tbGiftIndex[nItemId] or 1
+          self:SelectItem(nIndex)
+          break
+        end
+      end
+    end
+  end
+  self:UpdateBottomInfo()
+end
+
+function tbWnd:UpdateNumberInput(nNum)
+  if not self.nItemIndex or 0 == self.nItemIndex then
+    me.CenterMsg(i18n.EasyGet("\232\175\183\229\133\136\233\128\137\230\139\169\228\186\136\228\187\165\232\181\160\233\128\129\231\154\132\231\164\188\231\137\169"))
+    return 0
+  else
+    if nNum == MAX_INPUT_VALUE then
+      nNum = self.nMaxInputCount
+    end
+    if nNum > self.nRemainSend then
+      me.CenterMsg(i18n.EasyGet("\230\175\143\230\151\165\229\143\175\232\181\160\233\128\1295\228\184\170\239\188\140\229\183\178\232\190\190\228\184\138\233\153\144"))
+      nNum = self.nMaxInputCount
+    elseif nNum > self.nHave then
+      me.CenterMsg(i18n.EasyGet("\230\149\176\233\135\143\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\229\162\158\229\138\160"))
+      nNum = self.nMaxInputCount
+    end
+    self.nSend = nNum
+    if 0 == self.nSend then
+      self.pPanel:Label_SetText(self.ItemPath[self.nItemIndex] .. "/UIItemGrid/LabelSuffix", string.format("%d", self.nHave))
+    else
+      self.pPanel:Label_SetText(self.ItemPath[self.nItemIndex] .. "/UIItemGrid/LabelSuffix", string.format("%d/%d", self.nSend, self.nHave))
+    end
+    self:UpdateBottomInfo()
+    return nNum
+  end
+end
+
+function tbWnd:UpdateBottomInfo()
+  local nGiftType = self.nGiftType
+  local dwID = self.nCurDwId
+  local nSend = self.nSend or 0
+  local nRemainSend = Gift:RemainTimes(dwID, nGiftType) or 0
+  local nMaxSend = Gift.SendTimes[nGiftType] or 0
+  local nWillSend = nMaxSend - nRemainSend + nSend
+  nWillSend = nMaxSend < nWillSend and nMaxSend or nWillSend
+  local nRate = Gift.Rate[nGiftType] or 0
+  local nAddImitity = nRate * nSend
+  local szPercent = nMaxSend == Gift.Times.Forever and string.format("%d", nRemainSend) or string.format("%d / %d", nWillSend, nMaxSend)
+  self.pPanel:Label_SetText(self.txtAdd, string.format("+%d", nAddImitity))
+  self.pPanel:Label_SetText(self.txtNum, i18n.EasyGet("\228\187\138\230\151\165\229\183\178\232\181\160\239\188\154{0}", szPercent))
+  self.pPanel:SetActive(self.txtNum, self.nItemIndex and 0 ~= self.nItemIndex)
+  if self.nGiftType == Gift.GiftType.MarryGift then
+    self:UpdateMarrySkill()
+  else
+    self:UpdateFriendSkill()
+  end
+end
+
+function tbWnd:UpdateFriendSkill()
+  local tbFriendInfo = FriendShip:GetFriendDataInfo(self.nCurDwId)
+  assert(tbFriendInfo)
+  local nImity = tbFriendInfo.nImity
+  local nPercent
+  if 0 ~= nImity then
+    self.pPanel:Label_SetText(self.txtValue, string.format("%d/%d", nImity, tbFriendInfo.nMaxImity))
+    nPercent = nImity / tbFriendInfo.nMaxImity
+  else
+    local _, nNeedImity = FriendShip:GetImityLevel(1)
+    self.pPanel:Label_SetText(self.txtValue, string.format("%d/%d", nImity, nNeedImity))
+    nPercent = 0
+  end
+  self.pPanel:Label_SetText(self.txtLevel, i18n.EasyGet("{0}\231\186\167", tbFriendInfo.nImityLevel or 0))
+  self.pPanel:Sprite_SetFill(self.imgValue, nPercent)
+  local nBuff = FriendShip:GetFriendImityExpP(tbFriendInfo.nImityLevel)
+  local nNextBuff = FriendShip:GetFriendImityExpP(tbFriendInfo.nImityLevel + 1)
+  self.pPanel:Label_SetText(self.txtBuffNum, nBuff .. "%")
+  self.pPanel:Label_SetText(self.txtNextLevelBuffNum, i18n.EasyGet("\228\184\139\228\184\128\231\186\167\239\188\154{0}%", nNextBuff))
+  self.pPanel:Label_SetText(self.txtBuffTips, i18n.EasyGet("\233\135\142\229\164\150\231\187\132\233\152\159\231\187\143\233\170\140\229\138\160\230\136\144"))
+  self.pPanel:Label_SetText(self.txtAddType, i18n.EasyGet("\228\186\178\229\175\134\229\186\166"))
+end
+
+function tbWnd:UpdateMarrySkill()
+  local nImity = Marry.tbMarryData.nImitity or 0
+  local nImitityLevel, nSkillLevel = Marry:CalImitityLevel(nImity)
+  self.pPanel:Label_SetText(self.txtLevel, i18n.EasyGet("{0}\231\186\167", nImitityLevel))
+  self.pPanel:Label_SetText(self.txtBuffTips, i18n.EasyGet("\229\175\185\230\128\170\231\137\169\228\188\164\229\174\179\230\143\144\233\171\152"))
+  local nMax = Marry.tbImitityLevel[nImitityLevel].nImitity
+  local nPercent = nImity / nMax
+  self.pPanel:Sprite_SetFill(self.imgValue, nPercent)
+  self.pPanel:Label_SetText(self.txtValue, string.format("%d/%d", nImity, nMax))
+  self.pPanel:Label_SetText(self.txtAddType, i18n.EasyGet("\228\190\160\228\190\163\229\128\188"))
+  local tbState = KFightSkill.GetSkillAllMagic(Marry.Cfg.nBuffSkillID, nSkillLevel)
+  for nIndex, tbAttr in ipairs(tbState) do
+    if tbAttr.szName == "damage4npc_p" then
+      for k = 1, 3 do
+        tbAttr.tbValue[k] = tbAttr.tbValue[k] / 100
+      end
+      local szFinalName, szFinalValue = FightSkill:GetMagicDescSplit(tbAttr.szName, tbAttr.tbValue)
+      self.pPanel:Label_SetText(self.txtBuffNum, szFinalValue)
+    end
+  end
+  tbState = KFightSkill.GetSkillAllMagic(Marry.Cfg.nBuffSkillID, nSkillLevel + 1)
+  for nIndex, tbAttr in ipairs(tbState) do
+    if tbAttr.szName == "damage4npc_p" then
+      for k = 1, 3 do
+        tbAttr.tbValue[k] = tbAttr.tbValue[k] / 100
+      end
+      local szFinalName, szFinalValue = FightSkill:GetMagicDescSplit(tbAttr.szName, tbAttr.tbValue)
+      self.pPanel:Label_SetText(self.txtNextLevelBuffNum, i18n.EasyGet("\228\184\139\228\184\128\231\186\167\239\188\154{0}", szFinalValue))
+    end
+  end
+end
+
+function tbWnd:UpdateAllFriendData(nFriendDwId, nSex)
+  self.nCurDwId = nil
+  local tbAllFriend = FriendShip:GetAllFriendData()
+  local tbTemp = {}
+  self.bHasGiftSexFriend = false
+  for _, tbInfo in ipairs(tbAllFriend) do
+    if tbInfo.nState == Player.emPLAYER_STATE_NORMAL then
+      if tbInfo.nSex == nSex or nSex == Gift.Sex.Both then
+        self.bHasGiftSexFriend = true
+      end
+      table.insert(tbTemp, tbInfo)
+    end
+  end
+  
+  local function fnSort(a, b)
+    if nSex then
+      if a.nSex == nSex and b.nSex == nSex or nSex == Gift.Sex.Both then
+        return a.nImity > b.nImity
+      elseif a.nSex == nSex then
+        return true
+      elseif b.nSex == nSex then
+        return false
+      else
+        return a.nImity > b.nImity
+      end
+    elseif nFriendDwId then
+      if a.dwID == nFriendDwId then
+        return true
+      elseif b.dwID == nFriendDwId then
+        return false
+      else
+        return a.nImity > b.nImity
+      end
+    end
+  end
+  
+  table.sort(tbTemp, fnSort)
+  self.tbAllFriend = tbTemp
+  self.nCurDwId = not self.nCurDwId and self.tbAllFriend[1] and self.tbAllFriend[1].dwID
+end
+
+function tbWnd:OnSendSuccess(nGiftType, nItemId, nCount)
+  if self.nGiftType == nGiftType then
+    self:InitBaseData()
+    Gift:UpdateGiftData()
+    self.nOnSendSuccessTimer = Timer:Register(Env.GAME_FPS * 0.2, self.SelectGift, self)
+  end
+end
+
+function tbWnd:OnBuyGiftSuccess(bSuccess, nBuyTemplateId)
+  local nCurGoodTId = self.tbAllGift[self.nItemIndex].nItemId
+  if not nCurGoodTId or nBuyTemplateId ~= nCurGoodTId then
+    return
+  end
+  self:UpdateGiftList()
+  if self.nItemIndex and 0 ~= self.nItemIndex then
+    self:SelectItem(self.nItemIndex)
+  end
+end
+
+function tbWnd:OnBuyGiftFail()
+  self:SelectGift()
+end
+
+function tbWnd:CloseByDefault()
+  if self.nOpenTimer then
+    Timer:Close(self.nOpenTimer)
+    self.nOpenTimer = nil
+  end
+  if self.nOnSendSuccessTimer then
+    Timer:Close(self.nOnSendSuccessTimer)
+    self.nOnSendSuccessTimer = nil
+  end
+  self:Close()
+end

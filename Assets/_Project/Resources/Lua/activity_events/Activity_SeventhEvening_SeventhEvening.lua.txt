@@ -1,0 +1,148 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+Require("CommonScript/Activity/ActivityMgrDef.lua")
+Require("CommonScript/Npc/NpcDefine.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.SeventhEvening)
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/SeventhActivity/SeventhEveningCfg.tab"
+  local tbActivityConfig = Lib:EasyLoadTabFile(szFilepath, {"nConfigId"})
+  if not tbActivityConfig then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  self.ACTIVITY_CONFIG = {}
+  for nConfigId, tbConfig in pairs(tbActivityConfig) do
+    self.ACTIVITY_CONFIG[nConfigId] = tbConfig
+  end
+  szFilepath = "Setting/Activity/SeventhActivity/RankingAward.tab"
+  local tbRankingAward = Lib:EasyLoadTabFile(szFilepath)
+  if not tbRankingAward then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  for _, tbInfo in pairs(tbRankingAward) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("SeventhEvening: Load tbRankingAward failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbRankingAward = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbRankingAward or {}
+    if not self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbRankingAward[tbInfo.nRank] then
+      self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbRankingAward[tbInfo.nRank] = tbInfo
+    else
+      LogErr(string.format("SeventhEvening: Load tbRankingAward failed, duplicate nRank = %d", tbInfo.nRank))
+      return false
+    end
+  end
+  szFilepath = "Setting/Activity/SeventhActivity/GainAward.tab"
+  local tbGainAward = Lib:EasyLoadTabFile(szFilepath)
+  if not tbGainAward then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  for _, tbInfo in pairs(tbGainAward) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("SeventhEvening: Load tbGainAward failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbGainAward = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbGainAward or {}
+    table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbGainAward, tbInfo)
+  end
+  szFilepath = "Setting/Activity/SeventhActivity/MapLocInfo.tab"
+  local tbMapLocInfo = Lib:EasyLoadTabFile(szFilepath)
+  if not tbMapLocInfo then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  for _, tbInfo in pairs(tbMapLocInfo) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("SeventhEvening: Load tbMapLocInfo failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMapLocInfo = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMapLocInfo or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMapLocInfo[tbInfo.nMapId] = tbInfo
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+  self.bLoadConfig = true
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  if not tbActCfg then
+    return false
+  end
+  self.tbConfig = tbActCfg.Cfg
+  self.tbConfig.szName = i18n.Encode(self.tbConfig.szName)
+  self.tbConfig.szDesc = i18n.Encode(self.tbConfig.szDesc)
+  self.tbConfig.szHasTeam = i18n.Encode(self.tbConfig.szHasTeam)
+  self.tbConfig.szShowTime = i18n.Encode(self.tbConfig.szShowTime)
+  self.tbConfig.tbRankingAward = {}
+  for _, tbInfo in ipairs(tbActCfg.RankingAward) do
+    self.tbConfig.tbRankingAward[tbInfo.nRank] = tbInfo
+  end
+  self.tbConfig.tbGainAward = {}
+  for _, tbInfo in ipairs(tbActCfg.GainAward) do
+    table.insert(self.tbConfig.tbGainAward, tbInfo)
+  end
+  self.tbConfig.tbMapLocInfo = {}
+  for _, tbInfo in ipairs(tbActCfg.MapLocInfo) do
+    self.tbConfig.tbMapLocInfo[tbInfo.nMapId] = tbInfo
+  end
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+  return true
+end
+
+function tbActivity:CheckConfigValid(tbConfig)
+  local bResult = true
+  local tbType = ActivityMgr.Def.tbCheckFieldTyep
+  local tbCheckFunc = ActivityMgr.Def.tbCheckFieldFunc
+  local tbGainNumberFieldCheck = {
+    "nMinMaturity",
+    "nMaxMaturity"
+  }
+  local tbGainAwardFieldCheck = {
+    {"nAwardId", "nAwardKey"}
+  }
+  for _, info in ipairs(self.tbConfig.tbGainAward) do
+    for _, szField in ipairs(tbGainNumberFieldCheck) do
+      if not tbCheckFunc[tbType.number](info, szField) then
+        bResult = false
+      end
+    end
+    for _, szField in ipairs(tbGainAwardFieldCheck) do
+      if not tbCheckFunc[tbType.award](info, szField[1], szField[2]) then
+        bResult = false
+      end
+    end
+  end
+  local tbRankingNumberFieldCheck = {"nRank"}
+  local tbRankingAwardFieldCheck = {
+    {"nAwardId", "nAwardKey"}
+  }
+  for _, info in ipairs(self.tbConfig.tbRankingAward) do
+    for _, szField in ipairs(tbRankingNumberFieldCheck) do
+      if not tbCheckFunc[tbType.number](info, szField) then
+        bResult = false
+      end
+    end
+    for _, szField in ipairs(tbRankingAwardFieldCheck) do
+      if not tbCheckFunc[tbType.award](info, szField[1], szField[2]) then
+        bResult = false
+      end
+    end
+  end
+  local tbMapLocInfoNumberFieldCheck = {
+    "nMapId",
+    "nLocX",
+    "nLocY"
+  }
+  for _, info in ipairs(self.tbConfig.tbMapLocInfo) do
+    for _, szField in ipairs(tbMapLocInfoNumberFieldCheck) do
+      if not tbCheckFunc[tbType.number](info, szField) then
+        bResult = false
+      end
+    end
+  end
+  return bResult
+end
+
+tbActivity.SaveKey = GetGroupKey(ActivityMgr.Def.ClassNameList.SeventhEvening)
+tbActivity.SaveSegment = 1
+tbActivity.TongXinSaveKey = Npc.TongXinShu.SaveKey
+tbActivity.TongXinSaveID = Npc.TongXinShu.SaveID
+tbActivity.SaveID = {LastJoinTime = 1}

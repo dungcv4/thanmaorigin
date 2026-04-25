@@ -1,0 +1,133 @@
+local tbWnd = Ui:CreateClass("UIActivity_Anniversary", "UIFestivalBase")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  ItemTemplate = "ImgAll/ContList/Viewport/Content/ItemTemplate",
+  txtTitle = "node/imgBG/Content/Main/Tex/txtTitle",
+  txtTime = "node/imgBG/Content/Main/Tex/txtTime01",
+  wndTip = "node/wndTip",
+  Template = "node/wndTip/imgBG/Scroll View/Viewport/Content/Template",
+  wndTiptxtTitle = "node/wndTip/imgBG/txtTitle",
+  ClickEmptyToClose = "node/wndTip/ClickEmptyToClose",
+  btnGo = "node/wndTip/imgBG/btnGo",
+  img_Finish = "node/wndTip/imgBG/img_Finish",
+  Img_Close = "node/wndTip/imgBG/Img_Close"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_OBACTIVITY_UPDATE,
+      self.RefreshSigninGift
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.nMainCommonEntryID = 255
+  self.nOBRewardID = 249
+  self.tbBtnPath = {}
+  self.tbBtnTextPath = {}
+  self.tbBtnEffectPath = {}
+  local szTemp = "node/imgBG/Content/btnList/Viewport/Content/State_UnOpened%d"
+  for i = 1, self.nMaxButton do
+    self.tbBtnPath[i] = string.format(szTemp .. "/btnTemplate", i)
+    self.tbBtnTextPath[i] = string.format(szTemp .. "/Text", i)
+  end
+  self.tbBtnPath[self.nMainCommonEntryID] = "node/imgBG/Content/btnMain"
+  self.tbBtnTextPath[self.nMainCommonEntryID] = "node/imgBG/Content/btnMain/Text"
+  self.tbBtnEffectPath[self.nMainCommonEntryID] = "node/imgBG/Content/btnMain/BtnPitchOn"
+  self.tbCommonEntryID2SubPanel = {
+    [255] = "node/imgBG/Content/Main",
+    [251] = "node/imgBG/Content/Birthday",
+    [256] = "node/imgBG/Content/Draw",
+    [245] = "node/imgBG/Content/Cack",
+    [252] = "node/imgBG/Content/Sword"
+  }
+  self.tbCommonEntryID2UiName = {
+    [255] = "UIAnniversaryMain",
+    [251] = "UINewYearDinner",
+    [256] = "UIAnnualDraw",
+    [245] = "UIAnnualCack",
+    [252] = "UIAnnualSword"
+  }
+  self.tbGiftListView = Ui:NewScrollView(self, tbControls.Template)
+  self.pPanel:SetActive(tbControls.wndTip, false)
+  self.pPanel:SetActive(tbControls.Img_Close, false)
+  self:SetClickEmptyCallback(tbControls.wndTip)
+end
+
+function tbWnd:RefreshSigninGift()
+  self.pPanel:SetActive(tbControls.wndTip, true)
+  local tbGetOBRewardInstConfig = ActivityMgr:GetInstanceById(self.nOBRewardID)
+  local bHasGotten = tbGetOBRewardInstConfig:HasGotten(self.nOBRewardID)
+  self.pPanel:SetActive(tbControls.btnGo, not bHasGotten)
+  self.pPanel:SetActive(tbControls.img_Finish, bHasGotten)
+  local tbConfig = ActivityMgr.EntranceSchedule:BuildInstanceConfig(self.nOBRewardID, ActivityMgr.Def.ClassNameList.OBReward)
+  local tbAward = Award:GetAward(tbConfig.nAwardId, tbConfig.nAwardKey)
+  self.pPanel:Label_SetText(tbControls.wndTiptxtTitle, i18n.Parse(tbConfig.szName))
+  self:UpdateListView(tbAward)
+  Ui:Button_BindEvent(self.pPanel, tbControls.btnGo, self.OnClickGo, self, self.nOBRewardID, tbConfig.szJumpType, tbConfig.szJumpParam)
+end
+
+function tbWnd:UpdateListView(tbAward)
+  if not tbAward then
+    return
+  end
+  if not self.tbGiftListView then
+    self.tbGiftListView = Ui:NewScrollView(self, tbControls.Template)
+  end
+  self.tbGiftListView:Clear()
+  for i = 1, #tbAward do
+    self.tbGiftListView:SetElement(i, function(tbElement)
+      self:UpdateListElement(tbElement, tbAward[i])
+    end, true)
+  end
+end
+
+function tbWnd:UpdateListElement(tbElement, tbAward)
+  local tbGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  if "Item" == tbAward[1] then
+    tbGrid:SetItemByTemplate(tbAward[2], tbAward[3], nil, nil, {bShowTip = true})
+    local szName = Item:GetName(tbAward[2], me)
+  else
+    tbGrid:SetDigitalItem(tbAward[1], tbAward[3])
+    local szName = Currency:GetName(tbAward[1])
+  end
+  tbGrid:SetClickEnable(true)
+end
+
+function tbWnd:OnClickEmptyClose()
+  self.pPanel:SetActive(tbControls.wndTip, false)
+end
+
+function tbWnd:CheckOpenState(nActId)
+  local bStart = false
+  local bEnd = false
+  local tbInstConfig = ActivityMgr:GetConfigById(nActId)
+  if GetTime() >= tbInstConfig.nStartTime then
+    bStart = true
+  end
+  if GetTime() > tbInstConfig.nEndTime then
+    bEnd = true
+  end
+  return bStart, bEnd
+end
+
+function tbWnd:OnClickGo(nActId, szCallBack, szParam, szRedPoint)
+  local bStart, bEnd = self:CheckOpenState(nActId)
+  if not bStart then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\232\191\152\230\156\170\229\188\128\229\144\175"))
+    return
+  end
+  if bEnd then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\229\183\178\231\187\147\230\157\159"))
+    return
+  end
+  if not szCallBack or Lib:IsEmptyStr(szCallBack) then
+    return
+  end
+  local fn = ActivityMgr.tbJumpFunc[szCallBack]
+  local tbParam = Lib:SplitStrTry2Num(szParam, "|")
+  fn(nActId, table.unpack(tbParam))
+end

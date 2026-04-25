@@ -1,0 +1,435 @@
+Require("CommonScript/GameSetting.lua")
+Player.emFIGHT_STATE = {NONE = 0, FIGHTING = 1}
+Player.nFirstLoginFubenGroup = 129
+Player.nFirstLoginFubenKey = 1
+Player.tbPosFirstLogin = {
+  143406,
+  134166,
+  44656
+}
+Player.nFirstLoginMap = 3
+Player.nFirstLoginFubenMapId = 40
+Player.tbFirstPersonalFubenSetting = {
+  1,
+  6,
+  1
+}
+Player.nNewbieLevel = 11
+Player.nNewbieSKillId = 120
+Player.nExerciseWaitTime = 5
+Player.nExerciseTimeout = 180
+
+local function AddUnknowAward(pPlayer, nLogReason, nLogReason2, szMsg, szType, ...)
+  LogErr("Player Add Award Fail !! Unknow Type: ", szType, ...)
+end
+
+local function AddEmptyAward(pPlayer, nLogReason, nLogReason2, szMsg, szType, ...)
+  Log("AddEmptyAward", pPlayer.szName, pPlayer.dwID)
+end
+
+local function AddItemUnsafe(pPlayer, nLogReason, nLogReason2, szMsg, szType, nItemTemplateId, nCount, tbItemExtParams)
+  tbItemExtParams = tbItemExtParams or {}
+  nLogReason2 = nLogReason2 or 0
+  if not tbItemExtParams.nTradeLimitType then
+    local nBindType = tbItemExtParams.nBindType or Item.eBINDTYPE.BIND
+    if nBindType == Item.eBINDTYPE.BIND or nBindType == Item.eBINDTYPE.MONTHCARD_UNBIND and not WeekMonthCard:CheckMonthCardState(pPlayer) then
+      tbItemExtParams.nTradeLimitType = Item.eTRADELIMITTYPE.NONE
+      tbItemExtParams.nTradeLimitValue = 0
+    end
+  end
+  local bAutoUse, tbAwards = Item:AutoUseRandItem(pPlayer, nItemTemplateId, nCount, szMsg, tbItemExtParams, nLogReason, nLogReason2)
+  if bAutoUse then
+    return tbAwards
+  else
+    local pItem = pPlayer.AddItemEx_Unsafe(nItemTemplateId, nCount, tbItemExtParams, nLogReason, nLogReason2)
+  end
+end
+
+local function AddMoney(pPlayer, nLogReason, nLogReason2, szMsg, szType, nCount, nUselessParam)
+  if not nCount or 0 == nCount then
+    LogErr("AwardFunc Err AddMoney Fail", nLogReason, nUselessParam, nCount)
+    return false
+  end
+  if not szType or not Currency:Valid(szType) then
+    Log("_LuaPlayer.AddMoney fail !! unknow money type ", pPlayer.szName, pPlayer.dwID, szType, nCount)
+  elseif nLogReason == Env.LogWay_RandomItem then
+    pPlayer.AddMoney(szType, nCount, nLogReason, nLogReason2, nLogReason2, 1)
+  else
+    pPlayer.AddMoney(szType, nCount, nLogReason, nLogReason2)
+  end
+end
+
+local function AddExp(pPlayer, nLogReason, nLogReason2, szMsg, szType, nCount, nUselessParam)
+  if not nCount or nCount <= 0 then
+    LogErr("AwardFunc Err AddExp Fail", nLogReason, nUselessParam, nCount)
+    return false
+  end
+  return pPlayer.AddExperience(nCount, nLogReason)
+end
+
+local function AddTimeTitle(pPlayer, nLogReason, nLogReason2, szMsg, szType, nTitleID, nEndTime, bActive, bShowInfo, szTitle)
+  if not nTitleID or nTitleID <= 0 then
+    return
+  end
+  if -1 == nEndTime then
+    pPlayer.AddTitle(nTitleID, -1, bActive, bShowInfo, szTitle)
+  else
+    pPlayer.AddTimeTitle(nTitleID, nEndTime, bActive, bShowInfo, szTitle)
+  end
+end
+
+local function AddDurationTitle(pPlayer, nLogReason, nLogReason2, szMsg, szType, nTitleID, nDuration, bActive, bShowInfo, szTitle)
+  if not nTitleID or nTitleID <= 0 then
+    return
+  end
+  if not nDuration or 0 == nDuration then
+    pPlayer.AddTitle(nTitleID, nil, bActive, bShowInfo, szTitle)
+  elseif nDuration < 0 then
+    pPlayer.AddTitle(nTitleID, -1, bActive, bShowInfo, szTitle)
+  else
+    local nNow = GetTime()
+    local nEndTime = nNow + nDuration
+    pPlayer.AddTimeTitle(nTitleID, nEndTime, bActive, bShowInfo, szTitle)
+  end
+end
+
+local function AddBasicExp(pPlayer, nLogReason, nLogReason2, szMsg, szType, nCount, nUselessParam)
+  if not nCount or 0 == nCount then
+    LogErr("AwardFunc Err AddBasicExp Err", nLogReason, nUselessParam, nCount)
+    return false
+  end
+  if not (pPlayer and nCount) or nCount <= 0 then
+    return
+  end
+  nCount = nCount * pPlayer.GetBaseAwardExp()
+  return pPlayer.AddExperience(nCount, nLogReason)
+end
+
+local function AddAward(pPlayer, nLogReason, nLogReason2, szMsg, szType, nAwardId, nAwardKey, nRatio)
+  if not pPlayer then
+    return
+  end
+  local tbAwardParam = {}
+  tbAwardParam.szMsg = i18n.EasyGet("\232\142\183\229\190\151\229\165\150\229\138\177")
+  tbAwardParam.nLogReason = nLogReason
+  tbAwardParam.nLogReason2 = nLogReason2
+  tbAwardParam.nRatio = nRatio
+  Award:GiveAward(pPlayer.dwID, nAwardId, nAwardKey, tbAwardParam)
+  Log("player AddAward", pPlayer.szName, pPlayer.dwID, szType, nAwardId, nAwardKey)
+end
+
+local function AddChatIcon(pPlayer, nLogReason, nLogReason2, szMsg, szType, nAwardSubType, nCount)
+end
+
+local function AddTongStock(pPlayer, nLogReason, nLogReason2, szMsg, szType, nCount, nUselessParam)
+  if not nCount or 0 == nCount then
+    LogErr("AwardFunc Err AddTongStock Fail", nLogReason, nUselessParam, nCount)
+    return false
+  end
+  if not Currency:Valid(szType) or nCount <= 0 then
+    LogErr("AddTongStock szType", szType, "nCount", nCount)
+    return false
+  end
+  if not nLogReason or 0 == nLogReason then
+    LogErr("nLogReason == 0 ", debug.traceback())
+  end
+  local nOrgPoint = Tong:GetPersonalStock(pPlayer.dwID)
+  local bRet = Tong:ChangePersonalStock(pPlayer.dwID, nCount, nLogReason, nLogReason2)
+  if not bRet then
+    return false
+  end
+  local nAfterChangePoint = Tong:GetPersonalStock(pPlayer.dwID)
+  Log("AddTongStock", pPlayer.szName, pPlayer.dwID, "TongFund", nOrgPoint, nCount, nAfterChangePoint, Env.tbLogWaySubWays[nLogReason] or "unkonwn", Env.tbLogWayDesc[nLogReason] or "unkonwn", nLogReason2)
+  return true
+end
+
+local function AddItemShow(pPlayer, nLogReason, nLogReason2, szMsg, szType, nAwardSubType, nCount)
+  return true
+end
+
+local function AddPartner(pPlayer, nLogReason, nLogReason2, szMsg, szType, nPartnerTemplateId, nPartnerCount)
+  for i = 1, nPartnerCount do
+    local bHaveMainPartner, nMainPartnerId = Partner:GetMainPartnerId(pPlayer, nPartnerTemplateId)
+    if not bHaveMainPartner then
+      local nPartnerId = pPlayer.AddPartner(nPartnerTemplateId, nLogReason or 0)
+      if nPartnerId then
+        Log("player add partner", pPlayer.szName, "partnerTemplateId:" .. nPartnerTemplateId, "partnerId:" .. nPartnerId)
+      end
+    elseif 0 ~= nMainPartnerId then
+      local nPartnerRedundanceNum = Partner:GetMainPartnerRedundanceNumById(pPlayer, nMainPartnerId) or 0
+      Partner:UpdateMainPartnerRedundanceNum(pPlayer, nMainPartnerId, nPartnerRedundanceNum + 1)
+      Log("player add partner redundance num", pPlayer.szName, "partnerTemplateId:" .. nPartnerTemplateId, "redundance num:" .. nPartnerRedundanceNum + 1)
+    end
+  end
+end
+
+local function AddVipExp(pPlayer, nLogReason, nLogReason2, szMsg, szType, nCount)
+  Vip:AddExp(pPlayer, nCount)
+end
+
+local function GetDefaultValue()
+  return 0
+end
+
+local function GetEmptyValue()
+  return 0
+end
+
+local function GetItemValue(szType, nItemId, nCount)
+  return nCount * (KItem.GetBaseValue(nItemId) or 0)
+end
+
+local function GetMoneyValue(szType, nAwardType, nCount)
+  return nCount * (Currency:GetValue(szType) or 0)
+end
+
+local function GetPartnerValue(szType, nPartnerTemplateId, nCount)
+  return nCount * Partner:GetPartnerValueByTemplateId(nPartnerTemplateId)
+end
+
+Player.award_type_unkonw = 0
+Player.award_type_item = 1
+Player.award_type_money = 2
+Player.award_type_exp = 3
+Player.award_type_basicExp = 4
+Player.award_type_tongstock = 5
+Player.award_type_itemshow = 6
+Player.award_type_partner = 7
+Player.award_type_vip_exp = 16
+Player.award_type_award = 18
+Player.award_type_item_Unsafe = 28
+Player.Type2Func = {
+  [Player.award_type_unkonw] = AddUnknowAward,
+  [Player.award_type_item] = AddItemUnsafe,
+  [Player.award_type_money] = AddMoney,
+  [Player.award_type_exp] = AddExp,
+  [Player.award_type_item_Unsafe] = AddItemUnsafe,
+  [Player.award_type_basicExp] = AddBasicExp,
+  [Player.award_type_tongstock] = AddTongStock,
+  [Player.award_type_itemshow] = AddItemShow,
+  [Player.award_type_partner] = AddPartner,
+  [Player.award_type_vip_exp] = AddVipExp
+}
+Player.Type2ValueFunc = {
+  [Player.award_type_unkonw] = GetDefaultValue,
+  [Player.award_type_item] = GetItemValue,
+  [Player.award_type_money] = GetMoneyValue,
+  [Player.award_type_item_Unsafe] = GetItemValue,
+  [Player.award_type_tongstock] = GetMoneyValue,
+  [Player.award_type_partner] = GetPartnerValue,
+  [Player.award_type_vip_exp] = GetDefaultValue
+}
+Player.AwardType = {
+  Item = Player.award_type_item,
+  Gold = Player.award_type_money,
+  YuanBao = Player.award_type_money,
+  Coin = Player.award_type_money,
+  JingHuo = Player.award_type_money,
+  MingWang = Player.award_type_money,
+  KinContrib = Player.award_type_money,
+  WuWeiRepute = Player.award_type_money,
+  ZhuLuRepute = Player.award_type_money,
+  XiaoYaoRepute = Player.award_type_money,
+  JingHua = Player.award_type_money,
+  JinDing = Player.award_type_money,
+  Exp = Player.award_type_exp,
+  ItemUnsafe = Player.award_type_item_Unsafe,
+  BasicExp = Player.award_type_basicExp,
+  TongFund = Player.award_type_tongstock,
+  ItemShow = Player.award_type_itemshow,
+  Partner = Player.award_type_partner,
+  ZhanLingExp = Player.award_type_money,
+  VipExp = Player.award_type_vip_exp,
+  Award = Player.award_type_award,
+  ZhenQi = Player.award_type_money,
+  MetalYuanShi = Player.award_type_money,
+  WoodYuanShi = Player.award_type_money,
+  WaterYuanShi = Player.award_type_money,
+  FireYuanShi = Player.award_type_money,
+  EarthYuanShi = Player.award_type_money,
+  MingYangJiFen = Player.award_type_money
+}
+Player.AwardType2Name = {
+  [Player.award_type_item] = "Item",
+  [Player.award_type_money] = "Money",
+  [Player.award_type_exp] = "Exp",
+  [Player.award_type_item_Unsafe] = "ItemUnsafe",
+  [Player.award_type_itemshow] = "ItemShow",
+  [Player.award_type_partner] = "Partner",
+  [Player.award_type_vip_exp] = "VipExp",
+  [Player.award_type_award] = "Award"
+}
+Player.NonDataAwardType = {}
+Player.AwardTypeCountIndex = {
+  [Player.award_type_unkonw] = 3,
+  [Player.award_type_item] = 3,
+  [Player.award_type_money] = 2,
+  [Player.award_type_exp] = 2,
+  [Player.award_type_basicExp] = 2,
+  [Player.award_type_tongstock] = 2,
+  [Player.award_type_itemshow] = 3,
+  [Player.award_type_partner] = 3,
+  [Player.award_type_item_Unsafe] = 3,
+  [Player.award_type_vip_exp] = 2
+}
+
+function Player:GetAwardFunc(szType)
+  local awardType = self.AwardType[szType] or self.award_type_unkonw
+  return self.Type2Func[awardType]
+end
+
+function Player:GetAwardValue(tbAward)
+  if not tbAward or not tbAward[1] then
+    return 0
+  end
+  local awardType = self.AwardType[tbAward[1] or "nil"] or self.award_type_unkonw
+  local fnGetValueFunc = self.Type2ValueFunc[awardType] or GetDefaultValue
+  return fnGetValueFunc(table.unpack(tbAward))
+end
+
+function Player:GetPlayerSex(pPlayer)
+  if not pPlayer then
+    return
+  end
+  local pNpc = pPlayer.GetNpc()
+  local nResult
+  if pNpc then
+    local nBodySex = pNpc.GetBodySex()
+    nResult = self:GetPlayerRealSex(nBodySex)
+  end
+  return nResult
+end
+
+function Player:GetPlayerSexById(nDwId)
+  local pPlayer = KPlayer.GetPlayerObjById(nDwId)
+  if not pPlayer then
+    return
+  end
+  Player:GetPlayerSex(pPlayer)
+end
+
+function Player:GetPlayerRealSex(nBodySex)
+  local nResult
+  if nBodySex and nBodySex >= 0 then
+    local nLast = nBodySex % 2
+    if 1 == nLast then
+      nResult = 1
+    else
+      nResult = 0
+    end
+  end
+  return nResult
+end
+
+function Player:IsFirstPersonalFuben(pPlayer)
+  return false
+end
+
+function Player:MsgBox(pPlayer, szMsg, tbCallback, szNotTipsType, nTime, fnTimeOut, szUiName)
+  szUiName = szUiName or "UIMessageBox"
+  Player:MyMsgBox(pPlayer, szMsg, tbCallback, szNotTipsType, nTime, fnTimeOut, szUiName)
+end
+
+function Player:MyMsgBox(pPlayer, szMsg, tbCallback, szNotTipsType, nTime, fnTimeOut, szUiName)
+  local tbLight = {}
+  local tbBtnTxt = {}
+  local nCallbackCount = 0
+  szUiName = szUiName or "UIMessageBox"
+  pPlayer.tbMsgBoxCallback = tbCallback
+  for _, tbInfo in ipairs(tbCallback or {}) do
+    table.insert(tbBtnTxt, tbInfo[1])
+    table.insert(tbLight, tbInfo.bLight and true or false)
+  end
+  if MODULE_GAMESERVER and nTime and nTime > 0 and pPlayer.tbMsgBoxCallback then
+    pPlayer.tbMsgBoxCallback.nTimerId = Timer:Register(Env.GAME_FPS * nTime, function(nPlayerId)
+      local pPlayer = KPlayer.GetPlayerObjById(nPlayerId)
+      local old_me = pPlayer
+      fnTimeOut()
+      if pPlayer then
+        if pPlayer.tbMsgBoxCallback then
+          pPlayer.tbMsgBoxCallback.nTimerId = nil
+        end
+        pPlayer.CallClientScript("Ui:CloseWindow", szUiName)
+      end
+    end, pPlayer.dwID)
+  end
+  pPlayer.CallClientScript("Ui:OnServerMsgBox", szMsg, tbCallback and #tbCallback or 0, tbBtnTxt, MODULE_GAMESERVER, szNotTipsType, nTime, tbLight, szUiName, not MODULE_GAMESERVER and fnTimeOut)
+end
+
+function Player:LoadBirthSetting()
+  self.tbBirthSetting = Lib:LoadIniFile("Setting/BirthSetting.ini")
+  assert(self.tbBirthSetting)
+  for k, v in pairs(self.tbBirthSetting.Postion) do
+    self.tbBirthSetting.Postion[k] = tonumber(v)
+  end
+  Player.PLAYER_NAME_MIN_LENGTH = tonumber(self.tbBirthSetting.RoleName.NameMin)
+  Player.PLAYER_NAME_MAX_LENGTH = tonumber(self.tbBirthSetting.RoleName.NameMax)
+end
+
+Player:LoadBirthSetting()
+
+function Player:LoadExpReduceSetting()
+  self.tbExpReduceSetting = Lib:LoadTabFileEx("Setting/Player/ExpReduce.tab", "ddddd", "", {
+    "LevelMin",
+    "LevelMax",
+    "ExpMin",
+    "ExpMax",
+    "ReduceRate"
+  }, nil, nil, true)
+end
+
+function Player:GetExpReduceRate(pPlayer)
+  local nCurLevel = pPlayer.nLevel
+  local nHaveExp = pPlayer.GetExp()
+  local nNextExp = OfflineExp.tbOfflineExp[nCurLevel].nExpUpGrade
+  local nExpTimes = math.floor(nHaveExp / nNextExp)
+  local nRate = 1
+  for _, tbCfg in pairs(self.tbExpReduceSetting) do
+    if nCurLevel >= tbCfg.LevelMin and nCurLevel <= tbCfg.LevelMax and nExpTimes >= tbCfg.ExpMin and nExpTimes <= tbCfg.ExpMax then
+      nRate = tbCfg.ReduceRate
+      break
+    end
+  end
+  return nRate
+end
+
+function Player:LoadLevelExpAdditionSetting()
+  local tbFile = Lib:LoadTabFileEx("Setting/Player/LevelExpAddition.tab", "dd", nil, {
+    "nLowerLevel",
+    "nPercent"
+  })
+  self.tbLevelExpAddition = {}
+  local nLowerLevel, nPercent = tbFile[#tbFile].nLowerLevel, tbFile[#tbFile].nPercent
+  for i = GameSetting.MAX_PLAYER_TOTAL_LEVEL, nLowerLevel, -1 do
+    self.tbLevelExpAddition[i] = nPercent
+  end
+  local nIndex = 1
+  for i = 1, #tbFile do
+    nLowerLevel, nPercent = tbFile[i].nLowerLevel, tbFile[i].nPercent
+    for nIdx = nIndex, nLowerLevel do
+      self.tbLevelExpAddition[nIdx] = nPercent
+      nIndex = nIndex + 1
+    end
+  end
+end
+
+Player:LoadLevelExpAdditionSetting()
+
+function Player:GetLevelExpAdditionPercent(nLevel)
+  if 1 ~= GetTimeFrameState(self.szLowerExpAddTimeFrame) then
+    return 0
+  end
+  if nLevel <= 0 then
+    return 0
+  end
+  return self.tbLevelExpAddition[nLevel] or 0
+end
+
+function Player:LoadPlayerGlabalSetting()
+  local tbFile = Lib:LoadIniFile("Setting/Player/PlayerGlobalSetting.ini")
+  assert(tbFile)
+  Player.nLowerExpAddOpenLevel = tonumber(tbFile.ExpCondition.nLowerExpAddOpen)
+  Player.szLowerExpAddTimeFrame = tostring(tbFile.ExpCondition.szLowerExpAddTimeFrame)
+end
+
+Player:LoadPlayerGlabalSetting()

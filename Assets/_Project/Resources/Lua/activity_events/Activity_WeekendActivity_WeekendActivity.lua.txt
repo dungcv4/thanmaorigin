@@ -1,0 +1,128 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+ActivityMgr.szWeekendActivityClassName = "WeekendActivity"
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.szWeekendActivityClassName)
+tbActivity.Offset = 14400
+tbActivity.Cfg = {
+  tbMainConfigId = {nWeekendActivityId = 1},
+  tbSubActivityId = {
+    nWeekMonthCardId = 1,
+    nTongChallengeId = 2,
+    nTongPartyId = 3
+  }
+}
+tbActivity.bLoadConfig = false
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return true
+  end
+  self.ACTIVITY_CONFIG = {}
+  self.tbConfig = {}
+  local szFilePath = "Setting/Activity/WeekendActivity/WeekendSetting.tab"
+  local tbActivityConfig = Lib:EasyLoadTabFile(szFilePath)
+  if not tbActivityConfig then
+    LogErr(szFilePath .. " not find")
+    return false
+  end
+  for Idx, tbSubConfig in pairs(tbActivityConfig) do
+    if self.ACTIVITY_CONFIG[tbSubConfig.nConfigId] then
+      self.ACTIVITY_CONFIG[tbSubConfig.nConfigId][tbSubConfig.nSubConfigId] = tbSubConfig
+    else
+      self.ACTIVITY_CONFIG[tbSubConfig.nConfigId] = {}
+      self.ACTIVITY_CONFIG[tbSubConfig.nConfigId][tbSubConfig.nSubConfigId] = tbSubConfig
+    end
+  end
+  szFilePath = "Setting/Activity/WeekendActivity/ExtraDate.tab"
+  local tbExtraDate = Lib:LoadTabFileEx(szFilePath, "dsds", nil, {
+    "nConfigId",
+    "szDate",
+    "nOpenStatus",
+    "szShow"
+  })
+  local nDay, nTime
+  for _, tbInfo in ipairs(tbExtraDate or {}) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("WeekendActivity:LoadConfig ExtraDate nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbExtraDate = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbExtraDate or {}
+    nTime = Lib:ParseDateTime(tbInfo.szDate)
+    assert(nTime, string.format("WeekendActivity:LoadConfig ExtraDate date %s is wrong", tbInfo.szDate or ""))
+    nDay = Lib:GetLocalDay(nTime)
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbExtraDate[nDay] = {
+      0 ~= tbInfo.nOpenStatus and true or false,
+      tbInfo.szShow
+    }
+    if not self.ACTIVITY_CONFIG[tbInfo.nConfigId].szLogWay then
+      self.ACTIVITY_CONFIG[tbInfo.nConfigId].szLogWay = "LogWay_WeekendActivity"
+    end
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+  self.bLoadConfig = true
+  return true
+end
+
+function tbActivity:CheckDateIsOpen(nBegin, nBeginHour, nEnd, nEndHour)
+  local nNow = GetTime()
+  local nDay = Lib:GetLocalDay(nNow - self.Offset)
+  if self.tbConfig.tbExtraDate[nDay] then
+    return self.tbConfig.tbExtraDate[nDay][1]
+  end
+  local nCurDayOfWeek = Lib:GetLocalWeekDay(nNow)
+  local nCurHourOfDay = Lib:GetLocalDayHour(nNow)
+  if nEnd < nBegin then
+    if self:TimeCompare(nCurDayOfWeek, nCurHourOfDay, nBegin, nBeginHour, true) or self:TimeCompare(nEnd, nEndHour, nCurDayOfWeek, nCurHourOfDay, false) then
+      return true
+    end
+    return false
+  else
+    if self:TimeCompare(nCurDayOfWeek, nCurHourOfDay, nBegin, nBeginHour, true) and self:TimeCompare(nEnd, nEndHour, nCurDayOfWeek, nCurHourOfDay, false) then
+      return true
+    end
+    return false
+  end
+end
+
+function tbActivity:GetShowTxtInfo()
+  local nNow = GetTime()
+  local nDay = Lib:GetLocalDay(nNow)
+  if self.tbConfig.tbExtraDate[nDay] then
+    return i18n.Parse(self.tbConfig.tbExtraDate[nDay][2])
+  end
+  return i18n.EasyGet("\230\175\143\229\145\168\229\133\173\227\128\129\230\151\165")
+end
+
+function tbActivity:TimeCompare(nLeftDayOfWeek, nLeftHours, nRightDayOfWeek, nRightHours, bCanEqual)
+  bCanEqual = bCanEqual or false
+  if nRightDayOfWeek < nLeftDayOfWeek then
+    return true
+  elseif nLeftDayOfWeek == nRightDayOfWeek then
+    if bCanEqual and nRightHours <= nLeftHours or nRightHours < nLeftHours then
+      return true
+    end
+    return false
+  end
+  return false
+end
+
+function tbActivity:GetConfigByConfigId(nConfigId)
+  local tbConfig = {}
+  tbConfig = self.ACTIVITY_CONFIG[nConfigId]
+  return tbConfig
+end
+
+function tbActivity:WeekendActivityIsOpen()
+  if not self:IsOpen() then
+    return false
+  end
+  local tbAllConfig = self:GetConfigByConfigId(self.Cfg.tbMainConfigId.nWeekendActivityId)
+  if not tbAllConfig then
+    return false
+  end
+  local tbConfig = tbAllConfig[self.Cfg.tbSubActivityId.nWeekMonthCardId]
+  if not tbConfig then
+    return false
+  end
+  return self:CheckDateIsOpen(tbConfig.nBeginDay, tbConfig.nBeginHour, tbConfig.nEndDay, tbConfig.nEndHour)
+end
+
+function tbActivity:GetSaveKeyFieldName()
+  return ActivityMgr.NoSaveKey
+end

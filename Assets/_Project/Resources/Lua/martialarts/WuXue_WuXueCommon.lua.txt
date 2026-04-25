@@ -1,0 +1,423 @@
+WuXue = WuXue or {}
+
+function WuXue:UpdateActiveSkill(pPlayer, nWuXueId, nWuXueLearnState)
+  pPlayer = pPlayer or me
+  self:RemoveActiveSkillFromPlayer(pPlayer)
+  self:CheckAndRemoveRepeatSkillFromPlayer(pPlayer, nWuXueId)
+  self:AddActiveSkillToPlayer(pPlayer, nWuXueId, nWuXueLearnState)
+end
+
+function WuXue:UpdatePassiveSkill(pPlayer, nWuXueId, nWuXueLearnState, nIndex)
+  pPlayer = pPlayer or me
+  self:RemovePassiveSkillFromPlayer(pPlayer, nIndex)
+  self:CheckAndRemoveRepeatSkillFromPlayer(pPlayer, nWuXueId)
+  self:AddPassiveSkillToPlayer(pPlayer, nWuXueId, nWuXueLearnState, nIndex)
+end
+
+function WuXue:CheckAndRemoveRepeatSkillFromPlayer(pPlayer, nTargetWuXueId)
+  pPlayer = pPlayer or me
+  local bInstalled, nType, nIndex = self:CheckWuXueInstalled(pPlayer, nTargetWuXueId)
+  if bInstalled then
+    if 1 == nType then
+      self:RemoveActiveSkillFromPlayer(pPlayer)
+    elseif 2 == nType then
+      self:RemovePassiveSkillFromPlayer(pPlayer, nIndex)
+    end
+  end
+end
+
+function WuXue:AddActiveSkillToPlayer(pPlayer, nWuXueId, nWuXueLearnState)
+  pPlayer = pPlayer or me
+  local pNpc = pPlayer.GetNpc()
+  local nActiveSkillId, nPassiveSkillId = self:GetSkillIdByWuXueId(nWuXueId)
+  if not nActiveSkillId or nActiveSkillId <= 0 then
+    return false
+  end
+  if not self.tbWuXueExtraPassiveSkillList[nActiveSkillId] then
+    return false
+  end
+  if pNpc then
+    pNpc.AddSkill(nActiveSkillId, nWuXueLearnState)
+    for i = 1, nWuXueLearnState do
+      local nExtraPassiveSkillId = self.tbWuXueExtraPassiveSkillList[nActiveSkillId][i]
+      if nExtraPassiveSkillId and nExtraPassiveSkillId > 0 then
+        pNpc.AddSkillState(nExtraPassiveSkillId, 1, FightSkill.STATE_TIME_TYPE.state_time_normal, -1)
+      end
+    end
+    if MODULE_GAMESERVER then
+      pPlayer.SetUserValue(self.Def.nSkillGroupKey, self.Def.tbSkillGroup.CurActiveSkill, nWuXueId)
+    end
+    return true
+  end
+  return false
+end
+
+function WuXue:AddPassiveSkillToPlayer(pPlayer, nWuXueId, nWuXueLearnState, nIndex)
+  pPlayer = pPlayer or me
+  local pNpc = pPlayer.GetNpc()
+  local nActiveSkillId, nPassiveSkillId = self:GetSkillIdByWuXueId(nWuXueId)
+  if nPassiveSkillId <= 0 then
+    return false
+  end
+  if not self.tbWuXueExtraPassiveSkillList[nPassiveSkillId] then
+    return false
+  end
+  if pNpc then
+    pNpc.AddSkillState(nPassiveSkillId, nWuXueLearnState, FightSkill.STATE_TIME_TYPE.state_time_normal, -1)
+    for i = 1, nWuXueLearnState do
+      local nExtraPassiveSkillId = self.tbWuXueExtraPassiveSkillList[nPassiveSkillId][i]
+      if nExtraPassiveSkillId and nExtraPassiveSkillId > 0 then
+        pNpc.AddSkillState(nExtraPassiveSkillId, 1, FightSkill.STATE_TIME_TYPE.state_time_normal, -1)
+      end
+    end
+    if MODULE_GAMESERVER then
+      local nSaveKey = self.Def.tbPassiveSkillIndex[nIndex]
+      pPlayer.SetUserValue(self.Def.nSkillGroupKey, nSaveKey, nWuXueId)
+    end
+    return true
+  end
+  return false
+end
+
+function WuXue:RemoveActiveSkillFromPlayer(pPlayer)
+  pPlayer = pPlayer or me
+  local nWuXueId = pPlayer.GetUserValue(self.Def.nSkillGroupKey, self.Def.tbSkillGroup.CurActiveSkill)
+  if nWuXueId <= 0 then
+    return false
+  end
+  local nActiveSkillId, nPassiveSkillId = self:GetSkillIdByWuXueId(nWuXueId)
+  if nActiveSkillId <= 0 then
+    return false
+  end
+  if not self.tbWuXueExtraPassiveSkillList[nActiveSkillId] then
+    return false
+  end
+  local pNpc = pPlayer.GetNpc()
+  if pNpc then
+    pNpc.RemoveSkill(nActiveSkillId)
+    local nWuXueCurState = self:GetWuXueSkillLearnState(pPlayer, nWuXueId)
+    for i = 1, nWuXueCurState do
+      local nExtraPassiveSkillId = self.tbWuXueExtraPassiveSkillList[nActiveSkillId][i]
+      if nExtraPassiveSkillId and nExtraPassiveSkillId > 0 then
+        pNpc.RemoveSkillState(nExtraPassiveSkillId)
+      end
+    end
+    if MODULE_GAMESERVER then
+      pPlayer.SetUserValue(self.Def.nSkillGroupKey, self.Def.tbSkillGroup.CurActiveSkill, 0)
+    end
+    return true
+  end
+  return false
+end
+
+function WuXue:RemovePassiveSkillFromPlayer(pPlayer, nIndex)
+  pPlayer = pPlayer or me
+  local nSaveKey = self.Def.tbPassiveSkillIndex[nIndex]
+  local nWuXueId = pPlayer.GetUserValue(self.Def.nSkillGroupKey, nSaveKey)
+  if nWuXueId <= 0 then
+    return false
+  end
+  local nActiveSkillId, nPassiveSkillId = self:GetSkillIdByWuXueId(nWuXueId)
+  if nPassiveSkillId <= 0 then
+    return false
+  end
+  if not self.tbWuXueExtraPassiveSkillList[nPassiveSkillId] then
+    return false
+  end
+  local pNpc = pPlayer.GetNpc()
+  if pNpc then
+    pNpc.RemoveSkillState(nPassiveSkillId)
+    local nWuXueCurState = self:GetWuXueSkillLearnState(pPlayer, nWuXueId)
+    for i = 1, nWuXueCurState do
+      local nExtraPassiveSkillId = self.tbWuXueExtraPassiveSkillList[nPassiveSkillId][i]
+      if nExtraPassiveSkillId and nExtraPassiveSkillId > 0 then
+        pNpc.RemoveSkillState(nExtraPassiveSkillId)
+      end
+    end
+    if MODULE_GAMESERVER then
+      pPlayer.SetUserValue(self.Def.nSkillGroupKey, nSaveKey, 0)
+    end
+    return true
+  end
+  return false
+end
+
+function WuXue:RemoveAllInstalledSkills(pPlayer)
+  pPlayer = pPlayer or me
+  local pNpc = pPlayer.GetNpc()
+  if not pNpc then
+    return false
+  end
+  local tbAllWuXueInstalled = self:GetAllWuXueInstalled(pPlayer)
+  for nSaveKey, nWuXueId in pairs(tbAllWuXueInstalled) do
+    if nWuXueId > 0 then
+      if 1 == nSaveKey then
+        self:RemoveActiveSkillFromPlayer(pPlayer)
+      else
+        self:RemovePassiveSkillFromPlayer(pPlayer, nSaveKey - 1)
+      end
+    end
+  end
+  return true
+end
+
+function WuXue:GetWuXueSkillLearnState(pPlayer, nWuXueId)
+  pPlayer = pPlayer or me
+  local nWuXueLearnState = pPlayer.GetUserValue(self.Def.nDataGroupKey, nWuXueId)
+  return nWuXueLearnState
+end
+
+function WuXue:SetWuXueSkillLearnState(pPlayer, nWuXueId, nWuXueLearnState)
+  pPlayer = pPlayer or me
+  pPlayer.SetUserValue(self.Def.nDataGroupKey, nWuXueId, nWuXueLearnState)
+end
+
+function WuXue:GetSkillIdByWuXueId(nWuXueId)
+  if self.tbWuXueSkillInfo and self.tbWuXueSkillInfo[nWuXueId] then
+    return self.tbWuXueSkillInfo[nWuXueId].nActiveSkillId, self.tbWuXueSkillInfo[nWuXueId].nPassiveSkillId
+  end
+end
+
+function WuXue:GetOpenStageByTimeFrame()
+  local nCurState = 0
+  for szTimeFrame, nState in pairs(self.Cfg.OpenTimeFrameState) do
+    if 1 == GetTimeFrameState(szTimeFrame) and nState > nCurState then
+      nCurState = nState
+    end
+  end
+  return nCurState
+end
+
+function WuXue:GetAllWuXueInstalled(pPlayer)
+  pPlayer = pPlayer or me
+  local tbAllWuXueInstalled = {}
+  tbAllWuXueInstalled[self.Def.tbSkillGroup.CurActiveSkill] = pPlayer.GetUserValue(self.Def.nSkillGroupKey, self.Def.tbSkillGroup.CurActiveSkill)
+  for nIndex, nSaveKey in ipairs(self.Def.tbPassiveSkillIndex) do
+    tbAllWuXueInstalled[nSaveKey] = pPlayer.GetUserValue(self.Def.nSkillGroupKey, nSaveKey)
+  end
+  return tbAllWuXueInstalled
+end
+
+function WuXue:GetWuXueLearnedCount(pPlayer)
+  pPlayer = pPlayer or me
+  local tbWuXueLearned = {}
+  for nWuXueId, tbInfo in pairs(self.tbWuXueSkillInfo) do
+    local nWuXueLearnState = self:GetWuXueSkillLearnState(pPlayer, nWuXueId)
+    if nWuXueLearnState > 0 then
+      table.insert(tbWuXueLearned, {nWuXueId = nWuXueId, nStar = nWuXueLearnState})
+    end
+  end
+  return tbWuXueLearned
+end
+
+function WuXue:CheckWuXueInstalled(pPlayer, nWuXueId)
+  pPlayer = pPlayer or me
+  local nActiveWuXueId = pPlayer.GetUserValue(self.Def.nSkillGroupKey, self.Def.tbSkillGroup.CurActiveSkill)
+  if nActiveWuXueId == nWuXueId then
+    return true, 1, 1
+  end
+  for nIndex, nSaveKey in ipairs(self.Def.tbPassiveSkillIndex) do
+    local nPassiveWuXueId = pPlayer.GetUserValue(self.Def.nSkillGroupKey, nSaveKey)
+    if nPassiveWuXueId == nWuXueId then
+      return true, 2, nIndex
+    end
+  end
+  return false, 0, 0
+end
+
+function WuXue:GetPlayerOneSkillInfoWithoutConfig(nSkillId, nSkillLevel)
+  local nSkillInfoLevel = nSkillLevel
+  if not nSkillInfoLevel or nSkillInfoLevel <= 0 then
+    nSkillInfoLevel = 1
+  end
+  local tbSkillInfo = FightSkill:GetSkillSetting(nSkillId, nSkillInfoLevel)
+  local nMaxSkillLevel = 1
+  local bMax = nSkillLevel >= nMaxSkillLevel
+  local szCurMagicDesc, szNextMagicDesc, szClassName = FightSkill:FormatMagicDesc(nSkillId, nSkillLevel)
+  local tbSkillResultInfo = {
+    nId = nSkillId,
+    nLevel = nSkillLevel,
+    nMaxLevel = nMaxSkillLevel,
+    bMax = bMax,
+    szName = tbSkillInfo.SkillName or "",
+    szDesc = tbSkillInfo.Desc or "",
+    szProperty = tbSkillInfo.Property or "",
+    nCD = tbSkillInfo.TimePerCast or 0,
+    bPassive = tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_passivity or tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_inst_missile,
+    nRadius = tbSkillInfo.AttackRadius or 0,
+    nSort = 1,
+    szIconAltlas = "",
+    szCurMagicDesc = szCurMagicDesc or "",
+    szNextMagicDesc = szNextMagicDesc or "",
+    szClassName = szClassName or "",
+    bNotNextInfo = bMax
+  }
+  if tbSkillResultInfo.IsAura then
+    tbSkillResultInfo.bPassive = true
+  end
+  return tbSkillResultInfo
+end
+
+function WuXue:GenerateSkillDescText(tbSkillInfo, bShowCurrentLevel, bShowNextLevel, bShowActive)
+  if not tbSkillInfo or not tbSkillInfo.nId then
+    return ""
+  end
+  bShowCurrentLevel = false ~= bShowCurrentLevel
+  bShowNextLevel = false ~= bShowNextLevel
+  local nSkillLevel = tbSkillInfo.nLevel or 0
+  if nSkillLevel < 0 then
+    nSkillLevel = 0
+  end
+  local nDisplayLevel = nSkillLevel
+  if tbSkillInfo.nExtraLevel and tbSkillInfo.nExtraLevel > 0 then
+    nDisplayLevel = nSkillLevel + tbSkillInfo.nExtraLevel
+  end
+  local szSkillType = ""
+  if not tbSkillInfo.bPassive then
+    szSkillType = string.format("<color=#%s>[%s]</color>", Ui:GetDisplayColorHexStr("Yellow"), i18n.Get(FightSkill.Terms.ActiveSkill))
+  else
+    szSkillType = string.format("<color=#%s>[%s]</color>", Ui:GetDisplayColorHexStr("Yellow"), i18n.Get(FightSkill.Terms.PassiveSkill))
+  end
+  if bShowActive then
+    szSkillType = szSkillType .. string.format("<color=#%s>[%s]</color>", Ui:GetDisplayColorHexStr("Red"), i18n.EasyGet("\229\183\178\230\191\128\230\180\187"))
+  end
+  local szMainDesc = szSkillType .. "\n" .. Lib:Str2LunStr(i18n.Parse(tbSkillInfo.szDesc or ""))
+  local szShowInfo = szMainDesc
+  if bShowCurrentLevel and nSkillLevel > 0 then
+    szShowInfo = szShowInfo .. string.format([[
+
+
+<color=#%s>[%s]</color>]], Ui:GetDisplayColorHexStr("Yellow"), i18n.Get(FightSkill.Terms.CurrentLevel))
+    local tbCurDesc = Lib:SplitStr(tbSkillInfo.szCurMagicDesc or "", "|")
+    for _, szCurMagicDesc in ipairs(tbCurDesc) do
+      if "AttackRadius" == szCurMagicDesc then
+        if tbSkillInfo.nRadius and 0 ~= tbSkillInfo.nRadius then
+          szShowInfo = szShowInfo .. "\n" .. i18n.Get(FightSkill.Terms.AttackRadius, tbSkillInfo.nRadius / Lib.Logic2Unity)
+        end
+      elseif "TimePerCast" == szCurMagicDesc then
+        if tbSkillInfo.nCD and tbSkillInfo.nCD > 20 then
+          szShowInfo = szShowInfo .. "\n" .. i18n.Get(FightSkill.Terms.TimePerCast, math.floor(tbSkillInfo.nCD / Env.GAME_FPS))
+        end
+      elseif not Lib:IsEmptyStr(szCurMagicDesc) then
+        if "skill_desc" == szCurMagicDesc then
+          szShowInfo = szShowInfo .. "\n" .. FightSkill:GetPassiveSkillDesc(tbSkillInfo.szClassName, nDisplayLevel)
+        else
+          szShowInfo = szShowInfo .. szCurMagicDesc
+        end
+      end
+    end
+  end
+  if bShowNextLevel and nSkillLevel >= 0 and not tbSkillInfo.bNotNextInfo and not tbSkillInfo.bMax then
+    szShowInfo = szShowInfo .. string.format([[
+
+
+<color=#%s>[%s]</color>]], Ui:GetDisplayColorHexStr("Yellow"), i18n.Get(FightSkill.Terms.NextLevel))
+    local tbNextSkillInfo = KFightSkill.GetSkillInfo(tbSkillInfo.nId, nDisplayLevel + 1)
+    local tbNextDesc = Lib:SplitStr(tbSkillInfo.szNextMagicDesc or "", "|")
+    for _, szNextMagicDesc in ipairs(tbNextDesc) do
+      if "AttackRadius" == szNextMagicDesc then
+        if tbSkillInfo.nRadius and 0 ~= tbSkillInfo.nRadius then
+          local nNextRadius = tbSkillInfo.nRadius
+          if tbNextSkillInfo and tbNextSkillInfo.AttackRadius and tbNextSkillInfo.AttackRadius > 0 then
+            nNextRadius = tbNextSkillInfo.AttackRadius
+          end
+          szShowInfo = szShowInfo .. string.format([[
+
+<color=#%s>%s</color>]], Ui:GetDisplayColorHexStr("Red"), i18n.Get(FightSkill.Terms.AttackRadius, nNextRadius / Lib.Logic2Unity))
+        end
+      elseif "TimePerCast" == szNextMagicDesc then
+        if tbSkillInfo.nCD and tbSkillInfo.nCD > 20 then
+          local nNextCD = tbSkillInfo.nCD
+          if tbNextSkillInfo and tbNextSkillInfo.TimePerCast and tbNextSkillInfo.TimePerCast > 20 then
+            nNextCD = tbNextSkillInfo.TimePerCast
+          end
+          szShowInfo = szShowInfo .. string.format([[
+
+<color=#%s>%s</color>]], Ui:GetDisplayColorHexStr("Red"), i18n.Get(FightSkill.Terms.TimePerCast, math.floor(nNextCD / Env.GAME_FPS)))
+        end
+      elseif not Lib:IsEmptyStr(szNextMagicDesc) then
+        local szNextShowInfo = ""
+        if "skill_desc" == szNextMagicDesc then
+          szNextShowInfo = "\n" .. FightSkill:GetPassiveSkillDesc(tbSkillInfo.szClassName, nDisplayLevel + 1)
+        else
+          szNextShowInfo = szNextMagicDesc
+        end
+        szShowInfo = szShowInfo .. string.format("<color=#%s>%s</color>", Ui:GetDisplayColorHexStr("Red"), szNextShowInfo)
+      end
+    end
+  end
+  szShowInfo = string.gsub(szShowInfo, "\\n", "\n")
+  return szShowInfo
+end
+
+function WuXue:GetSkillMagicValueMap(nSkillId, nLevel)
+  FightSkill:TrySplitMagicDesc()
+  local tbDescInfo = FightSkill.tbSkillDesc[nSkillId]
+  if not tbDescInfo or not tbDescInfo.SkillMagicDesc then
+    return {}
+  end
+  local tbResult = {}
+  local tbMagicSeq = tbDescInfo.SkillMagicDesc
+  local tbState = KFightSkill.GetSkillAllMagic(nSkillId, nLevel)
+  for _, szAttribName in ipairs(tbMagicSeq) do
+    for _, tbAttr in ipairs(tbState) do
+      if tbAttr.szName == szAttribName then
+        local tbValue = {}
+        for k = 1, 3 do
+          tbValue[k] = (tbAttr.tbValue[k] or 0) / 100
+        end
+        local szFinalName, szFinalValue = FightSkill:GetMagicDescSplit(szAttribName, tbValue)
+        if szFinalName and szFinalValue then
+          tbResult[szAttribName] = {szFinalName = szFinalName, szFinalValue = szFinalValue}
+        end
+        break
+      end
+    end
+  end
+  return tbResult
+end
+
+function WuXue:GenerateSkillDescDiffText(nSkillId, nLevel)
+  if not (nSkillId and not (nSkillId <= 0) and nLevel) or nLevel < 0 then
+    return {}
+  end
+  local tbCur = self:GetSkillMagicValueMap(nSkillId, nLevel)
+  local tbNext = self:GetSkillMagicValueMap(nSkillId, nLevel + 1)
+  if not next(tbCur) and not next(tbNext) then
+    return {}
+  end
+  local tbLines = {}
+  local tbCurSetting = FightSkill:GetSkillSetting(nSkillId, nLevel)
+  local tbNextSetting = FightSkill:GetSkillSetting(nSkillId, nLevel + 1)
+  if tbCurSetting and tbNextSetting then
+    local nRadiusCur = tbCurSetting.AttackRadius or 0
+    local nRadiusNext = tbNextSetting.AttackRadius or 0
+    if nRadiusCur ~= nRadiusNext and 0 ~= nRadiusCur then
+      table.insert(tbLines, {
+        i18n.Get(FightSkill.Terms.AttackRadius, ""):gsub("\239\188\154.*", ""),
+        string.format("%.1f\226\134\146%.1f", nRadiusCur / Lib.Logic2Unity, nRadiusNext / Lib.Logic2Unity)
+      })
+    end
+    local nCDCur = tbCurSetting.TimePerCast or 0
+    local nCDNext = tbNextSetting.TimePerCast or 0
+    if nCDCur ~= nCDNext and nCDCur > 20 then
+      table.insert(tbLines, {
+        i18n.Get(FightSkill.Terms.TimePerCast, ""):gsub("\239\188\154.*", ""),
+        string.format("%ds\226\134\146%ds", math.floor(nCDCur / Env.GAME_FPS), math.floor(nCDNext / Env.GAME_FPS))
+      })
+    end
+  end
+  for szAttr, tbCurVal in pairs(tbCur) do
+    local tbNextVal = tbNext[szAttr]
+    if tbNextVal and tbCurVal.szFinalValue ~= tbNextVal.szFinalValue then
+      table.insert(tbLines, {
+        tbCurVal.szFinalName,
+        string.format("%s\226\134\146%s", tbCurVal.szFinalValue, tbNextVal.szFinalValue)
+      })
+    end
+  end
+  if 0 == #tbLines then
+    return {}
+  end
+  return tbLines
+end

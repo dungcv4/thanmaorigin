@@ -1,0 +1,143 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.SummerFishing)
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/SummerActivity/SummerFishing/FishingExpertCfg.tab"
+  local tbActivityConfig = Lib:EasyLoadTabFile(szFilepath, {"nConfigId"})
+  if not tbActivityConfig then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  self.ACTIVITY_CONFIG = {}
+  for nConfigId, tbConfig in pairs(tbActivityConfig) do
+    self.ACTIVITY_CONFIG[nConfigId] = tbConfig
+  end
+  szFilepath = "Setting/Activity/SummerActivity/SummerFishing/FishingAwardLocInfo.tab"
+  local tbFishingAwardLocInfo = Lib:EasyLoadTabFile(szFilepath)
+  if not tbFishingAwardLocInfo then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  for _, tbInfo in pairs(tbFishingAwardLocInfo) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("SummerFishing: LoadFishingAwardLocInfoConfig failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFishingAwardLocInfo = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFishingAwardLocInfo or {}
+    if not self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFishingAwardLocInfo[tbInfo.nMapId] then
+      self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFishingAwardLocInfo[tbInfo.nMapId] = tbInfo
+    else
+      LogErr(string.format("SummerFishing: LoadFishingAwardLocInfoConfig failed, duplicate Map Info, nMapId = %d", tbInfo.nMapId))
+      return false
+    end
+  end
+  szFilepath = "Setting/Activity/SummerActivity/SummerFishing/FishInfo.tab"
+  local tbFishInfo = Lib:EasyLoadTabFile(szFilepath)
+  if not tbFishInfo then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  for _, tbInfo in pairs(tbFishInfo) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("SummerFishing: LoadFishInfoConfig failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFishInfo = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFishInfo or {}
+    if not self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFishInfo[tbInfo.nFishTemplateId] then
+      self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFishInfo[tbInfo.nFishTemplateId] = tbInfo
+    else
+      LogErr(string.format("SummerFishing: LoadFishInfoConfig failed, duplicate Fish Info, nFishTemplateId = %d", tbInfo.nFishTemplateId))
+      return false
+    end
+  end
+  szFilepath = "Setting/Activity/SummerActivity/SummerFishing/FishingBuff.tab"
+  local tbFishingBuff = Lib:EasyLoadTabFile(szFilepath)
+  if not tbFishingBuff then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  for _, tbInfo in pairs(tbFishingBuff) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("SummerFishing: LoadFishingBuffConfig failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFishingBuff = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFishingBuff or {}
+    table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFishingBuff, tbInfo)
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+  self.bLoadConfig = true
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  self.tbConfig = tbActCfg.Cfg
+  self.tbConfig.szName = i18n.Encode(self.tbConfig.szName)
+  self.tbConfig.szDesc = i18n.Encode(self.tbConfig.szDesc)
+  self.tbConfig.szShowTime = i18n.Encode(self.tbConfig.szShowTime)
+  self.tbConfig.tbFishingAwardLocInfo = {}
+  for _, tbInfo in ipairs(tbActCfg.FishingAwardLocInfo) do
+    self.tbConfig.tbFishingAwardLocInfo[tbInfo.nMapId] = tbInfo
+  end
+  self.tbConfig.tbFishInfo = {}
+  for _, tbInfo in ipairs(tbActCfg.FishInfo) do
+    self.tbConfig.tbFishInfo[tbInfo.nFishTemplateId] = tbInfo
+  end
+  self.tbConfig.tbFishingBuff = Lib:CopyTB(tbActCfg.FishingBuff)
+end
+
+function tbActivity:CheckConfigValid()
+  local tbConfig = self:GetConfig()
+  if Lib:IsEmptyStr(tbConfig.szSaveKey) then
+    LogErr("[SummerFishing:CheckConfigValid] bad savekey! please check it! szSaveKey=", tbConfig.szSaveKey, self:GetId())
+    return false
+  end
+  if Lib:IsEmptyStr(tbConfig.szLogWay) then
+    LogErr("[SummerFishing:CheckConfigValid] bad logway! please check it! szLogWay=", tbConfig.szLogWay, self:GetId())
+    return false
+  end
+  return true
+end
+
+function tbActivity:InitExtraData()
+  self.nSaveId = GetGroupKey(self.tbConfig.szSaveKey)
+  self.szLogWay = self.tbConfig.szLogWay
+end
+
+tbActivity.SaveID = {
+  LastJoinTime = 1,
+  SelectBaitTemplateId = 3,
+  FishWeightHistory = 4
+}
+
+function tbActivity:GetSelectBait(pPlayer)
+  if not pPlayer then
+    return
+  end
+  local nBaitTemplateId = pPlayer.GetUserValue(self.nSaveId, self.SaveID.SelectBaitTemplateId)
+  if not nBaitTemplateId or 0 == nBaitTemplateId then
+    return
+  else
+    return nBaitTemplateId
+  end
+end
+
+tbActivity.Protocol = {
+  OnCreateFishBallResp = 1,
+  OnFishBallSkillResp = 2,
+  OnDestroySkillResp = 3,
+  OnSyncOneFishDataResp = 4,
+  OnSyncAllFishDataResp = 5,
+  OnRemindBuyCreelResp = 7,
+  OnRemindBaitCompose = 8,
+  OnSyncAllFishDataReq = 9,
+  OnSetSelectBaitReq = 10,
+  OnSelectBait = 11,
+  OnFishingSuccessResp = 12,
+  OnSyncActivityStatusResp = 13
+}
+tbActivity.FishBallStatus = {
+  START = 1,
+  END = 2,
+  GET = 3
+}
+tbActivity.FishBallSkill = {
+  [tbActivity.FishBallStatus.START] = 507,
+  [tbActivity.FishBallStatus.END] = 506,
+  [tbActivity.FishBallStatus.GET] = 506
+}

@@ -1,0 +1,160 @@
+local tbWnd = Ui:CreateWindow("UIBattleEntrance")
+local szDegreeName = "Battle"
+tbWnd.tbControls = {
+  btnClose = "imgBG/btnClose",
+  btnEnter = "imgBG/panelInfo/btnEnter",
+  txtLeftCount = "imgBG/panelInfo/panelTimes/txtLeftCount",
+  txtOpenTime = "imgBG/panelInfo/Time/txtOpenTime",
+  txtCurNum = "imgBG/panelInfo/txtCurNum",
+  txtSetupTime = "imgBG/panelInfo/panelSetupTime/txtSetupTime",
+  txtEnroll = "imgBG/panelInfo/txtEnroll",
+  txtEnrolling = "imgBG/panelInfo/txtEnrolling",
+  txtTitle = "imgBG/txtTitle",
+  btnPlus = "imgBG/panelInfo/panelTimes/btnPlus",
+  txtEdictCount = "imgBG/panelInfo/panelItemTimes/txtLeftCount",
+  btnEdictPlus = "imgBG/panelInfo/panelItemTimes/btnPlus",
+  uiItemGrid = "imgBG/panelInfo/panelItemTimes/UIItemGrid"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnEnter = function(self)
+    Battle:WantSignUp()
+  end,
+  btnPlus = function(self)
+    self:OnClickBtnPlus()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_BATTLE_OPEN,
+      self.SyncOpenInfo
+    },
+    {
+      EventNotify.emNOTIFY_BUY_DEGREE_SUCCESS,
+      self.onRefreshInfo
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.nLeftTime = 0
+  self.pPanel:SetActive(self.btnEdictPlus, false)
+  self.EdictGrid = Ui:NewExistItemGrid(self, self.uiItemGrid)
+  local tbInfo = Item:GetClass("CountAddProp"):GetAddDegreeInfo(szDegreeName)
+  self.EdictGrid:SetItemByTemplate(tbInfo.TemplateId, 0)
+  self.EdictGrid:SetClickEnable(true)
+end
+
+function tbWnd:OnOpen()
+  self:onRefreshInfo()
+  self.nLeftTime = 0
+  self.pPanel:Label_SetText(self.txtSetupTime, "--:--")
+end
+
+function tbWnd:OnClose()
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+  end
+  if self.nTimer2 then
+    Timer:Close(self.nTimer2)
+  end
+end
+
+function tbWnd:onRefreshInfo()
+  if not Ui:WindowVisible(self.ClassName) then
+    return
+  end
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+  end
+  if self.nTimer2 then
+    Timer:Close(self.nTimer2)
+  end
+  self.pPanel:Label_SetText(self.txtOpenTime, Battle.Cfg.szBattleEntrance)
+  local nLeftTimes = DegreeCtrl:GetDegree(me, "Battle")
+  self.pPanel:Label_SetText(self.txtLeftCount, string.format("%d/%d", nLeftTimes, DegreeCtrl:GetMaxDegree("Battle", me)))
+  self.pPanel:SetActive(self.btnPlus, nLeftTimes <= 0)
+  self.pPanel:Label_SetText(self.txtEdictCount, string.format("%d/%d", DegreeCtrl:GetDegree(me, "BattleImperialEdict"), DegreeCtrl:GetMaxDegree("BattleImperialEdict", me)))
+  self.pPanel:SetActive(self.txtCurNum, false)
+  self.nTimer = Timer:Register(Env.GAME_FPS * 5, function()
+    RemoteServer.GetBattleSignUpInfo()
+    return true
+  end)
+  self.nTimer2 = Timer:Register(Env.GAME_FPS, self.UpdataTime, self)
+end
+
+function tbWnd:SyncOpenInfo(nRet, nWaitlistNum, bInList, nLeftTime, bKuaFu, szType)
+  self.pPanel:SetActive(self.txtCurNum, true)
+  self.pPanel:Label_SetText(self.txtCurNum, i18n.EasyGet("\229\189\147\229\137\141\230\138\165\229\144\141\228\186\186\230\149\176 {0}", nWaitlistNum))
+  self.pPanel:SetActive(self.txtEnroll, bInList)
+  self.pPanel:SetActive(self.btnEnter, not bInList)
+  if bKuaFu then
+    self.pPanel:Label_SetText(self.txtTitle, i18n.EasyGet("\229\174\139\233\135\145\230\136\152\229\156\186\239\188\136\232\183\168\230\156\141\239\188\137"))
+    self.pPanel:Label_SetText(self.txtEnrolling, i18n.EasyGet("\232\183\168\230\156\141\230\136\152\229\156\186\230\138\165\229\144\141\228\184\173"))
+  else
+    local szTitle = i18n.EasyGet("\229\174\139\233\135\145\230\136\152\229\156\186")
+    if "BattleHuqi" == szType then
+      szTitle = i18n.EasyGet("\229\174\139\233\135\145\230\138\164\230\151\151\230\136\152\229\156\186")
+    end
+    self.pPanel:Label_SetText(self.txtTitle, szTitle)
+    self.pPanel:Label_SetText(self.txtEnrolling, i18n.EasyGet("\230\136\152\229\156\186\230\138\165\229\144\141\228\184\173"))
+  end
+  if Calendar:IsActivityInOpenState("BattleYD") and BattleSignUpYD:CheckPlayerQualification(me) then
+    self.pPanel:Label_SetText(self.txtLeftCount, "1/1")
+    self.pPanel:SetActive(self.btnPlus, false)
+    self.pPanel:Label_SetText(self.txtTitle, i18n.EasyGet("\229\174\139\233\135\145\230\136\152\229\156\186\239\188\136\230\156\136\229\186\166\239\188\137"))
+    self.pPanel:Label_SetText(self.txtEnrolling, i18n.EasyGet("\230\156\136\229\186\166\230\136\152\229\156\186\230\138\165\229\144\141\228\184\173"))
+  end
+  self.nLeftTime = nLeftTime
+  self:UpdataTime()
+end
+
+function tbWnd:UpdataTime()
+  if self.nLeftTime > 0 then
+    self.nLeftTime = self.nLeftTime - 1
+    self.pPanel:Label_SetText(self.txtSetupTime, string.format("%02d:%02d", math.floor(self.nLeftTime / 60), math.mod(self.nLeftTime, 60)))
+  end
+  return true
+end
+
+function tbWnd:OnClickBtnPlus()
+  local bAdd, szErrMsg = self:CheckAddTimes()
+  if not bAdd and szErrMsg then
+    me.CenterMsg(szErrMsg)
+  end
+end
+
+function tbWnd:CheckAddTimes()
+  local tbInfo = Item:GetClass("CountAddProp"):GetAddDegreeInfo(szDegreeName)
+  if not tbInfo then
+    return false, i18n.EasyGet("\231\188\186\229\176\145\229\174\139\233\135\145\232\175\143\228\185\166\233\133\141\231\189\174")
+  end
+  if DegreeCtrl:GetDegree(me, tbInfo.CostDegree) <= 0 then
+    return false, i18n.EasyGet("\230\130\168\228\187\138\230\151\165\229\183\178\231\187\143\228\189\191\231\148\168\232\191\135\229\174\139\233\135\145\232\175\143\228\185\166\228\186\134")
+  end
+  local nCount, tbItemList = me.GetItemCountByTypeInBag(tbInfo.TemplateId)
+  if nCount <= 0 then
+    return false, i18n.EasyGet("\230\130\168\231\154\132\232\131\140\229\140\133\229\134\133\230\178\161\230\156\137\229\174\139\233\135\145\232\175\143\228\185\166\239\188\140\229\143\130\228\184\142\230\136\152\229\156\186\229\176\134\230\156\137\230\166\130\231\142\135\232\142\183\229\190\151")
+  end
+  
+  local function agreeFunc()
+    local _, pItem = next(tbItemList)
+    if pItem then
+      RemoteServer.UseItem(pItem.dwId)
+    end
+  end
+  
+  local function cancelFunc()
+  end
+  
+  local tbItemInfo = Item:GetItemBaseProp(tbInfo.TemplateId)
+  Ui:OpenWindow("UIMessageBoxBig", i18n.Get(Battle.Cfg.tbText.szUsingCountAddPropText, i18n.Parse(tbItemInfo.szName), nCount), {agreeFunc, cancelFunc}, {
+    i18n.EasyGet("\231\161\174\229\174\154"),
+    i18n.EasyGet("\229\143\150\230\182\136")
+  })
+  return true, nil
+end

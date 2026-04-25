@@ -1,0 +1,139 @@
+Require("CommonScript/PartnerEquip/PartnerEquipCommon.lua")
+local tbPartnerEquip = Item:GetClass("PartnerEquipItem")
+local PartnerEquip = Item.PartnerEquip
+
+function tbPartnerEquip:OnCreate(pEquip)
+  if not PartnerEquip:CheckIsPartnerEquip(pEquip) then
+    Lib:LogErrFormat("PartnerEquipItem: OnCreate fail, pEquip is not PartnerEquip, dwItemId = %d", pEquip.dwId)
+    return
+  end
+  PartnerEquip:AddCostMaterial(pEquip, PartnerEquip.tbEquipItemCfg[pEquip.dwTemplateId].nRewardXuanShiNum)
+  self:InitBaseAttribute(pEquip)
+end
+
+function tbPartnerEquip:InitBaseAttribute(pEquip)
+  local tbItemCfg = PartnerEquip.tbEquipItemCfg[pEquip.dwTemplateId]
+  if not tbItemCfg then
+    Lib:LogErrFormat("PartnerEquipItem: InitBaseAttribute fail, tbEquipItemCfg not exist, dwItemId = %d", pEquip.dwId)
+    return
+  end
+  for i = PartnerEquip.BASE_ATTR_MIN, PartnerEquip.BASE_ATTR_MAX do
+    if not PartnerEquip:IsExistAttrInHole(pEquip, i) and tbItemCfg["nBaseAttrib" .. i .. "Id"] then
+      local tbNewBaseAttr = PartnerEquip:CalcNewAttrById(tbItemCfg["nBaseAttrib" .. i .. "Id"])
+      if tbNewBaseAttr then
+        PartnerEquip:SetBaseAttr(pEquip, tbNewBaseAttr, i)
+      end
+    end
+  end
+end
+
+function tbPartnerEquip:GetRandomAttrib(nTemplate, pEquip)
+  local tbTip = {}
+  local tbAttrib
+  if pEquip then
+    local szQualityColor = Item:GetQualityColor(pEquip.nQuality)
+    tbAttrib = PartnerEquip:GetAllRandomAttr(pEquip)
+    for i = 1, PartnerEquip.MAX_RANDOMATTR_NUM do
+      tbTip[i] = {}
+      local tbMA = tbAttrib[i]
+      if tbMA then
+        local szAttribDesc = FightSkill:GetMagicDesc(tbMA.szAttrType, {
+          tbMA.nAttrValue1,
+          tbMA.nAttrValue2,
+          tbMA.nAttrValue3
+        })
+        if szAttribDesc and "" ~= szAttribDesc then
+          table.insert(tbTip[i], string.format("<color=#%s>%s</color> ", Ui.tbColor:GetColorHexByDefineName(szQualityColor), szAttribDesc))
+          if pEquip.nQuality == PartnerEquip.eEquipQuality.Rare then
+            local tbMaxRandomAttrInfo = PartnerEquip:GetMaxRandomAttrInfo(tbMA.nAttrId)
+            local _, nMaxValue, _ = PartnerEquip:GetEquipAttrDiff(tbMaxRandomAttrInfo, nil)
+            table.insert(tbTip[i], i18n.EasyGet("\239\188\136\228\184\138\233\153\144\239\188\154{0}\239\188\137", nMaxValue))
+          end
+        end
+      else
+        table.insert(tbTip[i], i18n.EasyGet("<color=#{0}>\229\141\135\232\135\179{1}\231\186\167\229\143\175\232\167\163\233\148\129</color> ", Ui.tbColor:GetColorHexByDefineName(szQualityColor), i * Item.PartnerEquip.CFG.nRandomAttrStageLevel))
+      end
+    end
+    return tbTip
+  else
+    return nil
+  end
+end
+
+function tbPartnerEquip:GetHideAttrib(nTemplate, pEquip)
+  local tbTip = {}
+  if pEquip and pEquip.nQuality == PartnerEquip.eEquipQuality.Rare then
+    local szSkillName, szSkillDesc = PartnerEquip:GetHideSkillInfo(pEquip)
+    if szSkillName and szSkillDesc then
+      table.insert(tbTip, string.format("[%s] %s", szSkillName, szSkillDesc))
+    end
+    return tbTip
+  else
+    return nil
+  end
+end
+
+function tbPartnerEquip:GetChatLinkInfo(pEquip)
+  if pEquip.szClass ~= "PartnerEquipItem" then
+    return
+  end
+  local tbInfo = {}
+  tbInfo.tbBaseAttr = self:GetBaseAttrib(nil, pEquip)
+  tbInfo.tbRandomAttr = self:GetRandomAttrib(nil, pEquip)
+  tbInfo.tbHideAttr = self:GetHideAttrib(nil, pEquip)
+  tbInfo.nFightPower = PartnerEquip:GetEquipFightPower(pEquip)
+  return tbInfo
+end
+
+function tbPartnerEquip:GetTip(pEquip, pPlayer)
+  return self:GetBaseAttrib(nil, pEquip), self:GetRandomAttrib(nil, pEquip), self:GetHideAttrib(nil, pEquip)
+end
+
+function tbPartnerEquip:GetTipByTemplate(nTemplateId, tbLinkInfo)
+  return tbLinkInfo.tbBaseAttr, tbLinkInfo.tbRandomAttr, tbLinkInfo.tbHideAttr
+end
+
+function tbPartnerEquip:GetBaseAttrib(nTemplate, pEquip)
+  local tbTip = {}
+  local tbAttrib
+  if pEquip then
+    tbAttrib = PartnerEquip:GetAllBaseAttr(pEquip)
+    local nEquipLevel = PartnerEquip:GetEquipLevel(pEquip)
+    for i, tbMA in ipairs(tbAttrib or {}) do
+      tbTip[i] = {}
+      local szAttribDesc, szAttribValue = FightSkill:GetMagicDescSplit(tbMA.szAttrType, {
+        tbMA.nAttrValue1,
+        tbMA.nAttrValue2,
+        tbMA.nAttrValue3
+      })
+      if szAttribDesc and "" ~= szAttribDesc then
+        local szQualityColor = Item:GetQualityColor(pEquip.nQuality)
+        local _, nMinValue, nMaxValue = PartnerEquip:GetAttrRange(tbMA.nAttrId)
+        local _, nEnhanceValue, _ = PartnerEquip:GetBaseAttrDiffByLevel(pEquip, i, 0, nEquipLevel)
+        table.insert(tbTip[i], string.format("<color=#%s>%s\239\188\154+%s</color> ", Ui.tbColor:GetColorHexByDefineName(szQualityColor), szAttribDesc, szAttribValue - nEnhanceValue))
+        table.insert(tbTip[i], string.format("<color=#%s>(%s - %s)</color>", Ui.tbColor:GetColorHexByDefineName("Gray"), nMinValue, nMaxValue))
+        if nEnhanceValue > 0 then
+          table.insert(tbTip[i], i18n.EasyGet("<color=#{0}>(\229\141\135\231\186\167 +{1})</color>", Ui.tbColor:GetColorHexByDefineName("Green"), nEnhanceValue))
+        end
+      end
+    end
+  else
+    tbAttrib = KItem.GetEquipBaseProp(nTemplate).tbBaseAttrib
+    local _, _, _, nQuality = KItem.GetItemShowInfo(nTemplate)
+    for i, tbMA in ipairs(tbAttrib or {}) do
+      tbTip[i] = {}
+      local szAttribDesc = FightSkill:GetMagicDesc(tbMA.szAttrType, {
+        tbMA.nAttrValue1,
+        tbMA.nAttrValue2,
+        tbMA.nAttrValue3
+      })
+      if szAttribDesc and "" ~= szAttribDesc then
+        local szQualityColor = Item:GetQualityColor(nQuality)
+        local _, nMinValue, nMaxValue = PartnerEquip:GetAttrRange(tbMA.nAttrId)
+        table.insert(tbTip[i], string.format("<color=#%s>%s</color> ", Ui.tbColor:GetColorHexByDefineName(szQualityColor), szAttribDesc))
+        table.insert(tbTip[i], string.format("<color=#%s>(%s - %s)</color>", Ui.tbColor:GetColorHexByDefineName("Gray"), nMinValue, nMaxValue))
+      end
+    end
+  end
+  return tbTip
+end

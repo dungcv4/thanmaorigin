@@ -1,0 +1,194 @@
+Require("CommonScript/Task/CommerceTask/CommerceTask_public.lua")
+
+function CommerceTask:OnSyncData()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UPDATE_COMMERCETASK)
+end
+
+function CommerceTask:OnAcceptTask()
+  self:OnSyncData()
+  Ui:OpenWindow("UICommerceTask")
+end
+
+function CommerceTask:GetTitle()
+  return i18n.Get(self.Msg.TaskTitle)
+end
+
+function CommerceTask:GetTitleWithPrefix()
+  return i18n.EasyGet("[\229\184\184] \229\149\134\228\188\154\228\187\187\229\138\161")
+end
+
+function CommerceTask:GetStepText()
+  local nTaskId = self:GetCurTaskId()
+  if nTaskId <= 0 then
+    return ""
+  end
+  local nFinishCount = self:GetFinishCount()
+  return string.format("(%d/%d)", nFinishCount, self.ROUND_TASKNUM)
+end
+
+function CommerceTask:GetTarget()
+  if self:CanGetWholeAward() then
+    return i18n.Get(self.Msg.FinishAndGetAward)
+  end
+  local nTaskId = self:GetCurTaskId()
+  if nTaskId <= 0 then
+    return i18n.Get(self.Msg.TaskDefaultTarget)
+  end
+  local tbInfo = self:GetTaskCfg(nTaskId)
+  if not tbInfo then
+    return i18n.Get(self.Msg.TaskDefaultTarget)
+  end
+  local nOwnCount = me.GetItemCountInBags(tbInfo.nItemTemplateId)
+  if nOwnCount >= tbInfo.nCount then
+    nOwnCount = tbInfo.nCount
+  end
+  return i18n.Get(self.Msg.TaskTarget, tbInfo.nCount, i18n.Parse(tbInfo.szItemName), nOwnCount, tbInfo.nCount)
+end
+
+function CommerceTask:OnTrack()
+  if self:GetCurTaskId() > 0 or self:CanGetWholeAward() then
+    Ui:OpenWindow("UICommerceTask")
+  else
+    self:GoToNpc(self.TASK_NPC_TEMPLATEID, self.TASK_NPC_MAPID)
+  end
+end
+
+function CommerceTask:GoToNpc(nNpcTemplateId, nMapTemplateId)
+  TeamMgr:StopFollowMember()
+  AFK:Stop()
+  local nPosX, nPosY, nWalkNearLength = Npc:GetNpcPos(nNpcTemplateId, nMapTemplateId, true)
+  
+  local function fnCallback()
+    local pNpc = KNpc.GetNearestNpcByTemplateId(me.GetNpc(), nNpcTemplateId, AFK:GetSetting():GetFightSetting().nSearchRadius)
+    if pNpc then
+      local nNpcId = pNpc.nId
+      if nNpcId then
+        Operation:SimpleTap(nNpcId)
+      end
+    end
+  end
+  
+  AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, fnCallback, nWalkNearLength, nil, nNpcTemplateId)
+end
+
+function CommerceTask:IsInCurTaskList()
+  if me.nLevel < self.LEVEL_LIMIT or 0 == GetTimeFrameState(self.TIMEFRAME_LIMIT) then
+    return false
+  else
+    return self:GetCurTaskId() > 0 or self:CanGetWholeAward() or DegreeCtrl:GetDegree(me, self.KEY) > 0
+  end
+end
+
+function CommerceTask:GetTaskDesc()
+  return i18n.Get(self.Msg.TaskDesc)
+end
+
+function CommerceTask:GetAward()
+  local nTaskId = self:GetCurTaskId()
+  if nTaskId <= 0 then
+    return {}
+  end
+  local tbInfo = self:GetTaskCfg(nTaskId)
+  if not tbInfo then
+    return {}
+  end
+  return Award:GetAward(self.AWARD_ID, tbInfo.nAwardKey, {})
+end
+
+function CommerceTask:GetRoundAward()
+  return Award:GetAward(self.AWARD_ID, self.FINISH_WHOLE_TASK_AWARD_KEY, {})
+end
+
+function CommerceTask:GetRoundShowAward()
+  return Award:GetAward(self.AWARD_ID, self.FINISH_WHOLE_TASK_AWARD_KEY, {bRandRate = true, bNoRandom = true})
+end
+
+function CommerceTask:CheckItem(nTaskId, nItemId)
+  local tbInfo = self:GetTaskCfg(nTaskId)
+  if not tbInfo then
+    return false
+  end
+  local nConsumeCount = tbInfo.nCount
+  if tbInfo.nItemTemplateId > 0 then
+    local nOwnCount = me.GetItemCountInBags(tbInfo.nItemTemplateId)
+    return nConsumeCount <= nOwnCount
+  else
+    local pItem = KItem.GetItemObj(nItemId)
+    if not pItem then
+      return false
+    end
+    return pItem.nItemType == tbInfo.nItemType and pItem.nLevel ~= tbInfo.nItemLevel
+  end
+end
+
+function CommerceTask:ApplySubmitItem(nItemId)
+  local nTaskId = self:GetCurTaskId()
+  if nTaskId <= 0 then
+    return
+  end
+  local tbInfo = self:GetTaskCfg(nTaskId)
+  if not tbInfo then
+    return
+  end
+  local nItemType = tbInfo.nItemType
+  if nItemType < 0 then
+    return
+  end
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  if pItem.nItemType ~= nItemType then
+    me.CenterMsg(i18n.Get(self.Msg.ItemNotRight))
+    return
+  end
+  if pItem.nLevel ~= tbInfo.nItemLevel then
+    me.CenterMsg(i18n.Get(self.Msg.ItemNotRight))
+    return
+  end
+  RemoteServer.CommerceTaskCmd(self.Protocol.SubmitItem, nItemId)
+end
+
+function CommerceTask:ApplySubmitTask()
+  local nTaskId = self:GetCurTaskId()
+  if nTaskId <= 0 then
+    return
+  end
+  local tbInfo = self:GetTaskCfg(nTaskId)
+  if not tbInfo then
+    return
+  end
+  local nConsumeCount = tbInfo.nCount
+  if tbInfo.nItemTemplateId <= 0 then
+    return
+  end
+  local nOwnCount = me.GetItemCountInBags(tbInfo.nItemTemplateId)
+  if nConsumeCount > nOwnCount then
+    me.CenterMsg(i18n.Get(self.Msg.ItemNotEnough))
+    return
+  end
+  RemoteServer.CommerceTaskCmd(self.Protocol.SubmitTask)
+end
+
+function CommerceTask:C2SGetRoundAward()
+  RemoteServer.CommerceTaskCmd(self.Protocol.GetWholeAward)
+end
+
+function CommerceTask:C2SBuyRelpaceTaskCount()
+  RemoteServer.CommerceTaskCmd(CommerceTask.Protocol.BuyRelpaceTaskCount)
+end
+
+function CommerceTask:C2SReplaceTask()
+  RemoteServer.CommerceTaskCmd(CommerceTask.Protocol.OnRelpaceTask)
+end
+
+function CommerceTask:OnLevelUp(nNewLevel)
+  if nNewLevel >= self.LEVEL_LIMIT then
+    self:OnSyncData()
+  end
+end
+
+if CommerceTask.nLevelUpEventId then
+  PlayerEvent:UnRegisterGlobal("OnLevelUp", CommerceTask.nLevelUpEventId)
+end
+CommerceTask.nLevelUpEventId = PlayerEvent:RegisterGlobal("OnLevelUp", CommerceTask.OnLevelUp, CommerceTask)

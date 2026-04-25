@@ -1,0 +1,150 @@
+local tbWnd = Ui:CreateWindow("UISkillShow")
+
+function tbWnd:NotifyEvents()
+  return {}
+end
+
+tbWnd.tbControls = {
+  imgIcon = "imgBG/Top/imgIconBG/imgIcon",
+  txtName = "imgBG/Top/txtName",
+  txtLevel = "imgBG/Top/txtLevel",
+  txtNotLearn = "imgBG/Top/txtNotLearn",
+  btnLevelUp = "imgBG/Top/btnLevelUp",
+  txtDescScroll = "imgBG/Bottom/txtDescScroll",
+  txtDesc = "imgBG/Bottom/txtDescScroll/txtDesc",
+  txtLevelUpTips = "imgBG/Top/txtLevelUpTips"
+}
+tbWnd.tbOnClick = {
+  btnLevelUp = function(self)
+    local nSkillId = self.tbSkillInfo.nId
+    local bRet, szMsg = FightSkill:CheckSkillLeveUp(me, nSkillId)
+    if not bRet then
+      me.CenterMsg(szMsg)
+      return
+    end
+    RemoteServer.OnSkillLevelUp(nSkillId)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.txtDescScrollView = self.pPanel:GetScrollRect(self.txtDescScroll)
+  self:SetClickEmptyToClose()
+end
+
+function tbWnd:OnOpen(tbSkillInfo, bIsCurFationSect, bShowLevelUpButton)
+  self.bIsCurFationSect = bIsCurFationSect
+  self.txtDescScrollView.verticalNormalizedPosition = 1
+  self.bShowLevelUpButton = bShowLevelUpButton
+  self:UpdateInfo(tbSkillInfo)
+end
+
+function tbWnd:UpdateInfo(tbSkillInfo)
+  self.tbSkillInfo = tbSkillInfo
+  local nSkillLevel = self.tbSkillInfo.nLevel
+  if nSkillLevel < 0 then
+    nSkillLevel = 0
+  end
+  local nMaxSkillLevel = self.tbSkillInfo.nMaxLevel or FightSkill:GetSkillMaxLevel(me, self.tbSkillInfo.nId)
+  local szLevelText = string.format("%d/%d", nSkillLevel, nMaxSkillLevel)
+  if tbSkillInfo.nExtraLevel and tbSkillInfo.nExtraLevel > 0 then
+    szLevelText = string.format("%d\239\188\136%d+%d\239\188\137/%d", nSkillLevel + tbSkillInfo.nExtraLevel, nSkillLevel, tbSkillInfo.nExtraLevel, nMaxSkillLevel)
+    nSkillLevel = nSkillLevel + tbSkillInfo.nExtraLevel
+  end
+  local bLearn = self.bIsCurFationSect and nSkillLevel > 0
+  self.pPanel:SetActive(self.txtLevel, bLearn)
+  self.pPanel:SetActive(self.btnLevelUp, bLearn and self.bShowLevelUpButton)
+  self.pPanel:SetActive(self.txtLevelUpTips, bLearn and self.bShowLevelUpButton)
+  self.pPanel:SetActive(self.txtNotLearn, not bLearn)
+  if bLearn then
+    self.pPanel:Label_SetText(self.txtLevel, szLevelText)
+    local bLevelUpButtonEnable = tbSkillInfo.nLevel >= 0 and me.nLevel >= FightSkill:GetSkillLevelUpNeed(tbSkillInfo.nId, 0) and not tbSkillInfo.bMax
+    self.pPanel:Button_SetEnable(self.btnLevelUp, bLevelUpButtonEnable)
+  end
+  if self.tbSkillInfo.bIsOtherPlayer then
+    self.pPanel:SetActive(self.btnLevelUp, false)
+    self.pPanel:SetActive(self.txtLevelUpTips, false)
+  end
+  self.pPanel:Label_SetText(self.txtName, i18n.Parse(self.tbSkillInfo.szName))
+  if EDITOR then
+    self.pPanel:Label_SetText(self.txtName, string.format("%s %d", i18n.Parse(self.tbSkillInfo.szName), self.tbSkillInfo.nId))
+  end
+  self.pPanel:Sprite_SetSprite(self.imgIcon, tbSkillInfo.szIconAltlas)
+  local szSkillType
+  if not self.tbSkillInfo.bPassive then
+    szSkillType = string.format("<color=#%s>[%s]</color>", Ui:GetDisplayColorHexStr("Yellow"), i18n.Get(FightSkill.Terms.ActiveSkill))
+  else
+    szSkillType = string.format("<color=#%s>[%s]</color>", Ui:GetDisplayColorHexStr("Yellow"), i18n.Get(FightSkill.Terms.PassiveSkill))
+  end
+  local szMainDesc = szSkillType .. "\n" .. Lib:Str2LunStr(i18n.Parse(self.tbSkillInfo.szDesc))
+  local szShowInfo = szMainDesc .. string.format([[
+
+
+<color=#%s>[%s]</color>]], Ui:GetDisplayColorHexStr("Yellow"), i18n.Get(FightSkill.Terms.CurrentLevel))
+  local tbRet = Lib:SplitStr(self.tbSkillInfo.szCurMagicDesc, "|")
+  for _, szCurMagicDesc in ipairs(tbRet) do
+    if "AttackRadius" == szCurMagicDesc then
+      if 0 ~= self.tbSkillInfo.nRadius and self.tbSkillInfo.nLevel > 0 then
+        szShowInfo = szShowInfo .. "\n" .. i18n.Get(FightSkill.Terms.AttackRadius, self.tbSkillInfo.nRadius / Lib.Logic2Unity)
+      end
+    elseif "TimePerCast" == szCurMagicDesc then
+      if self.tbSkillInfo.nCD > 20 and self.tbSkillInfo.nLevel > 0 then
+        szShowInfo = szShowInfo .. "\n" .. i18n.Get(FightSkill.Terms.TimePerCast, math.floor(self.tbSkillInfo.nCD / Env.GAME_FPS))
+      end
+    elseif not Lib:IsEmptyStr(szCurMagicDesc) then
+      if "skill_desc" == szCurMagicDesc then
+        szShowInfo = szShowInfo .. "\n" .. FightSkill:GetPassiveSkillDesc(self.tbSkillInfo.szClassName, nSkillLevel)
+      else
+        szShowInfo = szShowInfo .. szCurMagicDesc
+      end
+    end
+  end
+  if nSkillLevel <= 0 or self.bIsCurFationSect == false then
+    szShowInfo = szMainDesc
+  end
+  local szMaxMsg
+  if self.tbSkillInfo.nLevel >= -1 and not self.tbSkillInfo.bNotNextInfo then
+    szShowInfo = szShowInfo .. string.format([[
+
+
+<color=#%s>[%s]</color>]], Ui:GetDisplayColorHexStr("Yellow"), i18n.Get(FightSkill.Terms.NextLevel))
+    local tbNextSkillInfo = KFightSkill.GetSkillInfo(self.tbSkillInfo.nId, nSkillLevel + 1)
+    local tbRet = Lib:SplitStr(self.tbSkillInfo.szNextMagicDesc, "|")
+    for _, szNextMagicDesc in ipairs(tbRet) do
+      if "AttackRadius" == szNextMagicDesc then
+        if 0 ~= self.tbSkillInfo.nRadius then
+          if tbNextSkillInfo and tbNextSkillInfo.AttackRadius and tbNextSkillInfo.AttackRadius > 0 then
+            szShowInfo = szShowInfo .. string.format([[
+
+<color=#%s>%s</color>]], Ui:GetDisplayColorHexStr("Red"), i18n.Get(FightSkill.Terms.AttackRadius, tbNextSkillInfo.AttackRadius / Lib.Logic2Unity))
+          else
+            szShowInfo = szShowInfo .. string.format([[
+
+<color=#%s>%s</color>]], Ui:GetDisplayColorHexStr("Red"), i18n.Get(FightSkill.Terms.AttackRadius, self.tbSkillInfo.nRadius / Lib.Logic2Unity))
+          end
+        end
+      elseif "TimePerCast" == szNextMagicDesc then
+        if self.tbSkillInfo.nCD > 20 then
+          if tbNextSkillInfo and tbNextSkillInfo.TimePerCast and tbNextSkillInfo.TimePerCast > 20 then
+            szShowInfo = szShowInfo .. string.format([[
+
+<color=#%s>%s</color>]], Ui:GetDisplayColorHexStr("Red"), i18n.Get(FightSkill.Terms.TimePerCast, math.floor(tbNextSkillInfo.TimePerCast / Env.GAME_FPS)))
+          else
+            szShowInfo = szShowInfo .. string.format([[
+
+<color=#%s>%s</color>]], Ui:GetDisplayColorHexStr("Red"), i18n.Get(FightSkill.Terms.TimePerCast, math.floor(self.tbSkillInfo.nCD / Env.GAME_FPS)))
+          end
+        end
+      elseif not Lib:IsEmptyStr(szNextMagicDesc) then
+        local szNextShowInfo = ""
+        if "skill_desc" == self.tbSkillInfo.szNextMagicDesc then
+          szNextShowInfo = "\n" .. FightSkill:GetPassiveSkillDesc(self.tbSkillInfo.szClassName, nSkillLevel + 1)
+        else
+          szNextShowInfo = szNextMagicDesc
+        end
+        szShowInfo = szShowInfo .. string.format("<color=#%s>%s</color>", Ui:GetDisplayColorHexStr("Red"), szNextShowInfo)
+      end
+    end
+  end
+  szShowInfo = string.gsub(szShowInfo, "\\n", "\n")
+  self.pPanel:Label_SetText(self.txtDesc, szShowInfo)
+end

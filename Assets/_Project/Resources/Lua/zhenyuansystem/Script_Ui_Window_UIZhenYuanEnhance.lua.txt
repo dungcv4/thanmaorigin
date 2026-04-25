@@ -1,0 +1,161 @@
+local tbWnd = Ui:CreateWindow("UIZhenyuanEnhance")
+local tbControls = {
+  btnClose = "node/BG/btnClose",
+  btnMetal = "node/imgBG/ContentLianhua/Series/Metal",
+  btnWood = "node/imgBG/ContentLianhua/Series/Wood",
+  btnWater = "node/imgBG/ContentLianhua/Series/Water",
+  btnFire = "node/imgBG/ContentLianhua/Series/Fire",
+  btnEarth = "node/imgBG/ContentLianhua/Series/Earth",
+  ContentLianhua = "node/imgBG/ContentLianhua",
+  ContentNingju = "node/imgBG/ContentNingju",
+  btnNingju = "node/imgBG/TabGroup/btnNingju",
+  btnLianhua = "node/imgBG/TabGroup/btnLianhua",
+  btnCardPicking = "node/imgBG/btnCardPicking",
+  txtDynamic = "node/imgBG/UIMoneyPanel/panelList/panelDynamic/txtDynamic",
+  btnPlusDynamic = "node/imgBG/UIMoneyPanel/panelList/panelDynamic/btnPlusDynamic",
+  wndUpPartnerGroup = "node/imgBG/wndUpPartnerGroup",
+  Template = "node/imgBG/wndUpPartnerGroup/imgBg/UpPartnerGroup/Template",
+  Empty4Raycast = "node/imgBG/wndUpPartnerGroup/Empty4Raycast",
+  btnHelp = "node/BG/txtTitle/btnHelp"
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_ZHENYUAN_SYNC_RECORD,
+      self.UpdateSubPanel
+    },
+    {
+      EventNotify.emNOTIFY_ZHENYUAN_SYNC_LIANHUA,
+      self.RefreshLianHuaInfo
+    },
+    {
+      EventNotify.emNOTIFY_ZHENYUAN_STAR,
+      self.RefreshStar
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.RefreshCurrency,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_ZHENYUAN_ENHANCE_FAIL,
+      self.StopLianHua,
+      self
+    }
+  }
+end
+
+tbWnd.PANEL_TYPE_NINGJU = 1
+tbWnd.PANEL_TYPE_LIANHUA = 2
+tbWnd.PANEL_SETTING = {
+  [tbWnd.PANEL_TYPE_NINGJU] = {
+    CLASS = "UIZhenyuanNingJu",
+    OBJ = tbControls.ContentNingju,
+    BTN = tbControls.btnNingju,
+    OpenFunc = function()
+      return true
+    end
+  },
+  [Item.ZhenYuan.PANEL_TYPE_LIANHUA] = {
+    CLASS = "UIZhenyuanLianHua",
+    OBJ = tbControls.ContentLianhua,
+    BTN = tbControls.btnLianhua,
+    OpenFunc = function()
+      return true
+    end
+  }
+}
+tbWnd.tbControls = tbControls
+local tbSeriesMap = {
+  [1] = "Series/Metal",
+  [2] = "Series/Wood",
+  [3] = "Series/Water",
+  [4] = "Series/Fire",
+  [5] = "Series/Earth"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    Ui:OpenWindow("UIZhenyuan")
+    self:Close()
+  end,
+  btnCardPicking = function(self)
+    Ui:OpenWindow("UICardPickingNew", 2)
+    Ui:CloseWindow("UIZhenyuanEnhance")
+  end,
+  btnPlusDynamic = function()
+    Shop:OpenShopBuyWid(671604, true, "YuanBao")
+  end,
+  Empty4Raycast = function(self)
+    self:RefreshMingXia(false)
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("ZhenYuanLianHua")
+  end
+}
+
+function tbWnd:UpdateSubPanel()
+  self:RefreshCurrency()
+  self.tbTabControl:UpdateSubPanel(self.PANEL_TYPE_NINGJU, "PartnerNingJuInfo")
+end
+
+function tbWnd:RefreshLianHuaInfo(nPower)
+  self:RefreshCurrency()
+  self.tbTabControl:UpdateSubPanel(self.PANEL_TYPE_LIANHUA, "RefreshLianHuaInfo", nPower)
+end
+
+function tbWnd:StopLianHua()
+  self.tbTabControl:UpdateSubPanel(self.PANEL_TYPE_LIANHUA, "StopLianHua")
+end
+
+function tbWnd:RefreshStar(nCurStar)
+  self.tbTabControl:UpdateSubPanel(self.PANEL_TYPE_LIANHUA, "ShowStarEffect", nCurStar)
+end
+
+function tbWnd:OnCreate()
+  self.tbTabControl = Ui:NewTabControl(self, self.PANEL_SETTING)
+  self.tbMingXiaTemplateList = Ui:NewScrollView(self, tbControls.Template, nil)
+end
+
+function tbWnd:OnOpen(nIndex)
+  if not self.tbTabControl:OnOpen(nIndex) then
+    return
+  end
+  self:RefreshMingXia(false)
+  self:RefreshCurrency()
+end
+
+function tbWnd:OnClose()
+  self.tbTabControl:OnClose()
+end
+
+function tbWnd:RefreshCurrency()
+  local nZhenQi = me.GetMoney(Currency.TYPE.ZhenQi)
+  self.pPanel:Label_SetText(tbControls.txtDynamic, i18n.Parse(tostring(nZhenQi)))
+  self.tbTabControl:UpdateSubPanel(self.PANEL_TYPE_LIANHUA, "RefreshCost")
+end
+
+function tbWnd:RefreshMingXia(bIsShow)
+  self.pPanel:SetActive(tbControls.wndUpPartnerGroup, bIsShow)
+  self.tbMingXiaTemplateList:Reset()
+  if not bIsShow then
+    return
+  end
+  local tbMingXiaTable = Item.ZhenYuan:GetMingXiaTable()
+  local tbMingXia = {}
+  for key, value in pairs(tbMingXiaTable) do
+    table.insert(tbMingXia, key)
+  end
+  for index, nPartnerId in ipairs(tbMingXia) do
+    self.tbMingXiaTemplateList:SetElement(index, function(tbElement)
+      local tbParterCfg = Partner.tbAllPartnerInfo[nPartnerId]
+      if tbParterCfg then
+        tbElement.pPanel:Label_SetText("txtName", i18n.Parse(tbParterCfg.szName))
+        tbElement.pPanel:Sprite_SetSprite("imgNameBg", Partner.tbPartnerNameBg[tbParterCfg.nQualityLevel])
+        for i = 1, 5 do
+          tbElement.pPanel:SetActive(tbSeriesMap[i], tbParterCfg.nSeries == i)
+        end
+      end
+    end)
+  end
+end

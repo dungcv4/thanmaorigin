@@ -1,0 +1,174 @@
+local tbWnd = Ui:CreateClass("UISelectTree", "UIPanel")
+
+function Ui:NewExistSelectTreePanel(tbOwner, szGroupKey)
+  return Ui:CreatePanel("UISelectTree", szGroupKey, tbOwner)
+end
+
+tbWnd.tbButtonList = {}
+tbWnd.SELECTMODE_MULTY = 1
+tbWnd.SELECTMODE_SINGLE = 2
+tbWnd.tbControls = {
+  TxtTitle = "imgBG/imgTitleBG/TxtTitle",
+  BtnSelectAll = "imgBG/BtnSelectAll",
+  BtnClearAll = "imgBG/BtnClearAll",
+  BtnOK = "imgBG/BtnOK",
+  BtnCancel = "imgBG/BtnCancel",
+  OptListScrollView = "imgBG/OptList/ScrollView",
+  templateBig = "imgBG/OptList/ScrollView/Viewport/Content/templateBig",
+  templateSmall = "imgBG/OptList/ScrollView/Viewport/Content/templateSmall"
+}
+tbWnd.tbOnClick = {
+  BtnSelectAll = function(self)
+    self:SelectAll()
+  end,
+  BtnClearAll = function(self)
+    self:ClearAll()
+  end,
+  BtnOK = function(self)
+    local tbResult = {}
+    for k, v in pairs(self.tbResult) do
+      if v then
+        table.insert(tbResult, k)
+      end
+    end
+    if self.funCallBack then
+      local nResult = self.funCallBack(tbResult)
+      if not nResult then
+        return
+      end
+    end
+    self:Clear()
+  end,
+  BtnCancel = function(self)
+    self:Clear()
+    if self.funCallBackCancel then
+      self.funCallBackCancel()
+    end
+  end
+}
+
+function tbWnd:Clear()
+  for _, v in pairs(self.tbButtonList) do
+    self.pPanel:DeleteObject(v)
+  end
+  self.tbButtonList = {}
+  self.tbResult = {}
+  self.funCallBack = nil
+end
+
+function tbWnd:OnOpen(bMultySelect, bOK, szTitle, tbData, funCallBack, funCallBackCancel)
+  self:Clear()
+  self.bOK = bOK
+  self.pPanel:SetActive(self.BtnOK, self.bOK)
+  self.nSelectMode = bMultySelect and self.SELECTMODE_MULTY or self.SELECTMODE_SINGLE
+  self.pPanel:SetActive(self.BtnSelectAll, self.nSelectMode == self.SELECTMODE_MULTY)
+  self.pPanel:SetActive(self.BtnClearAll, self.nSelectMode == self.SELECTMODE_MULTY)
+  self.pPanel:SetActive(self.BtnCancel, self.nSelectMode ~= self.SELECTMODE_MULTY)
+  self.funCallBack = funCallBack
+  self.funCallBackCancel = funCallBackCancel
+  self.pPanel:Label_SetText(self.TxtTitle, szTitle)
+  local nBigIndex = 0
+  local nSmallIndex = 0
+  self.tbNumberKeyToPathKeyMap = {}
+  for _, tbBigInfo in ipairs(tbData) do
+    nBigIndex = nBigIndex + 1
+    local szBigKey = self.pPanel:CloneObject(self.templateBig, string.format("Big%d", nBigIndex))
+    table.insert(self.tbButtonList, szBigKey)
+    self.pPanel:Label_SetChildText(szBigKey, "TxtContentMsg", tbBigInfo.szText)
+    self.pPanel:Label_SetChildText(szBigKey, "Toggle/TxtExternMsg", tbBigInfo.szExternMsg or "")
+    if tbBigInfo.tbLeaves then
+      self.pPanel:SetActive(szBigKey .. "/Toggle", false)
+      for _, tbSmallInfo in ipairs(tbBigInfo.tbLeaves) do
+        nSmallIndex = nSmallIndex + 1
+        local szSmallKey = self.pPanel:CloneObject(self.templateSmall, string.format("Small%d", nSmallIndex))
+        table.insert(self.tbButtonList, szSmallKey)
+        local bCheck = tbSmallInfo.bCheck or false
+        self.tbResult[tbSmallInfo.key] = bCheck
+        self.pPanel:Label_SetChildText(szSmallKey, "TxtContentMsg", tbSmallInfo.szText)
+        self.pPanel:Label_SetChildText(szSmallKey, "TxtExternMsg", tbSmallInfo.szExternMsg or "")
+        self.pPanel:SetActive(szSmallKey .. "/Toggle", true)
+        self.pPanel:Toggle_SetChecked(szSmallKey .. "/Toggle", tbSmallInfo.bCheck or false)
+        self.tbNumberKeyToPathKeyMap[tbSmallInfo.key] = szSmallKey
+        Ui:Toggle_BindEvent(self.pPanel, szSmallKey .. "/Toggle", function(self, isOn)
+          self:onClickToggle(isOn, tbSmallInfo.key, szSmallKey)
+        end, self)
+      end
+    else
+      self.pPanel:SetActive(szBigKey .. "/Toggle", true)
+      local bCheck = tbBigInfo.bCheck or false
+      self.tbResult[tbBigInfo.key] = bCheck
+      self.pPanel:Toggle_SetChecked(szBigKey .. "/Toggle", bCheck)
+      self.tbNumberKeyToPathKeyMap[tbBigInfo.key] = szBigKey
+      Ui:Toggle_BindEvent(self.pPanel, szBigKey .. "/Toggle", function(self, isOn)
+        self:onClickToggle(isOn, tbBigInfo.key, szBigKey)
+      end, self)
+    end
+  end
+end
+
+function tbWnd:SelectAll()
+  if self.nSelectMode == self.SELECTMODE_SINGLE then
+    return
+  end
+  for _, szBtnKey in pairs(self.tbButtonList) do
+    self.pPanel:Toggle_SetChecked(szBtnKey .. "/Toggle", true)
+  end
+  for key, _ in pairs(self.tbResult) do
+    self.tbResult[key] = true
+  end
+end
+
+function tbWnd:ClearAll()
+  if self.nSelectMode == self.SELECTMODE_SINGLE then
+    return
+  end
+  for _, szBtnKey in pairs(self.tbButtonList) do
+    self.pPanel:Toggle_SetChecked(szBtnKey .. "/Toggle", false)
+  end
+  for key, _ in pairs(self.tbResult) do
+    self.tbResult[key] = false
+  end
+end
+
+function tbWnd:AutoOnClickToggle(isOn, key)
+  local szBtnKey = self.tbNumberKeyToPathKeyMap[key]
+  if nil ~= szBtnKey then
+    self:onClickToggle(isOn, key, szBtnKey)
+  end
+end
+
+function tbWnd:onClickToggle(isOn, key, szBtnKey)
+  if self.nSelectMode == self.SELECTMODE_SINGLE then
+    if self.tbResult[key] == true and not isOn then
+      self.pPanel:Toggle_SetChecked(szBtnKey .. "/Toggle", true)
+      return
+    end
+    self.tbResult[key] = isOn
+    if isOn then
+      for k, _ in pairs(self.tbResult) do
+        if k ~= key then
+          self.tbResult[k] = false
+        end
+      end
+      for _, k in pairs(self.tbButtonList) do
+        if k ~= szBtnKey then
+          self.pPanel:Toggle_SetChecked(k .. "/Toggle", false)
+        end
+      end
+    end
+  elseif self.nSelectMode == self.SELECTMODE_MULTY then
+    self.tbResult[key] = isOn
+    self.pPanel:Toggle_SetChecked(szBtnKey .. "/Toggle", isOn)
+  end
+  if not self.bOK then
+    local tbResult = {}
+    for k, v in pairs(self.tbResult) do
+      if v then
+        table.insert(tbResult, k)
+      end
+    end
+    if self.funCallBack then
+      self.funCallBack(tbResult)
+    end
+  end
+end

@@ -1,0 +1,262 @@
+TwoAreaBattle.PreMap = TwoAreaBattle.PreMap or {}
+local PreMap = TwoAreaBattle.PreMap
+TwoAreaBattle.RaceMap = TwoAreaBattle.RaceMap or {}
+local RaceMap = TwoAreaBattle.RaceMap
+TwoAreaBattle.tbMyRank = {}
+TwoAreaBattle.nLastRquestMyRankTime = 0
+
+function TwoAreaBattle:RegisterFubenUIChecker()
+  FubenUIController:RegisterChecker({
+    TwoAreaBattle.Cfg.nPreMapTemplate
+  }, PreMap)
+  FubenUIController:RegisterChecker({
+    TwoAreaBattle.Cfg.nRaceMapTemplate
+  }, RaceMap)
+end
+
+TwoAreaBattle:RegisterFubenUIChecker()
+
+local function FnSortByScore(tbA, tbB)
+  return tbA.nScore > tbB.nScore
+end
+
+function TwoAreaBattle:ShowMyRankInTong()
+  local tbData = {}
+  for dwPlayerId, tbInfo in pairs(self.tbMyRank) do
+    table.insert(tbData, tbInfo)
+  end
+  table.sort(tbData, FnSortByScore)
+  for nIndex, tbInfo in ipairs(tbData) do
+    if tbInfo.szName == me.szName then
+      tbData.myIndex = nIndex
+      tbData.myInfo = {}
+      tbData.myInfo.szName = tbInfo.szName
+      tbData.myInfo.nKill = tbInfo.nKill
+      tbData.myInfo.nScore = tbInfo.nScore
+      tbData.myInfo.nFaction = tbInfo.nFaction
+    end
+    Ui:OpenWindow("UITieFuChengResult", tbData)
+  end
+end
+
+function TwoAreaBattle:TrySignUp()
+  RemoteServer.RequestTwoAreaBattle("OnC2WTryGetInfo")
+end
+
+function TwoAreaBattle:ShowActivityTips()
+  Ui:OpenWindow("UIActivity", Calendar.TIMELIMIT, Calendar:GetActivityId("ShuangYuZhengFeng"))
+end
+
+function TwoAreaBattle:OnNotifyMyRank()
+  Ui:SynNotifyMsg({
+    szType = "TwoAreaBattle",
+    nTimeOut = GetTime() + 300
+  })
+end
+
+function TwoAreaBattle:OnGetMyRank(tbMyRank)
+  self.tbMyRank = tbMyRank
+  self:ShowMyRankInTong()
+end
+
+function PreMap:SetCanExit(bExit)
+  self.IsCanExit = bExit
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function PreMap:IsNeedExitFubenButton()
+  return self.IsCanExit
+end
+
+function PreMap:OnFubenMapLoaded()
+  self:SetCanExit(true)
+end
+
+local tbRankToDesc = {
+  {
+    nRank = 1,
+    szDesc = function(nRank)
+      return i18n.EasyGet("\228\189\160\231\154\132\229\144\141\230\172\161\239\188\154{0}, \229\143\175\232\191\155\229\133\165\231\137\169\232\181\132\229\140\186", nRank)
+    end
+  },
+  {
+    nRank = 13,
+    szDesc = function(nRank)
+      return i18n.EasyGet("\228\189\160\231\154\132\229\144\141\230\172\161\239\188\154{0}, \229\143\175\232\191\155\229\133\165\231\137\169\232\181\132\229\140\186\227\128\129\230\136\152\230\151\151\229\140\186", nRank)
+    end
+  },
+  {
+    nRank = 31,
+    szDesc = function(nRank)
+      return i18n.EasyGet("\228\189\160\231\154\132\229\144\141\230\172\161\239\188\154{0}, \229\143\175\232\191\155\229\133\165\230\136\152\230\151\151\229\140\186", nRank)
+    end
+  }
+}
+
+function PreMap:UpdatePreMapUI(nTime, nRank)
+  local tbTime = {
+    [1] = nTime,
+    [2] = i18n.EasyGet("\232\183\157\231\166\187\230\180\187\229\138\168\229\188\128\229\144\175\239\188\154%s")
+  }
+  local szDesc = ""
+  for _, tbInfo in ipairs(tbRankToDesc) do
+    if nRank < tbInfo.nRank then
+      break
+    end
+    szDesc = tbInfo.szDesc(nRank)
+  end
+  local tbContent = {
+    [1] = i18n.EasyGet("\229\144\132\229\140\186\229\159\159\232\191\155\229\133\165\230\136\152\229\138\155\232\166\129\230\177\130"),
+    [2] = i18n.EasyGet("\231\137\169\232\181\132\229\140\186\239\188\136\229\143\179\228\184\138\239\188\137\239\188\154\229\184\174\228\188\154\230\136\152\229\138\1551-30\229\144\141"),
+    [3] = i18n.EasyGet("\230\136\152\230\151\151\229\140\186\239\188\136\229\183\166\228\184\139\239\188\137\239\188\154\229\184\174\228\188\154\230\136\152\229\138\15513\229\144\141\229\143\138\228\187\165\229\164\150"),
+    [4] = i18n.EasyGet("\231\137\169\232\181\132\228\186\137\229\164\186\229\140\186\230\156\128\229\164\154\232\191\155\229\133\16512\228\186\186"),
+    [5] = szDesc
+  }
+  FubenUIController:OpenDefaultFuBenUI("TwoAreaBattleHelp", {tbTime}, tbContent)
+end
+
+RaceMap.tbFlagRefreshTime = {}
+RaceMap.tbCarRefreshTime = {}
+RaceMap.tbFixPoint = {}
+RaceMap.tbDynamicPoint = {}
+
+function RaceMap:IsNeedExitFubenButton()
+  return true
+end
+
+function RaceMap:IsNeedFuncScoreButton()
+  return true, {
+    self.TryGetMyRank,
+    self
+  }
+end
+
+function RaceMap:OnFubenMapLoaded()
+  BelongUI:StartCheckShow()
+end
+
+function RaceMap:TryGetMyRank()
+  local nNow = GetTime()
+  if nNow < TwoAreaBattle.nLastRquestMyRankTime + 5 then
+    TwoAreaBattle:ShowMyRankInTong()
+    return
+  end
+  TwoAreaBattle.nLastRquestMyRankTime = nNow
+  RemoteServer.RequestZTwoAreaBattle("OnC2ZGetMyRank")
+end
+
+function RaceMap:UpdateRaceMapUI(nTime, tbRank, nMyScore, bEnd, bDouble)
+  local tbTime = {
+    [1] = nTime,
+    [2] = bEnd and i18n.EasyGet("\230\180\187\229\138\168\231\187\147\230\157\159\239\188\140\232\175\183\231\166\187\229\188\128\230\156\172\229\156\176\229\155\190\239\188\154%s") or i18n.EasyGet("\230\180\187\229\138\168\229\128\146\232\174\161\230\151\182\239\188\154%s")
+  }
+  table.sort(tbRank, FnSortByScore)
+  local tbContent = {}
+  if bDouble then
+    table.insert(tbContent, i18n.EasyGet("\229\189\147\229\137\141\233\152\182\230\174\181\229\143\175\232\142\183\229\190\151\229\143\140\229\128\141\231\137\169\232\181\132"))
+  end
+  local szTemp = i18n.EasyGet("\231\137\169\232\181\132\230\142\146\229\144\141")
+  for nIndex, tbInfo in ipairs(tbRank) do
+    szTemp = szTemp .. "\n" .. string.format("%d %s %d", nIndex, tbInfo.szTongName, tbInfo.nScore)
+  end
+  table.insert(tbContent, szTemp)
+  local nNow = GetTime()
+  if #self.tbFlagRefreshTime > 0 then
+    table.insert(tbContent, i18n.EasyGet("\230\150\176\231\154\132\230\136\152\230\151\151\229\141\179\229\176\134\229\135\186\231\142\176:{0}\231\167\146", math.floor(self.tbFlagRefreshTime[1] - nNow)))
+  end
+  if #self.tbCarRefreshTime > 0 then
+    table.insert(tbContent, i18n.EasyGet("\230\150\176\231\154\132\231\137\169\232\181\132\232\189\166\229\141\179\229\176\134\229\135\186\231\142\176:{0}\231\167\146", math.floor(self.tbCarRefreshTime[1] - nNow)))
+  end
+  table.insert(tbContent, i18n.EasyGet("\n\228\184\170\228\186\186\231\167\175\229\136\134\239\188\154{0}", nMyScore))
+  FubenUIController:OpenDefaultFuBenUI("TwoAreaBattleHelp", {tbTime}, tbContent)
+end
+
+function RaceMap:OnGetScoreData(nTime, tbRank, nMyScore, bEnd, bDouble)
+  self.nEndTime = GetTime() + nTime
+  self.tbRank = tbRank
+  self.nMyScore = nMyScore
+  self.bDouble = bDouble
+  self:UpdateRaceMapUI(nTime, tbRank, nMyScore, bEnd, bDouble)
+end
+
+function RaceMap:OnGetRefreshData(tbCarRefreshTime, tbFlagRefreshTime)
+  table.sort(tbCarRefreshTime)
+  table.sort(tbFlagRefreshTime)
+  self.tbCarRefreshTime = tbCarRefreshTime
+  self.tbFlagRefreshTime = tbFlagRefreshTime
+  if not self.nRefreshTimer then
+    self.nRefreshTimer = Timer:Register(Env.GAME_FPS, self.Refresh_Helper, self)
+  end
+end
+
+function RaceMap:OnAddRefreshTime(szType, nTime)
+  self[szType] = self[szType] or {}
+  table.insert(self[szType], nTime)
+  if not self.nRefreshTimer then
+    self.nRefreshTimer = Timer:Register(Env.GAME_FPS, self.Refresh_Helper, self)
+  end
+end
+
+function RaceMap:Refresh_Helper()
+  local nNow = GetTime()
+  for i = #self.tbCarRefreshTime, 1, -1 do
+    if nNow > self.tbCarRefreshTime[i] then
+      table.remove(self.tbCarRefreshTime, i)
+    end
+  end
+  for i = #self.tbFlagRefreshTime, 1, -1 do
+    if nNow > self.tbFlagRefreshTime[i] then
+      table.remove(self.tbFlagRefreshTime, i)
+    end
+  end
+  if #self.tbCarRefreshTime > 0 or #self.tbFlagRefreshTime > 0 then
+    self:UpdateRaceMapUI(self.nEndTime - nNow, self.tbRank, self.nMyScore, self.bDouble)
+    return true
+  end
+  self.nRefreshTimer = nil
+  return false
+end
+
+function RaceMap:OnShowEndInfo(nTime, tbTongRank, tbMyRank, nMyScore)
+  self.tbCarRefreshTime = {}
+  self.tbCarRefreshTime = {}
+  TwoAreaBattle.tbMyRank = tbMyRank
+  self:OnGetScoreData(nTime, tbTongRank, nMyScore, true)
+  BelongUI:EndCheckShow()
+end
+
+function RaceMap:OnGetFixPos(tbPoint)
+  self.tbFixPoint = tbPoint
+  self:ShowPos()
+end
+
+function RaceMap:OnGetDynamicPos(tbPoint)
+  self.tbDynamicPoint = tbPoint
+  self:ShowPos()
+end
+
+function RaceMap:ShowPos()
+  local tbTemp1 = Lib:CopyTB(self.tbFixPoint)
+  local tbTemp2 = Lib:CopyTB(self.tbDynamicPoint)
+  local tbPoint = Lib:MergeTable(tbTemp1, tbTemp2)
+  Map:SyncDynMapPoint(TwoAreaBattle.Cfg.nRaceMapTemplate, tbPoint, GetTime() + TwoAreaBattle.Cfg.nSyncCarPosTime + 1)
+end
+
+function RaceMap:StopAutoPath()
+  AutoPath:StopGoto()
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+end
+
+function RaceMap:OnLogout()
+  TwoAreaBattle.tbMyRank = {}
+  TwoAreaBattle.nLastRquestMyRankTime = 0
+  if self.nRefreshTimer then
+    Timer:Close(self.nRefreshTimer)
+    self.nRefreshTimer = nil
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, RaceMap)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, RaceMap.OnLogout, RaceMap)

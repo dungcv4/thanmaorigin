@@ -1,0 +1,439 @@
+function Partner:Init()
+  EventNotify:RegistNotify(EventNotify.emNOTYFY_SYNC_ITEMS_BEGIN, self.OnSyncItemsBegin, self)
+  
+  EventNotify:RegistNotify(EventNotify.emNOTYFY_SYNC_ITEMS_END, self.OnSyncItemsEnd, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, self.OnClientLogout, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self.OnClientLogin, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_PARTNER_ADD, self.OnSyncPartnerAdd, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, self.OnCrossDay, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, self.OnChangePlayerLevel, self)
+end
+
+function Partner:OnS2CProtectExtraSkillLevel(nPartnerProtectExtraLevel)
+  me.nPartnerProtectExtraLevel = nPartnerProtectExtraLevel
+end
+
+function Partner:OnSyncItemsBegin()
+  self.bSyncAllItems = true
+end
+
+function Partner:OnSyncItemsEnd()
+  self.bSyncAllItems = false
+end
+
+function Partner:OnClientLogout()
+  self:ClearDelaySyncPartnerCallback()
+end
+
+function Partner:OnClientLogin()
+  self:CheckPartnerRedPointWhenLogin()
+end
+
+function Partner:OnSyncPartnerAdd()
+  self:TryRightSetPosRedPoint()
+end
+
+function Partner:OnCrossDay()
+  self:TryRightSetPosRedPoint()
+end
+
+function Partner:OnChangePlayerLevel()
+  self:TryRightSetPosRedPoint()
+end
+
+function Partner:OnSyncPartnerDelete()
+  local tbWnd = Ui:GetWindow(Partner.szPartnerUIClassName)
+  if tbWnd then
+    tbWnd:UpdatePartnerFriendSubView("Decompose")
+    tbWnd:UpdatePartnerBasicInfo()
+  end
+  Ui:CloseWindow("UIPartnerNew_EpiphanyTips")
+end
+
+function Partner:SyncSelectedDecomposePartnerList(nTemplateId, nHaveCount)
+  local tbWnd = Ui:GetWindow(Partner.szPartnerUIClassName)
+  if tbWnd then
+    tbWnd:UpdatePartnerFriendSubView("DecomposeSync", nTemplateId, nHaveCount)
+  end
+end
+
+function Partner:SyncSelectedDunWuDecomposePartnerList(nTemplateId, nHaveCount)
+  local tbWnd = Ui:GetWindow("UIPartnerNew_EpiphanyTips")
+  if tbWnd then
+    tbWnd:UpdateSelectedDecomposePartnerList(nTemplateId, nHaveCount)
+  end
+end
+
+function Partner:OnSyncPartnerUpdate(dwId, nUpdateUiType)
+  local tbWnd = Ui:GetWindow(Partner.szPartnerUIClassName)
+  if nil == tbWnd then
+    return
+  end
+  if "Skill" == nUpdateUiType then
+    tbWnd:UpdatePartnerBasicInfo()
+    local tbWndSkillLearn = Ui:GetWindow("UIPartnerSkillShow")
+    if tbWndSkillLearn then
+      tbWndSkillLearn:UpdateSkillLearnInfo()
+    end
+  elseif "All" == nUpdateUiType then
+    tbWnd:OnOpen()
+  elseif "GradeLevel" == nUpdateUiType then
+    tbWnd:UpdatePartnerBasicInfo()
+    tbWnd:ShowPartnerLevelUpEffect()
+  elseif "AllPartners" == nUpdateUiType then
+    tbWnd:UpdateOrderInfo()
+    tbWnd:UpdatePartnerBasicInfo()
+    PartnerZhenFa:TryUpdateActivateRedPoint()
+    self:TryRightSetPosRedPoint()
+  elseif "PartnerFriend" == nUpdateUiType then
+    tbWnd:UpdatePartnerFriendSubView("Friend")
+    local bShowRedPoint = self:CheckFriendRedPoint()
+    if not bShowRedPoint then
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.PartnerFriend)
+    end
+  elseif "PartnerXiSui" == nUpdateUiType then
+    tbWnd:UpdatePartnerBasicInfo()
+  elseif "Normal" == nUpdateUiType then
+    tbWnd:UpdatePartnerBasicInfo()
+  end
+end
+
+function Partner:OnSyncPartnerReborn()
+  local tbWnd = Ui:GetWindow(Partner.szPartnerUIClassName)
+  local tbRebornWnd = Ui:GetWindow("UIPartnerReborn")
+  if tbRebornWnd then
+    tbRebornWnd:Close()
+  end
+  if tbWnd then
+    tbWnd:OnOpen()
+  end
+end
+
+function Partner:OnGradeLevelup(nPartnerId, nGradeLevel, tbTargetPotentialLimit)
+  me.CenterMsg(i18n.EasyGet("\231\170\129\231\160\180\230\136\144\229\138\159\239\188\140\229\144\132\233\161\185\230\189\156\232\131\189\228\184\138\233\153\144\229\190\151\229\136\176\230\143\144\229\141\135"))
+  local pPartner = me.GetPartnerObj(nPartnerId)
+  if not pPartner then
+    return
+  end
+  pPartner.SetGradeLevel(nGradeLevel)
+  for i = 1, #Partner.tbAllPotentialType do
+    Partner:SetXiSuiPotentialByObj(pPartner, i, tbTargetPotentialLimit[i])
+  end
+  pPartner.Update()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_GRADE_LEVELUP, nPartnerId)
+  Partner:OnSyncPartnerUpdate(nPartnerId, "GradeLevel")
+end
+
+function Partner:OnStarLevelup(nPartnerId, nDstStarLevel, nCostParNum, tbTargetPotentialLimit)
+  me.CenterMsg(i18n.EasyGet("\229\141\135\230\152\159\230\136\144\229\138\159\239\188\140\229\144\132\233\161\185\230\189\156\232\131\189\228\184\138\233\153\144\229\190\151\229\136\176\230\143\144\229\141\135"))
+  local pPartner = me.GetPartnerObj(nPartnerId)
+  if not pPartner then
+    return
+  end
+  pPartner.SetStar(nDstStarLevel)
+  for i = 1, #Partner.tbAllPotentialType do
+    Partner:SetXiSuiPotentialByObj(pPartner, i, tbTargetPotentialLimit[i])
+  end
+  pPartner.Update()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_STAR_LEVELUP, nPartnerId, nDstStarLevel - 1, nDstStarLevel)
+  local tbWnd = Ui:GetWindow(Partner.szPartnerUIClassName)
+  if tbWnd then
+    tbWnd:UpdatePartnerBasicInfo()
+    tbWnd:ShowPartnerStarUpEffect(nDstStarLevel)
+  end
+end
+
+function Partner:OnUpdatePotential(nPotentialType)
+  local tbWnd = Ui:GetWindow(Partner.szPartnerUIClassName)
+  if tbWnd then
+    tbWnd:UpdatePartnerBasicInfo()
+    tbWnd:ShowPartnerPotentialEffect()
+  end
+end
+
+function Partner:OnUpdateXiSuiData(tbXiSuiData)
+  local tbWnd = Ui:GetWindow(Partner.szPartnerUIClassName)
+  if tbWnd then
+    tbWnd:ShowPartnerReInitEffect(tbXiSuiData)
+    tbWnd:UpdatePartnerBasicInfo()
+  end
+end
+
+function Partner:GetPartnerStarMax(nQualityLevel)
+  local nValue = 0
+  local nMaxLevel = Client.nServerMaxLevel
+  for i = 1, 8 do
+    local nNeedLevel = self.tbStarLevelUpInfo[nQualityLevel][i].nNeedLevel
+    if nMaxLevel > nNeedLevel then
+      nValue = i
+    end
+  end
+  return nValue
+end
+
+function Partner:OnNotifyDelaySyncAllPartner(bDelaySync)
+  self.bDelaySyncPartner = bDelaySync
+  if not bDelaySync and self.tbDelaySyncPartnerCallback then
+    local tbCallBack = self.tbDelaySyncPartnerCallback
+    self.tbDelaySyncPartnerCallback = nil
+    Lib:CallBack(tbCallBack)
+  end
+end
+
+function Partner:SetDelaySyncPartnerCallback(tbCallBack)
+  if self.nRequestPartnerDataTime and self.nRequestPartnerDataTime > 0 and GetTime() - self.nRequestPartnerDataTime <= 3 then
+    return
+  end
+  self.tbDelaySyncPartnerCallback = tbCallBack
+  self.nRequestPartnerDataTime = GetTime()
+  RemoteServer.CallPartnerFunc("SyncAllPartnerReq")
+end
+
+function Partner:ClearDelaySyncPartnerCallback()
+  self.tbDelaySyncPartnerCallback = nil
+  self.szUIName = nil
+end
+
+function Partner:OpenPartnerMainUI(nPanel, nSelectPartnerTemplateId)
+  if Partner.bDelaySyncPartner then
+    Partner:SetDelaySyncPartnerCallback({
+      Ui.OpenWindow,
+      Ui,
+      Partner.szPartnerUIClassName,
+      nPanel,
+      nSelectPartnerTemplateId
+    })
+    Partner:InitPartnerOrder()
+    return
+  end
+  Ui:OpenWindow(Partner.szPartnerUIClassName, nPanel, nSelectPartnerTemplateId)
+end
+
+function Partner:OpenOtherUI(szUIName, ...)
+  if Partner.bDelaySyncPartner then
+    Partner:SetDelaySyncPartnerCallback({
+      Ui.OpenWindow,
+      Ui,
+      szUIName,
+      ...
+    })
+    Partner:InitPartnerOrder()
+    return
+  end
+  Ui:OpenWindow(szUIName, ...)
+end
+
+function Partner:InitPartnerOrder()
+  local tbPosInfo = me.GetPartnerPosInfo()
+  local tbPartnerOrder = {}
+  local tempPartnerOrder = {}
+  local tempPartnerPos = {}
+  for i = 1, Partner.nMaxPos do
+    tempPartnerPos[tbPosInfo[i]] = i
+  end
+  local playerFlag = false
+  for i = 1, Partner.nMaxOrder do
+    local nPartnerId = me.GetUserValue(GetGroupKey("PartnerOrder"), i)
+    tbPartnerOrder[i] = nPartnerId
+    if nPartnerId > 0 and nil == tempPartnerPos[nPartnerId] then
+      tbPartnerOrder[i] = 0
+    elseif -1 == nPartnerId then
+      playerFlag = true
+    end
+    tempPartnerOrder[nPartnerId] = i
+  end
+  local tbInsertPartner = {}
+  if false == playerFlag then
+    playerFlag = true
+    table.insert(tbInsertPartner, -1)
+  end
+  for i = 1, Partner.nMaxPos do
+    if tbPosInfo[i] > 0 and not tempPartnerOrder[tbPosInfo[i]] then
+      table.insert(tbInsertPartner, tbPosInfo[i])
+    end
+  end
+  for i = 1, #tbInsertPartner do
+    for nIndex = 1, Partner.nMaxOrder do
+      if 0 == tbPartnerOrder[nIndex] then
+        tbPartnerOrder[nIndex] = tbInsertPartner[i]
+        break
+      end
+    end
+  end
+  RemoteServer.CallPartnerFunc("SetPartnerOrder", tbPartnerOrder)
+end
+
+Partner.emREDPOINT = {
+  StartUp = 1,
+  GradeUp = 2,
+  Skill = 3,
+  XiSui = 4,
+  JueXing = 5
+}
+
+function Partner:CheckPartnerRedPointWhenLogin()
+  local tbPosInfo = me.GetPartnerPosInfo()
+  if self:CheckSkillBookRedPoint() then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.PartnerSKillBookPick)
+  end
+  if self:CheckOrderRedPoint(tbPosInfo) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.PartnerCanInPos)
+  end
+  if self:CheckFriendRedPoint() then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.PartnerFriend)
+  end
+  self:TryRightSetPosRedPoint()
+end
+
+function Partner:CheckPartnerPensonalRedPoint(nPartnerId)
+  local tbRet = {}
+  tbRet[Partner.emREDPOINT.StartUp] = {}
+  tbRet[Partner.emREDPOINT.GradeUp] = {}
+  tbRet[Partner.emREDPOINT.Skill] = {}
+  tbRet[Partner.emREDPOINT.JueXing] = {}
+  if nPartnerId then
+    tbRet[Partner.emREDPOINT.StartUp] = self:CheckCanStarLevelup(me, nPartnerId)
+    tbRet[Partner.emREDPOINT.GradeUp] = self:CheckLevelCanGradeLevelup(me, nPartnerId)
+    tbRet[Partner.emREDPOINT.JueXing] = self:CheckCanPartnerJueXingSkillLevelUp(me, nPartnerId)
+    local bInPos = self:CheckPartnerInPos(me, nPartnerId)
+    if bInPos then
+      tbRet[Partner.emREDPOINT.Skill] = self:CheckPartnerSkillRedPoint(nPartnerId)
+    end
+  end
+  return tbRet
+end
+
+function Partner:CheckPartnerSkillRedPoint(nPartnerId)
+  local tbRet = {}
+  local pPartner = me.GetPartnerObj(nPartnerId)
+  if not pPartner then
+    return tbRet
+  end
+  if 1 ~= pPartner.GetMainDevFlag() then
+    return tbRet
+  end
+  local tbRet = {}
+  local nMaxSkill = Partner.StarLevelExtSkillNum[me.GetPartnerObj(nPartnerId).GetStar()] or self.nMaxSkillNum
+  nMaxSkill = nMaxSkill > self.nMaxSkillNum and self.nMaxSkillNum or nMaxSkill
+  for i = 1, nMaxSkill do
+    local nSkillId, nSkillLevel, nSkillExp = pPartner.GetSkillInfo(i)
+    if 0 == nSkillId then
+      local tbHaveSkillBookInfo = me.GetItemListInBag("PartnerSkillBook", 200)
+      for _, pItem in pairs(tbHaveSkillBookInfo) do
+        local bCanUse = self:CheckCanUseSkillBook(me, nPartnerId, pItem.dwId)
+      end
+      for j = 1, #tbHaveSkillBookInfo do
+        local pItem = tbHaveSkillBookInfo[j]
+        if not pItem then
+          break
+        end
+        local bCanUse = self:CheckCanUseSkillBook(me, nPartnerId, pItem.dwId)
+        if bCanUse then
+          tbRet[i] = true
+          break
+        end
+      end
+    else
+      tbRet[i] = true
+      local nQuality = self.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+      local bLimit = nSkillLevel >= self.SkillLevelQuality[nQuality]
+      local nSkillBookId = self.tbSkillBookSetting.tbSkillId2BookId[nSkillId]
+      local nSkillBookLevelUpItemId = self.tbSkillBookSetting.tbBookInfo[nSkillBookId].nLevelupId
+      local nNextLevel = nSkillLevel + 1
+      local nPartnerMaxLevel = self.SkillLevelQuality[nQuality]
+      local bNextOpen = false
+      if nNextLevel <= nPartnerMaxLevel then
+        bNextOpen = 1 == GetTimeFrameState(self.SkillLevelTimeFrame[nSkillLevel + 1])
+      end
+      local nSkillLevelUpItemCost = self.tbSkillBookSetting.tbBookInfo[nSkillBookId].tbSkillValue[nSkillLevel]
+      local nSkillBookLevelUpNeededValue = nSkillLevelUpItemCost - nSkillExp
+      if bLimit or not bNextOpen then
+        tbRet[i] = false
+      end
+      local bBreak = bNextOpen and not bLimit
+      if 0 == nSkillBookLevelUpNeededValue and bBreak then
+        local nSkillBookItemId = self.tbSkillBookSetting.tbBookInfo[nSkillBookId].nGradeupId
+        local nSkillBookItemCount = self.tbSkillBookSetting.tbBookInfo[nSkillBookId].tbGradeValue[nSkillLevel]
+        if nSkillBookItemCount > me.GetItemCountInBags(nSkillBookItemId) then
+          tbRet[i] = false
+        end
+      end
+      if nSkillBookLevelUpNeededValue > 0 and nSkillBookLevelUpNeededValue > me.GetItemCountInBags(nSkillBookLevelUpItemId) then
+        tbRet[i] = false
+      end
+    end
+  end
+  return tbRet
+end
+
+function Partner:CheckFriendRedPoint()
+  local bLight = false
+  for _, tbInfo in pairs(Partner.tbPartnerFetterSetting) do
+    local bFetterFull, bFetterMaxLevel, _, nCurLevel = self:CheckPartnerFetterFull(me, tbInfo.nId)
+    if 0 == nCurLevel and bFetterFull then
+      bLight = true
+    end
+    if bFetterFull and not bFetterMaxLevel then
+      bLight = true
+    end
+  end
+  return bLight
+end
+
+function Partner:CheckSkillBookRedPoint()
+  return false
+end
+
+function Partner:CheckOrderRedPoint(tbPosInfo)
+  local nPosPartnerCount = 0
+  for nPos, nPartnerId in ipairs(tbPosInfo) do
+    if 0 ~= nPartnerId then
+      nPosPartnerCount = nPosPartnerCount + 1
+    end
+  end
+  local nPosPartnerLimit = 0
+  for i = #self.PosNeedLevel, 1, -1 do
+    if me.nLevel >= self.PosNeedLevel[i] then
+      nPosPartnerLimit = i
+      break
+    end
+  end
+  if nPosPartnerCount < nPosPartnerLimit then
+    return true
+  else
+    return false
+  end
+end
+
+function Partner:CheckSetPosRedPoint()
+  local nPosPartnerCount = 0
+  local tbPosInfo = me.GetPartnerPosInfo()
+  for nPos, nPartnerId in ipairs(tbPosInfo) do
+    if nPartnerId > 0 then
+      nPosPartnerCount = nPosPartnerCount + 1
+    end
+  end
+  local nPosPartnerLimit = 0
+  for i = #self.PosNeedLevel, 1, -1 do
+    if me.nLevel >= self.PosNeedLevel[i] then
+      nPosPartnerLimit = i
+      break
+    end
+  end
+  local tbAllPartner = me.GetAllPartner()
+  local nAllPartnerCount = Lib:CountTB(tbAllPartner)
+  if nPosPartnerCount < nPosPartnerLimit and nAllPartnerCount - nPosPartnerCount > 0 then
+    return true
+  end
+  return false
+end
+
+function Partner:TryRightSetPosRedPoint()
+  if self:CheckSetPosRedPoint() then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.PartnerSetPos)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.PartnerSetPos)
+  end
+end
+
+Partner:Init()

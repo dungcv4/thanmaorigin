@@ -1,0 +1,321 @@
+Require("CommonScript/GlobalDomainBattle/GlobalDomainBattleDef.lua")
+Require("Script/Fuben/FubenUIController.lua")
+
+function GlobalDomainBattle:OnPredictState(bMeetTimeFrame, szZoneTimeFrame, bOpenToday)
+  self.bMeetTimeFrame = bMeetTimeFrame
+  self.szZoneTimeFrame = szZoneTimeFrame
+  self.bOpenToday = bOpenToday
+end
+
+function GlobalDomainBattle:AttendReq(nMapTid)
+  local bRet, szErr = self:CanAttend(me, nMapTid)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  local nCurMapTid = me.nMapTemplateId
+  
+  local function fnEnter()
+    if self:IsGameMap(nCurMapTid) then
+      RemoteServer.RequestGlobalDomainBattle("SwitchMap", nMapTid)
+    else
+      RemoteServer.RequestGlobalDomainBattle("AttendReq", nMapTid)
+    end
+    Ui:CloseWindow("UIWorldMap")
+    Ui:CloseWindow("UILegion")
+  end
+  
+  local bRet, szErr = ActivityCheck:CheckCanEnterActivityEx(me, nil, fnEnter, nil, nil, not self:IsGameMap(nMapTid))
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+end
+
+function GlobalDomainBattle:NotifyOpen(nTimeOut)
+  Ui:SynNotifyMsg({
+    szType = "GlobalDomainBattleStart",
+    nTimeOut = GetTime() + nTimeOut
+  })
+  RedPointMgr:LightRedPoint(RedPointMgr.EVENT.GlobalDomainBattleOpen)
+end
+
+function GlobalDomainBattle:ClientLoginReq()
+  RemoteServer.RequestGlobalDomainBattle("ClientLoginReq")
+end
+
+function GlobalDomainBattle:QueryBaseReq()
+  RemoteServer.RequestGlobalDomainBattle("QueryBaseReq", self.nBaseVersion)
+end
+
+function GlobalDomainBattle:OnClearWarZoneList()
+  self.tbWarZoneList = {}
+end
+
+function GlobalDomainBattle:OnSynWarZoneList(nWarZoneType, tbLegion)
+  self.tbWarZoneList[nWarZoneType] = self.tbWarZoneList[nWarZoneType] or {}
+  self.tbWarZoneList[nWarZoneType].tbLegions = self.tbWarZoneList[nWarZoneType].tbLegions or {}
+  self.tbWarZoneList[nWarZoneType].nLegionType = nWarZoneType
+  for nKey, tbLegionInfo in pairs(tbLegion) do
+    self.tbWarZoneList[nWarZoneType].tbLegions[nKey] = tbLegionInfo
+  end
+end
+
+function GlobalDomainBattle:QueryBaseRsp(nBaseVersion, tbOccupyList, tbClaimList, tbLastOccupyList, tbOccupyShowList, tbRanklist, nGameState, bMeetTimeFrame)
+  self.nBaseVersion = nBaseVersion
+  self.tbClaimList = tbClaimList
+  self.tbOccupyList = tbOccupyList
+  self.tbLastOccupyList = tbLastOccupyList
+  self.nGameState = nGameState
+  self.tbOccupyShowList = tbOccupyShowList
+  self.tbRankList = tbRanklist
+  self.bMeetTimeFrame = bMeetTimeFrame
+  if Ui:WindowVisible("UINewInformation") then
+    Ui:GetWindow("UINewInformation"):UpdateGlobalDomainBattlePanel()
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_DOMAIN_INFO)
+end
+
+function GlobalDomainBattle:QueryGeneralInfoRsp(nBaseVersion, tbClaimList, tbOccupyList)
+  self.nBaseVersion = nBaseVersion
+  self.tbClaimList = tbClaimList
+  self.tbOccupyList = tbOccupyList
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_DOMAIN_INFO)
+end
+
+function GlobalDomainBattle:QueryScoreReq()
+  if self:IsFightPhase() and self:IsInGame() then
+    RemoteServer.RequestGlobalDomainBattle("QueryScoreReq")
+  end
+end
+
+function GlobalDomainBattle:QueryScoreRsp(tbDomainList, tbAttendeeList)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_DOMAIN_SCORE, tbDomainList, tbAttendeeList)
+end
+
+function GlobalDomainBattle:QueryResultReq()
+  RemoteServer.RequestGlobalDomainBattle("QueryResultReq")
+end
+
+function GlobalDomainBattle:QueryResultRsp(tbResultList, nMyRank)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_DOMAIN_RESULT, tbResultList, nMyRank)
+end
+
+function GlobalDomainBattle:LegionShopLimitRsp(tbInfo)
+  self.tbLegionShopLimit = tbInfo
+  if Ui:WindowVisible("UILegionDomainShop") then
+    Ui:GetWindow("UILegionDomainShop"):UpdateShow()
+  end
+end
+
+function GlobalDomainBattle:ClaimReq(nMapTid)
+  local bRet, szErr = self:CanClaim(me, nMapTid, false)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  
+  local function fnConfirm()
+    RemoteServer.RequestGlobalDomainBattle("ClaimReq", nMapTid)
+  end
+  
+  local szMsg = i18n.EasyGet("\231\161\174\229\174\154\229\175\185{0}\229\143\145\232\181\183\229\174\163\230\136\152\229\144\151\239\188\159", Map:GetMapName(nMapTid))
+  me.MsgBox(szMsg, {
+    {
+      i18n.szOk,
+      fnConfirm
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function GlobalDomainBattle:SendToFrontReq(nFrontIdx)
+  local bRet, szErr = self:CanSendToFront(me, nFrontIdx)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  RemoteServer.RequestGlobalDomainBattle("SendToFrontReq", nFrontIdx)
+end
+
+function GlobalDomainBattle:FollowMemberReq(nFromMapId, nFromMapTid, nTargetMapId, nTargetMapTid)
+  RemoteServer.RequestGlobalDomainBattle("FollowMemberReq", nTargetMapId, nTargetMapTid)
+end
+
+function GlobalDomainBattle:FollowMemberRsp(bRet)
+  if not bRet and TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+end
+
+function GlobalDomainBattle:OnLogin()
+  self.nBaseVersion = 0
+  if self:IsInGame() then
+    self:QueryBaseReq()
+  else
+    self:ClientLoginReq()
+  end
+end
+
+function GlobalDomainBattle:OnCalendarAction()
+  if not Legion:HasLegion() then
+    me.CenterMsg(i18n.EasyGet("\233\156\128\232\166\129\229\133\136\229\138\160\229\133\165\229\134\155\229\155\162"))
+    return
+  end
+  Ui:OpenWindow("UILegion", "ACTIVITY")
+end
+
+function GlobalDomainBattle:OnFubenMapLoaded()
+  FubenUIController:OpenFuBenUI()
+  Ui:CloseWindow("UILegion")
+end
+
+function GlobalDomainBattle:IsNeedFuncScoreButton()
+  return true, {
+    Ui.SwitchWindow,
+    Ui,
+    "UIHudLegionDomainScore"
+  }
+end
+
+function GlobalDomainBattle:IsNeedExitFubenButton()
+  return true
+end
+
+function GlobalDomainBattle:IsNeedFubenBtn()
+  local tbBtnList
+  local tbSetting = self.MAP_FIGHT[me.nMapTemplateId]
+  if tbSetting and tbSetting.POS.FRONT then
+    tbBtnList = {}
+    
+    local function fnGoto(nIndex)
+      TeamMgr:StopFollowMember()
+      AFK:Stop()
+      Timer:Register(Env.GAME_FPS / 2, function()
+        GlobalDomainBattle:SendToFrontReq(nIndex)
+      end)
+    end
+    
+    for nIndex, tbPos in ipairs(tbSetting.POS.FRONT) do
+      table.insert(tbBtnList, {
+        szName = i18n.EasyGet("\229\137\141\231\186\191{0}", nIndex),
+        fnOnClick = function()
+          fnGoto(nIndex)
+        end
+      })
+    end
+  end
+  return true, nil, tbBtnList
+end
+
+function GlobalDomainBattle:GetFubenBtnAImagePathAndText()
+  return "UI/atlas/hud/btn_transfer.png", nil
+end
+
+function GlobalDomainBattle:RegisterFubenUIChecker()
+  local tbMapList = {}
+  for nMapTid, _ in pairs(self.MAP_FIGHT) do
+    table.insert(tbMapList, nMapTid)
+  end
+  FubenUIController:RegisterChecker(tbMapList, self)
+end
+
+function GlobalDomainBattle:RegisterFubenClass()
+  for nMapTid, _ in pairs(self.MAP_FIGHT) do
+    local tbMapClass = Map:GetClass(nMapTid)
+    
+    function tbMapClass:TransmitFrom(...)
+      GlobalDomainBattle:FollowMemberReq(...)
+    end
+  end
+end
+
+function GlobalDomainBattle:GiveItem(nMemberId, nItemId, nTemplateId)
+  RemoteServer.RequestGlobalDomainBattle("RequestGiveItem", nMemberId, nItemId, nTemplateId)
+end
+
+function GlobalDomainBattle:OnGiveSucc()
+  Ui:CloseWindow("UIExperienceBook")
+end
+
+function GlobalDomainBattle:ApplyMagicAttr(tbAttrList)
+  if tbAttrList then
+    local pNpc = me.GetNpc()
+    for nIndex, tbAttr in pairs(tbAttrList) do
+      pNpc.ApplyMagicAttrib(table.unpack(tbAttr))
+    end
+  end
+  self.bTransform = true
+end
+
+function GlobalDomainBattle:RemoveMagicAttr(tbAttrList)
+  if tbAttrList then
+    local pNpc = me.GetNpc()
+    for nIndex, tbAttr in pairs(tbAttrList) do
+      pNpc.RemoveMagicAttrib(table.unpack(tbAttr))
+    end
+  end
+  self.bTransform = false
+end
+
+function GlobalDomainBattle:IsTransform()
+  return self.bTransform
+end
+
+function GlobalDomainBattle:GetOccupierShow(nMapTid)
+  local nWarZoneType = Legion:GetWarZoneType(me.dwLegionId)
+  local nOccupier = self:GetOccupier(nMapTid, nWarZoneType)
+  return nOccupier and self.tbOccupyShowList[nWarZoneType][nOccupier] or i18n.EasyGet("\230\151\160")
+end
+
+function GlobalDomainBattle:IsWeekDay()
+  return true
+end
+
+function GlobalDomainBattle:SetHasGlobalInfo(bIsHadOccupyInfo)
+  self.bIsHadOccupyInfo = bIsHadOccupyInfo
+end
+
+function GlobalDomainBattle:IsInGame()
+  return GlobalDomainBattle:IsGameMap(me.nMapTemplateId)
+end
+
+function GlobalDomainBattle:ShowLegionIcon()
+  return not self:IsInGame() and GlobalHangUp:IsInFuben() and not self:IsMeetTimeFrame() and self:DuringSeason() and not self:IsOpenDay()
+end
+
+function GlobalDomainBattle:IsGlobalOpenDay(nTime)
+  return self:CheckTime(nTime)
+end
+
+function GlobalDomainBattle:IsServerOpenDay(nTime)
+  return not self:CheckTime(nTime)
+end
+
+function GlobalDomainBattle:CheckTime(nTime)
+  local nMonth = Lib:GetLocalMonth(nTime)
+  return 1 == nMonth % 2 and self:DuringSeason()
+end
+
+function GlobalDomainBattle:IsLegionOfficialMaintain()
+  return self.bMeetTimeFrame and self.bIsHadOccupyInfo
+end
+
+function GlobalDomainBattle:CheckAndGoto(nMapTid, nMapId, nX, nY)
+  if self:IsGameMap(nMapTid) and me.nMapTemplateId ~= nMapTid then
+    self:AttendReq(nMapTid)
+  end
+end
+
+function GlobalDomainBattle:Init()
+  if self.bInit then
+    return
+  end
+  self:RegisterFubenUIChecker()
+  self:RegisterFubenClass()
+  self.bInit = true
+end
+
+GlobalDomainBattle:Init()

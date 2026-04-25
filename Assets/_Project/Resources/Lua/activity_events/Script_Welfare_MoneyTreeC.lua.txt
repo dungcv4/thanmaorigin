@@ -1,0 +1,88 @@
+function MoneyTree:UICallShakeOne()
+  if not self:CheckCanShakeOnce() then
+    GainCurrency:ReadyForJump("YuanBao")
+  else
+    RemoteServer.OnMoneyTreeRequest(self.C2SProtocol.ShakeOnce)
+  end
+end
+
+function MoneyTree:UICallShakeTen()
+  local function fnAgree()
+    if not self:CheckCanShakeTen() then
+      GainCurrency:ReadyForJump("YuanBao")
+    else
+      RemoteServer.OnMoneyTreeRequest(self.C2SProtocol.ShakeTen)
+    end
+  end
+  
+  if DegreeCtrl:GetDegree(me, "MoneyTreeTodaySecondConfirm") > 0 then
+    Ui:OpenWindow("UIMessageBox", i18n.Get(self.tbText.szSecondConfirm, self.Cfg.nCostYuanBaoCountOnce * self.TEN_COUNT, self.TEN_COUNT), {
+      {fnAgree},
+      {}
+    }, nil, "MoneyTreeSecondConfirm", nil, i18n.Get(self.tbText.szToggleText))
+  else
+    fnAgree()
+  end
+end
+
+function MoneyTree:SetNotShowValue(bIsNotShowToday)
+  RemoteServer.OnMoneyTreeRequest(self.C2SProtocol.SetTodaySecondConfirm, not bIsNotShowToday)
+end
+
+function MoneyTree:OnS2CShakeResult(tbRandomIndexArray)
+  self.tbRecord = self.tbRecord or {}
+  for _, nRandomIndex in ipairs(tbRandomIndexArray) do
+    local nMultiple = self.tbProbabilityCfg[nRandomIndex].nMultiple
+    local nGetCoinCount = self:GetCoinCountFromRandomIndex(nRandomIndex)
+    local szTips
+    if nMultiple > 1 then
+      szTips = i18n.Get(self.tbText.szAddCoinShowCrit, nGetCoinCount, nMultiple)
+    else
+      szTips = i18n.Get(self.tbText.szAddCoinShow, nGetCoinCount)
+    end
+    me.CenterMsg(szTips)
+    ChatMgr:OnChannelMessage(ChatMgr.ChannelType.System, 0, ChatMgr.SystemMsgType.System, "", 0, 0, 0, szTips)
+    local szColor = "#4d4034"
+    if 2 == nRandomIndex then
+      szColor = "#54ab4d"
+    elseif 3 == nRandomIndex then
+      szColor = "#c56d05"
+    end
+    local szRecord = i18n.EasyGet("<color={1}>{0} \232\142\183\229\190\151\233\147\182\228\184\164*{2}</color>", Lib:GetCurTimeStr(), szColor, nGetCoinCount)
+    table.insert(self.tbRecord, szRecord)
+  end
+  if #self.tbRecord > self.RECORD_MAX_COUNT then
+    for i = #self.tbRecord - self.RECORD_MAX_COUNT, 1, -1 do
+      table.remove(self.tbRecord, i)
+    end
+  end
+  self:SyncUI(tbRandomIndexArray)
+end
+
+function MoneyTree:GetClientRecord()
+  return self.tbRecord or {}
+end
+
+function MoneyTree:OnLoginC()
+  self.tbRecord = {}
+end
+
+function MoneyTree:OnS2CLogin()
+  self:SyncUI()
+end
+
+function MoneyTree:ResetRedPoint()
+  if self:HaveFreeTimes() and self:CheckIsOpen(me) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.MoneyTreeFree)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.MoneyTreeFree)
+  end
+end
+
+function MoneyTree:SyncUI(tbRandomIndexArray)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MONEY_TREE_SYNC, tbRandomIndexArray)
+  self:ResetRedPoint()
+end
+
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, MoneyTree.ResetRedPoint, MoneyTree)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, MoneyTree.ResetRedPoint, MoneyTree)

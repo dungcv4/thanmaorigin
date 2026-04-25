@@ -1,0 +1,197 @@
+local tbWnd = Ui:CreateWindow("UIAchievement")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_ACHIEVEMENT_DATA_SYNC,
+      self.UpdateAchievementList
+    }
+  }
+end
+
+local tbControls = {
+  UITree = "node/ScrollViewCatalog/UITree",
+  btnClose = "node/imgBG/btnClose",
+  btnAllGet = "node/btnAllGet",
+  AchievementDetailTemplate = "node/ScrollViewContent/Viewport/Grid/AchievementTemplate",
+  txtAchieveScoreValue = "node/AchieveScore/txtAchieveScoreValue"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnAllGet = function(self)
+    self:TryGainAllAward()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.uiTree = Ui:NewTree(self, self.UITree, self.onClickTreeBigBtn, self.onClickTreeSmallBtn)
+  local tbBigData, tbSmallData = self:GetAchievementTreeData()
+  self.uiTree:SetData(tbBigData, tbSmallData)
+  self.tbScrollView = Ui:NewLoopScrollView(self, tbControls.AchievementDetailTemplate, "Element/Template")
+end
+
+function tbWnd:OnOpen(nID)
+  local tbBigData, tbSmallData = self:GetAchievementTreeData()
+  self.uiTree:SetData(tbBigData, tbSmallData)
+  if nID then
+    self:SelectAchievement(nID, tbBigData, tbSmallData)
+  else
+    self.uiTree:AutoSelect()
+    self:UpdateAchievementList()
+  end
+  self.uiTree:GoTop()
+  self.tbScrollView:PlayItemGridAnimation()
+end
+
+function tbWnd:CheckRedPoint()
+  local tbGroupIDList, tbKindList = Achievement:GetRedPointAchievementList()
+  local szBigKey, szSmallKey
+  for nBigIndex, tbBigInfo in ipairs(self.uiTree.tbBigData) do
+    szBigKey = "node/ScrollViewCatalog/UITree/ScrollView/Viewport/Content/Big" .. nBigIndex
+    RedPointMgr:DynamicUnRegist(self.pPanel, szBigKey)
+    if tbGroupIDList[tbBigInfo.nType] then
+      szBigKey = "node/ScrollViewCatalog/UITree/ScrollView/Viewport/Content/Big" .. nBigIndex
+      RedPointMgr:DynamicRegisteRedPoint(self.pPanel, szBigKey, {
+        RedPointMgr.EVENT.Achievement
+      })
+    end
+  end
+  for nSmallIndex, tbSmallInfo in ipairs(self.uiTree.tbSmallData) do
+    szSmallKey = "node/ScrollViewCatalog/UITree/ScrollView/Viewport/Content/Small" .. nSmallIndex
+    RedPointMgr:DynamicUnRegist(self.pPanel, szSmallKey)
+    if tbKindList[tbSmallInfo.tbInfo.szKind] then
+      RedPointMgr:DynamicRegisteRedPoint(self.pPanel, szSmallKey, {
+        RedPointMgr.EVENT.Achievement
+      })
+    end
+  end
+  if next(tbGroupIDList) or next(tbKindList) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.Achievement)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.Achievement)
+  end
+end
+
+function tbWnd:onClickTreeBigBtn(tbInfo, nBigIndex)
+  if not self.szKind or tbInfo.nID ~= Achievement:GetGroupIDByKind(self.szKind) then
+    self.uiTree:AutoSelectSmall(tbInfo.nID)
+    self.tbScrollView:PlayItemGridAnimation()
+  end
+end
+
+function tbWnd:onClickTreeSmallBtn(tbInfo, nSmallIndex)
+  self.szKind = tbInfo.szKind
+  self.tbScrollView:Clear()
+  self:UpdateAchievementList()
+  self.tbScrollView:PlayItemGridAnimation()
+end
+
+function tbWnd:UpdateAchievementList()
+  if not self.szKind or self.szKind == "" then
+    self:CheckRedPoint()
+    return
+  end
+  local tbList = Achievement:GetShowListByKind(self.szKind)
+  
+  local function setItemFunc(tbLoopScroll, nIndex)
+    local tbInfo = tbList[nIndex]
+    local tbElement = tbLoopScroll:GetElement(nIndex)
+    tbElement.tbInfo = tbInfo
+    local pPanel = tbElement.pPanel
+    pPanel:Label_SetText("Template/txtAchievement", tbInfo.szName)
+    pPanel:Label_SetText("Template/Condition", tbInfo.szDesc)
+    pPanel:SetActive("Template/imgCompleted", tbInfo.nFinished)
+    pPanel:SetActive("Template/btnGain", not tbInfo.nFinished and tbInfo.nCurCount >= tbInfo.nFinishCount)
+    pPanel:SetActive("Template/imgCompleted", tbInfo.nFinished)
+    pPanel:SetActive("Template/btnGo", not tbInfo.nFinished and tbInfo.nCurCount < tbInfo.nFinishCount and tbInfo.bShowBtnGo)
+    Ui:Button_BindEvent(pPanel, "Template/btnGo", self.onClickBtnGo, self, tbInfo.nID)
+    if not tbInfo.nFinished and tbInfo.nCurCount < tbInfo.nFinishCount then
+      pPanel:Label_SetText("Template/ProgressBar/Percentage", string.format("%d/%d", tbInfo.nCurCount, tbInfo.nFinishCount))
+      pPanel:Sprite_SetFillAmount("Template/ProgressBar/ProgressFore", tbInfo.nCurCount / tbInfo.nFinishCount, tbInfo.nCurCount / tbInfo.nFinishCount, 0, false)
+      pPanel:SetActive("Template/ProgressBar", true)
+    else
+      pPanel:SetActive("Template/ProgressBar", false)
+    end
+    Ui:Button_BindEvent(pPanel, "Template/btnGain", self.onClickGainAward, self, tbInfo.nID)
+    if not tbInfo.nFinished and tbInfo.nCurCount >= tbInfo.nFinishCount then
+      RedPointMgr:DynamicRegisteRedPoint(pPanel, "Template/btnGain", {
+        RedPointMgr.EVENT.Achievement
+      })
+    end
+    pPanel:SetActive("Template/AwardPanel", true)
+    local tbCellInfo = tbElement.tbCellInfo
+    if not tbCellInfo.tbItemGridScrollView then
+      tbCellInfo.tbItemGridScrollView = Ui:NewItemGridScrollView(tbElement, "Template/AwardPanel/Item", 3, 1)
+    else
+      tbCellInfo.tbItemGridScrollView:Reset()
+    end
+    local tbAward = Lib:GetAwardFromString(tbInfo.szAward)
+    local tbItemList = {}
+    for _, tbAwardInfo in ipairs(tbAward) do
+      table.insert(tbItemList, tbAwardInfo)
+    end
+    tbCellInfo.tbItemGridScrollView:UpdateGenericItem(tbItemList, true)
+  end
+  
+  self.tbScrollView:Clear()
+  self.tbScrollView:SetElement(Lib:CountTB(tbList), setItemFunc)
+  self.tbScrollView:GoTop()
+  self.pPanel:Label_SetText(tbControls.txtAchieveScoreValue, me.GetUserValue(Achievement.ScoreSaveKey, Achievement.ScoreKey))
+  self:CheckRedPoint()
+end
+
+function tbWnd:onClickBtnGo(nID)
+  Achievement:OnClickBtnGo(nID)
+end
+
+function tbWnd:onClickGainAward(nID)
+  Achievement:TryGainAwardC(nID)
+end
+
+function tbWnd:GetAchievementTreeData()
+  return Achievement:GetTreeShowData()
+end
+
+function tbWnd:TryGainAllAward()
+  Achievement:TryGainAllAwardC()
+end
+
+function tbWnd:SelectAchievement(nID, tbBigData, tbSmallData)
+  local tbCfg = Achievement:GetCfgByID(nID)
+  if not tbCfg then
+    return
+  end
+  local szKind = Achievement:GetKindByID(nID)
+  local nGroupID = Achievement:GetGroupIDByKind(szKind)
+  local nSmallIndex, nBigIndex
+  for nIndex, tbData in ipairs(tbBigData) do
+    if tbData.tbInfo.nID == nGroupID then
+      nBigIndex = nIndex
+      break
+    end
+  end
+  local nBigType = tbBigData[nBigIndex].nType
+  for nIndex, tbData in ipairs(tbSmallData) do
+    if tbData.nType == nBigType then
+      nSmallIndex = (nSmallIndex or 0) + 1
+      if tbData.tbInfo.szKind == szKind then
+        break
+      end
+    end
+  end
+  if nBigIndex and nSmallIndex then
+    self.uiTree:SelectNode(nBigIndex, nSmallIndex, true)
+    if self.szKind and self.szKind ~= "" then
+      local tbList = Achievement:GetShowListByKind(self.szKind)
+      for nIndex, tbInfo in ipairs(tbList) do
+        if tbInfo.nID == nID then
+          self.tbScrollView:ScrollToIndex(nIndex)
+          break
+        end
+      end
+    end
+  end
+end

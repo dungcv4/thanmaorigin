@@ -1,0 +1,111 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+Require("CommonScript/Activity/ActivityMgrDef.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.GuMuMiQing)
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/GuMuActivity/GuMuMiQingCfg.tab"
+  local tbActivityConfig = Lib:EasyLoadTabFile(szFilepath, {"nConfigId"})
+  if not tbActivityConfig then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  self.ACTIVITY_CONFIG = {}
+  for nConfigId, tbConfig in pairs(tbActivityConfig) do
+    self.ACTIVITY_CONFIG[nConfigId] = tbConfig
+  end
+  szFilepath = "Setting/Activity/GuMuActivity/TreeLocInfo.tab"
+  local tbTreeLocInfo = Lib:EasyLoadTabFile(szFilepath)
+  if not tbTreeLocInfo then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  for _, tbInfo in pairs(tbTreeLocInfo) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("GuMuMiQing: Load tbTreeLocInfo failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTreeLocInfo = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTreeLocInfo or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTreeLocInfo[tbInfo.nMapId] = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTreeLocInfo[tbInfo.nMapId] or {}
+    table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTreeLocInfo[tbInfo.nMapId], {
+      nLocX = tbInfo.nLocX,
+      nLocY = tbInfo.nLocY
+    })
+  end
+  szFilepath = "Setting/Activity/GuMuActivity/TreeNumInfo.tab"
+  local tbTreeNumInfo = Lib:EasyLoadTabFile(szFilepath)
+  if not tbTreeNumInfo then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  for _, tbInfo in pairs(tbTreeNumInfo) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("GuMuMiQing: Load TreeNumInfo failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTreeNumInfo = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTreeNumInfo or {}
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTreeLocInfo[tbInfo.nMapId], string.format("GuMuMiQing: Load tbTreeNumInfo failed, nMapId=%d not exist in tbTreeLocInfo, nConfigId=%d", tbInfo.nMapId, tbInfo.nConfigId))
+    assert(not self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTreeNumInfo[tbInfo.nMapId], string.format("GuMuMiQing: Load tbTreeNumInfo failed, duplicate nMapId=%d, nConfigId=%d", tbInfo.nMapId, tbInfo.nConfigId))
+    assert(#self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTreeLocInfo[tbInfo.nMapId] >= tbInfo.nAppearBigTreeNum + tbInfo.nAppearSmallTreeNum, string.format("GuMuMiQing: Load tbTreeNumInfo failed, the num of position can't less than the tree num, nConfigId=%d", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTreeNumInfo[tbInfo.nMapId] = {
+      nAppearBigTreeNum = tbInfo.nAppearBigTreeNum,
+      nAppearSmallTreeNum = tbInfo.nAppearSmallTreeNum
+    }
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+  self.bLoadConfig = true
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  if not tbActCfg then
+    LogErr(string.format("tbActivity:LoadConfigWithGroup ERROR tbActCfg is nil szGroupName = %s, szGroupSubType = %s", szGroupName, szGroupSubType))
+  end
+  self.tbConfig = tbActCfg.Cfg
+  if self.tbConfig.szStartRollTip and not Lib:IsEmptyStr(self.tbConfig.szStartRollTip) then
+    self.tbConfig.szStartRollTip = i18n.Encode(self.tbConfig.szStartRollTip)
+  end
+  if not self.tbConfig.szRegularRollTip or Lib:IsEmptyStr(self.tbConfig.szRegularRollTip) then
+    self.tbConfig.szRegularRollTip = i18n.Encode(self.tbConfig.szRegularRollTip)
+  end
+  if self.tbConfig.szMatureRollTip and not Lib:IsEmptyStr(self.tbConfig.szMatureRollTip) then
+    self.tbConfig.szMatureRollTip = i18n.Encode(self.tbConfig.szMatureRollTip)
+  end
+  self.tbConfig.szNotifyMsgTitle = i18n.Encode(self.tbConfig.szNotifyMsgTitle)
+  self.tbConfig.szNotifyMsgContent = i18n.Encode(self.tbConfig.szNotifyMsgContent)
+  self.tbConfig.tbTreeLocInfo = {}
+  self.tbConfig.tbTreeNumInfo = {}
+  for _, tbInfo in pairs(tbActCfg.tbTreeLocInfo) do
+    local szLocationFile = tbInfo.szLocationFile
+    local tbLocationList = Lib:LoadTabFileEx(szLocationFile, "dd", nil, {"PosX", "PosY"}, nil, nil, true)
+    if tbLocationList then
+      self.tbConfig.tbTreeLocInfo[tbInfo.nMapId] = {}
+      for _, tbPos in ipairs(tbLocationList) do
+        table.insert(self.tbConfig.tbTreeLocInfo[tbInfo.nMapId], {
+          nLocX = tbPos.PosX,
+          nLocY = tbPos.PosY
+        })
+      end
+    end
+  end
+  for _, tbInfo in pairs(tbActCfg.tbTreeNumInfo) do
+    assert(self.tbConfig.tbTreeLocInfo[tbInfo.nMapId], string.format("GuMuMiQing: Load tbTreeNumInfo failed, nMapId=%d not exist in tbTreeLocInfo.", tbInfo.nMapId))
+    assert(#self.tbConfig.tbTreeLocInfo[tbInfo.nMapId] >= tbInfo.nAppearBigTreeNum + tbInfo.nAppearSmallTreeNum, string.format("GuMuMiQing: Load tbTreeNumInfo failed, the num of position can't less than the tree num, position count=%d, tree num=%d, nMapId=%d.", #self.tbConfig.tbTreeLocInfo[tbInfo.nMapId], tbInfo.nAppearBigTreeNum + tbInfo.nAppearSmallTreeNum, tbInfo.nMapId))
+    self.tbConfig.tbTreeNumInfo[tbInfo.nMapId] = {
+      nAppearBigTreeNum = tbInfo.nAppearBigTreeNum,
+      nAppearSmallTreeNum = tbInfo.nAppearSmallTreeNum
+    }
+  end
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+end
+
+function tbActivity:CheckConfigValid()
+  return true
+end
+
+tbActivity.SaveID = {
+  nLastJoinTime = 1,
+  nLastCollectTime = 2,
+  nHasCollectBigTreeNum = 3,
+  nHasCollectSmallTreeNum = 4,
+  nFavorability = 5
+}
+tbActivity.Protocol = {SyncActiveStatusResp = 1, ReqGoToTree = 2}

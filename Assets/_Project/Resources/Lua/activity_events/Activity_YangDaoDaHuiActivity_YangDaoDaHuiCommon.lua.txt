@@ -1,0 +1,153 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+Require("CommonScript/Activity/ActivityMgrDef.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.YangDaoDaHui)
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  self.ACTIVITY_CONFIG = {}
+  local szConfigPath = "Setting/Activity/YangDaoDaHuiActivity/YangDaoDaHuiCfg.tab"
+  local tbActivityCfg = Lib:EasyLoadTabFile(szConfigPath, {"nConfigId"})
+  for nConfigId, tbConfig in pairs(tbActivityCfg) do
+    self.ACTIVITY_CONFIG[nConfigId] = tbConfig
+    if tbConfig.szHandInFavorParam then
+      self.ACTIVITY_CONFIG[nConfigId].tbHandIn = self:ParseHandInFavorStr(tbConfig.szHandInFavorParam)
+    end
+  end
+  local szNpcPosInfoPath = "Setting/Activity/YangDaoDaHuiActivity/YangDaoDaHuiNpcPosInfo.tab"
+  local tbNpcPosCfg = Lib:EasyLoadTabFile(szNpcPosInfoPath)
+  for _, tbInfo in ipairs(tbNpcPosCfg) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("YangDaoDaHui: Load YangDaoDaHuiNpcPosInfo.tab failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMapBossPosInfo = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMapBossPosInfo or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMapBossPosInfo[tbInfo.nMapId] = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMapBossPosInfo[tbInfo.nMapId] or {}
+    local szMapBossInfoFile = Map:GetMapPosFile(tbInfo.nMapId, tbInfo.szBossPosText)
+    local tbBossPosList = Lib:LoadTabFileEx(szMapBossInfoFile, "ddd", nil, {
+      "PosX",
+      "PosY",
+      "nBossIndex"
+    }, nil, nil, true)
+    for nIdx, tbPos in ipairs(tbBossPosList) do
+      local tbPosData = {}
+      tbPosData.nPosX = tbPos.PosX
+      tbPosData.nPosY = tbPos.PosY
+      tbPosData.nBossIndex = tbPos.nBossIndex
+      self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMapBossPosInfo[tbInfo.nMapId][tbPos.nBossIndex] = tbPosData
+    end
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMineralPosInfo = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMineralPosInfo or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMineralPosInfo[tbInfo.nMapId] = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMineralPosInfo[tbInfo.nMapId] or {}
+    local szMapMineralInfoFile = Map:GetMapPosFile(tbInfo.nMapId, tbInfo.szMineralPosText)
+    local tbMineralPosList = Lib:LoadTabFileEx(szMapMineralInfoFile, "ddd", nil, {
+      "PosX",
+      "PosY",
+      "nBossIndex"
+    }, nil, nil, true)
+    for nIdx, tbPos in ipairs(tbMineralPosList) do
+      local tbPosData = {}
+      tbPosData.nPosX = tbPos.PosX
+      tbPosData.nPosY = tbPos.PosY
+      tbPosData.nBossIndex = tbPos.nBossIndex
+      self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMineralPosInfo[tbInfo.nMapId][tbPos.nBossIndex] = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMineralPosInfo[tbInfo.nMapId][tbPos.nBossIndex] or {}
+      table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMineralPosInfo[tbInfo.nMapId][tbPos.nBossIndex], tbPosData)
+    end
+  end
+  local szLodeBossFrameCfgPath = "Setting/Activity/YangDaoDaHuiActivity/LodeBossFrameCfg.tab"
+  local tbBossFrameCfg = Lib:EasyLoadTabFile(szLodeBossFrameCfgPath)
+  for _, tbInfo in ipairs(tbBossFrameCfg) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("YangDaoDaHui: Load LodeBossFrameCfg.tab failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTimeFrameBossTemplateId = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTimeFrameBossTemplateId or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTimeFrameBossTemplateId[tbInfo.szTimeFrame] = tbInfo.nNpcTemplateID
+  end
+  local szMineralInfoPath = "Setting/Activity/YangDaoDaHuiActivity/MineralInfo.tab"
+  local tbMineralInfo = Lib:EasyLoadTabFile(szMineralInfoPath)
+  for nConfigId, tbInfo in pairs(tbMineralInfo) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("YangDaoDaHui: Load MineralInfo.tab failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[nConfigId].tbMineralInfo = tbInfo
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+  self.bLoadConfig = true
+end
+
+function tbActivity:CheckConfigValid()
+  return true
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  self.tbConfig = tbActCfg.Cfg
+  if tbActCfg.Cfg.szHandInFavorParam then
+    self.tbConfig.tbHandIn = self:ParseHandInFavorStr(tbActCfg.Cfg.szHandInFavorParam)
+  end
+  self.tbConfig.szStartNotify = i18n.Encode(self.tbConfig.szStartNotify)
+  self.tbConfig.szNotifyTitle = i18n.Encode(self.tbConfig.szNotifyTitle)
+  self.tbConfig.szNotifyContent = i18n.Encode(self.tbConfig.szNotifyContent)
+  self.tbConfig.szLodeBossDeathNotify = i18n.Encode(self.tbConfig.szLodeBossDeathNotify)
+  self.tbConfig.szLodeBossTimeUpNotify = i18n.Encode(self.tbConfig.szLodeBossTimeUpNotify)
+  self.tbConfig.szJoinAwardMailTitle = i18n.Encode(self.tbConfig.szJoinAwardMailTitle)
+  self.tbConfig.szJoinAwardMailText = i18n.Encode(self.tbConfig.szJoinAwardMailText)
+  self.tbConfig.szJoinAwardMailSender = i18n.Encode(self.tbConfig.szJoinAwardMailSender)
+  self.tbConfig.szAddFavorMsg = i18n.Encode(self.tbConfig.szAddFavorMsg)
+  for _, tbInfo in ipairs(tbActCfg.tbNpcPosInfo) do
+    self.tbConfig.tbMapBossPosInfo = self.tbConfig.tbMapBossPosInfo or {}
+    self.tbConfig.tbMapBossPosInfo[tbInfo.nMapId] = self.tbConfig.tbMapBossPosInfo[tbInfo.nMapId] or {}
+    local szMapBossInfoFile = Map:GetMapPosFile(tbInfo.nMapId, tbInfo.szBossPosText)
+    local tbBossPosList = Lib:LoadTabFileEx(szMapBossInfoFile, "ddd", nil, {
+      "PosX",
+      "PosY",
+      "nBossIndex"
+    }, nil, nil, true)
+    for nIdx, tbPos in ipairs(tbBossPosList) do
+      local tbPosData = {}
+      tbPosData.nPosX = tbPos.PosX
+      tbPosData.nPosY = tbPos.PosY
+      tbPosData.nBossIndex = tbPos.nBossIndex
+      self.tbConfig.tbMapBossPosInfo[tbInfo.nMapId][tbPos.nBossIndex] = tbPosData
+    end
+    self.tbConfig.tbMineralPosInfo = self.tbConfig.tbMineralPosInfo or {}
+    self.tbConfig.tbMineralPosInfo[tbInfo.nMapId] = self.tbConfig.tbMineralPosInfo[tbInfo.nMapId] or {}
+    local szMapMineralInfoFile = Map:GetMapPosFile(tbInfo.nMapId, tbInfo.szMineralPosText)
+    local tbMineralPosList = Lib:LoadTabFileEx(szMapMineralInfoFile, "ddd", nil, {
+      "PosX",
+      "PosY",
+      "nBossIndex"
+    }, nil, nil, true)
+    for nIdx, tbPos in ipairs(tbMineralPosList) do
+      local tbPosData = {}
+      tbPosData.nPosX = tbPos.PosX
+      tbPosData.nPosY = tbPos.PosY
+      tbPosData.nBossIndex = tbPos.nBossIndex
+      self.tbConfig.tbMineralPosInfo[tbInfo.nMapId][tbPos.nBossIndex] = self.tbConfig.tbMineralPosInfo[tbInfo.nMapId][tbPos.nBossIndex] or {}
+      table.insert(self.tbConfig.tbMineralPosInfo[tbInfo.nMapId][tbPos.nBossIndex], tbPosData)
+    end
+  end
+  for _, tbInfo in ipairs(tbActCfg.tbLodeBossFrame) do
+    self.tbConfig.tbTimeFrameBossTemplateId = self.tbConfig.tbTimeFrameBossTemplateId or {}
+    self.tbConfig.tbTimeFrameBossTemplateId[tbInfo.szTimeFrame] = tbInfo.nNpcTemplateID
+  end
+  self.tbConfig.tbMineralInfo = tbActCfg.tbMineralInfo
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+  return true
+end
+
+function tbActivity:ParseHandInFavorStr(szParam)
+  local tbHandIn = {}
+  local tbHandInList = Lib:SplitStr(szParam, ";")
+  for _, szSingleHandIn in ipairs(tbHandInList) do
+    if "" ~= szSingleHandIn then
+      local tbRet = Lib:SplitStr(szSingleHandIn, "|")
+      tbHandIn[tonumber(tbRet[1])] = tonumber(tbRet[2])
+    end
+  end
+  return tbHandIn
+end
+
+tbActivity.SaveID = {
+  nLastJoinTime = 1,
+  nLastCollectTime = 2,
+  nHasCollectNormalMineralNum = 3,
+  nHasCollectPerfectMineralNum = 4,
+  nFavorability = 5
+}
+tbActivity.Protocol = {OnSyncActivityState = 1}

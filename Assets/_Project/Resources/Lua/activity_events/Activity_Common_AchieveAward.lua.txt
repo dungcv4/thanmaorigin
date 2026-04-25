@@ -1,0 +1,299 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.AchieveAward)
+tbActivity.Protocol = {
+  OnGetExtraAwardReq = 1,
+  OnGetExtraAwardResp = 2,
+  OnSyncAchieveDataReq = 3,
+  OnSyncAchieveDataResp = 4
+}
+tbActivity.nTimeoutClear = 2592000
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/AchieveAward/AchieveAwardCfg.tab"
+  local tbActivityConfig = Lib:EasyLoadTabFile(szFilepath, {"nConfigId"})
+  if not tbActivityConfig then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  self.ACTIVITY_CONFIG = {}
+  for nConfigId, tbConfig in pairs(tbActivityConfig) do
+    self.ACTIVITY_CONFIG[nConfigId] = tbConfig
+  end
+  szFilepath = "Setting/Activity/AchieveAward/AchieveAward.tab"
+  local tbAchieveAward = Lib:EasyLoadTabFile(szFilepath)
+  if not tbAchieveAward then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  for _, tbInfo in pairs(tbAchieveAward) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("AchieveAward: LoadtbAchieveAwardConfig failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbAchieveAward = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbAchieveAward or {}
+    if self.AchievementType[tbInfo.szAchieveType] then
+      local tbParams = Lib:SplitStrTry2Num(tbInfo.szParams, "|")
+      if tbInfo.szAchieveType == self.AchievementType.CollectEx then
+        tbInfo.tbParams = {}
+        for _, tbValue in ipairs(tbParams) do
+          local tbMetaInfo = Lib:SplitStr(tbValue, ";")
+          local tbTemp1 = {}
+          for _, tb in ipairs(tbMetaInfo) do
+            local tbTemp2 = Lib:SplitStrTry2Num(tb, ",")
+            local szCollectId = tbTemp2[1]
+            local nTimes = tbTemp2[2]
+            tbTemp1[szCollectId] = nTimes
+          end
+          table.insert(tbInfo.tbParams, tbTemp1)
+        end
+      else
+        tbInfo.tbParams = tbParams
+      end
+      local tbPriceInfo = Lib:SplitStrTry2Num(tbInfo.szExtraAwardPrice or "", "|")
+      local szCurrencyType = tbPriceInfo[1] or ""
+      local nPrice = tbPriceInfo[2] or 0
+      tbInfo.szCurrencyType = szCurrencyType
+      tbInfo.nPrice = nPrice
+      self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbAchieveAward[tbInfo.nAchieveId] = tbInfo
+    else
+      LogErr(string.format("AchieveAward: LoadAchieveAwardConfig failed, not support szAchieveType=%s", tbInfo.szAchieveType))
+      return false
+    end
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+  self.bLoadConfig = true
+end
+
+tbActivity.AchievementType = {
+  Collect = "Collect",
+  Use = "Use",
+  CollectEx = "CollectEx"
+}
+tbActivity.SaveID = {LastJoinTime = 1}
+
+function tbActivity:GetAchieveTypeById(nAchieveId)
+  local tbAchieveCfg = self.tbConfig.tbAchieveAward[nAchieveId]
+  if tbAchieveCfg then
+    return tbAchieveCfg.szAchieveType
+  end
+end
+
+function tbActivity:IsImmediateAward(nAchieveId)
+  local tbAchieveCfg = self.tbConfig.tbAchieveAward[nAchieveId]
+  if tbAchieveCfg and tbAchieveCfg.nImmediateAward and 1 == tbAchieveCfg.nImmediateAward then
+    return true
+  end
+  return false
+end
+
+tbActivity.CheckIsFinishFunc = {
+  [tbActivity.AchievementType.Use] = function()
+    return tbActivity.CheckUseFinish
+  end,
+  [tbActivity.AchievementType.Collect] = function()
+    return tbActivity.CheckCollectFinish
+  end,
+  [tbActivity.AchievementType.CollectEx] = function()
+    return tbActivity.CheckCollectExFinish
+  end
+}
+
+function tbActivity:CheckCollectFinish(nAchieveId, tbPlayerAchieveData)
+  local tbAchieveCfg = self.tbConfig.tbAchieveAward[nAchieveId]
+  if tbPlayerAchieveData and tbPlayerAchieveData[nAchieveId] and tbPlayerAchieveData[nAchieveId].tbCollectId then
+    for _, nCollectId in pairs(tbAchieveCfg.tbParams) do
+      if not tbPlayerAchieveData[nAchieveId].tbCollectId[nCollectId] then
+        return false
+      end
+    end
+    return true
+  else
+    return false
+  end
+end
+
+function tbActivity:CheckUseFinish(nAchieveId, tbPlayerAchieveData)
+  local tbAchieveCfg = self.tbConfig.tbAchieveAward[nAchieveId]
+  if tbPlayerAchieveData and tbPlayerAchieveData[nAchieveId] then
+    return tbPlayerAchieveData[nAchieveId].nHasUseCount >= tbAchieveCfg.tbParams[2]
+  else
+    return false
+  end
+end
+
+function tbActivity:CheckCollectExFinish(nAchieveId, tbPlayerAchieveData)
+  local tbAchieveCfg = self.tbConfig.tbAchieveAward[nAchieveId]
+  if tbPlayerAchieveData and tbPlayerAchieveData[nAchieveId] and tbPlayerAchieveData[nAchieveId].tbCollectTimes then
+    for nGroupId, tb in pairs(tbAchieveCfg.tbParams) do
+      local bGroupFinish = false
+      for szCollectId, nTimes in pairs(tb) do
+        if nTimes <= tbPlayerAchieveData[nAchieveId].tbCollectTimes[nGroupId][szCollectId] then
+          bGroupFinish = true
+          break
+        end
+      end
+      if not bGroupFinish then
+        return false
+      end
+    end
+    return true
+  else
+    return false
+  end
+end
+
+function tbActivity:CheckIsFinishById(nAchieveId, pPlayer, tbPlayerAchieveData)
+  if pPlayer and nAchieveId then
+    local tbData = tbPlayerAchieveData or self:GetAchieveDataNotInit(pPlayer)
+    local pFunc = self.CheckIsFinishFunc[self:GetAchieveTypeById(nAchieveId)]
+    if pFunc then
+      local pCheckFunc = pFunc()
+      return pCheckFunc(self, nAchieveId, tbData)
+    else
+      Lib:LogFormat("AchieveAward: CheckIsFinishById failed, not support achievetype, achieveid=%d, nPlayerId=%d", nAchieveId, pPlayer)
+    end
+  end
+  return false
+end
+
+function tbActivity:GetUsedCountById(nAchieveId, pPlayer, tbPlayerAchieveData)
+  local tbAchieveInfo = self.tbConfig.tbAchieveAward[nAchieveId]
+  if tbAchieveInfo and pPlayer then
+    local tbData = tbPlayerAchieveData or self:GetAchieveDataNotInit(pPlayer)
+    if tbData and tbData[nAchieveId] then
+      return tbData[nAchieveId].nHasUseCount or 0
+    end
+  end
+  return 0
+end
+
+function tbActivity:GetNotCollectIdList(nAchieveId, pPlayer, tbPlayerAchieveData)
+  local tbAchieveInfo = self.tbConfig.tbAchieveAward[nAchieveId]
+  local tbNotCollectIdList = {}
+  if tbAchieveInfo and pPlayer then
+    local tbData = tbPlayerAchieveData or self:GetAchieveDataNotInit(pPlayer)
+    if tbData and tbData[nAchieveId] and tbData[nAchieveId].tbCollectId then
+      for _, nCollectId in pairs(tbAchieveInfo.tbParams) do
+        if not tbData[nAchieveId].tbCollectId[nCollectId] then
+          table.insert(tbNotCollectIdList, nCollectId)
+        end
+      end
+    end
+  end
+  return tbNotCollectIdList
+end
+
+function tbActivity:GetCollectExTimes(nAchieveId, pPlayer, tbPlayerAchieveData, szCollectId)
+  local tbAchieveInfo = self.tbConfig.tbAchieveAward[nAchieveId]
+  local nTimes = 0
+  if tbAchieveInfo and pPlayer then
+    local tbData = tbPlayerAchieveData or self:GetAchieveDataNotInit(pPlayer)
+    if tbData and tbData[nAchieveId] and tbData[nAchieveId].tbCollectTimes then
+      nTimes = tbData[nAchieveId].tbCollectTimes[szCollectId]
+    end
+  end
+  return nTimes
+end
+
+function tbActivity:GetCollectExCnt(nAchieveId, pPlayer, tbPlayerAchieveData)
+  local tbAchieveInfo = self.tbConfig.tbAchieveAward[nAchieveId]
+  local nTimes = 0
+  if tbAchieveInfo and pPlayer then
+    local tbData = tbPlayerAchieveData or self:GetAchieveDataNotInit(pPlayer)
+    if tbData and tbData[nAchieveId] and tbData[nAchieveId].tbCollectTimes then
+      for _, tbValue in pairs(tbData[nAchieveId].tbCollectTimes) do
+        for _, nCnt in pairs(tbValue) do
+          nTimes = nTimes + nCnt
+        end
+      end
+    end
+  end
+  return nTimes
+end
+
+function tbActivity:GetCollectExNeedCnt(nAchieveId)
+  local tbAchieveInfo = self.tbConfig.tbAchieveAward[nAchieveId]
+  local nTimes = 0
+  if tbAchieveInfo and tbAchieveInfo.tbParams then
+    for _, tbValue in pairs(tbAchieveInfo.tbParams) do
+      for _, nCnt in pairs(tbValue) do
+        nTimes = nTimes + nCnt
+      end
+    end
+  end
+  return nTimes
+end
+
+function tbActivity:CheckIsAwardById(nAchieveId, pPlayer, tbPlayerAchieveData)
+  if pPlayer then
+    local tbData = tbPlayerAchieveData or self:GetAchieveDataNotInit(pPlayer)
+    return tbData[nAchieveId].bHasAward
+  end
+  return true
+end
+
+function tbActivity:GetAchieveDataNotInit(pPlayer)
+  local tbData = pPlayer.GetScriptTable(ActivityMgr.Def.ClassNameList.AchieveAward) or {}
+  if tbData.Achievement then
+    return tbData.Achievement[self.nId] or {}
+  end
+  return {}
+end
+
+function tbActivity:GetUiTitle()
+  if self.tbConfig.szTitle ~= nil and self.tbConfig.szTitle ~= "" and 0 ~= self.tbConfig.szTitle then
+    return self.tbConfig.szTitle
+  end
+  return ""
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  if not tbActCfg then
+    return false
+  end
+  self.tbConfig = tbActCfg.Cfg
+  self.tbConfig.tbAchieveAward = {}
+  for _, tbInfo in pairs(tbActCfg.AwardInfo) do
+    if self.AchievementType[tbInfo.szAchieveType] then
+      local tbParams = Lib:SplitStrTry2Num(tbInfo.szParams, "|")
+      if tbInfo.szAchieveType == self.AchievementType.CollectEx then
+        if tbInfo.szAchieveType == self.AchievementType.CollectEx then
+          tbInfo.tbParams = {}
+          for _, tbValue in ipairs(tbParams) do
+            local tbMetaInfo = Lib:SplitStr(tbValue, ";")
+            local tbTemp1 = {}
+            for _, tb in ipairs(tbMetaInfo) do
+              local tbTemp2 = Lib:SplitStrTry2Num(tb, ",")
+              local szCollectId = tbTemp2[1]
+              local nTimes = tbTemp2[2]
+              tbTemp1[szCollectId] = nTimes
+            end
+            table.insert(tbInfo.tbParams, tbTemp1)
+          end
+        end
+      else
+        tbInfo.tbParams = tbParams
+      end
+      local tbPriceInfo = Lib:SplitStrTry2Num(tbInfo.szExtraAwardPrice or "", "|")
+      local szCurrencyType = tbPriceInfo[1] or ""
+      local nPrice = tbPriceInfo[2] or 0
+      tbInfo.szCurrencyType = szCurrencyType
+      tbInfo.nPrice = nPrice
+      tbInfo.szDesc = i18n.Encode(tbInfo.szDesc)
+      self.tbConfig.tbAchieveAward[tbInfo.nAchieveId] = tbInfo
+    else
+      LogErr(string.format("AchieveAward: LoadConfigWithGroup failed, not support szAchieveType=%s", tbInfo.szAchieveType))
+      return false
+    end
+  end
+  self.tbConfig.szTitle = i18n.Encode(self.tbConfig.szTitle)
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+  return true
+end
+
+function tbActivity:CheckConfigValid(tbConfig)
+  return true
+end

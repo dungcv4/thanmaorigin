@@ -1,0 +1,260 @@
+local tbWnd = Ui:CreateWindow("UIHonorLevel")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  imgEmpty = "node/imgBG/Content/imgEmpty",
+  imgEmptyMax = "node/imgBG/Content/imgEmptyMax",
+  txtMax = "node/imgBG/Content/txtMax",
+  txtMaxTips = "node/imgBG/Content/txtMaxTips",
+  goPanel = "node/imgBG/Content/panel%s",
+  txtHonor = "node/imgBG/Content/panel%s/HonorTitle",
+  txtFightPower = "node/imgBG/Content/panel%s/txtFightPower",
+  txtAttribute = "node/imgBG/Content/panel%s/AttributeList/txtAttribute%d",
+  goPanelUpgrade = "node/imgBG/Content/panelCost",
+  txtUpgradeFightPower = "node/imgBG/Content/panelCost/FightPower/txtFightPowerValue",
+  goUpgradeItem = "node/imgBG/Content/panelCost/CostItem",
+  goUpgradeItemGrid = "node/imgBG/Content/panelCost/CostItem/UIItemGrid",
+  txtUpgradeItemCount = "node/imgBG/Content/panelCost/CostItem/txtItemCount",
+  btnAdd = "node/imgBG/Content/panelCost/CostItem/btnAdd",
+  goNextLevelTips = "node/imgBG/Content/panelCost/Tips",
+  txtNextLevelTips = "node/imgBG/Content/panelCost/Tips/txtTips",
+  uiNextLevelItemGrid = "node/imgBG/Content/panelCost/Tips/item/UIItemGrid",
+  btnUpgrade = "node/imgBG/Content/btnUpgrade",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  btnStore = "node/imgBG/Content/btnStore"
+}
+tbWnd.tbControls = tbControls
+tbWnd.SHOW_KEY = {NOW = "Now", NEXT = "Next"}
+tbWnd.ATTR_NUM_LIMIT = 4
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnAdd = function(self)
+    self:OnClickAddItem()
+  end,
+  btnUpgrade = function(self)
+    self:OnClickUpgrade()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("HonorHelp")
+  end,
+  btnStore = function(self)
+    Ui:OpenWindow("UIStore", Shop.ShopTypeStr.HunShi, Ui.UIStoreGood.tbHunShiSubPanelIndex.Mantle)
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_LEAVE,
+      self.OnLeaveMap
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnSyncItem
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_HONOR_LEVEL,
+      self.OnChangeHonorLevel
+    },
+    {
+      EventNotify.emNOTIFY_FIGHT_POWER_CHANGE,
+      self.OnChangeFightPower
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.tbUpgradeItemGrid = Ui:NewExistItemGrid(self, self.goUpgradeItemGrid)
+  self.tbUpgradeItemGrid:SetClickEnable(true)
+  self.tbHonorTitles = {}
+  local szPath = string.format(tbControls.txtHonor, self.SHOW_KEY.NOW)
+  local obj = self.pPanel:GetObject(szPath)
+  self.tbHonorTitles[self.SHOW_KEY.NOW] = obj:GetComponent(Ui.UIHonorTitle)
+  szPath = string.format(tbControls.txtHonor, self.SHOW_KEY.NEXT)
+  obj = self.pPanel:GetObject(szPath)
+  self.tbHonorTitles[self.SHOW_KEY.NEXT] = obj:GetComponent(Ui.UIHonorTitle)
+  self.tbNextLevelItemGrid = Ui:NewExistItemGrid(self, tbControls.uiNextLevelItemGrid)
+  self.tbNextLevelItemGrid:SetClickEnable(true)
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnUpgrade, {
+    RedPointMgr.EVENT.HonorLevelUp
+  })
+end
+
+function tbWnd:OnOpen()
+  self:UpdateHonorLevel()
+end
+
+function tbWnd:ShowLevel(szKey, nStarLevel)
+  local tbLevelSetting = HonorLevel.LEVEL_CFG[nStarLevel]
+  if not tbLevelSetting then
+    self.pPanel:SetActive(string.format(self.goPanel, szKey), false)
+    return
+  end
+  local bIsOpenFrame = 1 == GetTimeFrameState(tbLevelSetting.TIMEFRAME_REQ)
+  self.pPanel:SetActive(string.format(self.goPanel, szKey), bIsOpenFrame)
+  if not bIsOpenFrame then
+    return
+  end
+  local tbAwardSetting = HonorLevel.AWARD_CFG[tbLevelSetting.HONOR_LEVEL]
+  local tbLevelGroupSetting = HonorLevel.LEVEL_GROUP_CFG[tbLevelSetting.HONOR_LEVEL]
+  local tbExternAttrSetting = FightSkill:GetExternAttrib(tbLevelSetting.ATTRIB_GROUP, tbLevelSetting.ATTRIB_LEVEL)
+  local szName = i18n.Parse(tbAwardSetting.HONOR_NAME)
+  local nStar = 0
+  if #tbLevelGroupSetting > 1 then
+    for nIndex, nValue in pairs(tbLevelGroupSetting) do
+      if nValue == nStarLevel then
+        szName = string.format("%s\194\183%s", szName, i18n.Get(HonorLevel.tbText.szNStar, nIndex))
+        nStar = nIndex
+        break
+      end
+    end
+  end
+  local pHonorTitle = self.tbHonorTitles[szKey]
+  pHonorTitle:SetHonorTitle(szName, string.format("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d", tbAwardSetting.FONT_COLOR, tbAwardSetting.FONT_OUTLINE_COLOR, tbAwardSetting.GLOW_COLOR, 0, tbAwardSetting.STAR_COLOR, tbAwardSetting.STAR_GLOW_COLOR, tbAwardSetting.GRADIENT1, tbAwardSetting.GRADIENT2, tbAwardSetting.STAR_GRADIENT1, tbAwardSetting.STAR_GRADIENT2, tbAwardSetting.STAR_OUTLINE_COLOR))
+  self.pPanel:Label_SetText(string.format(self.txtFightPower, szKey), i18n.Get(HonorLevel.tbText.szFightPowerShow, tbExternAttrSetting.nFightPower))
+  for nId = 1, self.ATTR_NUM_LIMIT do
+    local szPath = string.format(self.txtAttribute, szKey, nId)
+    local tbAttr = tbExternAttrSetting[nId]
+    if tbAttr then
+      self.pPanel:Label_SetText(szPath, Item:GetClass("equip"):GetMagicAttribDesc(tbAttr.szAttribName, tbAttr.tbValue))
+      self.pPanel:SetActive(szPath, true)
+    else
+      self.pPanel:SetActive(szPath, false)
+    end
+  end
+  self.pPanel:SetActive(string.format(self.goPanel, szKey), true)
+end
+
+function tbWnd:ShowUpgrade()
+  local tbSetting = HonorLevel.LEVEL_CFG[HonorLevel:GetStarLevel(me) + 1]
+  if not tbSetting then
+    self.pPanel:SetActive(self.goPanelUpgrade, false)
+    self.pPanel:SetActive(self.btnUpgrade, false)
+    return
+  end
+  if "" ~= tbSetting.TIMEFRAME_REQ and 1 ~= GetTimeFrameState(tbSetting.TIMEFRAME_REQ) then
+    self.pPanel:SetActive(self.goPanelUpgrade, false)
+    self.pPanel:SetActive(self.btnUpgrade, true)
+    return
+  end
+  local nNowFightPower = me.GetNpc().GetFightPower()
+  self.pPanel:Label_SetText(self.txtUpgradeFightPower, string.format("%d/%d", nNowFightPower, tbSetting.FIGHTPOWER_REQ))
+  self.pPanel:Label_SetColorByName(self.txtUpgradeFightPower, nNowFightPower >= tbSetting.FIGHTPOWER_REQ and "Enough" or "NotEnough")
+  if 0 ~= tbSetting.ITEM_ID and 0 ~= tbSetting.ITEM_NUM then
+    self.tbUpgradeItemGrid:SetItemByTemplate(tbSetting.ITEM_ID)
+    local nNowItemNum = me.GetItemCountInBags(tbSetting.ITEM_ID)
+    self.pPanel:Label_SetText(self.txtUpgradeItemCount, string.format("%d/%d", nNowItemNum, tbSetting.ITEM_NUM))
+    self.pPanel:Label_SetColorByName(self.txtUpgradeItemCount, nNowItemNum >= tbSetting.ITEM_NUM and "Enough" or "NotEnough")
+    self.pPanel:SetActive(self.goUpgradeItem, true)
+  else
+    self.pPanel:SetActive(self.goUpgradeItem, false)
+  end
+  self.pPanel:SetActive(self.goPanelUpgrade, true)
+  self.pPanel:SetActive(self.btnUpgrade, true)
+end
+
+function tbWnd:ShowEmpty()
+  if HonorLevel.LEVEL_CFG[HonorLevel:GetStarLevel(me)] then
+    self.pPanel:SetActive(self.imgEmpty, false)
+  else
+    self.pPanel:SetActive(self.imgEmpty, true)
+  end
+  local tbSetting = HonorLevel.LEVEL_CFG[HonorLevel:GetStarLevel(me) + 1]
+  if tbSetting then
+    local bIsOpenFrame = 1 == GetTimeFrameState(tbSetting.TIMEFRAME_REQ)
+    self.pPanel:SetActive(self.imgEmptyMax, not bIsOpenFrame)
+    if tbSetting.TIMEFRAME_REQ ~= "" and 1 ~= GetTimeFrameState(tbSetting.TIMEFRAME_REQ) then
+      self.pPanel:SetActive(self.txtMax, true)
+      self.pPanel:SetActive(self.txtMaxTips, true)
+      self.pPanel:Label_SetText(self.txtMaxTips, i18n.EasyGet("{0}\229\144\142\232\167\163\233\148\129", Calendar:GetTimeframeName(tbSetting.TIMEFRAME_REQ)))
+    else
+      self.pPanel:SetActive(self.txtMax, false)
+      self.pPanel:SetActive(self.txtMaxTips, false)
+    end
+  else
+    self.pPanel:SetActive(self.imgEmptyMax, true)
+    self.pPanel:SetActive(self.txtMax, true)
+    self.pPanel:SetActive(self.txtMaxTips, false)
+  end
+end
+
+function tbWnd:ShowNextLevelMantle()
+  local tbNowLevel = HonorLevel.LEVEL_CFG[HonorLevel:GetStarLevel(me)]
+  local tbNextLevel = HonorLevel.LEVEL_CFG[HonorLevel:GetStarLevel(me) + 1]
+  local nNowHonorLevel
+  if nil ~= tbNowLevel then
+    nNowHonorLevel = tbNowLevel.HONOR_LEVEL
+  end
+  if nil ~= tbNextLevel then
+    local nNextHonorLevel = tbNextLevel.HONOR_LEVEL
+    local bShowNextLevelTips = nil == nNowHonorLevel or nNowHonorLevel < nNextHonorLevel
+    self.pPanel:SetActive(self.goNextLevelTips, bShowNextLevelTips)
+    if bShowNextLevelTips then
+      self.pPanel:Label_SetText(self.txtNextLevelTips, i18n.Get(HonorLevel.tbText.szNextLevelMantleTips, Lib:TimeDesc(HonorLevel.AWARD_CFG[nNextHonorLevel].ITEM_TIMEOUT)))
+      self.tbNextLevelItemGrid:SetItemByTemplate(HonorLevel.AWARD_CFG[nNextHonorLevel].ITEM_ID, 1)
+    end
+  end
+end
+
+function tbWnd:OnClickAddItem()
+  local tbSetting = HonorLevel.LEVEL_CFG[HonorLevel:GetStarLevel(me) + 1]
+  if not tbSetting then
+    return
+  end
+  Shop:OpenShopBuyWidDefault(tbSetting.ITEM_ID)
+end
+
+function tbWnd:OnClickUpgrade()
+  HonorLevel:ActivateReq(HonorLevel:GetStarLevel(me) + 1)
+end
+
+function tbWnd:OnSyncItem()
+  self:ShowUpgrade()
+end
+
+function tbWnd:OnChangeHonorLevel(nOldLevel, nNewLevel)
+  self:UpdateHonorLevel()
+  self:ShowUpgradeEffect(nOldLevel, nNewLevel)
+  if self:Visible() and nOldLevel < nNewLevel then
+    self:ClearSaveTimer()
+    self.nSaveTimerID = Timer:Register(Env.GAME_FPS * 2, function()
+      if self.nSaveTimerID then
+        self.nSaveTimerID = nil
+        Ui:OpenWindow("UIShowTitle")
+      end
+    end)
+  end
+end
+
+function tbWnd:UpdateHonorLevel()
+  self:ShowLevel(self.SHOW_KEY.NOW, HonorLevel:GetStarLevel(me))
+  self:ShowLevel(self.SHOW_KEY.NEXT, HonorLevel:GetStarLevel(me) + 1)
+  self:ShowUpgrade()
+  self:ShowEmpty()
+  self:ShowNextLevelMantle()
+end
+
+function tbWnd:OnChangeFightPower()
+  self:ShowUpgrade()
+end
+
+function tbWnd:ShowUpgradeEffect(nOldLevel, nNewLevel)
+  if nOldLevel < nNewLevel then
+    Ui:OpenUpgradeEffect(i18n.EasyGet("\229\141\135\233\152\182\230\136\144\229\138\159"))
+  end
+end
+
+function tbWnd:ClearSaveTimer()
+  if self.nSaveTimerID then
+    Timer:Close(self.nSaveTimerID)
+    self.nSaveTimerID = nil
+  end
+end
+
+function tbWnd:OnLeaveMap()
+  self:Close()
+end
+
+function tbWnd:OnClose()
+end

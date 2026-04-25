@@ -1,0 +1,354 @@
+local TaskStatus = MasterPrentice.Def.TaskStatus
+MasterPrentice.MPTask = MasterPrentice.MPTask or {}
+
+function MasterPrentice.MPTask:LoadGoalConfig()
+  local tbGoalSetting = Lib:LoadTabFileEx("Setting/MasterPrentice/MasterPrenticeGoals.tab", "dsdddd", "ID", {
+    "ID",
+    "Title",
+    "AchievementSubKindID",
+    "Count",
+    "PrenticeExp",
+    "MasterMoney"
+  })
+  self.tbGoalSetting = tbGoalSetting
+  local tbGoalBySubKind = {}
+  for i, tbGoal in pairs(tbGoalSetting) do
+    tbGoalBySubKind[tbGoal.AchievementSubKindID] = tbGoalBySubKind[tbGoal.AchievementSubKindID] or {}
+    table.insert(tbGoalBySubKind[tbGoal.AchievementSubKindID], tbGoal)
+  end
+  self.tbGoalBySubKind = tbGoalBySubKind
+  self.tbGoalSetting = SetReadOnly(self.tbGoalSetting)
+  self.tbGoalBySubKind = SetReadOnly(self.tbGoalBySubKind)
+end
+
+function MasterPrentice.MPTask:LoadTaskConfig()
+  local tbTaskSetting = Lib:LoadTabFileEx("Setting/MasterPrentice/MasterPrenticeTasks.tab", "dsdddss", "ID", {
+    "ID",
+    "Title",
+    "Count",
+    "PrenticeExp",
+    "AchievementSubKindID",
+    "StartTimeFrame",
+    "EndTimeFrame"
+  })
+  self.tbTaskSetting = tbTaskSetting
+  local tbTaskBySubKind = {}
+  for i, tbTask in pairs(tbTaskSetting) do
+    tbTaskBySubKind[tbTask.AchievementSubKindID] = tbTask
+  end
+  self.tbTaskBySubKind = tbTaskBySubKind
+  self.tbTaskBySubKind = SetReadOnly(self.tbTaskBySubKind)
+end
+
+function MasterPrentice.MPTask:LoadTaskReplaceConfig()
+  local tbTaskReplaceSetting = Lib:LoadTabFileEx("Setting/MasterPrentice/MasterPrenticeTasksReplace.tab", "ddds", "nId", {
+    "nId",
+    "nOldTasksId",
+    "nNewTasksId",
+    "szStartTimeFrame"
+  })
+  self.tbTaskReplaceSetting = tbTaskReplaceSetting
+  local tbOldTaskId2NewTaskId = {}
+  for _, tbInfo in pairs(tbTaskReplaceSetting) do
+    tbOldTaskId2NewTaskId[tbInfo.nOldTasksId] = tbInfo
+  end
+  self.tbOldTaskId2NewTaskId = tbOldTaskId2NewTaskId
+  self.tbOldTaskId2NewTaskId = SetReadOnly(self.tbOldTaskId2NewTaskId)
+end
+
+MasterPrentice.MPTask:LoadGoalConfig()
+MasterPrentice.MPTask:LoadTaskConfig()
+MasterPrentice.MPTask:LoadTaskReplaceConfig()
+
+function MasterPrentice.MPTask:IsFinishGoal(pPlayer, nGoalId, tbMPData)
+  local tbGoal = self.tbGoalSetting[nGoalId]
+  if not tbGoal then
+    return false
+  end
+  if not tbGoal.AchievementSubKindID or 0 == tbGoal.AchievementSubKindID then
+    return false
+  end
+  local nCount = tbMPData.tbGoalData[nGoalId] or 0
+  if nCount < tbGoal.Count then
+    return false
+  end
+  return true
+end
+
+function MasterPrentice.MPTask:GetGoalData(tbTask, tbMPData)
+  local nFinish, nCount = 0, 0
+  local nGoalId = tbTask.ID
+  tbMPData.tbGoalData = tbMPData.tbGoalData or {}
+  local nCount = tbMPData.tbGoalData[nGoalId] or 0
+  if 1 == self:GetGoalState(nGoalId, tbMPData.tbGoalFlagsBefore) then
+    nFinish = TaskStatus.Expired
+  elseif 1 == self:GetGoalState(nGoalId, tbMPData.tbGoalFlags) then
+    nFinish = TaskStatus.Reported
+  elseif self:IsFinishGoal(me, nGoalId, tbMPData) then
+    nFinish = TaskStatus.Finished
+  else
+    nFinish = TaskStatus.Unfinish
+  end
+  return nFinish, nCount
+end
+
+local function _GetBitPos(nGoalId)
+  return math.ceil(nGoalId / 30), math.mod(nGoalId, 30) + 1
+end
+
+function MasterPrentice.MPTask:GetGoalState(nGoalId, tbFlags)
+  local nValueId, nBitIndex = _GetBitPos(nGoalId)
+  tbFlags[nValueId] = tbFlags[nValueId] or 0
+  return KLib.GetBit(tbFlags[nValueId], nBitIndex)
+end
+
+function MasterPrentice.MPTask:SetGoalState(nGoalId, tbFlags, bValue)
+  local nValueId, nBitIndex = _GetBitPos(nGoalId)
+  bValue = 0 ~= bValue and 1 or 0
+  tbFlags[nValueId] = KLib.SetBit(tbFlags[nValueId], nBitIndex, bValue)
+end
+
+function MasterPrentice.MPTask:ReportGoal(masterId, prenticeId, tbMPData, bGiveAward, bForce)
+  if 1 == tbMPData.bDismiss then
+    return false, i18n.EasyGet("\232\167\163\233\153\164\229\184\136\229\190\146\229\133\179\231\179\187\231\138\182\230\128\129\228\184\173\230\151\160\230\179\149\230\177\135\230\138\165\228\187\187\229\138\161")
+  end
+  if tbMPData.status ~= MasterPrentice.Def.STATUS_APPRENTICE and 1 == bGiveAward then
+    return false, i18n.EasyGet("\230\156\170\229\135\186\229\184\136\229\188\159\229\173\144\230\137\141\232\131\189\230\177\135\230\138\165\228\187\187\229\138\161")
+  end
+  local pPrentice = KPlayer.GetPlayerObjById(prenticeId)
+  local nGoalCount, nPrenticeExp, nMasterMoney = 0, 0, 0
+  for i = 1, #self.tbGoalSetting do
+    for _continue = 1, 1 do
+      local tbGoal = self.tbGoalSetting[i]
+      local nGoalId = tbGoal.ID
+      if not (1 ~= self:GetGoalState(nGoalId, tbMPData.tbGoalFlagsBefore) and 1 ~= self:GetGoalState(nGoalId, tbMPData.tbGoalFlags) and self:IsFinishGoal(pPrentice, nGoalId, tbMPData)) then
+        break
+      end
+      nGoalCount = nGoalCount + 1
+      self:SetGoalState(nGoalId, tbMPData.tbGoalFlags, 1)
+      nPrenticeExp = nPrenticeExp + tbGoal.PrenticeExp
+      nMasterMoney = nMasterMoney + tbGoal.MasterMoney
+    end
+  end
+  if 0 == nGoalCount then
+    return 1 == bForce and true or false, i18n.EasyGet("\230\178\161\230\156\137\229\174\140\230\136\144\228\187\187\228\189\149\230\150\176\231\154\132\229\135\186\229\184\136\228\187\187\229\138\161")
+  end
+  if 1 == bGiveAward then
+    tbMPData.nFinishedGoalCount = (tbMPData.nFinishedGoalCount or 0) + nGoalCount
+    MasterPrentice:AsyncCall(masterId, "MasterPrentice.MPTask:GiveGoalMasterAward", masterId, prenticeId, nGoalCount, nMasterMoney)
+    MasterPrentice:AsyncCall(prenticeId, "MasterPrentice.MPTask:GiveGoalPrenticeAward", prenticeId, nGoalCount, nPrenticeExp)
+  end
+  MasterPrentice:NotifyGoalReported(pPrentice, masterId)
+  local tbMasterInfo = KPlayer.GetRoleStayInfo(masterId)
+  if tbMasterInfo then
+    Lib:TrackEvent(prenticeId, Env.track_shitu_huibao, tbMasterInfo.szAccount, tbMasterInfo.dwID, tbMasterInfo.szName, nGoalCount)
+  end
+  Event:OnEvent(Event.emEVENT_MASTERPRENTICE_TASK, prenticeId, nGoalCount)
+  return true, "", nGoalCount
+end
+
+function MasterPrentice.MPTask:GiveGoalMasterAward(masterId, prenticeId, nGoalCount, nMasterMoney)
+  local pMaster = KPlayer.GetPlayerObjById(masterId)
+  pMaster.AddMoney(MasterPrentice.Def.szMoneyKey, nMasterMoney, MasterPrentice.Def.LOGWAY)
+  local szPrenticeName = KPlayer.GetRoleStayInfo(prenticeId).szName
+  local szMsg = i18n.EasyGet("\229\190\146\229\188\159[{0}]\229\144\145\228\189\160\230\177\135\230\138\165\228\186\134{1}\230\157\161\229\184\136\229\190\146\231\155\174\230\160\135\239\188\140\228\189\160\232\142\183\229\190\151\228\186\134{2}\231\130\185{3}", szPrenticeName, nGoalCount, nMasterMoney, Currency:GetName(MasterPrentice.Def.szMoneyKey))
+  pMaster.CenterMsg(szMsg)
+  MasterPrentice:NotifyMasterAward(pMaster, szMsg, i18n.EasyGet("\229\184\136\229\190\146\231\155\174\230\160\135"))
+end
+
+function MasterPrentice.MPTask:GiveGoalPrenticeAward(prenticeId, nGoalCount, nPrenticeExp)
+  local pPrentice = KPlayer.GetPlayerObjById(prenticeId)
+  if nPrenticeExp > 0 then
+    nPrenticeExp = nPrenticeExp * pPrentice.GetBaseAwardExp()
+    pPrentice.AddExperience(nPrenticeExp, MasterPrentice.Def.LOGWAY)
+  end
+  local szMsg = i18n.EasyGet("\228\189\160\230\177\135\230\138\165\228\186\134{0}\230\157\161\229\184\136\229\190\146\231\155\174\230\160\135, \232\142\183\229\190\151\228\186\134{1}\231\187\143\233\170\140", nGoalCount, nPrenticeExp)
+  pPrentice.CenterMsg(szMsg)
+  MasterPrentice:NotifyMasterAward(pPrentice, szMsg, i18n.EasyGet("\229\184\136\229\190\146\231\155\174\230\160\135"))
+end
+
+function MasterPrentice.MPTask:GetFinishedGoalCount(tbMPData)
+  return tbMPData.nFinishedGoalCount
+end
+
+function MasterPrentice.MPTask:GetTotalGoalCount()
+  return #self.tbGoalSetting
+end
+
+function MasterPrentice.MPTask:GetTaskData(tbTask, tbMPData)
+  local nFinish, nCount = 0, 0
+  local nTaskId = tbTask.ID
+  if not tbMPData.tbTaskList then
+    return TaskStatus.Unfinish, 0
+  end
+  local nCount = tbMPData.tbTaskList[nTaskId] or 0
+  if self:IsFinishTask(me, nTaskId, tbMPData) then
+    nFinish = TaskStatus.Finished
+  else
+    nFinish = TaskStatus.Unfinish
+  end
+  return nFinish, nCount
+end
+
+function MasterPrentice.MPTask:GetFinishedTaskCount(tbMPData)
+  local nFinishedTaskCount, nPrenticeExp = 0, 0
+  local pPrentice = me
+  for nTaskId, nValue in pairs(tbMPData.tbTaskList) do
+    if self:IsFinishTask(pPrentice, nTaskId, tbMPData) then
+      nFinishedTaskCount = nFinishedTaskCount + 1
+    end
+  end
+  nPrenticeExp = nFinishedTaskCount * MasterPrentice:GetPrenticeExpByLevel(pPrentice.nLevel)
+  return nFinishedTaskCount, nPrenticeExp
+end
+
+function MasterPrentice.MPTask:IsFinishTask(pPlayer, nTaskId, tbMPData)
+  local tbGoal = self.tbTaskSetting[nTaskId]
+  if not tbGoal then
+    return false
+  end
+  if not tbGoal.AchievementSubKindID or 0 == tbGoal.AchievementSubKindID then
+    return false
+  end
+  local nCount = tbMPData.tbTaskList[nTaskId] or 0
+  if nCount < tbGoal.Count then
+    return false
+  end
+  return true
+end
+
+function MasterPrentice.MPTask:ReportTask(pMaster, pPrentice, tbMPData)
+  local nFinishedTaskCount, nPrenticeExp = 0, 0
+  for nTaskId, nValue in pairs(tbMPData.tbTaskList) do
+    if self:IsFinishTask(pPrentice, nTaskId, tbMPData) then
+      nFinishedTaskCount = nFinishedTaskCount + 1
+    end
+  end
+  nPrenticeExp = nFinishedTaskCount * MasterPrentice:GetPrenticeExpByLevel(pPrentice.nLevel)
+  if nFinishedTaskCount <= 0 then
+    return false
+  end
+  local szMsg = i18n.EasyGet("\228\189\160\230\156\172\230\172\161\228\184\138\228\186\164\228\186\134{0}\230\157\161\229\135\186\229\184\136\228\187\187\229\138\161, \232\142\183\229\190\151\228\186\134{1}\231\187\143\233\170\140", nFinishedTaskCount, nPrenticeExp)
+  pPrentice.AddExperience(nPrenticeExp, MasterPrentice.Def.LOGWAY)
+  pPrentice.Msg(szMsg)
+  pPrentice.CenterMsg(szMsg)
+  MasterPrentice:NotifyTaskReported(pPrentice, pMaster.dwID)
+  local masterCtrl = MasterPrentice:GetMPInfo(pMaster)
+  local nMasterTaskAwardWeek, nCurrWeek = masterCtrl.nMasterTaskAwardWeek or 0, Lib:GetLocalWeek()
+  if nMasterTaskAwardWeek < nCurrWeek then
+    masterCtrl.nMasterTaskAwardWeek = nCurrWeek
+    masterCtrl.nMasterTaskAwardTimes = 0
+  end
+  local realAwardCount = math.min(MasterPrentice.Cfg.MAX_WEEK_TASK_COUNT - masterCtrl.nMasterTaskAwardTimes, nFinishedTaskCount)
+  if realAwardCount > 0 then
+    local nMasterMoney = realAwardCount * MasterPrentice.Cfg.MASTER_MONEY_OF_TASK
+    masterCtrl.nMasterTaskAwardTimes = masterCtrl.nMasterTaskAwardTimes + realAwardCount
+    pMaster.AddMoney(MasterPrentice.Def.szMoneyKey, nMasterMoney, MasterPrentice.Def.LOGWAY)
+    local szPrenticeName = pPrentice.szName
+    local szMsg = i18n.EasyGet("\230\156\172\230\172\161\229\190\146\229\188\159[{0}]\229\144\145\228\189\160\230\177\135\230\138\165\228\186\134\228\186\134{1}\230\157\161\229\184\136\229\190\146\229\145\168\229\184\184\228\187\187\229\138\161\239\188\140\228\189\160\232\142\183\229\190\151\228\186\134{2}\231\130\185{3}, \230\130\168\230\156\172\229\145\168\229\183\178\231\187\143\232\142\183\229\190\151\228\186\134{4}\230\172\161\229\184\136\229\190\146\228\187\187\229\138\161\229\165\150\229\138\177", szPrenticeName, nFinishedTaskCount, nMasterMoney, Currency:GetName(MasterPrentice.Def.szMoneyKey), masterCtrl.nMasterTaskAwardTimes)
+    pMaster.Msg(szMsg)
+    MasterPrentice:NotifyMasterAward(pMaster, szMsg, i18n.EasyGet("\229\184\136\229\190\146\228\187\187\229\138\161"))
+  else
+    local szPrenticeName = pPrentice.szName
+    local szMsg = i18n.EasyGet("\230\156\172\230\172\161\229\190\146\229\188\159[{0}]\229\144\145\228\189\160\228\184\138\228\186\164\228\186\134{1}\230\157\161\229\184\136\229\190\146\229\145\168\229\184\184\228\187\187\229\138\161\239\188\140\230\130\168\230\156\172\229\145\168\229\183\178\231\187\143\232\142\183\229\190\151\228\186\134{2}/{3}\230\172\161\229\184\136\229\190\146\228\187\187\229\138\161\229\165\150\229\138\177, \229\183\178\232\190\190\229\136\176\228\184\138\233\153\144!", szPrenticeName, nFinishedTaskCount, masterCtrl.nMasterTaskAwardTimes, MasterPrentice.Cfg.MAX_WEEK_TASK_COUNT)
+    pMaster.Msg(szMsg)
+    MasterPrentice:NotifyMasterAward(pMaster, szMsg, i18n.EasyGet("\229\184\136\229\190\146\228\187\187\229\138\161"))
+  end
+  Lib:MBIPLog(pPrentice.dwID, Env.masterprentice_reporttask, pMaster.dwID, pMaster.szName)
+  local tbTaskFinishList = {}
+  for nTaskId, nValue in pairs(tbMPData.tbTaskList) do
+    if self:IsFinishTask(pPrentice, nTaskId, tbMPData) then
+      table.insert(tbTaskFinishList, nTaskId)
+    end
+  end
+  local tbMasterInfo = KPlayer.GetRoleStayInfo(pMaster.dwID)
+  if tbMasterInfo then
+    Lib:TrackEvent(pPrentice.dwID, Env.track_shitu_wancheng, tbMasterInfo.szAccount, tbMasterInfo.dwID, tbMasterInfo.szName, tbTaskFinishList[1] or 0, tbTaskFinishList[2] or 0, tbTaskFinishList[3] or 0, tbTaskFinishList[4] or 0, tbTaskFinishList[5] or 0, tbTaskFinishList[6] or 0, tbTaskFinishList[7] or 0, tbTaskFinishList[8] or 0)
+  end
+  return true
+end
+
+function MasterPrentice.MPTask:OnAchiChange(nPlayerId, nSubKindID, nCurCount, nNewCount)
+  local pPlayer = KPlayer.GetPlayerObjById(nPlayerId)
+  if not pPlayer then
+    return
+  end
+  local masterCtrl = MasterPrentice:GetMPInfo(pPlayer)
+  if not masterCtrl.tbMyMaster then
+    return
+  end
+  local tbTask = self.tbTaskBySubKind[nSubKindID]
+  local bCompleted
+  if tbTask then
+    for i, masterId in pairs(masterCtrl.tbMyMaster) do
+      bCompleted = true
+      local tbMPData = MasterPrentice:GetMPData(masterId, nPlayerId)
+      if tbMPData and tbMPData.status == MasterPrentice.Def.STATUS_AFTER_APPENTICE and tbMPData.tbTaskList and tbMPData.tbTaskList[tbTask.ID] then
+        local tbTaskList = tbMPData.tbTaskList
+        tbTaskList[tbTask.ID] = tbTaskList[tbTask.ID] + nNewCount - nCurCount
+        MasterPrentice:SaveMPData(masterId, nPlayerId, tbMPData)
+        for nTaskId, nCount in pairs(tbTaskList) do
+          local tbTaskSetting = self.tbTaskSetting[nTaskId]
+          if not tbTaskSetting or nCount < tbTaskSetting.Count then
+            bCompleted = false
+            break
+          end
+        end
+        if bCompleted then
+          MasterPrentice:NotifyTaskCompleted(pPlayer, masterId, tbTask.ID)
+        end
+      end
+    end
+  end
+  local tbGoals = self.tbGoalBySubKind[nSubKindID]
+  if tbGoals then
+    for i, masterId in pairs(masterCtrl.tbMyMaster) do
+      local tbMPData = MasterPrentice:GetMPData(masterId, nPlayerId)
+      if tbMPData and tbMPData.status == MasterPrentice.Def.STATUS_APPRENTICE then
+        tbMPData.tbGoalData = tbMPData.tbGoalData or {}
+        for _, aGoal in pairs(tbGoals) do
+          tbMPData.tbGoalData[aGoal.ID] = nNewCount
+          MasterPrentice:SaveMPData(masterId, nPlayerId, tbMPData)
+          local nFinish = self:GetGoalData(aGoal, tbMPData)
+          if nFinish == MasterPrentice.Def.TaskStatus.Finished then
+            MasterPrentice:NotifyGoalCompleted(pPlayer, masterId, aGoal.ID)
+          end
+        end
+      end
+    end
+  end
+  MasterPrentice:SyncPlayerMPData(pPlayer)
+  for i, masterId in pairs(masterCtrl.tbMyMaster) do
+    local pMaster = KPlayer.GetPlayerObjById(masterId)
+    if pMaster then
+      MasterPrentice:SyncPlayerMPData(pMaster)
+    end
+  end
+end
+
+function MasterPrentice.MPTask:UpdateGoalData(pPlayer, tbMPData, nMasterId)
+  local nSubKindID
+  for _, tbGoal in pairs(self.tbGoalSetting) do
+    nSubKindID = tbGoal.AchievementSubKindID
+    if 0 ~= nSubKindID then
+      local nCount = Achievement:GetSubKindCount(pPlayer, nSubKindID)
+      tbMPData.tbGoalData[tbGoal.ID] = nCount
+    end
+  end
+end
+
+function MasterPrentice.MPTask:CheckAchievementIsValid()
+  local nSubKindID
+  for _, tbGoal in pairs(self.tbGoalSetting) do
+    nSubKindID = tbGoal.AchievementSubKindID
+    if not nSubKindID or nSubKindID <= 0 then
+      LogErr("MasterPrentice.MPTask:CheckAchievementIsValid wrong, subKindID is not exist", tbGoal.AchievementSubKindID)
+    end
+  end
+  for _, tbTask in pairs(self.tbTaskSetting) do
+    nSubKindID = tbTask.AchievementSubKindID
+    if not nSubKindID or nSubKindID <= 0 then
+      LogErr("MasterPrentice.MPTask:CheckAchievementIsValid tbTaskSetting wrong, subKindID is not exist", tbTask.AchievementSubKindID)
+    end
+  end
+end

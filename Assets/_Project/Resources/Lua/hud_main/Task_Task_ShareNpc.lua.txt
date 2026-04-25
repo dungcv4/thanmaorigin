@@ -1,0 +1,292 @@
+Task.tbLogicShareNpc = Task.tbLogicShareNpc or {}
+local tbLogicShareNpc = Task.tbLogicShareNpc
+tbLogicShareNpc.REFRESH_INTERVAL = 3
+tbLogicShareNpc.GOBACK_INTERVAL = 10
+tbLogicShareNpc.tbDefaultReturnPos = {
+  5,
+  42439,
+  38904
+}
+tbLogicShareNpc.tbPlayerInfo = {}
+tbLogicShareNpc.tbFinishedList = {}
+tbLogicShareNpc.tbDelayChangeFightMode = {}
+tbLogicShareNpc.tbNpcList = tbLogicShareNpc.tbNpcList or {}
+
+function tbLogicShareNpc:OnKillNpc(nNpcId, pKillerNpc)
+  if not MODULE_GAMESERVER then
+    return
+  end
+  if pKillerNpc then
+    self:OnBeAttackByPlayerEveryTime(pKillerNpc.nId, nNpcId)
+  end
+  for nIndex1, tbList1 in pairs(self.tbNpcList) do
+    for nIndex2, tbNpcInfo in pairs(tbList1) do
+      if tbNpcInfo.nNpcId == nNpcId then
+        tbNpcInfo.nDeathTime = GetTime()
+        for nPlayerNpcId, _ in pairs(tbNpcInfo.tbAttacker) do
+          local pNpc = KNpc.GetById(nPlayerNpcId)
+          if pNpc then
+            local pPlayer = pNpc.GetPlayer()
+            if pPlayer then
+              self:Finish(pPlayer, nIndex1, nIndex2)
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+function tbLogicShareNpc:OnBeAttackByPlayerEveryTime(nPlayerNpcId, nNpcId)
+  if not MODULE_GAMESERVER then
+    return
+  end
+  for _, tbList1 in pairs(self.tbNpcList) do
+    for _, tbNpcInfo in pairs(tbList1) do
+      if tbNpcInfo.nNpcId == nNpcId then
+        tbNpcInfo.tbAttacker[nPlayerNpcId] = 1
+        return
+      end
+    end
+  end
+end
+
+function tbLogicShareNpc:AddNpc(nIndex1, nIndex2)
+  assert(self.SETTING[nIndex1])
+  assert(self.SETTING[nIndex1][nIndex2])
+  local tbInfo = self.SETTING[nIndex1][nIndex2]
+  local nMapId = tbInfo.nMapId
+  local nX = tbInfo.nX
+  local nY = tbInfo.nY
+  local nNpcTemplateId = tbInfo.nNpcTemplateId
+  local nLevel = tbInfo.nLevel
+  local pNpc = KNpc.Add(nNpcTemplateId, nLevel, -1, nMapId, nX, nY, 0, 0)
+  if pNpc then
+    pNpc.SetByAttackCallScript(1)
+    local tbNpcInfo = {}
+    tbNpcInfo.nIndex1 = nIndex1
+    tbNpcInfo.nIndex2 = nIndex2
+    tbNpcInfo.nNpcId = pNpc.nId
+    tbNpcInfo.nNpcTemplateId = nNpcTemplateId
+    tbNpcInfo.nMapId = nMapId
+    tbNpcInfo.nDeathTime = 0
+    tbNpcInfo.tbAttacker = {}
+    self.tbNpcList = self.tbNpcList or {}
+    self.tbNpcList[nIndex1] = self.tbNpcList[nIndex1] or {}
+    self.tbNpcList[nIndex1][nIndex2] = tbNpcInfo
+  end
+end
+
+function tbLogicShareNpc:Breathe()
+  local nCurTime = GetTime()
+  for nIndex1, tbList1 in pairs(self.tbNpcList) do
+    for nIndex2, tbNpcInfo in pairs(tbList1) do
+      local nDeathTime = tbNpcInfo.nDeathTime
+      if nDeathTime > 0 and nCurTime > nDeathTime + self.REFRESH_INTERVAL then
+        self:AddNpc(nIndex1, nIndex2)
+      end
+    end
+  end
+  for nPlayerId, tbInfo in pairs(self.tbFinishedList or {}) do
+    local nFinishTime = tbInfo[1]
+    local nMapTemplateId = tbInfo[2]
+    if nCurTime > nFinishTime + self.GOBACK_INTERVAL then
+      local pPlayer = KPlayer.GetPlayerObjById(nPlayerId)
+      if pPlayer and pPlayer.nMapTemplateId == nMapTemplateId then
+        self:GoBack(pPlayer)
+      end
+      self.tbFinishedList[nPlayerId] = nil
+      self:RemovePlayerInfo(nPlayerId)
+    end
+  end
+  for nPlayerId, tbInfo in pairs(self.tbDelayChangeFightMode) do
+    local nFightMode, nCheckTime = table.unpack(tbInfo)
+    if nCurTime >= nCheckTime then
+      local pPlayer = KPlayer.GetPlayerObjById(nPlayerId)
+      if pPlayer then
+        pPlayer.nFightMode = nFightMode
+      end
+      self.tbDelayChangeFightMode[nPlayerId] = nil
+    end
+  end
+  return Env.GAME_FPS
+end
+
+function tbLogicShareNpc:Finish(pPlayer, nIndex1, nIndex2)
+  local tbInfo = self:GetPlayerInfo(pPlayer.dwID)
+  if not tbInfo then
+    return
+  end
+  local nTaskId = tbInfo.nTaskId
+  local tbTaskData = Task:GetTaskData(pPlayer)
+  local tbCurTaskData = tbTaskData.tbCurTaskList[nTaskId]
+  if not tbCurTaskData then
+    return
+  end
+  tbCurTaskData.tbGain = tbCurTaskData.tbGain or {}
+  tbCurTaskData.tbGain[nIndex2] = tbCurTaskData.tbGain[nIndex2] or 0
+  tbCurTaskData.tbGain[nIndex2] = tbCurTaskData.tbGain[nIndex2] + 1
+  Task:SyncData(pPlayer)
+  if self:CheckFinished(pPlayer, nIndex1) then
+    local tbTaskInfo = tbTaskData.tbCurTaskList[nTaskId]
+    local tbDetailCfg = Task:GetDetailCfg(nTaskId, tbTaskInfo.nStep, tbTaskInfo.nBranch)
+    if tbDetailCfg.szAction == "killsharenpc" and tbDetailCfg.nShareNpcIndex == nIndex1 then
+      Lib:CallBack({
+        Task.DoAction,
+        Task,
+        pPlayer,
+        tbDetailCfg
+      })
+    end
+    self.tbFinishedList = self.tbFinishedList or {}
+    if not self.tbFinishedList[pPlayer.dwID] then
+      self.tbFinishedList[pPlayer.dwID] = {
+        GetTime(),
+        pPlayer.nMapTemplateId
+      }
+    end
+  end
+end
+
+function tbLogicShareNpc:CheckFinished(pPlayer, nIndex1)
+  local tbInfo = self:GetPlayerInfo(pPlayer.dwID)
+  if not tbInfo then
+    return
+  end
+  local nTaskId = tbInfo.nTaskId
+  local nTargetCount = #self.SETTING[nIndex1]
+  local tbTaskData = Task:GetTaskData(pPlayer)
+  local tbCurTaskData = tbTaskData.tbCurTaskList[nTaskId]
+  tbCurTaskData.tbGain = tbCurTaskData.tbGain or {}
+  for i = 1, nTargetCount do
+    local nGain = tbCurTaskData.tbGain[i] or 0
+    if nGain <= 0 then
+      return false
+    end
+  end
+  return true
+end
+
+function tbLogicShareNpc:OnEnter(nMapId, pPlayer)
+  if not self.MAPLIST[nMapId] then
+    return
+  end
+  pPlayer.CallClientScript("AFK:Start")
+end
+
+function tbLogicShareNpc:OnServerStart()
+  if not MODULE_GAMESERVER then
+    return
+  end
+  for nIndex1, tbInfo1 in pairs(self.SETTING) do
+    for nIndex2, _ in pairs(tbInfo1) do
+      self:AddNpc(nIndex1, nIndex2)
+    end
+  end
+  Timer:Register(Env.GAME_FPS, self.Breathe, self)
+end
+
+function tbLogicShareNpc:GoBack(pPlayer)
+  local tbInfo = self:GetPlayerInfo(pPlayer.dwID)
+  if tbInfo then
+    local tbReturnPos = tbInfo.tbReturnPos
+    local nMapId, nX, nY = table.unpack(tbReturnPos)
+    pPlayer.SwitchMap(nMapId, nX, nY, 0)
+    self.tbDelayChangeFightMode[pPlayer.dwID] = {
+      tbInfo.nFightMode,
+      GetTime() + 2
+    }
+  else
+    pPlayer.SwitchMap(5, 0, 0, 0)
+  end
+end
+
+function tbLogicShareNpc:RecordPlayerInfo(pPlayer, nTaskId)
+  local nPlayerId = pPlayer.dwID
+  local nFightMode = pPlayer.nFightMode
+  local nMapId, nX, nY, _ = pPlayer.GetWorldPos()
+  local tbInfo = {}
+  tbInfo.nTaskId = nTaskId
+  tbInfo.nFightMode = nFightMode
+  tbInfo.tbReturnPos = {
+    nMapId,
+    nX,
+    nY
+  }
+  self.tbPlayerInfo[nPlayerId] = tbInfo
+end
+
+function tbLogicShareNpc:GetPlayerInfo(nPlayerId)
+  return self.tbPlayerInfo[nPlayerId]
+end
+
+function tbLogicShareNpc:RemovePlayerInfo(nPlayerId)
+  self.tbPlayerInfo[nPlayerId] = nil
+end
+
+function tbLogicShareNpc:GotoMap(pPlayer, nIndex, nTaskId)
+  local tbInfo = self.SETTING[nIndex][1]
+  if not tbInfo then
+    return
+  end
+  if pPlayer.dwTeamID > 0 then
+    TeamMgr:QuiteTeam(pPlayer.dwTeamID, pPlayer.dwID, true)
+    pPlayer.CenterMsg(i18n.EasyGet("\232\191\155\229\133\165\228\187\187\229\138\161\229\156\186\230\153\175\239\188\140\233\128\128\229\135\186\233\152\159\228\188\141"))
+  end
+  self:RecordPlayerInfo(pPlayer, nTaskId)
+  local nMapId = tbInfo.nMapId
+  local nX = MathRandom(tbInfo.nX - 500, tbInfo.nX + 500)
+  local nY = MathRandom(tbInfo.nY - 500, tbInfo.nY + 500)
+  pPlayer.SwitchMap(nMapId, nX, nY, 0)
+end
+
+function tbLogicShareNpc:GetSetting(nIndex)
+  return self.SETTING[nIndex]
+end
+
+function tbLogicShareNpc:OnLogin(pPlayer)
+  local nMapId, _, _, _ = pPlayer.GetWorldPos()
+  if self.MAPLIST[nMapId] then
+    self:GoBack(pPlayer)
+    local nPlayerId = pPlayer.dwID
+    self.tbFinishedList[nPlayerId] = nil
+    self:RemovePlayerInfo(nPlayerId)
+  end
+end
+
+function tbLogicShareNpc:LoadFile()
+  local tbFile = Lib:LoadTabFileEx("Setting/Task/tasksharenpc.tab", "dddddd", "", {
+    "nIndex",
+    "nMapId",
+    "nX",
+    "nY",
+    "nNpcTemplateId",
+    "nLevel"
+  })
+  self.SETTING = {}
+  for _, tbInfo in ipairs(tbFile) do
+    local nIndex = tbInfo.nIndex
+    self.SETTING[nIndex] = self.SETTING[nIndex] or {}
+    table.insert(self.SETTING[nIndex], tbInfo)
+  end
+  self.MAPLIST = {}
+  for _, tbInfo1 in pairs(self.SETTING) do
+    for _, tbInfo2 in pairs(tbInfo1) do
+      self.MAPLIST[tbInfo2.nMapId] = 1
+    end
+  end
+end
+
+tbLogicShareNpc:LoadFile()
+
+function tbLogicShareNpc:OnPlayerRevive()
+  local nMapId, _, _, _ = me.GetWorldPos()
+  if self.MAPLIST[nMapId] then
+    self:GoBack(me)
+    local nPlayerId = me.dwID
+    self.tbFinishedList[nPlayerId] = nil
+    self:RemovePlayerInfo(nPlayerId)
+  end
+end
+
+PlayerEvent:RegisterGlobal("OnRevive", Task.tbLogicShareNpc.OnPlayerRevive, Task.tbLogicShareNpc)

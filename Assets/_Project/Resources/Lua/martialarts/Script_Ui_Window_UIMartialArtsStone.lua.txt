@@ -1,0 +1,340 @@
+local tbWnd = Ui:CreateWindow("UIMartialArtsStone")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_WXHUSHI_PUTON,
+      self.OnPutOnOrTakeOff,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_WXHUSHI_TAKEOFF,
+      self.OnPutOnOrTakeOff,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  Series = "node/imgBG/Content/Left/Series/%s",
+  HuShiTemplate = "node/imgBG/Content/Center/Scroll View/Viewport/Content/Template",
+  EmptyNow = "node/imgBG/Content/Right/Info/EmptyNow",
+  EmptySelect = "node/imgBG/Content/Right/Info/EmptySelect",
+  ContNow = "node/imgBG/Content/Right/Info/ContNow",
+  ContSelect = "node/imgBG/Content/Right/Info/ContSelect",
+  CurBaseAttrTemplate = "node/imgBG/Content/Right/Info/ContNow/ValueList/Viewport/Content/Regular/Template",
+  CurExtAttrTemplate = "node/imgBG/Content/Right/Info/ContNow/ValueList/Viewport/Content/Add/Template",
+  SelectBaseAttrTemplate = "node/imgBG/Content/Right/Info/ContSelect/ValueList/Viewport/Content/Regular/Template",
+  SelectExtAttrTemplate = "node/imgBG/Content/Right/Info/ContSelect/ValueList/Viewport/Content/Add/Template",
+  btnEquip = "node/imgBG/Content/Right/Info/btnEquip",
+  btnUnEquip = "node/imgBG/Content/Right/Info/btnUnEquip",
+  btnRecover = "node/imgBG/Content/Right/Info/btnRecover",
+  Metal = "node/imgBG/Content/Left/Series/Metal",
+  Wood = "node/imgBG/Content/Left/Series/Wood",
+  Water = "node/imgBG/Content/Left/Series/Water",
+  Fire = "node/imgBG/Content/Left/Series/Fire",
+  Earth = "node/imgBG/Content/Left/Series/Earth"
+}
+tbControls.tbHuShiItemEmpty = {}
+tbControls.tbHuShiItemGrid = {}
+tbControls.tbHuShiItemSelect = {}
+tbControls.tbPutOnHuShiPath = {
+  [1] = tbControls.Metal,
+  [2] = tbControls.Wood,
+  [3] = tbControls.Water,
+  [4] = tbControls.Fire,
+  [5] = tbControls.Earth
+}
+for nIndex, szPath in ipairs(tbControls.tbPutOnHuShiPath) do
+  tbControls.tbHuShiItemEmpty[nIndex] = string.format("%s/Empty", szPath)
+  tbControls.tbHuShiItemGrid[nIndex] = string.format("%s/ItemGrid", szPath)
+  tbControls.tbHuShiItemSelect[nIndex] = string.format("%s/imgSelect", szPath)
+end
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnEquip = function(self)
+    if not self.nBagHuShiIndex or not self.nHSSlotIndex then
+      return
+    end
+    local pHuShi = self.tbBagHuShi[self.nBagHuShiIndex]
+    if not pHuShi.dwId then
+      return
+    end
+    WXHuShi:HSPutOnReqC(self.nWXIndex, self.nHSSlotIndex, pHuShi.dwId)
+  end,
+  btnUnEquip = function(self)
+    local nTemplateId = self.tbPutOnHuShiData[1]
+    if nTemplateId <= 0 then
+      return
+    end
+    if not self.nHSSlotIndex then
+      return
+    end
+    WXHuShi:HSTakeOffReqC(self.nWXIndex, self.nHSSlotIndex)
+  end,
+  btnRecover = function(self)
+  end,
+  Metal = function(self)
+    self:OnSlotClick(1)
+  end,
+  Wood = function(self)
+    self:OnSlotClick(2)
+  end,
+  Water = function(self)
+    self:OnSlotClick(3)
+  end,
+  Fire = function(self)
+    self:OnSlotClick(4)
+  end,
+  Earth = function(self)
+    self:OnSlotClick(5)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbHuShiScrollView = Ui:NewSuperListView(self, tbControls.HuShiTemplate, self.SetHuShiList, nil, self.OnClickHuShiItem)
+  self.tbHuShiItemGridGo = {}
+  self:InitAttrObj()
+end
+
+function tbWnd:OnDestroy()
+  self.tbHuShiItemGridGo = nil
+end
+
+function tbWnd:OnOpen(nWXIndex, nHSSlotIndex, nSelectItemId)
+  self.nWXIndex = nWXIndex or 1
+  self.nHSSlotIndex = nHSSlotIndex or 1
+  self:OnSlotClick(self.nHSSlotIndex)
+  local nOpenIndex = -1
+  if nSelectItemId then
+    for nIndex, tbData in ipairs(self.tbBagHuShi) do
+      if tbData.dwId and tbData.dwId == nSelectItemId then
+        nOpenIndex = nIndex
+        break
+      end
+    end
+  end
+  if -1 ~= nOpenIndex then
+    self.tbHuShiScrollView:_OnClickElement(nOpenIndex)
+  end
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:OnSlotClick(nIndex)
+  self.nHSSlotIndex = nIndex
+  self.nBagHuShiIndex = nil
+  self.tbHuShiScrollView:ClearSelected()
+  self:UpdateView()
+  self:UpdateBtnState()
+end
+
+function tbWnd:OnPutOnOrTakeOff()
+  self.tbHuShiScrollView:ClearSelected()
+  self.nBagHuShiIndex = nil
+  self:UpdateView()
+  self:UpdateBtnState()
+  self.tbHuShiScrollView:_OnClickElement(1)
+end
+
+function tbWnd:UpdateView()
+  self.tbPutOnHuShiData = WXHuShi:GetWXHuShiData(me, self.nWXIndex, self.nHSSlotIndex)
+  self:UpdatePutOnHuShiItemInfo()
+  self:UpdateBagHuShiItemInfo()
+  self:UpdateAttrInfo()
+end
+
+function tbWnd:UpdatePutOnHuShiItemInfo()
+  for nHSSlot = 1, WXHuShi.nMaxHuShiSlot do
+    local tbData = WXHuShi:GetWXHuShiData(me, self.nWXIndex, nHSSlot)
+    local nTemplateId = tbData[1]
+    if nTemplateId > 0 then
+      self.pPanel:SetActive(tbControls.tbHuShiItemGrid[nHSSlot], true)
+      self.pPanel:SetActive(tbControls.tbHuShiItemEmpty[nHSSlot], false)
+      if not self.tbHuShiItemGridGo[nHSSlot] then
+        self.tbHuShiItemGridGo[nHSSlot] = Ui:NewExistItemGrid(self, tbControls.tbHuShiItemGrid[nHSSlot] .. "/UIItemGrid")
+        self.tbHuShiItemGridGo[nHSSlot]:SetClickEnable(true, function()
+          self.nHSSlotIndex = nHSSlot
+          self:UpdateView()
+        end)
+      end
+      self.tbHuShiItemGridGo[nHSSlot]:SetItemByTemplate(nTemplateId)
+    else
+      self.pPanel:SetActive(tbControls.tbHuShiItemGrid[nHSSlot], false)
+      self.pPanel:SetActive(tbControls.tbHuShiItemEmpty[nHSSlot], true)
+    end
+    if nHSSlot == self.nHSSlotIndex then
+      self.pPanel:SetActive(tbControls.tbHuShiItemSelect[nHSSlot], true)
+    else
+      self.pPanel:SetActive(tbControls.tbHuShiItemSelect[nHSSlot], false)
+    end
+  end
+end
+
+function tbWnd:UpdateBagHuShiItemInfo()
+  self.tbBagHuShi = WXHuShi:GetHuShiList(self.nHSSlotIndex)
+  local nTemplateId = self.tbPutOnHuShiData[1]
+  if nTemplateId > 0 then
+    table.insert(self.tbBagHuShi, 1, self.tbPutOnHuShiData)
+  end
+  self.tbHuShiScrollView:SetAllElement(self.tbBagHuShi)
+  if #self.tbBagHuShi > 0 then
+    self.tbHuShiScrollView:_OnClickElement(1)
+    self.tbHuShiScrollView:MovePanelToItemIndex(1)
+  end
+end
+
+function tbWnd:SetHuShiList(tbElement, pHuShi, nIndex)
+  local pPanel = tbElement.pPanel
+  local tbGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  local nItemLevel
+  local nEnhanceLevel = 0
+  local nTemplateId = self.tbPutOnHuShiData[1]
+  local nFightPower = 0
+  if nTemplateId > 0 and 1 == nIndex then
+    pPanel:SetActive("imgMark", true)
+    nEnhanceLevel = self.tbPutOnHuShiData[3]
+    tbGrid:SetItemByTemplate(nTemplateId)
+    nItemLevel = Item:GetLevel(nTemplateId)
+    local szItemName = Item:GetName(nTemplateId)
+    pPanel:Label_SetText("txtName", szItemName)
+    nFightPower = WXHuShi.tbHuShiItemCfg[nTemplateId].nFightPower
+  else
+    nItemLevel = pHuShi.nLevel
+    local szItemName = i18n.Parse(pHuShi.szName)
+    nFightPower = WXHuShi.tbHuShiItemCfg[pHuShi.dwTemplateId].nFightPower
+    pPanel:Label_SetText("txtName", szItemName)
+    tbGrid:SetItemByTemplate(pHuShi.dwTemplateId)
+    nEnhanceLevel = Item:GetClass("WXHuShiItem"):GetEnhanceLevel(pHuShi)
+    pPanel:SetActive("imgMark", false)
+  end
+  pPanel:Label_SetText("txtAdd", i18n.EasyGet("\229\188\186\229\140\150\239\188\154{0}", nEnhanceLevel))
+  if nEnhanceLevel > 0 then
+    nFightPower = nFightPower + WXHuShi.Cfg.tbEnhanceFight[nEnhanceLevel][nItemLevel]
+  end
+  pPanel:Label_SetText("TxtPower/Template/txtValueName/txtValue", nFightPower)
+end
+
+function tbWnd:OnClickHuShiItem(tbElement, tbMsg, nIndex)
+  if self.nBagHuShiIndex == nIndex then
+    return
+  end
+  self.nBagHuShiIndex = nIndex
+  self:UpdateBtnState()
+  self:UpdateAttrInfo()
+end
+
+function tbWnd:UpdateBtnState()
+  local nTemplateId = self.tbPutOnHuShiData[1]
+  if nTemplateId > 0 and 1 == self.nBagHuShiIndex then
+    self.pPanel:SetActive(tbControls.btnUnEquip, true)
+    self.pPanel:SetActive(tbControls.btnEquip, false)
+  else
+    self.pPanel:SetActive(tbControls.btnUnEquip, false)
+    self.pPanel:SetActive(tbControls.btnEquip, true)
+  end
+end
+
+function tbWnd:UpdateAttrInfo()
+  local nTemplateId = self.tbPutOnHuShiData[1]
+  local tbBaseAttr = self.tbPutOnHuShiData[4]
+  local tbExtAttr = self.tbPutOnHuShiData[5]
+  if nTemplateId > 0 then
+    self.pPanel:SetActive(tbControls.EmptyNow, false)
+    self.pPanel:SetActive(tbControls.ContNow, true)
+    self:UpdateAttrByAttrData(tbBaseAttr, self.tbCurBaseAttrObj, tbExtAttr, self.tbCurExtAttrObj)
+  else
+    self.pPanel:SetActive(tbControls.EmptyNow, true)
+    self.pPanel:SetActive(tbControls.ContNow, false)
+  end
+  if self.nBagHuShiIndex and self.tbBagHuShi[self.nBagHuShiIndex] then
+    self.pPanel:SetActive(tbControls.EmptySelect, false)
+    self.pPanel:SetActive(tbControls.ContSelect, true)
+    local pHuShi = self.tbBagHuShi[self.nBagHuShiIndex]
+    local nTemplateId = self.tbPutOnHuShiData[1]
+    local tbBaseAttr, tbExtAttr
+    if nTemplateId > 0 and 1 == self.nBagHuShiIndex then
+      tbBaseAttr = self.tbPutOnHuShiData[4]
+      tbExtAttr = self.tbPutOnHuShiData[5]
+    else
+      local tbItem = Item:GetClass("WXHuShiItem")
+      tbBaseAttr = tbItem:GetRandomBaseAttrInfo(pHuShi)
+      tbExtAttr = tbItem:GetRandomExtAttrInfo(pHuShi)
+    end
+    self:UpdateAttrByAttrData(tbBaseAttr, self.tbSelectBaseAttrObj, tbExtAttr, self.tbSelectExtAttrObj)
+  else
+    self.pPanel:SetActive(tbControls.EmptySelect, true)
+    self.pPanel:SetActive(tbControls.ContSelect, false)
+  end
+end
+
+function tbWnd:UpdateAttrByAttrData(tbBaseAttr, tbBasePath, tbExtAttr, tbExtPath)
+  for i = 1, WXHuShi.nMaxBaseAttrCount do
+    if i <= #tbBaseAttr then
+      local nAttrId = tbBaseAttr[i][1]
+      local tbValue = tbBaseAttr[i][2]
+      local szAttrType = WXHuShi.Cfg.tbAttrId2AttrType[nAttrId]
+      if not szAttrType then
+        LogErr("UpdateAttrInfo tbBaseAttr Can't find AttrType by attrId = ", nAttrId)
+      end
+      local szAttribMsg, szValue = FightSkill:GetMagicDescSplit(szAttrType, tbValue)
+      PushString(tbBasePath[i])
+      AppendString("/txtValueName")
+      local szAttrTypePath = PopString()
+      PushString(tbBasePath[i])
+      AppendString("/txtValue")
+      local szAttrValuePath = PopString()
+      self.pPanel:Label_SetText(szAttrTypePath, szAttribMsg)
+      self.pPanel:Label_SetText(szAttrValuePath, szValue)
+      self.pPanel:SetActive(tbBasePath[i], true)
+    else
+      self.pPanel:SetActive(tbBasePath[i], false)
+    end
+  end
+  for i = 1, WXHuShi.nMaxExtAttrCount do
+    if i <= #tbExtAttr then
+      local nAttrId = tbExtAttr[i][1]
+      local tbValue = tbExtAttr[i][2]
+      local szAttrType = WXHuShi.Cfg.tbAttrId2AttrType[nAttrId]
+      if not szAttrType then
+        LogErr("UpdateAttrInfo tbExtAttr Can't find AttrType by attrId = ", nAttrId)
+      end
+      local szAttribMsg, szValue = FightSkill:GetMagicDescSplit(szAttrType, tbValue)
+      PushString(tbExtPath[i])
+      AppendString("/txtValueName")
+      local szAttrTypePath = PopString()
+      PushString(tbExtPath[i])
+      AppendString("/txtValue")
+      local szAttrValuePath = PopString()
+      self.pPanel:Label_SetText(szAttrTypePath, szAttribMsg)
+      self.pPanel:Label_SetText(szAttrValuePath, szValue)
+      self.pPanel:SetActive(tbExtPath[i], true)
+    else
+      self.pPanel:SetActive(tbExtPath[i], false)
+    end
+  end
+end
+
+function tbWnd:InitAttrObj()
+  self.tbCurBaseAttrObj = {}
+  self.tbCurExtAttrObj = {}
+  self.tbSelectBaseAttrObj = {}
+  self.tbSelectExtAttrObj = {}
+  for i = 1, WXHuShi.nMaxBaseAttrCount do
+    self.tbCurBaseAttrObj[i] = self.pPanel:CloneObject(tbControls.CurBaseAttrTemplate, "CurBaseAttr" .. i)
+    self.tbSelectBaseAttrObj[i] = self.pPanel:CloneObject(tbControls.SelectBaseAttrTemplate, "SelectBaseAttr" .. i)
+  end
+  for i = 1, WXHuShi.nMaxExtAttrCount do
+    self.tbCurExtAttrObj[i] = self.pPanel:CloneObject(tbControls.CurExtAttrTemplate, "CurExtAttr" .. i)
+    self.tbSelectExtAttrObj[i] = self.pPanel:CloneObject(tbControls.SelectExtAttrTemplate, "SelectExtAttr" .. i)
+  end
+  self.pPanel:SetActive(tbControls.CurBaseAttrTemplate, false)
+  self.pPanel:SetActive(tbControls.SelectBaseAttrTemplate, false)
+  self.pPanel:SetActive(tbControls.CurExtAttrTemplate, false)
+  self.pPanel:SetActive(tbControls.SelectExtAttrTemplate, false)
+end

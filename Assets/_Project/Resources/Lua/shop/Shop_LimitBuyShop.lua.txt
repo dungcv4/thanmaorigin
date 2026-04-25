@@ -1,0 +1,90 @@
+Require("CommonScript/Shop/Shop.lua")
+
+function Shop:LoadLimitBuyShop()
+  self.tbLimitBuyShopWares = {}
+  local tbWares = Lib:LoadTabFileEx("Setting/Shop/LimitBuyShop.tab", "dddd", nil, {
+    "nWareId",
+    "nSort",
+    "nBigType",
+    "nSmallType"
+  })
+  for _, v in pairs(tbWares) do
+    table.insert(self.tbLimitBuyShopWares, v)
+  end
+  self.tbLimitClassifySetting = {}
+  local tbSettings = Lib:EasyLoadTabFile("Setting/Shop/LimitShopClassify.tab")
+  for nIndex, tbInfo in pairs(tbSettings) do
+    if not self.tbLimitClassifySetting[tbInfo.nBigType] then
+      self.tbLimitClassifySetting[tbInfo.nBigType] = {
+        tbSmallInfo = {}
+      }
+    end
+    self.tbLimitClassifySetting[tbInfo.nBigType].tbSmallInfo[tbInfo.nSmallType] = self.tbLimitClassifySetting[tbInfo.nBigType].tbSmallInfo[tbInfo.nSmallType] or {}
+    if not Lib:IsEmptyStr(tbInfo.szOpenTimeStr) then
+      self.tbLimitClassifySetting[tbInfo.nBigType].tbSmallInfo[tbInfo.nSmallType].szOpenTimeStr = tbInfo.szOpenTimeStr
+    end
+    if not Lib:IsEmptyStr(tbInfo.szEndTimeStr) then
+      self.tbLimitClassifySetting[tbInfo.nBigType].tbSmallInfo[tbInfo.nSmallType].szEndTimeStr = tbInfo.szEndTimeStr
+    end
+  end
+  Validator:Register(Shop.CheckLimitBuyShopCfg, Shop)
+end
+
+function Shop:CheckLimitBuyShopCfg()
+  local tbWareId = {}
+  local bRet = true
+  for i, tbLimitBuyShopData in ipairs(self.tbLimitBuyShopWares) do
+    local nWareId = tbLimitBuyShopData.nWareId
+    if nil == tbWareId[nWareId] then
+      tbWareId[nWareId] = nWareId
+    else
+      LogErr(string.format("load LimitBuyShop.tab failed, nWareId %d same in LimitBuyShop.tab", nWareId))
+      bRet = false
+    end
+    local tbWareInfo = self.tbWares[nWareId]
+    if not tbWareInfo then
+      LogErr(string.format("load LimitBuyShop.tab failed, nWareId %d not found in AllShopWares.tab", nWareId))
+      bRet = false
+    else
+      if tbWareInfo.szShopType ~= Shop.ShopTypeStr.LimitBuy then
+        LogErr(string.format("load LimitBuyShop.tab failed, nWareId %d szShopType not LimitBuy", nWareId))
+        bRet = false
+      end
+      local nItemId = self.tbWares[nWareId].nItemId
+      if nil == nItemId then
+        bRet = false
+      elseif not Item:IsExist(nItemId) then
+        LogErr(string.format("load LimitBuyShop.tab failed, nItemId %d not exist", nItemId))
+        bRet = false
+      end
+      local nBigType = tbLimitBuyShopData.nBigType
+      local nSmallType = tbLimitBuyShopData.nSmallType
+      local tbSmallInfo = self.tbLimitClassifySetting[nBigType].tbSmallInfo[nSmallType]
+      if tbSmallInfo and 1 == nBigType then
+        local nOpenTimeStrToClassify = Lib:GetDate2Time(tbSmallInfo.szOpenTimeStr)
+        local nEndTimeStrToClassify = Lib:GetDate2Time(tbSmallInfo.szEndTimeStr)
+        if not Lib:IsEmptyStr(tbWareInfo.szEndTimeStr) and not Lib:IsEmptyStr(tbWareInfo.szOpenTimeStr) then
+          if not nOpenTimeStrToClassify then
+            LogErr(string.format("Shop:CheckLimitBuyShopCfg() failed, LimitShopClassify.tab szOpenTimeStr is nil nBigType = %d, nSmallType = %d, nWareId = %d", 1, tbLimitBuyShopData.nSmallType, nWareId))
+            bRet = false
+          end
+          if not nEndTimeStrToClassify then
+            LogErr(string.format("Shop:CheckLimitBuyShopCfg() failed, LimitShopClassify.tab szEndTimeStr is nil nBigType = %d, nSmallType = %d, nWareId = %d", 1, tbLimitBuyShopData.nSmallType, nWareId))
+            bRet = false
+          end
+          if nOpenTimeStrToClassify > Lib:GetDate2Time(tbWareInfo.szOpenTimeStr) then
+            LogErr(string.format("Shop:CheckLimitBuyShopCfg() failed, szOpenTimeStr ERROR LimitShopClassify.szOpenTimeStr = %s, AllShopWares.szOpenTimeStr = %s, LimitBuyShop.nWareId = %d ", tbSmallInfo.szOpenTimeStr, tbWareInfo.szOpenTimeStr, nWareId))
+            bRet = false
+          end
+          if nEndTimeStrToClassify < Lib:GetDate2Time(tbWareInfo.szEndTimeStr) then
+            LogErr(string.format("Shop:CheckLimitBuyShopCfg() failed, szEndTimeStr ERROR LimitShopClassify.szEndTimeStr = %s, AllShopWares.szEndTimeStr = %s, LimitBuyShop.nWareId = %d ", tbSmallInfo.szEndTimeStr, tbWareInfo.szEndTimeStr, nWareId))
+            bRet = false
+          end
+        end
+      end
+    end
+  end
+  return bRet
+end
+
+Shop:LoadLimitBuyShop()

@@ -1,0 +1,160 @@
+Require("CommonScript/Dungeon/Barracks/BaiManMountain/BaiManMountainDef.lua")
+Require("CommonScript/Dungeon/Barracks/BaiManMountain/BaiManMountainCfg.lua")
+
+function BaiManMountain:CheckCanShow()
+  local bEnoughLevel = me.nLevel >= BaiManMountain.Cfg.nLevelLimit
+  local szOpenTimeFrame = BaiManMountain.Cfg.szOpenTimeFrame
+  local szCloseTimeFrame = BaiManMountain.Cfg.szCloseTimeFrame
+  local bIsOpen = true
+  if szOpenTimeFrame and "" ~= szOpenTimeFrame then
+    bIsOpen = 1 == GetTimeFrameState(szOpenTimeFrame)
+  end
+  local bNotClose = true
+  if szCloseTimeFrame and "" ~= szCloseTimeFrame then
+    bNotClose = 1 ~= GetTimeFrameState(szCloseTimeFrame)
+  end
+  return bEnoughLevel and bIsOpen and bNotClose
+end
+
+function BaiManMountain:LoadAllConfig()
+  local bRet1 = self:LoadObstalcleConfig()
+  local bRet2 = self:LoadRefreshPosConfig()
+  local bRet3 = self:LoadRevivePosConfig()
+  local bRet4 = self:LoadAutoPosConfig()
+  local bRet5 = self:LoadEscortPosConfig()
+  return bRet1 and bRet2 and bRet3 and bRet4 and bRet5
+end
+
+function BaiManMountain:LoadObstalcleConfig()
+  local tbObstaclePosCfg = Lib:EasyLoadTabFile(BaiManMountain.Cfg.PosFileCfg.ObstaclePosFile, nil, nil, nil, false)
+  if not tbObstaclePosCfg then
+    LogErr("BaiManMountain: LoadObstalcleConfig failed")
+    return false
+  end
+  local tb = {}
+  for _, tbCfg in pairs(tbObstaclePosCfg) do
+    if tb[tbCfg.szTrapName] then
+      LogErr("BaiManMountain: LoadObstalcleConfig failed, obstacle name duplicate")
+      return false
+    end
+    tb[tbCfg.szTrapName] = {
+      szTrapName = tbCfg.szTrapName,
+      ResetPosX = tonumber(tbCfg.PosX),
+      ResetPosY = tonumber(tbCfg.PosY)
+    }
+  end
+  BaiManMountain.tbObstaclePosCfg = tb
+  return true
+end
+
+function BaiManMountain:LoadRefreshPosConfig()
+  local tbRefreshPosCfg = Lib:EasyLoadTabFile(BaiManMountain.Cfg.PosFileCfg.RefreshPosFile, nil, nil, nil, false)
+  if not tbRefreshPosCfg then
+    LogErr("BaiManMountain: LoadRefreshPosConfig failed")
+    return false
+  end
+  local tb = {}
+  for _, tbCfg in pairs(tbRefreshPosCfg) do
+    if not BaiManMountain.Cfg.MonsterNpcCfg[tbCfg.szNpcName] then
+      LogErr("BaiManMountain: LoadRefreshPosConfig failed, unexist szNpcName = ", tbCfg.szNpcName)
+      return false
+    end
+    tb[tbCfg.szNpcName] = tb[tbCfg.szNpcName] or {}
+    table.insert(tb[tbCfg.szNpcName], {
+      szNpcName = tbCfg.szNpcName,
+      PosX = tonumber(tbCfg.PosX),
+      PosY = tonumber(tbCfg.PosY)
+    })
+  end
+  BaiManMountain.tbRefreshPosCfg = tb
+  return true
+end
+
+function BaiManMountain:LoadRevivePosConfig()
+  local tbRevivePosCfg = Lib:EasyLoadTabFile(BaiManMountain.Cfg.PosFileCfg.RevivePosFile, nil, nil, nil, false)
+  if not tbRevivePosCfg then
+    LogErr("BaiManMountain: LoadRevivePosConfig failed")
+    return false
+  end
+  local tb = {}
+  for _, tbCfg in pairs(tbRevivePosCfg) do
+    if not BaiManMountain.Def.TargetType[tbCfg.szTargetType] then
+      LogErr("BaiManMountain: LoadRevivePosConfig failed, unexist TargetType = ", tbCfg.szTargetType)
+      return false
+    end
+    if tb[tbCfg.szTargetType] then
+      LogErr("BaiManMountain: LoadRevivePosConfig failed, duplicate config, TargetType = ", tbCfg.szTargetType)
+      return false
+    end
+    tb[tbCfg.szTargetType] = {
+      szTargetType = tbCfg.szTargetType,
+      PosX = tonumber(tbCfg.PosX),
+      PosY = tonumber(tbCfg.PosY)
+    }
+  end
+  BaiManMountain.tbRevivePosCfg = tb
+  return true
+end
+
+function BaiManMountain:LoadAutoPosConfig()
+  local tbAutoPosCfg = Lib:EasyLoadTabFile(BaiManMountain.Cfg.PosFileCfg.AutoPosFile, nil, nil, nil, false)
+  if not tbAutoPosCfg then
+    LogErr("BaiManMountain: LoadAutoPosConfig failed")
+    return false
+  end
+  local tb = {}
+  for _, tbCfg in pairs(tbAutoPosCfg) do
+    if not BaiManMountain.Def.TargetType[tbCfg.szTargetType] then
+      LogErr("BaiManMountain: LoadAutoPosConfig failed, unexist TargetType = ", tbCfg.szTargetType)
+      return false
+    end
+    if tb[tbCfg.szTargetType] then
+      LogErr("BaiManMountain: LoadAutoPosConfig failed, duplicate TargetType = ", tbCfg.szTargetType)
+      return false
+    end
+    tb[tbCfg.szTargetType] = {
+      szTargetType = tbCfg.szTargetType,
+      PosX = tonumber(tbCfg.PosX),
+      PosY = tonumber(tbCfg.PosY)
+    }
+  end
+  BaiManMountain.tbAutoPosCfg = tb
+  return true
+end
+
+function BaiManMountain:LoadEscortPosConfig()
+  local tbEscortPosCfg = Lib:EasyLoadTabFile(BaiManMountain.Cfg.PosFileCfg.EscortPosFile, {"nIndex"}, nil, nil, false)
+  if not tbEscortPosCfg then
+    LogErr("BaiManMountain: LoadEscortPos failed")
+    return false
+  end
+  local tb = {}
+  for nIndex, tbPosInfo in pairs(tbEscortPosCfg) do
+    if tb[nIndex] then
+      LogErr("BaiManMountain: LoadEscortPos failed, duplicate nIndex = ", nIndex)
+      return false
+    end
+    tbPosInfo.PosX = tonumber(tbPosInfo.PosX)
+    tbPosInfo.PosY = tonumber(tbPosInfo.PosY)
+    tb[nIndex] = tbPosInfo
+  end
+  BaiManMountain.tbEscortPosCfg = tb
+  return true
+end
+
+BaiManMountain.Cfg.tbProcessTime = {
+  480,
+  600,
+  720,
+  780,
+  840
+}
+BaiManMountain.Cfg.tbIntegral = {
+  100,
+  90,
+  80,
+  70,
+  60,
+  50
+}
+Validator:Register(BaiManMountain.LoadAllConfig, BaiManMountain)

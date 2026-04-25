@@ -1,0 +1,358 @@
+Require("Script/MarketStall/MarketStallBase.lua")
+if not MarketStallYuanBao.init then
+  MarketStallYuanBao = Lib:NewClass(MarketStallBase)
+end
+
+function MarketStallYuanBao:init()
+  self:initBase()
+  self.szClassName = "MarketStallYuanBao"
+  self.tbWaittingStall = self.tbWaittingStall or {}
+  self.nStallType = self.tbStallType.YuanBao
+  self.szMoneyTip = i18n.EasyGet("\229\133\131\229\174\157")
+  self.tbTypeDefSettings = self.tbYuanBaoTypeSetting
+  self.tbDetailType2TempId = self.tbYuanBaoDetailType2TempId
+  self.nMarketLimitGroup = GetGroupKey("MarketLimitYuanBao")
+  self.tbStallLimitSetting = self.tbStallYuanBaoLimitSetting or {}
+end
+
+function MarketStallYuanBao:GetPriceInfo(nStallItemTempId)
+  local tbInfo = {}
+  tbInfo = (self.tbYuanBaoStallItemSettings or {})[nStallItemTempId or 0]
+  if not tbInfo then
+    print("[x] MarketStall:GetPriceInfo failed", nStallItemTempId)
+    return
+  end
+  if tbInfo.szOpenTimeFrame and tbInfo.szOpenTimeFrame ~= "" and 1 ~= GetTimeFrameState(tbInfo.szOpenTimeFrame) then
+    return
+  end
+  if tbInfo.szEndTimeFrame and "" ~= tbInfo.szEndTimeFrame and 1 == GetTimeFrameState(tbInfo.szEndTimeFrame) then
+    return
+  end
+  if tbInfo.szNextTimeFrame and 1 == GetTimeFrameState(tbInfo.szNextTimeFrame) then
+    self:UpdatePrice(tbInfo)
+  end
+  return tbInfo.nPrice, tbInfo.tbAllowPrice, tbInfo.nMinPercent, tbInfo.nMaxPercent
+end
+
+function MarketStallYuanBao:GetItemType(nStallItemTempId)
+  local tbInfo = {}
+  tbInfo = (self.tbYuanBaoStallItemSettings or {})[nStallItemTempId or 0]
+  if not tbInfo then
+    return
+  end
+  return tbInfo.nSeType, tbInfo.nDetailType
+end
+
+function MarketStallYuanBao:GetNextRefreshInterval()
+  local now = GetTime()
+  local nLastUpdateTime = self.nLastUpdateTime or 0
+  local interval = self.nUpdateStallItemListTime - (now - nLastUpdateTime)
+  return math.min(math.max(0, interval), self.nUpdateStallItemListTime)
+end
+
+function MarketStallYuanBao:GetManualRefreshCost()
+  return self:GetNextRefreshInterval() > 0 and self.nManualRefreshCost or 0
+end
+
+function MarketStallYuanBao:TryBuyStallItem(nType, nStallItemTempId, tbData, nCount)
+  if not tbData.bMinPrice then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\145\138\228\189\141\228\184\173\230\156\137\228\187\183\230\160\188\230\155\180\228\189\142\231\154\132\231\137\169\229\147\129"))
+    return false
+  end
+  return self:TryBuyStallItemBase(nType, nStallItemTempId, tbData, nCount)
+end
+
+function MarketStallYuanBao:_GetAllStallItems(nSeType)
+  local tbRet = {}
+  local tbStallInfo = {}
+  if self.nStallType == MarketStallBase.tbStallType.YuanBao then
+    tbStallInfo = self.tbYuanBaoStallItemSettings
+  else
+    tbStallInfo = self.tbGoldStallItemSettings
+  end
+  for nStallItemTempId, tbInfo in pairs(tbStallInfo) do
+    local _, nDetailType = self:GetItemType(nStallItemTempId)
+    if nSeType == tbInfo.nSeType or nSeType == self.nStarType and self:IsStar(nDetailType) then
+      local szName = KItem.GetItemShowInfo(nStallItemTempId, me.nFaction, me.nFactionSect, me.GetNpc().GetBodySex())
+      tbRet[nStallItemTempId] = {
+        nStallType = self.nStallType,
+        nSeType = tbInfo.nSeType,
+        nIndex = tbInfo.nIndex,
+        szName = szName,
+        nStallItemTempId = tbInfo.nStallItemTempId,
+        nCount = 0,
+        nDetailTypeId = tbInfo.nDetailType,
+        tbItems = {}
+      }
+    end
+  end
+  return tbRet
+end
+
+function MarketStallYuanBao:GetShowStallItems(nSeType, bHideEmpty)
+  local tbFetchedStallItems = self.tbFetchedStallItems or {}
+  local tbItems = self:_GetAllStallItems(nSeType)
+  for nStallItemTempId, tbItemStallSettingInfo in pairs(tbItems) do
+    local tbPriceInfo = tbFetchedStallItems[nStallItemTempId]
+    if tbPriceInfo then
+      for nPrice, tbInfo in pairs(tbPriceInfo) do
+        if tbInfo.nStallId then
+          self.tbAllStall[tbInfo.nStallId].bMinPrice = false
+        end
+        tbInfo.bMinPrice = false
+        tbInfo.nStallItemTempId = nStallItemTempId
+        tbItemStallSettingInfo.nCount = tbItemStallSettingInfo.nCount + tbInfo.nCount
+        table.insert(tbItemStallSettingInfo.tbItems, tbInfo)
+      end
+      table.sort(tbItemStallSettingInfo.tbItems, function(tbA, tbB)
+        return tbA.nPrice < tbB.nPrice
+      end)
+      if #tbItemStallSettingInfo.tbItems > 0 then
+        tbItemStallSettingInfo.tbItems[1].bMinPrice = true
+        local nStallId = tbItemStallSettingInfo.tbItems[1].nStallId
+        self.tbAllStall[nStallId].bMinPrice = true
+      end
+    end
+  end
+  local tbRet = {}
+  for _, tb in pairs(tbItems) do
+    if (not bHideEmpty or tb.nCount > 0) and self:GetPriceInfo(tb.nStallItemTempId) then
+      table.insert(tbRet, tb)
+    end
+  end
+  table.sort(tbRet, function(tbA, tbB)
+    return tbA.nIndex < tbB.nIndex or tbA.nIndex == tbB.nIndex and tbA.nStallItemTempId < tbB.nStallItemTempId
+  end)
+  return tbRet
+end
+
+function MarketStallYuanBao:GetPriceItemCount(nSeType, nStallItemTempId, nPrice)
+  if nSeType ~= self.nSeType then
+    return 0
+  end
+  return self.tbFetchedStallItems and self.tbFetchedStallItems[nStallItemTempId] and self.tbFetchedStallItems[nStallItemTempId][nPrice] and self.tbFetchedStallItems[nStallItemTempId][nPrice].nCount or 0
+end
+
+function MarketStallYuanBao:GetAvaliableItems()
+  local tbRet = {}
+  for _, nType in pairs(Ui.tbToggle) do
+    tbRet[nType] = {}
+  end
+  for nStallItemTempId, tbInfo in pairs(self.tbYuanBaoStallItemSettings) do
+    local tbItems = me.GetItemListInBag(nStallItemTempId)
+    if tbItems and #tbItems > 0 then
+      for _, pItem in ipairs(tbItems) do
+        local dwItemId = pItem.dwId
+        if self:CheckCanSellItem(me, dwItemId) then
+          local tbItem = {
+            nStallItemTempId = nStallItemTempId,
+            dwItemId = dwItemId,
+            nCount = pItem.nCount,
+            szClass = pItem.szClass
+          }
+          table.insert(tbRet[Ui.tbToggle.TogAll], tbItem)
+          local tbClassifyInfo = Item:GetDetailTypeClassify(pItem.nItemType, pItem.nDetailType)
+          if not tbClassifyInfo then
+            LogErr(string.format("DetailTypeClassify.tab: DetailType:%d%s not Define Classify!", pItem.nDetailType, i18n.Parse(pItem.szName)))
+            return
+          end
+          for key, nClassify in pairs(Ui.tbKey2Classify) do
+            if 1 == tbClassifyInfo[key] then
+              if "bInEquip" == key then
+                if not Item.ZhenYuan:IsZhenYuanEquip(pItem) then
+                  table.insert(tbRet[nClassify], tbItem)
+                end
+              else
+                table.insert(tbRet[nClassify], tbItem)
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  for _, tbItems in pairs(tbRet) do
+    table.sort(tbItems, function(a, b)
+      return a.nStallItemTempId < b.nStallItemTempId
+    end)
+  end
+  self.tbAvaliableItems = tbRet
+  return tbRet
+end
+
+function MarketStallBase:IsNeedRequestData()
+  return false
+end
+
+function MarketStallYuanBao:RefreshType(nSeType)
+  if self.nRefreshTypeTimer then
+    Timer:Close(self.nRefreshTypeTimer)
+  end
+  self.nRefreshTypeTimer = Timer:Register(1, function()
+    self.nRefreshTypeTimer = nil
+    self.rpc(self.nStallType, "RPC_GetAllItems", nSeType)
+  end)
+end
+
+function MarketStallYuanBao:ManualRefresh(nSeType)
+  local cost = self:GetManualRefreshCost()
+  if cost > me.GetMoney("YuanBao") then
+    me.CenterMsg(i18n.EasyGet("\229\133\131\229\174\157\228\184\141\232\182\179"))
+    return false
+  end
+  local nVipLevel = me.GetVipLevel()
+  if 1 ~= Vip.tbSetting[nVipLevel].nCanRefreshMarketStall then
+    return
+  end
+  self.rpc(self.nStallType, "RPC_UpdateAllStall", cost > 0, nSeType, true)
+  return true
+end
+
+function MarketStallYuanBao:AutoRefresh(nSeType)
+  if not self.nLastUpdateTime then
+    return
+  end
+  if self.nLastUpdateTime <= 0 then
+    return
+  end
+  local cost = self:GetManualRefreshCost()
+  if cost > 0 then
+    return
+  end
+  self.rpc(self.nStallType, "RPC_UpdateAllStall", false, nSeType, false)
+  return true
+end
+
+function MarketStallYuanBao:AllStallCancelSell()
+  if 0 == #self.tbMyItems then
+    return false, i18n.EasyGet("\230\154\130\230\151\160\229\143\175\228\184\139\230\158\182\229\149\134\229\147\129")
+  end
+  if me.GetFreeBagCount() < #self.tbMyItems then
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\229\176\134\232\190\190\229\136\176\228\184\138\233\153\144, \232\175\183\229\133\136\230\184\133\231\144\134\232\131\140\229\140\133"))
+    return false
+  end
+  local tbMyStallIdList = {}
+  for _, tbStallInfo in pairs(self.tbMyItems) do
+    table.insert(tbMyStallIdList, tbStallInfo.nStallId)
+    self.tbMgr.DelStallItem(tbStallInfo.nStallId)
+  end
+  self.rpc(self.nStallType, "RPC_AllCancelSellItem", tbMyStallIdList)
+  return true, i18n.EasyGet("\228\184\128\233\148\174\228\184\139\230\158\182\230\136\144\229\138\159")
+end
+
+function MarketStallYuanBao:IsStar(nDetailType)
+  local tbMarketStall = me.GetScriptTable("MarketStallYuanBao")
+  if not tbMarketStall.tbStars then
+    return
+  end
+  return tbMarketStall.tbStars and tbMarketStall.tbStars[nDetailType]
+end
+
+function MarketStallYuanBao:AddStar(nDetailType)
+  if not nDetailType then
+    return
+  end
+  local tbMarketStall = me.GetScriptTable("MarketStallYuanBao")
+  if tbMarketStall.nStarCount and tbMarketStall.nStarCount >= MarketStallBase.nMaxStarNum then
+    me.CenterMsg(i18n.EasyGet("\230\148\182\232\151\143\229\149\134\229\147\129\229\183\178\232\190\190\228\184\138\233\153\144"))
+    return
+  end
+  self.rpc(self.nStallType, "RPC_AddStar", nDetailType)
+  return true
+end
+
+function MarketStallYuanBao:DelStar(nDetailType)
+  if not nDetailType then
+    return
+  end
+  self.rpc(self.nStallType, "RPC_DelStar", nDetailType)
+  return true
+end
+
+function MarketStallYuanBao:OnGetItemList(nLastRefreshAllTime, nSeType, tbItems)
+  self.tbFetchedStallItems = tbItems
+  for _, tbPriceInfo in pairs(self.tbFetchedStallItems or {}) do
+    for _, tbInfo in pairs(tbPriceInfo) do
+      self.tbAllStall[tbInfo.nStallId] = tbInfo
+    end
+  end
+  self.nSeType = nSeType
+  self.nLastUpdateTime = nLastRefreshAllTime
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MS_YUANBAO_ITEM_LIST_CHANGE)
+end
+
+function MarketStallYuanBao:OnBuyItem(bResult, nStallItemTempId, nRes)
+  return self:OnBuyItemBase(bResult, nStallItemTempId, nRes)
+end
+
+function MarketStallYuanBao:OnUpdateItemList(nSeType, nStallItemTempId, tbItems)
+  self.tbFetchedStallItems = self.tbFetchedStallItems or {}
+  self.tbFetchedStallItems[nStallItemTempId] = self.tbFetchedStallItems[nStallItemTempId] or {}
+  local tbPriceInfo = self.tbFetchedStallItems[nStallItemTempId]
+  local tbNeedDel = {}
+  local minPrice
+  for nPrice, tb in pairs(tbPriceInfo) do
+    tb.bMinPrice = false
+    self.tbAllStall[tb.nStallId].bMinPrice = false
+    tb.nStallItemTempId = nStallItemTempId
+    if tbItems[nPrice] then
+      tb.nCount = tbItems[nPrice].nCount
+      tbItems[nPrice] = nil
+      if not minPrice then
+        minPrice = nPrice
+      elseif nPrice < minPrice then
+        minPrice = nPrice
+      end
+    else
+      tb.nCount = 0
+    end
+  end
+  if minPrice then
+    tbPriceInfo[minPrice].bMinPrice = true
+    local nStallId = tbPriceInfo[minPrice].nStallId
+    self.tbAllStall[nStallId].bMinPrice = true
+  end
+  for nPrice, tb in pairs(tbItems) do
+    tbPriceInfo[nPrice] = tb
+  end
+  if self.nSeType == nSeType then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_ITEM_CHANGE, true)
+  end
+end
+
+function MarketStallYuanBao:OnAddStar(nDetailType)
+  local tbMarketStall = me.GetScriptTable("MarketStallYuanBao")
+  tbMarketStall.tbStars = tbMarketStall.tbStars or {}
+  tbMarketStall.tbStars = tbMarketStall.tbStars or {}
+  tbMarketStall.tbStars[nDetailType] = 1
+  tbMarketStall.nStarCount = tbMarketStall.nStarCount + 1
+  me.CenterMsg(i18n.EasyGet("\229\183\178\229\133\179\230\179\168"))
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MARKET_ADD_STAR)
+end
+
+function MarketStallYuanBao:OnDelStar(nDetailType)
+  local tbMarketStall = me.GetScriptTable("MarketStallYuanBao")
+  if not tbMarketStall.tbStars then
+    return
+  end
+  tbMarketStall.tbStars[nDetailType] = nil
+  if not next(tbMarketStall.tbStars) then
+    tbMarketStall.tbStars = nil
+  end
+  tbMarketStall.nStarCount = tbMarketStall.nStarCount - 1
+  me.CenterMsg(i18n.EasyGet("\229\183\178\229\143\150\230\182\136\229\133\179\230\179\168"))
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MARKET_DEL_STAR)
+end
+
+function MarketStallYuanBao:OnSyncStar(tbStars)
+  local tbMarketStall = me.GetScriptTable("MarketStallYuanBao")
+  tbMarketStall.tbStars = tbStars
+  local nCount = 0
+  for nDetailType, _ in pairs(tbStars or {}) do
+    nCount = nCount + 1
+  end
+  tbMarketStall.nStarCount = nCount
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, MarketStallYuanBao)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, MarketStallYuanBao.ClearData, MarketStallYuanBao)

@@ -1,0 +1,140 @@
+local tbWnd = Ui:CreateClass("UIGoldBossOutputInfo", "UIPanel")
+tbWnd.tbControls = {
+  txtOutputTarget = "Info/txtOutputTarget"
+}
+local maxLine = 5
+
+function tbWnd:OnCreate()
+  self.tbOutputGroup = {}
+  for i = 1, maxLine do
+    local rootKey = "Info/OutputGroup/Output" .. i
+    self.pPanel:SetActive(rootKey, false)
+    table.insert(self.tbOutputGroup, {
+      rootKey,
+      rootKey .. "/OutputBar",
+      rootKey .. "/OutputDamage",
+      rootKey .. "/FamilyName"
+    })
+  end
+end
+
+function tbWnd:UpdateData()
+end
+
+function tbWnd:OnActivate(szActName)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_DATA, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_DATA, self.OnSyncData, self)
+  self:Init(szActName)
+end
+
+function tbWnd:OnDeactivate()
+  if self.nRefreshTimer then
+    Timer:Close(self.nRefreshTimer)
+    self.nRefreshTimer = nil
+  end
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_DATA, self)
+end
+
+function tbWnd:OnClose()
+  tbWnd:OnDeactivate()
+end
+
+function tbWnd:Init(szActName)
+  self:HideAllRank()
+  self.szActName = szActName or "WuLinGaoShouHelp"
+  self.tbAnims = {}
+  local szBossType = ""
+  if self.szActName == "WuLinGaoShouHelp" then
+    szBossType = string.format("WuLinGaoShou_%d", me.nMapTemplateId)
+  elseif self.szActName == "QinShiHuangLingHelp" then
+    szBossType = string.format("QinShiHuangLing_%d", me.nMapTemplateId)
+  elseif self.szActName == "KeYiMenHelp" then
+    szBossType = string.format("KeYiMen_%d", me.nMapTemplateId)
+  end
+  self:UpdateInfo(szBossType)
+  self:RefreshPanel()
+  if self.nRefreshTimer then
+    Timer:Close(self.nRefreshTimer)
+    self.nRefreshTimer = nil
+  end
+  self.nRefreshTimer = Timer:Register(Env.GAME_FPS * WuLinGaoShou.PANEL_REQUEST_RANK, self.RefreshPanel, self)
+end
+
+function tbWnd:HideAllRank()
+  for i = 1, maxLine do
+    self.pPanel:SetActive(self.tbOutputGroup[i][1], false)
+  end
+end
+
+function tbWnd:OnSyncData(szType)
+  self:UpdateInfo(szType)
+end
+
+function tbWnd:OnEnterMap(nTemplateMapId)
+  local isWuLinGaoShouMap = WuLinGaoShou:IsWuLinGaoShouMap(nTemplateMapId)
+  local isQinShiHuangLingMap = QinShiHuangLing:IsQinShiHuangLingMap(nTemplateMapId)
+  local isKeYiMenMap = KeYiMen.Com:IsKeYiMenMap(nTemplateMapId)
+  if not isWuLinGaoShouMap and not isQinShiHuangLingMap and not isKeYiMenMap then
+    self:Close()
+  end
+end
+
+function tbWnd:RefreshPanel()
+  if self.szActName == "WuLinGaoShouHelp" then
+    WuLinGaoShou:RequestWuLinGaoShouBossDmgRank()
+  elseif self.szActName == "QinShiHuangLingHelp" then
+    RemoteServer.RequestQinShiHuangLingDmgRank()
+  elseif self.szActName == "KeYiMenHelp" then
+    KeYiMen.C:RequestBossDmgRank()
+  end
+  return true
+end
+
+function tbWnd:UpdateInfo(szBossType)
+  local nMapTemplateId = me.nMapTemplateId
+  local tbSyncData
+  local nMaxKinCountForDisplay = 0
+  local WuLinGaoShouType = string.format("WuLinGaoShou_%d", nMapTemplateId)
+  local QinShiHuangLingType = string.format("QinShiHuangLing_%d", nMapTemplateId)
+  local KeYiMenType = string.format("KeYiMen_%d", nMapTemplateId)
+  tbSyncData = Player:GetServerSyncData(szBossType) or {}
+  if not tbSyncData then
+    return
+  end
+  if tbSyncData.TrapNpcTID == nil then
+    return
+  end
+  local nShowNpcID = tonumber(tbSyncData.TrapNpcTID)
+  if nShowNpcID > 0 then
+    local npcName = i18n.Parse(KNpc.GetNameByTemplateId(nShowNpcID))
+    if nil ~= npcName then
+      self.pPanel:Label_SetText(self.txtOutputTarget, i18n.EasyGet("\229\175\185<color=#FADD51>{0}</color>\231\154\132\228\188\164\229\174\179\232\190\147\229\135\186\230\142\146\229\144\141", npcName))
+    end
+  end
+  if szBossType == WuLinGaoShouType then
+    nMaxKinCountForDisplay = math.min(WuLinGaoShou.nMaxKinCountForDisplay, maxLine)
+  elseif szBossType == QinShiHuangLingType then
+    nMaxKinCountForDisplay = math.min(QinShiHuangLing.nMaxKinCountForDisplay, maxLine)
+  elseif szBossType == KeYiMenType then
+    nMaxKinCountForDisplay = math.min(KeYiMen.Def.nMaxKinCountForDisplay, maxLine)
+  end
+  for i = 1, nMaxKinCountForDisplay do
+    if self.tbOutputGroup[i] then
+      self.pPanel:SetActive(self.tbOutputGroup[i][1], false)
+      self.pPanel:Sprite_SetFill(self.tbOutputGroup[i][2], 0)
+      self.pPanel:Label_SetText(self.tbOutputGroup[i][3], "-")
+      self.pPanel:Label_SetText(self.tbOutputGroup[i][4], "-")
+    end
+  end
+  for nRank, tbInfo in ipairs(tbSyncData) do
+    local szKinOrTongName = tbInfo.szName
+    local nOutput = tbInfo.nHPPercent
+    if self.tbOutputGroup[nRank] and szKinOrTongName and nOutput and nOutput > 0 then
+      self.pPanel:SetActive(self.tbOutputGroup[nRank][1], true)
+      local nPercent = tbInfo.nHPPercent / 100
+      self.pPanel:Label_SetText(self.tbOutputGroup[nRank][3], string.format("%d%%", nOutput))
+      self.pPanel:Label_SetText(self.tbOutputGroup[nRank][4], szKinOrTongName)
+      self.pPanel:Sprite_SetFill(self.tbOutputGroup[nRank][2], nPercent)
+    end
+  end
+end

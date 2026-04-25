@@ -1,0 +1,101 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.ChildrensBook)
+local Protocol = {}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    LogErr("AchieveAwardC: ServerRequest failed, invalid Protocol = ", nProtocol)
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:OnOpen()
+  self:OnPlayerLogin()
+end
+
+function tbActivity:OnClientClose()
+  self.tbCacheData = nil
+end
+
+function tbActivity:OnPlayerLogin()
+end
+
+function tbActivity:GetRedPointEventId()
+  return {
+    self:GetRedPointEvent()
+  }
+end
+
+function tbActivity:GetRedPointEventList()
+  return self:GetRedPointEventId()
+end
+
+function tbActivity:GetRedPointEvent()
+  if not self.tbConfig.szRedPointEvent or Lib:IsEmptyStr(self.tbConfig.szRedPointEvent) or not RedPointMgr.EVENT[self.tbConfig.szRedPointEvent] then
+    return
+  end
+  return RedPointMgr.EVENT[self.tbConfig.szRedPointEvent]
+end
+
+function tbActivity:LoadSyncData(tbData)
+  self.tbCacheData = tbData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHILDRENSBOOK_SYNDATA)
+  self:CheckRedPoint()
+end
+
+function tbActivity:GetFinishNum(nDay, szTaskName)
+  if not self.tbCacheData then
+    return 0
+  end
+  if not self.tbCacheData.tbDailyTask[nDay] then
+    return 0
+  end
+  if not self.tbCacheData.tbDailyTask[nDay].tbTask[szTaskName] then
+    return 0
+  end
+  return self.tbCacheData.tbDailyTask[nDay].tbTask[szTaskName]
+end
+
+function tbActivity:GetTaskState(nDay)
+  if not self.tbCacheData then
+    return self.TaskLock
+  end
+  if not self.tbCacheData.tbDailyTask[nDay] then
+    return self.TaskLock
+  end
+  return self.tbCacheData.tbDailyTask[nDay].state
+end
+
+function tbActivity:GetAward(nDay)
+  ActivityMgr:CallServerScriptV2(self.nId, tbActivity.Protocol.GetChildrensBookAward, nDay)
+end
+
+function tbActivity:GetData()
+  return self.tbCacheData or {}
+end
+
+function tbActivity:GetNotHaveReceivedIndex()
+  for nIndex, tbValue in ipairs(self.tbCacheData.tbDailyTask) do
+    if tbValue.state ~= self.HaveReceived then
+      return nIndex
+    end
+  end
+  return 1
+end
+
+function tbActivity:CheckRedPoint()
+  local bShowRedPoint = false
+  for _, tbValue in pairs(self.tbCacheData.tbDailyTask) do
+    if tbValue.state == self.CanDraw then
+      bShowRedPoint = true
+      break
+    end
+  end
+  local nRedPoint = self:GetRedPointEventId()[1]
+  if bShowRedPoint and not RedPointMgr:CheckEvent(nRedPoint) then
+    RedPointMgr:LightRedPoint(nRedPoint)
+  end
+  if not bShowRedPoint and RedPointMgr:CheckEvent(nRedPoint) then
+    RedPointMgr:FadeRedPoint(nRedPoint)
+  end
+end

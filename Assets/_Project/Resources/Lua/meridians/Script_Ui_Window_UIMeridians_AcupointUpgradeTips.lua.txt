@@ -1,0 +1,306 @@
+local tbWnd = Ui:CreateWindow("UIMeridians_AcupointUpgradeTips")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.UpdateConsumeItemInfo,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_DEL_ITEM,
+      self.UpdateConsumeItemInfo,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_JINGMAI_XIULIAN,
+      self.UpdateView,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_JINGMAI_XIULIAN_SAVE,
+      self.UpdateView,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  btnClose = "node/imgBG/btnClose",
+  btnXiuLian = "node/imgBG/Content/btns/btnUpgrade",
+  btnSave = "node/imgBG/Content/btns/btnSave",
+  txtXiuLian = "node/imgBG/Content/btns/btnUpgrade/Text",
+  xuewei_ = "node/imgBG/Content/acupointList/xuewei_",
+  cost1 = "node/imgBG/Content/btns/cost1",
+  txtCost1 = "node/imgBG/Content/btns/cost1/txtCost",
+  btnAdd1 = "node/imgBG/Content/btns/cost1/btnAdd",
+  UIItemGrid1 = "node/imgBG/Content/btns/cost1/UIItemGrid",
+  cost2 = "node/imgBG/Content/btns/cost2",
+  txtCost2 = "node/imgBG/Content/btns/cost2/txtCost",
+  btnAdd2 = "node/imgBG/Content/btns/cost2/btnAdd",
+  UIItemGrid2 = "node/imgBG/Content/btns/cost2/UIItemGrid",
+  btnCheckAll = "node/imgBG/Content/btns/btnCheckAll",
+  AcupointQualityAttrTemplate = "wndAcupoint/imgBG/Scroll View/Viewport/Content/Template",
+  wndAcupoint = "wndAcupoint",
+  wndJumpTo = "wndJumpTo",
+  ObtainTemplate = "wndJumpTo/imgBG/List/Viewport/Content/Template"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OpenWindow("UIGeneralHelp", "JingMai")
+  end,
+  btnXiuLian = function(self)
+    if self.bXiuLianing then
+      return
+    end
+    
+    local function tbCallBack()
+      if self.bZiDongXiuLian then
+        self.bZiDongXiuLian = false
+      else
+        self.bZiDongXiuLian = true
+        local bRet = JingMai:C2SJMXiuLianXueWeiReqC(self.nJMIndex, self.nZTIndex, self.nGrade)
+        if 0 == bRet then
+          self.bZiDongXiuLian = false
+        end
+      end
+      self:SetBtnState()
+      self.bXiuLianing = true
+      Timer:Register(6, function()
+        self.bXiuLianing = false
+      end)
+    end
+    
+    if self.bCanSave then
+      local nLastTime = LocalData:GetRoleNumber("JingMai_Save", 0)
+      local bIsDiffDay = Lib:IsDiffDay(14400, nLastTime)
+      if not bIsDiffDay then
+        tbCallBack()
+      else
+        local function fnOk()
+          tbCallBack()
+        end
+        
+        Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\228\184\138\230\172\161\228\191\174\231\130\188\231\187\147\230\158\156\229\176\134\228\184\141\228\191\157\231\149\153\239\188\140\230\152\175\229\144\166\231\187\167\231\187\173\228\191\174\231\130\188\239\188\159"), {
+          {fnOk},
+          {}
+        }, nil, "JingMaiSave")
+      end
+    else
+      tbCallBack()
+    end
+  end,
+  btnSave = function(self)
+    if self.bXiuLianing then
+      return
+    end
+    JingMai:C2SJMSaveXiuLianXueWeiReqC(self.nJMIndex, self.nZTIndex, self.nGrade)
+    self.bXiuLianing = true
+    Timer:Register(6, function()
+      self.bXiuLianing = false
+    end)
+  end,
+  btnCheckAll = function(self)
+    self:OnShowXueWeiAllQualityAttr()
+  end,
+  btnAdd1 = function(self)
+    Shop:OpenShopBuyWid(JingMai.nMaiQiDanItemId, true)
+  end,
+  btnAdd2 = function(self)
+    self:UpdateObtainSV(JingMai.tbYinZhenObtainExplain)
+  end
+}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose(tbControls.wndJumpTo)
+  self:SetClickEmptyToClose(tbControls.wndAcupoint)
+  self.tbConsumeItemGrid1 = Ui:NewExistItemGrid(self, tbControls.UIItemGrid1)
+  self.tbConsumeItemGrid1:SetClickEnable(true)
+  self.tbConsumeItemGrid2 = Ui:NewExistItemGrid(self, tbControls.UIItemGrid2)
+  self.tbConsumeItemGrid2:SetClickEnable(true)
+  self.tbAcupointQualityAttrSV = Ui:NewScrollView(self, tbControls.AcupointQualityAttrTemplate)
+  self.tbObtainScrollView = Ui:NewScrollView(self, tbControls.ObtainTemplate)
+  self.bZiDongXiuLian = false
+end
+
+function tbWnd:OnDestroy()
+end
+
+function tbWnd:OnOpen(nJMIndex, nXWIndex, nGrade)
+  self.nJMIndex = nJMIndex
+  self.nXWIndex = nXWIndex
+  self.nGrade = nGrade
+  self:UpdateView()
+end
+
+function tbWnd:OnClose()
+  if self.bZiDongXiuLian then
+    self.bZiDongXiuLian = false
+    me.CenterMsg(i18n.EasyGet("\232\135\170\229\138\168\228\191\174\231\130\188\229\183\178\230\154\130\229\129\156"))
+  end
+end
+
+function tbWnd:UpdateView()
+  local nZTIndex = JingMai:DoXWIndex2ZTIndex(self.nXWIndex)
+  self.nZTIndex = nZTIndex
+  local nRandomQuality = JingMai:GetZhouTianRandomQuality(me, self.nJMIndex, nZTIndex, self.nGrade)
+  self.bCanSave = false
+  local bMustSave = true
+  for i = 1, JingMai.nZhouTianNeedXueWei do
+    local nXWIndex = (nZTIndex - 1) * JingMai.nZhouTianNeedXueWei + i
+    local szXWName = JingMai:GetXueWeiName(self.nJMIndex, nXWIndex)
+    self.pPanel:Label_SetText(tbControls.xuewei_ .. i .. "/txtAcupointName", szXWName)
+    local nAttrId = JingMai:GetXueWeiAttrID(self.nJMIndex, nXWIndex)
+    local tbAttrCfg = JingMai.tbJMAttrCfg[nAttrId]
+    local tbAttrValue = JingMai:GetXueWeiAttrValue(me, self.nJMIndex, nXWIndex, self.nGrade)
+    local nXWQuality = JingMai:GetXueWeiQuality(me, self.nJMIndex, nXWIndex, self.nGrade)
+    local szAttribMsg, szValue = FightSkill:GetMagicDescSplit(tbAttrCfg[nXWQuality].szAttrType, tbAttrValue)
+    self.pPanel:Label_SetText(tbControls.xuewei_ .. i .. "/txtAttrib", szAttribMsg)
+    self.pPanel:Label_SetText(tbControls.xuewei_ .. i .. "/txtAttribValueBefore", szValue)
+    self.pPanel:Label_SetColorByName(tbControls.xuewei_ .. i .. "/txtAttribValueBefore", JingMai:GetQualityName(nXWQuality))
+    local nMinValue, nMaxValue = JingMai:GetXueWeiAttrValueRange(self.nJMIndex, nXWIndex)
+    local nCompareIndex = JingMai.tbAttrId2CompareIndex[nAttrId] or 1
+    if nMaxValue == tbAttrValue[nCompareIndex] then
+    else
+    end
+    local szAttrNextPath = tbControls.xuewei_ .. i .. "/after/txtAttribValueAfter"
+    local szAttrChangePath = tbControls.xuewei_ .. i .. "/after/txtAttribValueChange"
+    self.pPanel:Label_SetText(tbControls.xuewei_ .. i .. "/txtAttribValueRange", i18n.EasyGet("\239\188\136\228\191\174\231\130\188\229\140\186\233\151\180{0} ~ {1}\239\188\137", nMinValue, nMaxValue))
+    if nRandomQuality > 0 then
+      local tbRDAttr = JingMai:GetXueWeiRandomAttrValue(me, self.nJMIndex, nXWIndex, self.nGrade)
+      local _, szRDValue = FightSkill:GetMagicDescSplit(tbAttrCfg[nRandomQuality].szAttrType, tbRDAttr)
+      self.pPanel:Label_SetText(szAttrNextPath, szRDValue)
+      self.pPanel:Label_SetColorByName(szAttrNextPath, JingMai:GetQualityName(nRandomQuality))
+      local szSubValue = FightSkill:StringValueSubResult(szValue, szRDValue)
+      self.pPanel:Label_SetText(szAttrChangePath, szSubValue)
+      if tbRDAttr[nCompareIndex] > tbAttrValue[nCompareIndex] then
+        self.pPanel:Label_SetColorByName(szAttrChangePath, "Enough")
+        self.bCanSave = true
+        self.bZiDongXiuLian = false
+      else
+        self.pPanel:Label_SetColorByName(szAttrChangePath, "NotEnough")
+        bMustSave = false
+      end
+    else
+      self.pPanel:Label_SetText(szAttrNextPath, "")
+      self.pPanel:Label_SetText(szAttrChangePath, "")
+    end
+  end
+  if self.bCanSave then
+    self.pPanel:SetActive(tbControls.btnSave, true)
+    self.bZiDongXiuLian = false
+    self.pPanel:SetActive(tbControls.btnXiuLian, false)
+    if not bMustSave then
+      Timer:Register(Env.GAME_FPS, function()
+        self.pPanel:SetActive(tbControls.btnXiuLian, true)
+      end)
+    else
+    end
+  else
+    self.pPanel:SetActive(tbControls.btnSave, false)
+    self.pPanel:SetActive(tbControls.btnXiuLian, true)
+  end
+  self:SetBtnState()
+  self:UpdateConsumeItemInfo()
+  if self.bZiDongXiuLian then
+    local bRet = JingMai:C2SJMXiuLianXueWeiReqC(self.nJMIndex, self.nZTIndex, self.nGrade)
+    if 0 == bRet then
+      self.bZiDongXiuLian = false
+      self:SetBtnState()
+    end
+  end
+end
+
+function tbWnd:UpdateConsumeItemInfo()
+  local nZTIndex = self.nZTIndex
+  local nNeedJMZhenQi = JingMai.JMZTXWXiuLianInfo[self.nJMIndex][nZTIndex][1]
+  local nNeedItemId = JingMai.JMZTXWXiuLianInfo[self.nJMIndex][nZTIndex][2]
+  local nNeedItemNum = JingMai.JMZTXWXiuLianInfo[self.nJMIndex][nZTIndex][3]
+  local nHadMaiQi = JingMai:GetMaiQiValue(me)
+  if nNeedJMZhenQi <= nHadMaiQi then
+    self.pPanel:Label_SetColorByName(tbControls.txtCost1, "Enough")
+  else
+    self.pPanel:Label_SetColorByName(tbControls.txtCost1, "NotEnough")
+  end
+  self.pPanel:Label_SetText(tbControls.txtCost1, string.format("%s/%s", nHadMaiQi, nNeedJMZhenQi))
+  self.tbConsumeItemGrid1:SetItemByTemplate(JingMai.nMaiQiItemId)
+  self.tbConsumeItemGrid2:SetItemByTemplate(nNeedItemId)
+  local nCurNum = me.GetItemCountByTypeInBag(nNeedItemId)
+  if nNeedItemNum <= nCurNum then
+    self.pPanel:Label_SetColorByName(tbControls.txtCost2, "Enough")
+  else
+    self.pPanel:Label_SetColorByName(tbControls.txtCost2, "NotEnough")
+  end
+  self.pPanel:Label_SetText(tbControls.txtCost2, string.format("%s/%s", nCurNum, nNeedItemNum))
+end
+
+function tbWnd:OnShowXueWeiAllQualityAttr()
+  self.pPanel:SetActive(tbControls.wndAcupoint, true)
+  local nAttrId = JingMai:GetXueWeiAttrID(self.nJMIndex, self.nXWIndex)
+  local tbAttrCfg = JingMai.tbJMAttrCfg[nAttrId]
+  local nCompareIndex = JingMai.tbAttrId2CompareIndex[nAttrId] or 1
+  for nQuality = 1, #JingMai.QualityInfo do
+    self.tbAcupointQualityAttrSV:SetElement(nQuality, function(tbElement, nIndex)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtName", i18n.EasyGet(JingMai.QualityInfo[nQuality].szName))
+      local szColorName = JingMai:GetQualityName(nQuality)
+      pPanel:Label_SetColorByName("txtName", szColorName)
+      local nMinValue = tbAttrCfg[nQuality][nCompareIndex][1]
+      local nMaxValue = tbAttrCfg[nQuality][nCompareIndex][2]
+      local szAttribMsg, _ = FightSkill:GetMagicDescSplit(tbAttrCfg[1].szAttrType, {
+        1,
+        1,
+        1
+      })
+      pPanel:Label_SetText("txtInfo01", szAttribMsg)
+      pPanel:Label_SetText("txtInfo02", i18n.EasyGet("(+{0} ~ +{1})", nMinValue, nMaxValue))
+      pPanel:Label_SetColorByName("txtInfo02", szColorName)
+    end)
+  end
+end
+
+function tbWnd:UpdateObtainSV(tbData)
+  self.pPanel:SetActive(tbControls.wndJumpTo, true)
+  
+  local function fnSetItem(tbValue, tbElement)
+    local pPanel = tbElement.pPanel
+    pPanel:Label_SetText("txtName", tbValue.szTitle())
+    pPanel:Label_SetText("txtDesc", tbValue.szDesc())
+    if tbValue.funcObtain then
+      pPanel:SetActive("imgArrow", true)
+      Ui:Button_BindEvent(pPanel, "Main", function()
+        self.pPanel:SetActive(tbControls.wndJumpTo, false)
+        if tbData.szType == "HuMaiFuOb" then
+          local nTemplateId = JingMai.JMHuMaiId[self.nZTIndex][1]
+          tbValue.funcObtain(nTemplateId)
+        elseif tbData.szType == "YinZhenOb" then
+          tbValue.funcObtain()
+        else
+          tbValue.funcObtain()
+        end
+      end)
+    else
+      pPanel:SetActive("imgArrow", false)
+    end
+  end
+  
+  self.tbObtainScrollView:Reset()
+  for i, tbValue in ipairs(tbData) do
+    self.tbObtainScrollView:SetElement(i, function(tbElement)
+      fnSetItem(tbValue, tbElement)
+    end)
+  end
+end
+
+function tbWnd:SetBtnState()
+  if not self.bZiDongXiuLian then
+    self.pPanel:Label_SetText(tbControls.txtXiuLian, i18n.EasyGet("\232\135\170\229\138\168\228\191\174\231\130\188"))
+  else
+    self.pPanel:Label_SetText(tbControls.txtXiuLian, i18n.EasyGet("\229\129\156\230\173\162\228\191\174\231\130\188"))
+  end
+end

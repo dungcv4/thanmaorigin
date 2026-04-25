@@ -1,0 +1,181 @@
+local tbWnd = Ui:CreateWindow("UIKinRedBagOpen")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_ROLE_STAY_INFO,
+      self.onSyncRoleInfo
+    }
+  }
+end
+
+local tbControls = {
+  Open = "Open",
+  OpentxtName = "Open/img_redbagopen02_Mask/Content/txtName1",
+  OpenPortraitObj = "Open/img_redbagopen02_Mask/Content/PortraitObj",
+  OpentxtContent = "Open/img_redbagopen02_Mask/Content/PanelContent1/txtContent",
+  OpentxtGetMoney = "Open/img_redbagopen02_Mask/Content/PanelGetMoney/txtGetMoney",
+  OpentxtReceiveDetail = "Open/img_redbagopen02_Mask/Content/PanelReceiveDetail/txtReceiveDetail",
+  OpenScrollView = "Open/img_redbagopen02_Mask/Content/PanelReceiveDetail/ScrollView",
+  OpentxtNoMoney = "Open/img_redbagopen02_Mask/Content/txtNoMoney",
+  ReceiveScrollViewTemplate = "Open/img_redbagopen02_Mask/Content/PanelReceiveDetail/ScrollView/ViewPort/List/Template",
+  Unopen = "Unopened",
+  UnopentxtName = "Unopened/Content/txtName2",
+  UnopenPortraitObj = "Unopened/Content/PortraitObj",
+  UnopentxtContent = "Unopened/Content/PanelContent2/txtContent",
+  UnopenBtnOpen = "Unopened/Content/BtnOpen",
+  btnCloseAnimation = "btnCloseAnimation"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbBuilding2Txt = {}
+tbWnd.tbMemberSortFunc = {}
+tbWnd.tbOnClick = {
+  UnopenBtnOpen = function(self)
+    self:ConfirmClick()
+  end,
+  btnCloseAnimation = function(self)
+    self.pPanel:SetActive(tbWnd.btnCloseAnimation, false)
+    local Animator = self.pPanel:GetAnimator("")
+    Animator:Update(Env.GAME_FPS * 1)
+  end
+}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.ReceiveScrollView = Ui:NewScrollView(self, tbControls.ReceiveScrollViewTemplate)
+end
+
+function tbWnd:OnOpen(tbRedPacketC)
+  self.tbRedPacketC = tbRedPacketC
+  self.nSessionForUnOpen = nil
+  self.tbRoleListForUnOpen = nil
+  self.nSessionForOpen = nil
+  self.tbRoleListForOpen = nil
+  local bCanOpen = self.tbRedPacketC:CanOpen()
+  self.pPanel:SetActive(self.btnCloseAnimation, true)
+  if bCanOpen then
+    local Animator = self.pPanel:GetAnimator("")
+    Animator:Play("UIKinRedBagOpenGold")
+    self:refreshUnOpen()
+    self:ConfirmClick()
+  else
+    self:refreshOpen()
+  end
+end
+
+function tbWnd:InitHead(pGrid, tbData)
+  if tbData and tbData.nLevel then
+    local tbPortraitObjPanel = Ui:NewExistPortraitObjPanel(self, pGrid)
+    tbPortraitObjPanel:SetRoleIcon(tbData.nPortrait)
+    tbPortraitObjPanel:SetFactionIcon(tbData.nFaction)
+    tbPortraitObjPanel:SetLevel(tbData.nLevel)
+  end
+end
+
+function tbWnd:RedBagOpen(isOpen)
+end
+
+function tbWnd:refreshUnOpen(szId)
+  local nOwner = self.tbRedPacketC.nOwner
+  if not self.tbRoleListForUnOpen then
+    local bAllHit, nSession, tbRoleInfoList = Player.RoleInfoCache:GetCache({nOwner})
+    if not bAllHit then
+      self.nSessionForUnOpen = nSession
+      self:Close()
+      return
+    end
+    self.tbRoleListForUnOpen = tbRoleInfoList
+  end
+  local tbRoleInfo = self.tbRoleListForUnOpen[nOwner]
+  self:InitHead(tbControls.UnopenPortraitObj, tbRoleInfo)
+  self.pPanel:Label_SetText(tbControls.UnopentxtName, i18n.EasyGet("{0}\231\154\132\231\186\162\229\140\133", tbRoleInfo.szName))
+  self.pPanel:Label_SetText(tbControls.UnopentxtContent, i18n.Parse(self.tbRedPacketC:GetDesc()))
+end
+
+function tbWnd:refreshOpen()
+  if not self.tbRoleListForOpen then
+    local tbPlayerIdList = {}
+    table.insert(tbPlayerIdList, self.tbRedPacketC.nOwner)
+    for _, tbRecord in ipairs(self.tbRedPacketC.tbRecord) do
+      table.insert(tbPlayerIdList, tbRecord.nId)
+    end
+    local bAllHit, nSession, tbRoleInfoList = Player.RoleInfoCache:GetCache(tbPlayerIdList)
+    if not bAllHit then
+      self.nSessionForOpen = nSession
+    end
+    self.tbRoleListForOpen = tbRoleInfoList
+  end
+  local nOwner = self.tbRedPacketC.nOwner
+  local tbRoleInfo = self.tbRoleListForOpen[nOwner]
+  self:InitHead(tbControls.OpenPortraitObj, tbRoleInfo)
+  if tbRoleInfo and tbRoleInfo.szName then
+    self.pPanel:Label_SetText(tbControls.OpentxtName, i18n.EasyGet("{0}\231\154\132\231\186\162\229\140\133", tbRoleInfo.szName))
+  else
+    self.pPanel:Label_SetText(tbControls.OpentxtName, i18n.EasyGet("\229\138\160\232\189\189\228\184\173\231\154\132\231\186\162\229\140\133..."))
+  end
+  self.pPanel:Label_SetText(tbControls.OpentxtContent, i18n.Parse(self.tbRedPacketC:GetDesc()))
+  local nAmount = 0
+  self.tbRedPacketC.tbRecord = self.tbRedPacketC.tbRecord or {}
+  for _, tbReceiver in pairs(self.tbRedPacketC.tbRecord) do
+    if tbReceiver.nId == me.dwID then
+      nAmount = tbReceiver.nAmount
+      break
+    end
+  end
+  if 0 == nAmount then
+    self.pPanel:Label_SetText(tbControls.OpentxtGetMoney, i18n.EasyGet("\230\156\170\230\138\162\229\136\176"))
+  else
+    self.pPanel:Label_SetText(tbControls.OpentxtGetMoney, nAmount)
+  end
+  self.tbRedPacketC.nMaxReceiver = self.tbRedPacketC.nMaxReceiver or 0
+  local receiveInfo = i18n.EasyGet("\229\183\178\233\162\134\229\143\150{0}/{1},\229\133\177{2}", #self.tbRedPacketC.tbRecord, self.tbRedPacketC.nCount, self.tbRedPacketC.nAmount)
+  self.pPanel:Label_SetText(tbControls.OpentxtReceiveDetail, receiveInfo)
+  local bEmpty = #self.tbRedPacketC.tbRecord >= self.tbRedPacketC.nCount
+  if bEmpty then
+    table.sort(self.tbRedPacketC.tbRecord, function(a, b)
+      return a.nAmount > b.nAmount
+    end)
+  end
+  self.ReceiveScrollView:Clear()
+  for i = 1, #self.tbRedPacketC.tbRecord do
+    local tbReceiver = self.tbRedPacketC.tbRecord[i]
+    local tbRoleInfo = self.tbRoleListForOpen[tbReceiver.nId]
+    self.ReceiveScrollView:SetElement(i, function(tbElement)
+      if 1 == i and self.tbRedPacketC.nType == RedPacketMgr.TYPE.RANDOM_AMOUNT and bEmpty then
+        tbElement.pPanel:Label_SetText("txtBest", i18n.EasyGet("\230\137\139\230\176\148\230\156\128\228\189\179"))
+        tbElement.pPanel:SetActive("txtBest", true)
+      else
+        tbElement.pPanel:SetActive("txtBest", false)
+      end
+      if tbRoleInfo and tbRoleInfo.szName then
+        tbElement.pPanel:Label_SetText("txtName", tbRoleInfo.szName)
+      else
+        tbElement.pPanel:Label_SetText("txtName", i18n.EasyGet("\229\138\160\232\189\189\228\184\173..."))
+      end
+      tbElement.pPanel:Label_SetText("txtMoney", tbReceiver.nAmount)
+      local szHeadPath = string.format("Open/img_redbagopen02_Mask/Content/PanelReceiveDetail/ScrollView/ViewPort/List/Element%d/PortraitObj", i)
+      self:InitHead(szHeadPath, tbRoleInfo)
+    end)
+  end
+end
+
+function tbWnd:onSyncRoleInfo(nSession, tbRoleInfoList)
+  local bCanOpen = self.tbRedPacketC:CanOpen()
+  if bCanOpen then
+    if nSession == self.nSessionForUnOpen then
+      self.nSessionForUnOpen = nil
+      self.tbRoleListForUnOpen = tbRoleInfoList
+      self:refreshUnOpen()
+    end
+  elseif nSession == self.nSessionForOpen then
+    self.nSessionForOpen = nil
+    self.tbRoleListForOpen = tbRoleInfoList
+    Ui:OpenWindow("UIKinRedBagOpen", self.tbRedPacketC, "Open")
+  end
+end
+
+function tbWnd:ConfirmClick()
+  if self.tbRedPacketC:CanOpen() then
+    RedPacketMgr:OpenRedPacket(self.tbRedPacketC.nId)
+  end
+end

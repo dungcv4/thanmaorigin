@@ -1,0 +1,248 @@
+local tbWnd = Ui:CreateWindow("UIDungeonResult")
+tbWnd.tbControls = {
+  btnClose = "imgBG/btnClose",
+  txtCountdown = "imgBG/btnClose/Countdown",
+  txtFinishTime = "imgBG/EvaluateInfo/Info/FinishTime/Text",
+  txtFinishScore = "imgBG/EvaluateInfo/Info/FinishScore/Text",
+  imgLevel = "imgBG/EvaluateInfo/RankProgress/imgLevel",
+  txtMoney = "imgBG/HarvestInfo/Money/txtMoney",
+  txtExp = "imgBG/HarvestInfo/Exp/txtExp",
+  FriendInformationGroup = "imgBG/FriendInformationGroup",
+  FriendInfor = "imgBG/FriendInformationGroup/FriendInformation%d",
+  txtNoFriend = "imgBG/txtNoFriend",
+  ItemTemplate = "imgBG/HarvestInfo/ItemList/ItemTemplate",
+  ScoreTips = "imgBG/EvaluateInfo/ScoreTips",
+  btnFriend1 = "imgBG/FriendInformationGroup/FriendInformation1/Friend/btn",
+  btnFriend2 = "imgBG/FriendInformationGroup/FriendInformation2/Friend/btn",
+  btnFriend3 = "imgBG/FriendInformationGroup/FriendInformation3/Friend/btn",
+  btnKin1 = "imgBG/FriendInformationGroup/FriendInformation1/Kin/btn",
+  btnKin2 = "imgBG/FriendInformationGroup/FriendInformation2/Kin/btn",
+  btnKin3 = "imgBG/FriendInformationGroup/FriendInformation3/Kin/btn"
+}
+tbWnd.nTeamMateNum = 3
+tbWnd.tbLevelToPath = {
+  [1] = "imgBG/Rank/Grade/SSS",
+  [2] = "imgBG/Rank/Grade/SS",
+  [3] = "imgBG/Rank/Grade/S",
+  [4] = "imgBG/Rank/Grade/A",
+  [5] = "imgBG/Rank/Grade/B",
+  [6] = "imgBG/Rank/Grade/C"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnFriend1 = function(self)
+    self:OnclickFriendBtn(1)
+  end,
+  btnFriend2 = function(self)
+    self:OnclickFriendBtn(2)
+  end,
+  btnFriend3 = function(self)
+    self:OnclickFriendBtn(3)
+  end,
+  btnKin1 = function(self)
+    self:OnclickKinBtn(1)
+  end,
+  btnKin2 = function(self)
+    self:OnclickKinBtn(2)
+  end,
+  btnKin3 = function(self)
+    self:OnclickKinBtn(3)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbItemView = Ui:NewScrollView(self, self.ItemTemplate)
+end
+
+function tbWnd:OnOpen(tbDungeonData, tbTeamData, tbPlayerAward, tbScoreInfo)
+  self.nScore = tbScoreInfo.nTotalScore or 0
+  self.tbMember = {}
+  for nIdx, tbMemberInfo in pairs(tbTeamData) do
+    if tbMemberInfo.dwPlayerId ~= me.dwID then
+      table.insert(self.tbMember, tbMemberInfo)
+    end
+  end
+  self.nCostTime = tbDungeonData.nCostTime or 0
+  self.tbPlayerAward = tbPlayerAward or {}
+  self.tbAddAward = {}
+  self.tbScoreInfo = tbScoreInfo
+  self.bIsShowScoreInfo = true
+  self.szCurType = nil
+  self:UpdateTeamMemberInfo()
+  self:UpdateScore()
+  self.nCloseTime = 15
+  self.nCloseTimer = Timer:Register(Env.GAME_FPS, self.SetCloseBtn, self)
+  self.tbItemView:PlayItemGridAnimation()
+end
+
+function tbWnd:OnClose()
+  if self.nCloseTimer then
+    Timer:Close(self.nCloseTimer)
+    self.nCloseTimer = nil
+  end
+end
+
+function tbWnd:UpdateTeamMemberInfo()
+  local bHaveMember = false
+  local tbTeamScore = self.tbScoreInfo.tbTeamScore or {}
+  for i = 1, self.nTeamMateNum do
+    local szKeyMember = string.format(self.FriendInfor, i)
+    if self.tbMember[i] then
+      self.pPanel:SetActive(szKeyMember, true)
+      local tbPortraitObjPanel = Ui:NewExistPortraitObjPanel(self, szKeyMember .. "/Head/PortraitObj")
+      tbPortraitObjPanel:SetRoleIcon(self.tbMember[i].nPortrait)
+      tbPortraitObjPanel:SetFactionIcon(self.tbMember[i].nFaction)
+      tbPortraitObjPanel:SetLevel(self.tbMember[i].nLevel)
+      self.pPanel:Label_SetText(szKeyMember .. "/Head/txtName", self.tbMember[i].szName)
+      local nAddFriendScore = tbTeamScore[self.tbMember[i].dwPlayerId] and tbTeamScore[self.tbMember[i].dwPlayerId].nAddFriendScore or 0
+      local nAddKinScore = tbTeamScore[self.tbMember[i].dwPlayerId] and tbTeamScore[self.tbMember[i].dwPlayerId].nAddKinScore or 0
+      local bIsFriend = nAddFriendScore > 0
+      self.pPanel:SetActive(szKeyMember .. "/Friend/btn", not bIsFriend)
+      self.pPanel:SetActive(szKeyMember .. "/Friend/txtAddScore", bIsFriend)
+      local szBtnTxt, bEnable = self:GetKinBtnShowInfo(self.tbMember[i].dwKinId)
+      local bIsSameKin = nAddKinScore > 0
+      if bIsSameKin then
+        self.pPanel:SetActive(szKeyMember .. "/Kin/btn", false)
+        self.pPanel:SetActive(szKeyMember .. "/Kin/txtAddScore", true)
+      else
+        self.pPanel:SetActive(szKeyMember .. "/Kin/btn", true)
+        self.pPanel:Button_SetEnable(szKeyMember .. "/Kin/btn", bEnable)
+        self.pPanel:Label_SetText(szKeyMember .. "/Kin/btn/Text", szBtnTxt)
+        self.pPanel:SetActive(szKeyMember .. "/Kin/txtAddScore", false)
+      end
+      self.pPanel:Label_SetText(szKeyMember .. "/Friend/txtAddScore/Text", "+" .. nAddFriendScore)
+      self.pPanel:Label_SetText(szKeyMember .. "/Kin/txtAddScore/Text", "+" .. nAddKinScore)
+      bHaveMember = true
+    else
+      self.pPanel:SetActive(szKeyMember, false)
+    end
+  end
+  self.pPanel:SetActive(self.txtNoFriend, not bHaveMember)
+end
+
+function tbWnd:UpdateScore()
+  local nMin = math.floor(self.nCostTime / 60)
+  local nSec = math.floor(self.nCostTime % 60)
+  self.pPanel:Label_SetText(self.txtFinishTime, string.format("%02d:%02d", nMin, nSec))
+  self.pPanel:Label_SetText(self.txtFinishScore, tostring(self.tbScoreInfo.nTotalScore or 0))
+  self.pPanel:Sprite_SetFillAmount(self.imgLevel, 0, self.tbScoreInfo.nTotalScore / Dungeon.tbGradeLevel[1].nScore, 1, true)
+  local tbGrade, tbNextGrade = Dungeon:GetGradeInfo(self.nScore)
+  if not self.szCurType or self.szCurType ~= tbGrade.szGrade then
+    self:SetGradeLevel(tbGrade.nLevel)
+  end
+  self.szCurType = tbGrade.szGrade
+  local szMsg
+  if tbNextGrade then
+    szMsg = i18n.EasyGet("\230\156\172\230\172\161\229\190\151\229\136\134{0}\239\188\140\229\183\174{1}\229\136\134\229\143\175\230\143\144\229\141\135\229\165\150\229\138\177\231\173\137\231\186\167", self.nScore, tbNextGrade.nScore - self.nScore)
+  else
+    szMsg = i18n.EasyGet("\229\189\147\229\137\141\229\183\178\230\152\175\230\156\128\233\171\152\229\165\150\229\138\177\231\173\137\231\186\167")
+  end
+  self.pPanel:Label_SetText(self.ScoreTips, szMsg)
+  local nExpCount = 0
+  local nCoinCount = 0
+  for _, tbInfo in pairs(self.tbPlayerAward or {}) do
+    if Player.AwardType[tbInfo[1]] == Player.award_type_exp then
+      nExpCount = nExpCount + tbInfo[2]
+    elseif "Coin" == tbInfo[1] then
+      nCoinCount = nCoinCount + tbInfo[2]
+    elseif Player.AwardType[tbInfo[1]] == Player.award_type_basicExp then
+      nExpCount = nExpCount + me.GetBaseAwardExp() * tbInfo[2]
+    else
+      table.insert(self.tbAddAward, tbInfo)
+    end
+  end
+  self.pPanel:Label_SetText(self.txtExp, "+" .. nExpCount)
+  self.pPanel:Label_SetText(self.txtMoney, "+" .. nCoinCount)
+  self:UpdatePlayerAward()
+end
+
+function tbWnd:SetGradeLevel(nLevel)
+  for _, tbData in pairs(Dungeon.tbGradeLevel) do
+    local nTemplateLevel = tbData.nLevel
+    if nTemplateLevel == nLevel then
+      self.pPanel:Label_SetText(self.tbLevelToPath[nTemplateLevel], i18n.Parse(Dungeon.tbGradeLevel[nTemplateLevel].szGrade))
+      self.pPanel:SetActive(self.tbLevelToPath[nTemplateLevel], true)
+    else
+      self.pPanel:SetActive(self.tbLevelToPath[nTemplateLevel], false)
+    end
+  end
+end
+
+function tbWnd:UpdatePlayerAward()
+  self.tbItemView:ResetFrom(#self.tbAddAward)
+  for i, tbAward in ipairs(self.tbAddAward) do
+    self.tbItemView:SetElement(i, function(tbElement)
+      local tbItemGrid = tbElement.tbItemGrid
+      if not tbItemGrid then
+        tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbItemGrid:SetClickEnable(true)
+      end
+      tbElement.pPanel:SetActive("Effect/Quality1", false)
+      tbElement.pPanel:SetActive("Effect/Quality2", false)
+      local szType = tbAward[1]
+      if szType == Player.AwardType2Name[Player.award_type_item] or szType == Player.AwardType2Name[Player.award_type_item_Unsafe] or szType == Player.AwardType2Name[Player.award_type_itemshow] then
+        local szName, nIcon, nView, nQuality = KItem.GetItemShowInfo(tbAward[2], me.nFaction, me.nFactionSect)
+        if nQuality >= 6 then
+          tbElement.pPanel:SetActive("Effect/Quality2", true)
+        elseif nQuality >= 4 then
+          tbElement.pPanel:SetActive("Effect/Quality1", true)
+        end
+        tbItemGrid:SetItemByTemplate(tbAward[2], tbAward[3])
+      else
+        tbItemGrid:SetDigitalItem(szType, tbAward[2])
+      end
+    end)
+  end
+  self.tbItemView:PlayItemGridAnimation()
+end
+
+function tbWnd:GetKinBtnShowInfo(nMemberKinId)
+  if me.dwKinId <= 0 then
+    if nMemberKinId <= 0 then
+      return i18n.EasyGet("\229\175\185\230\150\185\230\151\160\229\174\182\230\151\143"), false
+    else
+      return i18n.EasyGet("\229\138\160\229\133\165\229\174\182\230\151\143"), true
+    end
+  elseif nMemberKinId <= 0 then
+    return i18n.EasyGet("\233\130\128\232\175\183\229\174\182\230\151\143"), true
+  elseif nMemberKinId ~= me.dwKinId then
+    return i18n.EasyGet("\229\183\178\230\156\137\229\174\182\230\151\143"), false
+  else
+    return "", false
+  end
+end
+
+function tbWnd:SetCloseBtn()
+  self.nCloseTime = self.nCloseTime - 1
+  if 0 == self.nCloseTime then
+    self.nCloseTimer = nil
+    self:Close()
+    return
+  end
+  self.pPanel:Label_SetText(self.txtCountdown, i18n.EasyGet("({0})", self.nCloseTime))
+  return true
+end
+
+function tbWnd:OnclickFriendBtn(nIdx)
+  if self.tbMember[nIdx] then
+    FriendShip:RequestAddFriend(self.tbMember[nIdx].dwPlayerId)
+    self.pPanel:Button_SetEnable(self["btnFriend" .. nIdx], false)
+    self.pPanel:Button_SetText(self["btnFriend" .. nIdx], i18n.EasyGet("\229\183\178\231\148\179\232\175\183"), "Text")
+  end
+end
+
+function tbWnd:OnclickKinBtn(nIdx)
+  if self.tbMember[nIdx] then
+    local dwKinId = self.tbMember[nIdx].dwKinId
+    if dwKinId > 0 and me.dwKinId <= 0 then
+      RemoteServer.OnKinRequest("Apply", dwKinId)
+      self.pPanel:Button_SetText(self["btnKin" .. nIdx], i18n.EasyGet("\229\183\178\231\148\179\232\175\183"), "Text")
+    elseif dwKinId <= 0 and me.dwKinId > 0 then
+      Kin:Invite(self.tbMember[nIdx].dwPlayerId)
+      self.pPanel:Button_SetText(self["btnKin" .. nIdx], i18n.EasyGet("\229\183\178\233\130\128\232\175\183"), "Text")
+    end
+    self.pPanel:Button_SetEnable(self["btnKin" .. nIdx], false)
+  end
+end

@@ -1,0 +1,224 @@
+local tbWnd = Ui:CreateWindow("UINpcShop")
+tbWnd.tbControls = {
+  txtTitle = "node/imgBG/txtTitle",
+  UIMoneyPanel = "node/UIMoneyPanel",
+  txtTimeTip = "node/imgBG/txtTimeTip",
+  ElementTemplate = "node/imgBG/ShopGoods/GoodsList/pnlMask/pnlContant/ElementTemplate",
+  MentorMoney = "node/imgBG/MentorMoney",
+  btnClose = "node/imgBG/btnClose"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.OnMoneyChange,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SHOP_BUY_RESULT,
+      self.OnResponseBuy,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TONG_MEMBERLIST,
+      self.OnTongMemberListSync,
+      self
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, self.UIMoneyPanel)
+  self.tbWareScroll = Ui:NewScrollView(self, self.ElementTemplate, function(self, nIndex, tbElement)
+    self:OnItemClick(tbElement)
+  end, nil, true)
+end
+
+function tbWnd:OnOpen(nNpcId, nMapId, nHighLightTId, bAutoClick, nClickDelayTime, szDynamicCurrencyType)
+  local tbList = Shop:GetANpcShopWares(nNpcId, nMapId)
+  if not tbList or 0 == Lib:CountTB(tbList) then
+    LogErr(string.format("NPC SHOP CAN NOT OPEN, NPC ID = %s, MAP ID = %s", nNpcId, me.nMapId))
+    return
+  end
+  self.tbList = tbList
+  self.tbMoneyPanel:OnOpen()
+  self.nNpcId = nNpcId
+  if self.nNpcId == Tong.Def.OfficialNpcId then
+    self.tbMoneyPanel:SetDynamicCurrencyType("HunShi")
+    self.tbMoneyPanel:SetDynamicBtnPlusCallBack(GainCurrency.DirectJump, GainCurrency, "HunShi")
+    Tong:UpdateMemberList()
+  elseif self.nNpcId == HanWuYiJi.SHOP_NPCID[1] then
+    self.tbMoneyPanel:SetDynamicCurrencyType("HanWuFuShi")
+  elseif szDynamicCurrencyType then
+    self.tbMoneyPanel:SetDynamicCurrencyType(szDynamicCurrencyType)
+    if "ZhenFaCanYe1" == szDynamicCurrencyType or "ZhenFaCanYe2" == szDynamicCurrencyType or "ZhenFaCanYe3" == szDynamicCurrencyType or "ZhenFaCanYe4" == szDynamicCurrencyType or "ZhenFaCanYe5" == szDynamicCurrencyType or "ZhenFaCanYe6" == szDynamicCurrencyType or "GuDaiZhenFa" == szDynamicCurrencyType then
+      self.tbMoneyPanel:HideDynamicBtnPlus()
+    else
+      self.tbMoneyPanel:SetDynamicBtnPlusCallBack(GainCurrency.DirectJump, GainCurrency, szDynamicCurrencyType)
+    end
+  else
+    self.tbMoneyPanel:SetDefaultCurrencyView()
+    self.tbMoneyPanel:SetMoneyValue()
+  end
+  self:UpdateShow(tbList, nHighLightTId)
+  if bAutoClick and self.nHightLightIndex then
+    local tbElement = self.tbWareScroll:GetElement(self.nHightLightIndex)
+    nClickDelayTime = nClickDelayTime or 1
+    self.nTimer = Timer:Register(Env.GAME_FPS * nClickDelayTime, self.OnItemClick, self, tbElement, bAutoClick)
+  end
+  self.nRemainTimeTimer = Timer:Register(Env.GAME_FPS, self.UpdateRemianTime, self, tbList)
+end
+
+function tbWnd:fnSetItem(tbElement, tbInfo, nIndex, nNeedItemId)
+  local pPanel = tbElement.pPanel
+  local tbWare = Shop:GetAWare(tbInfo.nWareId)
+  if not tbWare then
+    return
+  end
+  tbElement.tbData = tbWare
+  local nPrice = Shop:GetPrice(tbWare)
+  pPanel:Label_SetText("txtMoneyNum", nPrice)
+  local szName = KItem.GetItemShowInfo(tbWare.nItemId, me.nFaction, me.nFactionSect, me.nSex)
+  local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  itemGrid:SetItemByTemplate(tbWare.nItemId)
+  itemGrid:SetClickEnable(true, function()
+    self:OnItemClick(tbElement)
+  end)
+  pPanel:Label_SetText("txtTitle", i18n.Parse(szName))
+  local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+  if -1 == nRemainCount then
+    pPanel:SetActive("Limit", false)
+    pPanel:Label_SetText("Limit/txtLimitNum", "")
+  else
+    pPanel:SetActive("Limit", true)
+    pPanel:Label_SetText("Limit/txtLimitNum", tostring(nRemainCount))
+  end
+  if 0 == nRemainCount then
+    pPanel:SetActive("imgSoldOutBg", true)
+    pPanel:SetActive("imgSoldOutMark", true)
+  else
+    pPanel:SetActive("imgSoldOutBg", false)
+    pPanel:SetActive("imgSoldOutMark", false)
+  end
+  local szMoney, szMoneyAtlas = Currency:GetIcon(tbWare.szCurrencyType)
+  pPanel:Sprite_SetSprite("imgMoney", szMoney)
+  local nShowDiscount = tbWare.nDiscount
+  if nShowDiscount and nShowDiscount > 0 and nShowDiscount < 10 then
+    pPanel:SetActive("imgZK", true)
+    pPanel:Label_SetText("imgZK/txtZK", i18n.GetDiscountText(nShowDiscount))
+  else
+    pPanel:SetActive("imgZK", false)
+    pPanel:Label_SetText("imgZK/txtZK", "")
+  end
+  tbElement.pPanel:SetActive("Effect", false)
+  if tbWare.szHotText and "" ~= tbWare.szHotText then
+    pPanel:SetActive("imgGiftMark", true)
+    pPanel:Label_SetText("imgGiftMark/txtTip", i18n.Parse(tbWare.szHotText))
+  else
+    pPanel:SetActive("imgGiftMark", false)
+  end
+  local nCurTime = GetTime()
+  pPanel:SetActive("txtTimeLimit", false)
+  if tbWare.nEndTimestamp and nCurTime < tbWare.nEndTimestamp then
+    pPanel:SetActive("txtTimeLimit", true)
+    pPanel:Label_SetText("txtTimeLimit", i18n.EasyGet("{0}\229\144\142\228\184\139\230\158\182", Lib:TimeDesc14(tbWare.nEndTimestamp - nCurTime)))
+  end
+  local isHightLight = false
+  if tbWare.nOfficialLimit and tbWare.nOfficialLimit > 0 then
+    local nPersonalLevel = Tong:GetMemberOfficialLevel_client(me.dwID)
+    if nPersonalLevel > 0 and tbWare.nOfficialLimit == nPersonalLevel then
+      isHightLight = true
+    end
+  end
+  if isHightLight or nNeedItemId and nNeedItemId > 0 and nNeedItemId == tbWare.nItemId then
+    tbElement.pPanel:SetActive("Effect", true)
+    tbElement.pPanel:Animator_SetEnable("Main", true)
+    pPanel:SetActive("imgHighlight", tbWare.nItemId == nNeedItemId)
+    self.nHightLightIndex = nIndex
+  else
+    pPanel:SetActive("imgHighlight", false)
+  end
+end
+
+function tbWnd:UpdateShow(tbList, nHighLightTId)
+  self.tbWareScroll:Reset()
+  for i, v in pairs(tbList) do
+    self.tbWareScroll:SetElement(i, function(tbElement)
+      self:fnSetItem(tbElement, v, i, nHighLightTId)
+    end)
+  end
+  self.pPanel:Label_SetText(self.txtTitle, i18n.Parse(self.szCurShopName))
+end
+
+function tbWnd:OnMoneyChange()
+  if self.nNpcId == Tong.Def.OfficialNpcId then
+    self.tbMoneyPanel:SetDynamicCurrencyType("HunShi")
+    self.tbMoneyPanel:SetDynamicBtnPlusCallBack(GainCurrency.DirectJump, GainCurrency, "HunShi")
+  elseif self.nNpcId == HanWuYiJi.SHOP_NPCID[1] then
+    self.tbMoneyPanel:SetDynamicCurrencyType("HanWuFuShi")
+  elseif self.tbMoneyPanel.szDynamicType then
+    self.tbMoneyPanel:SetDynamicCurrencyValue()
+  else
+    self.tbMoneyPanel:SetMoneyValue()
+  end
+end
+
+function tbWnd:OnItemClick(tbElement, bAutoBuy)
+  local nRemainCount = Shop:GetShopRemainCount(tbElement.tbData, me)
+  if 0 == nRemainCount then
+    me.CenterMsg(i18n.Get(Shop.Terms.InsufficientRemainInventory))
+    return
+  end
+  Ui:OpenWindow("UIShopBuy", tbElement.tbData, true, nil, bAutoBuy)
+end
+
+function tbWnd:OnResponseBuy(bSuccess, nItemId)
+  if bSuccess then
+    for i, tbInfo in ipairs(self.tbList) do
+      local tbWare = Shop:GetAWare(tbInfo.nWareId)
+      if tbWare and tbWare.nItemId == nItemId then
+        local tbElement = self.tbWareScroll:GetElement(i)
+        if tbElement then
+          self:fnSetItem(tbElement, tbInfo, i)
+        end
+      end
+    end
+  end
+end
+
+function tbWnd:OnTongMemberListSync()
+  if self.nNpcId == Tong.Def.OfficialNpcId and self.tbList then
+    self:UpdateShow(self.tbList)
+  end
+end
+
+function tbWnd:UpdateRemianTime(tbList)
+  for nIndex, tbInfo in pairs(tbList) do
+    local tbElement = self.tbWareScroll:GetElement(nIndex)
+    local pPanel = tbElement.pPanel
+    if not tbElement.tbData then
+      break
+    end
+    local tbWare = tbElement.tbData
+    local nCurTime = GetTime()
+    pPanel:SetActive("txtTimeLimit", false)
+    if tbWare.nEndTimestamp and nCurTime < tbWare.nEndTimestamp then
+      pPanel:SetActive("txtTimeLimit", true)
+      pPanel:Label_SetText("txtTimeLimit", i18n.EasyGet("{0}\229\144\142\228\184\139\230\158\182", Lib:TimeDesc14(tbWare.nEndTimestamp - nCurTime)))
+    end
+  end
+  return true
+end
+
+function tbWnd:OnClose()
+  if self.nRemainTimeTimer then
+    Timer:Close(self.nRemainTimeTimer)
+    self.nRemainTimeTimer = nil
+  end
+end

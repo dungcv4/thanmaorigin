@@ -1,0 +1,93 @@
+function Compose:LoadConfig()
+  local szFile = "Setting/Compose/Formula.tab"
+  
+  local tbField = {
+    "nFormulaId",
+    "szMaterials",
+    "szProduct",
+    "nBagCount",
+    "bImportant",
+    "nSourceFormulaId"
+  }
+  local tbSetting = Lib:LoadTabFileEx(szFile, "dsssdd", nil, tbField)
+  assert(tbSetting)
+  self.FORMULA_CONFIG = {}
+  local tbMaterialCache = {}
+  for _, tbConfig in pairs(tbSetting) do
+    local nId = tbConfig.nFormulaId
+    if self.FORMULA_CONFIG[nId] then
+      LogErr(string.format("Compose:LoadConfig fail, id=%d duplicate", nId))
+      return
+    end
+    local tbFormula = {}
+    local szMaterials = tbConfig.szMaterials
+    local tbMaterials = tbMaterialCache[szMaterials]
+    if not tbMaterials then
+      tbMaterials = Lib:GetAwardFromString(szMaterials)
+      tbMaterialCache[szMaterials] = tbMaterials
+    end
+    tbFormula.tbMaterials = tbMaterials
+    tbFormula.nSourceFormulaId = tbConfig.nSourceFormulaId
+    tbFormula.tbProduct = Lib:ParseAwardString(tbConfig.szProduct) or {}
+    tbFormula.nBagCount = tonumber(tbConfig.nBagCount)
+    tbFormula.bImportant = tbConfig.bImportant
+    self.FORMULA_CONFIG[nId] = tbFormula
+  end
+  self.FORMULA_CONFIG = SetReadOnly(self.FORMULA_CONFIG)
+end
+
+Compose:LoadConfig()
+Validator:Register(function()
+  for nId, tbFormula in pairs(Compose.FORMULA_CONFIG) do
+    local tbMaterials = tbFormula.tbMaterials
+    local tbProduct = tbFormula.tbProduct
+    for i, tbInfo in ipairs(tbMaterials) do
+      local bOk, szErr = Award:CheckAwardVaild(table.unpack(tbInfo))
+      if not bOk then
+        LogErr(string.format("Check Compose Formula=%d Material=%d Failed. %s", nId, i, szErr))
+        return false
+      end
+    end
+    if #tbProduct > 0 then
+      local bOk, szErr = Award:CheckAwardVaild(table.unpack(tbProduct))
+      if not bOk then
+        LogErr("Check Compose Formula=%d Product Failed.", nId, szErr)
+        return false
+      end
+    end
+  end
+  return true
+end)
+
+function Compose:GetMaxCanComposeInBag(nPlayerId, nFormulaId)
+  if not nPlayerId or not nFormulaId then
+    return 0
+  end
+  local tbFormula = self.FORMULA_CONFIG[nFormulaId]
+  if not tbFormula then
+    return 0
+  end
+  local pPlayer = KPlayer.GetPlayerObjById(nPlayerId)
+  if not pPlayer then
+    return 0
+  end
+  local tbMaterials = tbFormula.tbMaterials
+  local nMaxCanCompseNum = 999
+  for _, tbInfo in pairs(tbMaterials) do
+    local nHaveNum = Award:GetAwardCount(pPlayer, table.unpack(tbInfo))
+    nMaxCanCompseNum = math.min(nMaxCanCompseNum, nHaveNum)
+  end
+  return nMaxCanCompseNum
+end
+
+function Compose:GetMaterialsByFormulaId(nFormulaId)
+  if self.FORMULA_CONFIG[nFormulaId] then
+    return self.FORMULA_CONFIG[nFormulaId].tbMaterials
+  end
+end
+
+function Compose:GetSourceFormulaId(nFormulaId)
+  if self.FORMULA_CONFIG[nFormulaId] then
+    return self.FORMULA_CONFIG[nFormulaId].nSourceFormulaId
+  end
+end

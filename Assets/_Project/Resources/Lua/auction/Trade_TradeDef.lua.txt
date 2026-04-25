@@ -1,0 +1,177 @@
+Require("CommonScript/Trade/TradeCfg.lua")
+Trade.szRequestTradeMsgName = "TradeRequest"
+Trade.CurrencyType = "Gold"
+Trade.szLogTag = "[TRADE]"
+Trade.nMaxTradeItemRoom = Trade.ITEM_PER_LINE * Trade.TRADE_LINE
+Trade.ERR = {
+  OTHER_SIDE_NOT_ONLINE = 1,
+  OTHER_SIDE_TRADDING = 2,
+  OUR_SIDE_TRADDING = 3,
+  OTHER_SIDE_REFUSE = 4,
+  ALREADY_INVITE_HIM = 5,
+  CANNOT_TRADE_THIS_MAP = 6,
+  NOT_IN_SAME_MAP = 7,
+  ITEM_CANNOT_TRADE = 8,
+  ITEM_COUNT_NOT_ENOUGH = 9,
+  ITEM_NOT_EXIST = 10,
+  ITEM_OVER_LIMIT = 11,
+  MONEY_NOT_ENOUGH = 12,
+  MONEY_OVER_LIMIT = 13,
+  WAIT_OTHER_SIDE_LOCK = 14,
+  OTHER_SIDE_LOCK = 15,
+  OTHER_SIDE_UNLOCK = 16,
+  WAIT_OTHER_SIDE_CONFIRM = 17,
+  OTHER_SIDE_CONFIRM = 18,
+  OTHER_SIDE_CANCEL = 19,
+  SELF_IN_FIGHT_MODE = 20,
+  OTHER_IN_FIGHT_MODE = 21,
+  INVITE_NOT_EXIST = 22,
+  PROCESSOR_NOT_EXIST = 23,
+  ROLEID_ERROR = 24,
+  IN_INVITE_CD = 25,
+  SELF_NOT_IN_TRADDING = 26,
+  OTHER_NOT_IN_TRADDING = 27,
+  IN_LOCK = 28,
+  IN_CONFIRM = 29,
+  SELF_IN_UNLOCK = 30,
+  OTHER_IN_UNLOCK = 31,
+  TRADE_ITEM_ROOM_FULL = 32,
+  ITEM_OVER_LIMIT_AFTER = 33,
+  MONEY_NOT_ENOUGH_AFTER = 34,
+  MONEY_OVER_LIMIT_AFTER = 35,
+  ITEM_BELONG_ERROR = 36,
+  ITEM_CAN_NOT_TRADE = 37,
+  UNKNOWN_ERROR = 38
+}
+Trade.STATE = {
+  EXCHANGING = 0,
+  LOCK = 1,
+  CONFIRM = 2,
+  CANCEL = 3
+}
+Trade.Operation = {
+  ADD = 0,
+  REMOVE = 1,
+  OPERATIONNUM = 2
+}
+
+function Trade:CheckSelfCommon()
+  if not Map:CanTrade(me.nMapTemplateId) then
+    return false, Trade.ERR.CANNOT_TRADE_THIS_MAP
+  end
+  if 0 ~= me.nFightMode then
+    return false, Trade.ERR.SELF_IN_FIGHT_MODE
+  end
+  return true
+end
+
+function Trade:CheckDistance(pNpc)
+  if me.nMapTemplateId ~= pNpc.nMapTemplateId then
+    return false, Trade.ERR.NOT_IN_SAME_MAP
+  end
+  local nDistance = me.GetNpc().GetDistance(pNpc.nId)
+  if nDistance < 0 or nDistance >= Trade.nDistance then
+    return false, Trade.ERR.OTHER_SIDE_NOT_ONLINE
+  end
+  return true
+end
+
+function Trade:CheckMoneyEnough(pPlayer, dwNewMoney)
+  local nMoney = pPlayer.GetMoney(Trade.CurrencyType)
+  return dwNewMoney <= nMoney and dwNewMoney >= 0
+end
+
+function Trade:CheckIsTradding(pPlayer)
+  return pPlayer.nIsP2PTrading > 0
+end
+
+function Trade:CheckTradeStateDecision(processor, nToState)
+  local dwPlayerId = processor.GetOtherPlayerId(me.dwID)
+  if nToState == Trade.STATE.LOCK and Trade.CheckLock(processor, me.dwID) then
+    return false, Trade.ERR.IN_LOCK
+  end
+  if nToState == Trade.STATE.LOCK and Trade.CheckConfirm(processor, me.dwID) then
+    return false, Trade.ERR.IN_CONFIRM
+  end
+  if nToState == Trade.STATE.CONFIRM and Trade.CheckConfirm(processor, me.dwID) then
+    return false, Trade.ERR.IN_CONFIRM
+  end
+  if nToState == Trade.STATE.CONFIRM and Trade.CheckExchanging(processor, dwPlayerId) then
+    return false, Trade.ERR.OTHER_IN_UNLOCK
+  end
+  if nToState == Trade.STATE.EXCHANGING and Trade.CheckConfirm(processor, me.dwID) then
+    return false, Trade.ERR.IN_CONFIRM
+  end
+  if nToState == Trade.STATE.EXCHANGING and not Trade.CheckLock(processor, me.dwID) then
+    return false, Trade.ERR.SELF_IN_UNLOCK
+  end
+  return true
+end
+
+function Trade:CheckOneItemAdd(pPlayer, dwItemId, nCount)
+  local pItem = pPlayer.GetItemInAllSpace(dwItemId)
+  if not pItem then
+    return false
+  end
+  return nCount <= pItem.nCount
+end
+
+function Trade:CheckItemCanTrade(dwItemId)
+  local pItem = dwItemId and KItem.GetItemObj(dwItemId)
+  return pItem and not pItem.IsInTradeLimit(Item.eTRADELIMITWAY.P2P)
+end
+
+function Trade.CheckLock(processor, dwPlayerId)
+  return processor.GetPlayerTradeState(dwPlayerId) == Trade.STATE.LOCK
+end
+
+function Trade.CheckConfirm(processor, dwPlayerId)
+  return processor.GetPlayerTradeState(dwPlayerId) == Trade.STATE.CONFIRM
+end
+
+function Trade.CheckExchanging(processor, dwPlayerId)
+  return processor.GetPlayerTradeState(dwPlayerId) == Trade.STATE.EXCHANGING
+end
+
+function Trade:LoadTradeItem()
+  local tbField = {
+    "TemplateId",
+    "TradeLimitType",
+    "TradeLimitValue",
+    "TradeWay"
+  }
+  local tbTemp = Lib:LoadTabFileEx("Setting/Trade/TradeItem.tab", "ddds", nil, tbField)
+  self.tbTemplateId2TradeItem = {}
+  for _, tbData in pairs(tbTemp) do
+    local tbParamInfo = Lib:SplitStr(tbData.TradeWay, "|")
+    local tbItem = {
+      nTradeLimitType = tbData.TradeLimitType,
+      nTradeLimitValue = tbData.TradeLimitValue
+    }
+    tbItem.nTradeWay = 0
+    for i, v in ipairs(tbParamInfo) do
+      tbItem.nTradeWay = tbItem.nTradeWay | 1 << v - 1
+    end
+    self.tbTemplateId2TradeItem[tbData.TemplateId] = tbItem
+  end
+  Validator:Register(self.CheckTradeItem, self)
+end
+
+function Trade:CheckTradeItem()
+  for TemplateId, v in pairs(self.tbTemplateId2TradeItem) do
+    if not Item:IsExist(TemplateId) then
+      LogErr(string.format("load TradeItem.tab failed, TemplateId %d not exist", TemplateId))
+      return false
+    end
+  end
+  return true
+end
+
+Trade:LoadTradeItem()
+
+function Trade:GetTradeLimitWay(nTemplateId)
+  if not nTemplateId or not self.tbTemplateId2TradeItem[nTemplateId] then
+    return 0
+  end
+  return self.tbTemplateId2TradeItem[nTemplateId].nTradeWay or 0
+end

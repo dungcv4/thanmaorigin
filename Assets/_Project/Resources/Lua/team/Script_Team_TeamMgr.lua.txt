@@ -1,0 +1,2186 @@
+local AFKSetting = AFK.AFKSetting
+local AFKFightSetting = AFKSetting.AFKFightSetting
+TeamMgr.nFollowTeamTipsSpan = 5
+TeamMgr.nCheckTargetCD = 60
+TeamMgr.nChangeTargetCD = 600
+
+function TeamMgr:GetTeamDataCache()
+  me.tbTeamDataCache = me.tbTeamDataCache or {
+    tbTeamMember = {},
+    tbApplyer = {},
+    nCaptainID = 0,
+    nTeamID = 0,
+    bAutoAgree = true,
+    nTargetActivityId = nil,
+    tbMatchingActIds = {},
+    tbActivityTeams = {},
+    tbActivityTeamUpdateTime = {},
+    tbInviterList = {},
+    tbBecomeCaptainInfo = nil,
+    bShowTarget = nil,
+    tbVoiceValue = {},
+    bVoiceOpen = nil,
+    nVoiceState = nil,
+    tbAllKindTeams = {},
+    nAllKindTeamUpdateTime = 0,
+    bAutoMatching = false
+  }
+  return me.tbTeamDataCache
+end
+
+local function _TeamDataCache()
+  return TeamMgr:GetTeamDataCache()
+end
+
+function TeamMgr:IsCaptain(nPlayerID)
+  nPlayerID = nPlayerID or me.dwID
+  if type(nPlayerID) ~= "number" then
+    nPlayerID = nPlayerID.dwID
+  end
+  return nPlayerID == _TeamDataCache().nCaptainID
+end
+
+function TeamMgr:GetTeamMatesPos()
+  local tbPos = {}
+  for _, tbMemberData in ipairs(_TeamDataCache().tbTeamMember) do
+    if tbMemberData.nMapId == me.nMapId then
+      table.insert(tbPos, {
+        tbMemberData.nPosX,
+        tbMemberData.nPosY
+      })
+    end
+  end
+  return tbPos
+end
+
+function TeamMgr:GetApplyList()
+  return _TeamDataCache().tbApplyer
+end
+
+function TeamMgr:GetActivityList()
+  return self.TEAM_ACTIVITY_DATA
+end
+
+function TeamMgr:GetCurActivityId()
+  return _TeamDataCache().nTargetActivityId
+end
+
+function TeamMgr:GetCurActivityInfo()
+  return TeamMgr:GetActivityInfo(TeamMgr:GetCurActivityId())
+end
+
+function TeamMgr:GetActivityInfo(nActivityId)
+  local tbActivitys = TeamMgr:GetActivityList()
+  for _, tbActivity in pairs(tbActivitys) do
+    if nActivityId == tbActivity.nActivityId then
+      local szOriginName = TeamMgr.TEAM_ACTIVITY_NAME[tbActivity.subtype]()
+      local szName = szOriginName
+      local szType = tbActivity.szType
+      if TeamMgr.TEAM_ACTIVITY_NAME[tbActivity.szType] and tbActivity.szType ~= tbActivity.subtype then
+        szName = TeamMgr.TEAM_ACTIVITY_NAME[tbActivity.szType]() .. "\194\183" .. szName
+        szType = tbActivity.subtype
+      end
+      return szName, tbActivity.nMinOpenMember, szOriginName, szType
+    end
+  end
+end
+
+function TeamMgr:HasTeam()
+  return 0 ~= _TeamDataCache().nTeamID
+end
+
+function TeamMgr:GetTeamId()
+  return _TeamDataCache().nTeamID
+end
+
+function TeamMgr:GetCreateTime()
+  return _TeamDataCache().nCreateTime
+end
+
+function TeamMgr:GetMatchingActivityIds()
+  if self:HasTeam() then
+    return nil
+  end
+  return _TeamDataCache().tbMatchingActIds
+end
+
+function TeamMgr:ClearMatching()
+  _TeamDataCache().tbMatchingActIds = {}
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_NO_MATCH)
+end
+
+function TeamMgr:IsMatchingAct()
+  return not self:HasTeam() and next(_TeamDataCache().tbMatchingActIds)
+end
+
+function TeamMgr:IsTeamMatchingAct()
+  return self:HasTeam() and _TeamDataCache().bAutoMatching
+end
+
+function TeamMgr:IsActivityMatching(nActivityId)
+  if self:HasTeam() then
+    return
+  end
+  return _TeamDataCache().tbMatchingActIds[nActivityId]
+end
+
+function TeamMgr:GetMembersCount()
+  if not self:HasTeam() then
+    return 0
+  end
+  return #_TeamDataCache().tbTeamMember + 1
+end
+
+function TeamMgr:TeamFull()
+  return TeamMgr:GetMembersCount() >= TeamMgr.Cfg.MAX_MEMBER_COUNT
+end
+
+function TeamMgr:IsMember(nPlayerID)
+  if not self:HasTeam() then
+    return
+  end
+  return self:GetMember(nPlayerID)
+end
+
+function TeamMgr:GetMembers()
+  return _TeamDataCache().tbTeamMember
+end
+
+function TeamMgr:GetCamp()
+  local tbCaptainData = TeamMgr:GetCaptainData()
+  if tbCaptainData then
+    local pCaptain = KPlayer.GetPlayerObjById(tbCaptainData.nPlayerID)
+    local pNpc = pCaptain.GetNpc()
+    return pNpc.nCamp or Npc.CampTypeDef.camp_type_player
+  end
+  return Npc.CampTypeDef.camp_type_player
+end
+
+function TeamMgr:GetMember(nPlayerID)
+  for idx, tbMemberData in ipairs(_TeamDataCache().tbTeamMember) do
+    if tbMemberData.nPlayerID == nPlayerID then
+      return tbMemberData, idx
+    end
+  end
+end
+
+function TeamMgr:GetMemberData(nNpcID)
+  if not self:HasTeam() then
+    return nil, nil
+  end
+  for idx, tbMemberData in ipairs(_TeamDataCache().tbTeamMember or {}) do
+    if tbMemberData.nNpcID == nNpcID then
+      return tbMemberData, idx
+    end
+  end
+end
+
+function TeamMgr:OnLogin()
+  if not TeamMgr:HasTeam() then
+    return
+  end
+  local nFollowId = self:GetMeFollowTeammate() or AFK:GetFollowTeammateIdCache()
+  AFK:SetFollowTeammateIdCache(nil)
+  if not nFollowId then
+    return
+  end
+  local tbMemberData = TeamMgr:GetMember(nFollowId)
+  if not tbMemberData then
+    self:StopFollowMember()
+    return
+  end
+  self:StartFollowMember(nFollowId, tbMemberData.nNpcID)
+end
+
+function TeamMgr:OnLeaveGame()
+  TeamMgr:OnSynQuite()
+end
+
+local nTeammateAttackTimeOut = 5
+
+function TeamMgr:CacheMemberTarget(nNpcId, nParam1, nParam2)
+  local tbMember = TeamMgr:GetMemberData(nNpcId)
+  if not tbMember then
+    return
+  end
+  if -1 == nParam1 then
+    tbMember.nTargetNpcId = nParam2
+    tbMember.nAttackTimeOut = GetTime() + nTeammateAttackTimeOut
+  end
+end
+
+function TeamMgr:OnSyncTeamMemberFightPos(nNpcId, nMapId, nX, nY)
+  print("TeamMgr:OnSyncTeamMemberFightPos is invoked!", nNpcId, nMapId, nX, nY)
+  if not nNpcId or nNpcId <= 0 then
+    return
+  end
+  if not (nMapId and not (nMapId <= 0) and nX and not (nX <= 0) and nY) or nY <= 0 then
+    return
+  end
+  local tbMember = TeamMgr:GetMemberData(nNpcId)
+  if not tbMember then
+    return
+  end
+  local bIsFollow = self:IsFollowTeammate()
+  if not bIsFollow then
+    return
+  end
+  local nFollowId = self:GetMeFollowTeammate()
+  if not nFollowId or nFollowId ~= tbMember.nPlayerID then
+    return
+  end
+  AFKFightSetting:UpdateLeaderRepresentFightPointPos(nMapId, nX, nY)
+end
+
+function TeamMgr:SetShowTargetPanel(bShow)
+  _TeamDataCache().bShowTarget = bShow
+end
+
+function TeamMgr:IsShowTargetPanel()
+  return _TeamDataCache().bShowTarget
+end
+
+function TeamMgr:AfterApply(nTargetId, szTargetName)
+  local szTips = i18n.Get(self.Terms.ApplyHint, szTargetName)
+  ChatMgr:OnChannelMessage(ChatMgr.ChannelType.System, 0, ChatMgr.SystemMsgType.Team, "", 0, 0, 0, szTips)
+end
+
+function TeamMgr:OnInvited(nTeamID, nInviterID, szInvitorName, nLevel, nFaction, nPortrait, nHonorLevel, szKinName, szTongName, szTarget)
+  if not TeamMgr:CanTeam(me.nMapTemplateId) then
+    return false
+  end
+  for idx, tbTeamInfo in ipairs(_TeamDataCache().tbInviterList) do
+    if tbTeamInfo.nTeamId == nTeamID or tbTeamInfo.nPlayerId == nInviterID then
+      table.remove(_TeamDataCache().tbInviterList, idx)
+    end
+  end
+  local tbInviteData = {
+    nTeamId = nTeamID,
+    nPlayerId = nInviterID,
+    szName = szInvitorName,
+    nLevel = nLevel,
+    nFaction = nFaction,
+    nPortrait = nPortrait,
+    nHonorLevel = nHonorLevel,
+    szTarget = szTarget,
+    nTime = GetTime(),
+    szKinName = szKinName,
+    szTongName = szTongName
+  }
+  table.insert(_TeamDataCache().tbInviterList, tbInviteData)
+  local szTips = i18n.Get(self.Terms.InviteHint, szInvitorName)
+  ChatMgr:OnChannelMessage(ChatMgr.ChannelType.System, 0, ChatMgr.SystemMsgType.Team, "", 0, 0, 0, szTips)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "NewInvite")
+end
+
+function TeamMgr:GetInviteList()
+  return _TeamDataCache().tbInviterList
+end
+
+function TeamMgr:InviteRequestSync(bSuccess, nTargetId, szName)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_INVITE_REQ_RET, nTargetId, bSuccess)
+end
+
+function TeamMgr:InviteRespond(nTeamID, bAgree)
+  for i, tbTeamInfo in ipairs(_TeamDataCache().tbInviterList) do
+    if nTeamID == tbTeamInfo.nTeamId then
+      local nNotifyMsgIndex = tbTeamInfo.nNotifyMsgIndex or 0
+      Ui:CancelNotifyMsg(nNotifyMsgIndex)
+      RemoteServer.OnTeamRequest("AcceptInvitation", tbTeamInfo.nTeamId, tbTeamInfo.nPlayerId, bAgree)
+      table.remove(_TeamDataCache().tbInviterList, i)
+      EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_REMOVE_INVITE)
+      break
+    end
+  end
+end
+
+function TeamMgr:ClearInviteList()
+  local tbInviterList = _TeamDataCache().tbInviterList
+  if not tbInviterList or not next(tbInviterList) then
+    return
+  end
+  local tbInfo = {}
+  for _, tbInvite in pairs(tbInviterList) do
+    tbInfo[tbInvite.nTeamId] = 1
+  end
+  _TeamDataCache().tbInviterList = {}
+  RemoteServer.OnTeamRequest("ClearInviterList", tbInfo)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_CLEAR_INVITE)
+end
+
+function TeamMgr:ClearApplyList()
+  if not _TeamDataCache().tbApplyer or not next(_TeamDataCache().tbApplyer) then
+    return
+  end
+  _TeamDataCache().tbApplyer = {}
+  RemoteServer.OnTeamRequest("ClearApplyerList")
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_CLEAR_APPLY)
+end
+
+function TeamMgr:AgreeAppler(nApplerID, bAgree)
+  if not TeamMgr:IsCaptain() then
+    me.CenterMsg(i18n.Get(self.Terms.PermissionDenied))
+    return
+  end
+  TeamMgr:RemoveApplyer(nApplerID)
+  RemoteServer.OnTeamRequest("Agree", nApplerID, bAgree)
+end
+
+function TeamMgr:SyncTeamMemberTarget(nTargetNpcId)
+  self:CloseSyncTargetTimer()
+  self.nSyncTargetTimer = Timer:Register(Env.GAME_FPS, self.DelaySyncTeamMemberTarget, self, nTargetNpcId)
+end
+
+function TeamMgr:CloseSyncTargetTimer()
+  if self.nSyncTargetTimer then
+    Timer:Close(self.nSyncTargetTimer)
+    self.nSyncTargetTimer = nil
+  end
+end
+
+function TeamMgr:DelaySyncTeamMemberTarget(nTargetNpcId)
+  if not nTargetNpcId or nTargetNpcId <= 0 then
+    return
+  end
+  local bHasTeam = TeamMgr:HasTeam()
+  if not bHasTeam then
+    return
+  end
+  SyncTeamMemberTarget(nTargetNpcId)
+end
+
+function TeamMgr:RequestLeaderFightPos()
+  local bHasTeam = self:HasTeam()
+  if not bHasTeam then
+    return
+  end
+  local bIsFollow = self:IsFollowTeammate()
+  if not bIsFollow then
+    return
+  end
+  local nFollowId = self:GetMeFollowTeammate()
+  RemoteServer.RequestLeaderFightPos(nFollowId)
+end
+
+function TeamMgr:SyncTeamMemberFightPos(bCheckFightStep)
+  local bHasTeam = self:HasTeam()
+  if not bHasTeam then
+    return
+  end
+  local tbMeBeFollowed = TeamMgr:GetMeBeFollowed()
+  if not tbMeBeFollowed then
+    return
+  end
+  if not AFKFightSetting or not AFKFightSetting.tbLastFightMapPos then
+    return
+  end
+  local bInLeadRunning = AFK:IsLeadFightRunning()
+  if not bInLeadRunning then
+    return
+  end
+  if bCheckFightStep then
+    local bIsInFightStep = AFK:IsInFightStep()
+    if not bIsInFightStep then
+      return
+    end
+  end
+  local nMapId = AFKFightSetting.tbLastFightMapPos.nMapId
+  local nX = AFKFightSetting.tbLastFightMapPos.x
+  local nY = AFKFightSetting.tbLastFightMapPos.y
+  if not nMapId or nMapId <= 0 then
+    return
+  end
+  if not nX or nX <= 0 then
+    return
+  end
+  if not nY or nY <= 0 then
+    return
+  end
+  SyncTeamMemberFightPos(nMapId, nX, nY)
+end
+
+function TeamMgr:Apply(nTargetPlayerID, bNoFeedback)
+  if nTargetPlayerID == me.dwID then
+    me.CenterMsg(i18n.Get(self.Terms.ApplyingSelf))
+    return
+  end
+  if me.nLevel < TeamMgr.Cfg.OPEN_LEVEL then
+    me.CenterMsg(i18n.Get(self.Terms.MyLevelLimit, TeamMgr.Cfg.OPEN_LEVEL))
+    return
+  end
+  if TeamMgr:HasTeam() then
+    me.CenterMsg(i18n.Get(self.Terms.MeInTeam))
+    return
+  end
+  if not TeamMgr:CanTeam(me.nMapTemplateId) then
+    me.CenterMsg(i18n.Get(self.Terms.MapLimitWhenJoin))
+    return
+  end
+  RemoteServer.OnTeamRequest("Apply", nTargetPlayerID, bNoFeedback)
+end
+
+function TeamMgr:Invite(nTargetPlayerID)
+  if nTargetPlayerID == me.dwID then
+    me.CenterMsg(i18n.Get(self.Terms.InvitingSelf))
+    return
+  end
+  if me.nLevel < TeamMgr.Cfg.OPEN_LEVEL then
+    me.CenterMsg(i18n.Get(self.Terms.MyLevelLimit, TeamMgr.Cfg.OPEN_LEVEL))
+    return
+  end
+  if not TeamMgr:CanTeam(me.nMapTemplateId) then
+    me.CenterMsg(i18n.Get(self.Terms.MapLimitWhenJoin))
+    return false
+  end
+  RemoteServer.OnTeamRequest("Invite", nTargetPlayerID)
+end
+
+function TeamMgr:Quite()
+  if not TeamMgr:HasTeam() then
+    me.CenterMsg(i18n.Get(self.Terms.NoTeam))
+    return false
+  end
+  RemoteServer.OnTeamRequest("Quite")
+end
+
+function TeamMgr:RequestApplyerData()
+  RemoteServer.OnTeamRequest("RequestApplyerData")
+end
+
+function TeamMgr:SetAutoAgree(bAutoAgree)
+  RemoteServer.OnTeamRequest("SetAutoAgree", bAutoAgree)
+  _TeamDataCache().bAutoAgree = bAutoAgree
+end
+
+function TeamMgr:IsAutoAgree()
+  return _TeamDataCache().bAutoAgree
+end
+
+function TeamMgr:KickOutMember(nTargertPlayerID)
+  if not TeamMgr:IsCaptain() then
+    me.CenterMsg(i18n.Get(self.Terms.PermissionDenied))
+    return
+  end
+  RemoteServer.OnTeamRequest("KickOutMember", nTargertPlayerID)
+end
+
+function TeamMgr:ChangeCaptain(nPlayerId)
+  RemoteServer.OnTeamRequest("ChangeCaptain", nPlayerId)
+  self:TimerClear()
+end
+
+function TeamMgr:RemoveApplyer(nApplerID)
+  for nIdx, tbData in ipairs(_TeamDataCache().tbApplyer) do
+    if tbData.nID == nApplerID then
+      table.remove(_TeamDataCache().tbApplyer, nIdx)
+      break
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_REMOVE_APPLY)
+end
+
+function TeamMgr:GetMyTeamMemberData()
+  if not TeamMgr:HasTeam() then
+    return
+  end
+  local pNpc = me.GetNpc()
+  if not pNpc then
+    return
+  end
+  return {
+    nPlayerID = me.dwID,
+    nNpcID = pNpc.nId,
+    szName = me.szName,
+    nFaction = me.nFaction,
+    nSex = me.nSex,
+    nPortrait = me.nPortrait,
+    nHonorLevel = me.nHonorLevel,
+    nLevel = me.nTotalLevel,
+    nMapId = me.nMapId,
+    nPosX = 1,
+    nPosY = 1,
+    nHpPercent = pNpc.i64CurLife / pNpc.i64MaxLife * 100,
+    bDrink = nil,
+    nPortraitFrameID = PlayerPortraitFrame:GetMeCurPortraitFrameId(me)
+  }
+end
+
+function TeamMgr:GetCaptainData()
+  if me.dwID == _TeamDataCache().nCaptainID then
+    return TeamMgr:GetMyTeamMemberData()
+  end
+  for _, tbMemberData in ipairs(_TeamDataCache().tbTeamMember) do
+    if tbMemberData.nPlayerID == _TeamDataCache().nCaptainID then
+      return tbMemberData
+    end
+  end
+end
+
+function TeamMgr:IsNewbie()
+  if me.nLevel <= Player.nNewbieLevel then
+    return true
+  end
+  return false
+end
+
+function TeamMgr:ReqBecomeCaptain()
+  if not self:HasTeam() or self:IsCaptain() then
+    return
+  end
+  local tbCaptainData = self:GetCaptainData()
+  if not tbCaptainData then
+    me.CenterMsg(i18n.Get(self.Terms.NoCaptain))
+    return
+  end
+  if me.dwID == tbCaptainData.nPlayerID then
+    return true
+  end
+  if self:IsNewbie() then
+    me.CenterMsg(i18n.Get(self.Terms.NewbieLimit))
+    return
+  end
+  local pNpc = me.GetNpc()
+  if pNpc and Map:IsFuben(pNpc.nMapTemplateId) then
+    me.CenterMsg(i18n.Get(self.Terms.MapLimitWhenCaptainRequest))
+    return
+  end
+  local tbInfo = _TeamDataCache().tbBecomeCaptainInfo
+  if tbInfo then
+    local nNow = GetTime()
+    if nNow - tbInfo[2] < self.Cfg.nBecomeCaptainTimeSpan then
+      me.CenterMsg(i18n.Get(self.Terms.CaptainRequestCD, math.floor(self.Cfg.nBecomeCaptainTimeSpan / 60)))
+      return
+    end
+  end
+  local nImityLevel = FriendShip:GetFriendImityLevel(me.dwID, tbCaptainData.nPlayerID)
+  if not nImityLevel or nImityLevel < self.Cfg.nBecomeCaptainImityLevel then
+    me.CenterMsg(i18n.Get(self.Terms.FriendImityLimit))
+    return
+  end
+  RemoteServer.OnTeamRequest("ReqBecomeCaptain")
+  return true
+end
+
+function TeamMgr:OnReqBecomeCaptain(nTargetId, nTargetNpcId)
+  if not self:HasTeam() or not self:IsCaptain() then
+    return
+  end
+  if not nTargetNpcId then
+    return
+  end
+  local tbMember = self:GetMemberData(nTargetNpcId)
+  if not tbMember then
+    return
+  end
+  _TeamDataCache().tbBecomeCaptainInfo = {
+    nTargetId,
+    GetTime()
+  }
+  
+  local function fnAgree()
+    self:ResBecomeCaptain(nTargetId, true)
+  end
+  
+  local function fnDisagree()
+    self:ResBecomeCaptain(nTargetId, false)
+  end
+  
+  local function fnTimeOut()
+    fnAgree()
+    Ui:CloseWindow("UIMessageBox")
+  end
+  
+  local szMsg = i18n.Get(self.Terms.CaptainRequestHint, tbMember.szName)
+  me.MsgBox(szMsg, {
+    {
+      i18n.Get(self.Terms.Agree),
+      fnAgree
+    },
+    {
+      i18n.Get(self.Terms.Disagree),
+      fnDisagree
+    }
+  }, nil, self.Cfg.nBecomeCaptainTimerTime, fnTimeOut)
+end
+
+function TeamMgr:ResBecomeCaptain(nTargetId, bAgree)
+  if not self:HasTeam() or not self:IsCaptain() then
+    return
+  end
+  local tbInfo = _TeamDataCache().tbBecomeCaptainInfo
+  if not tbInfo then
+    return
+  end
+  RemoteServer.OnTeamRequest("ResBecomeCaptain", nTargetId, bAgree)
+end
+
+function TeamMgr:OnResBecomeCaptain(dwCaptainId, bAgree)
+end
+
+function TeamMgr:ClearBecomeCaptainInfo()
+  _TeamDataCache().tbBecomeCaptainInfo = nil
+end
+
+function TeamMgr:Recall()
+  if not self:HasTeam() then
+    me.CenterMsg(i18n.Get(self.Terms.NoTeam))
+    return
+  end
+  if not self:IsCaptain() then
+    me.CenterMsg(i18n.Get(self.Terms.PermissionDenied))
+    return
+  end
+  local tbMembers = self:GetMembers()
+  if #tbMembers > 0 then
+    RemoteServer.OnTeamRequest("Recall")
+  end
+  return true
+end
+
+function TeamMgr:RecallAMember(dwPlayerId)
+  if not self:HasTeam() then
+    me.CenterMsg(i18n.Get(self.Terms.NoTeam))
+    return
+  end
+  if not self:IsCaptain() then
+    me.CenterMsg(i18n.Get(self.Terms.PermissionDenied))
+    return
+  end
+  if self:GetMember(dwPlayerId) then
+    RemoteServer.OnTeamRequest("RecallAMember", dwPlayerId)
+  end
+  return true
+end
+
+function TeamMgr:OnRecall(nCaptainNpcId, nMemberId)
+  local nCaptainID = _TeamDataCache().nCaptainID
+  
+  local function fnAgree()
+    if nCaptainID ~= _TeamDataCache().nCaptainID then
+      return
+    end
+    self:StartFollowMember(nMemberId, nCaptainNpcId)
+    RemoteServer.OnTeamRequest("ResponseRecall", nMemberId, 1)
+  end
+  
+  local function fnDisagree()
+    RemoteServer.OnTeamRequest("ResponseRecall", nMemberId)
+  end
+  
+  if Client.SceneModule.IsLoading() then
+    fnDisagree()
+    return
+  end
+  
+  local function fnTimeOut()
+    fnAgree()
+    Ui:CloseWindow("UIMessageBox")
+  end
+  
+  local tbMember = self:GetMemberData(nCaptainNpcId)
+  local szName = tbMember and tbMember.szName or ""
+  local szMsg = i18n.Get(self.Terms.RecallHintMember, szName)
+  me.MsgBox(szMsg, {
+    {
+      i18n.Get(self.Terms.Agree),
+      fnAgree
+    },
+    {
+      i18n.Get(self.Terms.Disagree),
+      fnDisagree
+    }
+  }, nil, self.Cfg.nRecallTime, fnTimeOut)
+end
+
+function TeamMgr:StopFollowMember(bNotSend)
+  if not self:HasTeam() then
+    return
+  end
+  local tbTeamData = _TeamDataCache()
+  tbTeamData.tbFollow = tbTeamData.tbFollow or {}
+  local nMemberId = self:GetMeFollowTeammate()
+  if not tbTeamData.tbFollow[me.dwID] then
+    return
+  end
+  tbTeamData.tbFollow[me.dwID] = nil
+  AFK:RawStop()
+  if me.nFightMode == Player.emFIGHT_STATE.FIGHTING then
+    AFK:Start()
+  end
+  if not bNotSend then
+    self:SyncFollowMemberRequest(nMemberId, false)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIYF_FOLLOW_STATE_UPDATE)
+end
+
+function TeamMgr:S2C_StopFollowMember()
+  self:StopFollowMember(true)
+end
+
+function TeamMgr:StopFollowMemberAndSyncFollow(nMemberId, bFollow)
+  self:StopFollowMember(false)
+  self:OnSyncFollow(nMemberId, bFollow)
+end
+
+function TeamMgr:StartFollowMember(nMemberId, nNpcId, bNotSync)
+  if not self:HasTeam() then
+    return
+  end
+  local tbTeamData = _TeamDataCache()
+  tbTeamData.tbFollow = tbTeamData.tbFollow or {}
+  if self:IsFollowMe(nMemberId) then
+    me.CenterMsg(i18n.Get(self.Terms.FollowLoop))
+    return
+  end
+  AFK:RawStop()
+  tbTeamData.tbFollow[me.dwID] = nMemberId
+  AFK:Start(AFK.FightTypeTB.emFollowFight, nNpcId)
+  if not bNotSync then
+    self:SyncFollowMemberRequest(nMemberId, true)
+  end
+  self:RequestLeaderFightPos()
+  EventNotify.OnNotify(EventNotify.emNOTIYF_FOLLOW_STATE_UPDATE)
+end
+
+function TeamMgr:SyncFollowMemberRequest(nMemberId, bFollow)
+  if not nMemberId then
+    return
+  end
+  RemoteServer.OnOtherTeamRequest("FollowMember", nMemberId, bFollow)
+end
+
+function TeamMgr:S2CFollowMember(nTargetId, nTargetNpcId)
+  TeamMgr:StartFollowMember(nTargetId, nTargetNpcId, true)
+end
+
+function TeamMgr:IsFollowMe(nMemberId)
+  if 0 == me.dwTeamID then
+    return
+  end
+  local tbMember = self:GetMember(nMemberId)
+  if not tbMember then
+    return
+  end
+  local tbTeamData = _TeamDataCache()
+  return tbTeamData.tbFollow and tbTeamData.tbFollow[nMemberId] == me.dwID
+end
+
+function TeamMgr:OnSyncFollow(nMemberId, bFollow)
+  local tbTeamData = _TeamDataCache()
+  if bFollow then
+    tbTeamData.tbFollow = tbTeamData.tbFollow or {}
+    tbTeamData.tbFollow[nMemberId] = me.dwID
+  elseif tbTeamData.tbFollow then
+    tbTeamData.tbFollow[nMemberId] = nil
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIYF_FOLLOW_STATE_UPDATE, nMemberId, bFollow)
+end
+
+function TeamMgr:OnCancelFollow(nMemberId)
+  local nTargetId = self:GetFollowTarget(me.dwID)
+  if nTargetId == nMemberId then
+    local tbTeamData = _TeamDataCache()
+    tbTeamData.tbFollow[me.dwID] = nil
+    AFK:RawStop()
+    AFK:Start()
+  end
+end
+
+function TeamMgr:GetFollowTarget(nMemberId)
+  local tbTeamData = _TeamDataCache()
+  return tbTeamData.tbFollow and tbTeamData.tbFollow[nMemberId]
+end
+
+function TeamMgr:GetMeBeFollowed()
+  local tbFollower = {}
+  local tbTeamData = _TeamDataCache()
+  for nFollowId, dwId in pairs(tbTeamData.tbFollow or {}) do
+    if dwId == me.dwID then
+      tbFollower[nFollowId] = 1
+    end
+  end
+  return tbFollower
+end
+
+function TeamMgr:IsFollowTeammateWithMsg(szMsg)
+  szMsg = szMsg or i18n.Get(self.Terms.FollowState)
+  local bIsFollow = self:IsFollowTeammate()
+  if not bIsFollow then
+    return false
+  end
+  local nNow = GetTime()
+  if not self.nLastFollowTipsTime or nNow - self.nLastFollowTipsTime > self.nFollowTeamTipsSpan then
+    self.nLastFollowTipsTime = nNow
+    me.CenterMsg(szMsg)
+  end
+  return true
+end
+
+function TeamMgr:IsFollowTeammate()
+  return self:GetFollowTarget(me.dwID)
+end
+
+function TeamMgr:GetMeFollowTeammate()
+  return self:GetFollowTarget(me.dwID)
+end
+
+function TeamMgr:CheckAndGetMeFollowTeammate()
+  if not self:HasTeam() then
+    return nil
+  end
+  local nFollowId = self:GetMeFollowTeammate()
+  if not nFollowId or nFollowId <= 0 then
+    return nil
+  end
+  local tbTeammate = self:GetMember(nFollowId)
+  if not tbTeammate then
+    self:StopFollowMember()
+    return nil
+  end
+  return tbTeammate
+end
+
+function TeamMgr:CanSwitchMap(nMapId)
+  local tbTeammate = TeamMgr:CheckAndGetMeFollowTeammate()
+  if tbTeammate and nMapId ~= tbTeammate.nMapId then
+    me.CenterMsg(i18n.EasyGet("\232\183\159\230\136\152\228\184\173, \231\166\129\230\173\162\228\188\160\233\128\129"))
+    return false
+  end
+  return true
+end
+
+function TeamMgr:CancelRecall()
+  if not self:HasTeam() then
+    me.CenterMsg(i18n.Get(self.Terms.NoTeam))
+    return
+  end
+  if not self:IsCaptain() then
+    me.CenterMsg(i18n.Get(self.Terms.PermissionDenied))
+    return
+  end
+  local tbMembers = self:GetMembers()
+  if #tbMembers > 0 then
+    RemoteServer.OnTeamRequest("CancelRecall")
+  end
+  return true
+end
+
+function TeamMgr:OnCancelRecall(nCaptainNpcId, nCaptainId)
+  if not self:HasTeam() then
+    me.CenterMsg(i18n.Get(self.Terms.NoTeam))
+    return
+  end
+  local nTarget = self:GetFollowTarget(me.dwID)
+  if nTarget ~= nCaptainId then
+    return
+  end
+  self:StopFollowMember()
+end
+
+function TeamMgr:_GenerateMemberKinOrTongName(tbMemberData)
+  if not tbMemberData then
+    return
+  end
+  if tbMemberData.nTongId and tbMemberData.nTongId > 0 then
+    tbMemberData.szKinOrTongName = tbMemberData.szTongName or ""
+  elseif tbMemberData.nKinId and tbMemberData.nKinId > 0 then
+    tbMemberData.szKinOrTongName = tbMemberData.szKinName or ""
+  else
+    tbMemberData.szKinOrTongName = ""
+  end
+end
+
+function TeamMgr:OnSynAddApplyerTable(tbApplyerData)
+  table.insert(_TeamDataCache().tbApplyer, tbApplyerData)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "NewApplyer")
+  Ui:SynNotifyMsg({
+    szType = "NewApplyer",
+    nTimeOut = GetTime() + 30,
+    szApplyer = tbApplyerData.szName,
+    nApplyID = tbApplyerData.nID
+  })
+end
+
+function TeamMgr:OnSynNewTeam(nTeamID, nCreateTime, nCaptainID, tbTeamMember, nActivityId, nCaptainNpcId, tbFollow, bNoNeedFollow)
+  local tbTeamData = _TeamDataCache()
+  tbTeamData.nTeamID = nTeamID
+  tbTeamData.nCaptainID = nCaptainID
+  for _, tbMemberData in pairs(tbTeamMember) do
+    self:_GenerateMemberKinOrTongName(tbMemberData)
+  end
+  tbTeamData.tbTeamMember = tbTeamMember
+  tbTeamData.tbFollow = tbFollow
+  tbTeamData.nCreateTime = nCreateTime
+  local bShowTeamSetting = self:IsMatchingAct() and me.dwID ~= nCaptainID
+  self:ClearMatching()
+  if me.dwID ~= nCaptainID then
+    local tbCaptainData = TeamMgr:GetCaptainData()
+    local szCaptainName = tbCaptainData and tbCaptainData.szName or ""
+    me.CenterMsg(i18n.Get(self.Terms.JoinHintMember, szCaptainName))
+  elseif nActivityId then
+    _TeamDataCache().nTargetActivityId = nActivityId
+  end
+  local bIsCaptain = me.dwID == nCaptainID and 1 or 0
+  me.SetCaptainFalg(bIsCaptain)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "new", bShowTeamSetting)
+  if tbFollow then
+    EventNotify.OnNotify(EventNotify.emNOTIYF_FOLLOW_STATE_UPDATE)
+  end
+  if me.dwID == nCaptainID then
+    self:StartCheckTargetTimer()
+  elseif self.nCheckTargetTimer then
+    Timer:Close(self.nCheckTargetTimer)
+    self.nCheckTargetTimer = nil
+  end
+end
+
+function TeamMgr:OnSynAddMember(tbMemberData, tbFollow)
+  local tbTeamData = _TeamDataCache()
+  if not TeamMgr:GetMemberData(tbMemberData.nNpcID) then
+    self:_GenerateMemberKinOrTongName(tbMemberData)
+    table.insert(tbTeamData.tbTeamMember, tbMemberData)
+  else
+    Log("ERROR:already have team member ", tbMemberData.nNpcID)
+  end
+  tbTeamData.tbFollow = tbFollow
+  local bShowTeamSetting = false
+  if TeamMgr:IsCaptain() then
+    me.CenterMsg(i18n.Get(self.Terms.JoinHintCaptain, tbMemberData.szName))
+  end
+  self:CheckJoinActivity()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "MemberChanged", bShowTeamSetting, "AddMember")
+  if tbFollow then
+    EventNotify.OnNotify(EventNotify.emNOTIYF_FOLLOW_STATE_UPDATE)
+  end
+end
+
+function TeamMgr:CheckJoinActivity()
+  if not self:IsCaptain() then
+    return
+  end
+  local nActivityId = self:GetCurActivityId()
+  if not nActivityId then
+    return
+  end
+  if self:GetMembersCount() < TeamMgr.Cfg.MAX_MEMBER_COUNT then
+    return
+  end
+  local tbActivityList = self.TEAM_ACTIVITY_DATA
+  if not tbActivityList then
+    return
+  end
+  local szType, subtype
+  for _, tbActivity in pairs(tbActivityList) do
+    if tbActivity.nActivityId == nActivityId then
+      szType = tbActivity.szType
+      subtype = tbActivity.subtype
+      break
+    end
+  end
+  if not szType or not subtype then
+    return
+  end
+  local nLeftTimes = TeamMgr:GetActivityLeftTimes(me, szType, subtype)
+  if nLeftTimes and nLeftTimes < 1 then
+    return
+  end
+  if not TeamMgr:IsTeamMatchingAct() then
+    return
+  end
+  local nCountDownTime = 15
+  local szMsg = i18n.Get(self.Terms.ActivityJoinConfirm)
+  
+  local function fnAgree()
+    self:EnterActivity()
+  end
+  
+  local function fnDisagree()
+  end
+  
+  local function fnClose()
+    if nActivityId ~= self:GetCurActivityId() then
+      return
+    end
+    if not self:IsCaptain() then
+      return
+    end
+    if self:GetMembersCount() < TeamMgr.Cfg.MAX_MEMBER_COUNT then
+      return
+    end
+    self:EnterActivity()
+  end
+  
+  me.MsgBox(szMsg, {
+    {
+      i18n.Get(self.Terms.Agree),
+      fnAgree
+    },
+    {
+      i18n.Get(self.Terms.Disagree),
+      fnDisagree
+    }
+  }, nil, nCountDownTime, fnClose)
+end
+
+function TeamMgr:OnSynChangeCaptain(nCaptainID)
+  _TeamDataCache().nCaptainID = nCaptainID
+  _TeamDataCache().bAutoMatching = false
+  if not self:IsCaptain() then
+    _TeamDataCache().tbApplyer = {}
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "MemberChanged")
+  local szTips
+  if nCaptainID == me.dwID then
+    szTips = i18n.Get(self.Terms.CaptainChangedHintCaptain)
+    self:StartCheckTargetTimer()
+  else
+    local tbCaptain = self:GetCaptainData()
+    if tbCaptain then
+      szTips = i18n.Get(self.Terms.CaptainChangedHintMember, tbCaptain.szName)
+    end
+    if self.nCheckTargetTimer then
+      Timer:Close(self.nCheckTargetTimer)
+      self.nCheckTargetTimer = nil
+    end
+  end
+  if szTips then
+    ChatMgr:OnChannelMessage(ChatMgr.ChannelType.System, 0, ChatMgr.SystemMsgType.Team, "", 0, 0, 0, szTips)
+  end
+end
+
+function TeamMgr:OnSynAutoAgreeState(bAutoAgree)
+  _TeamDataCache().bAutoAgree = bAutoAgree
+end
+
+function TeamMgr:OnSynRemoveMember(nMemberID)
+  for nIdx, tbMemberData in ipairs(_TeamDataCache().tbTeamMember) do
+    if tbMemberData.nPlayerID == nMemberID then
+      table.remove(_TeamDataCache().tbTeamMember, nIdx)
+      local szTips = i18n.Get(self.Terms.QuitHint, tbMemberData.szName)
+      ChatMgr:OnChannelMessage(ChatMgr.ChannelType.System, 0, ChatMgr.SystemMsgType.Team, "", 0, 0, 0, szTips)
+      break
+    end
+  end
+  if self:GetFollowTarget(nMemberID) == me.dwID then
+    self:OnSyncFollow(nMemberID, false)
+  elseif self:GetFollowTarget(me.dwID) == nMemberID then
+    self:StopFollowMember(true)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "MemberChanged")
+end
+
+function TeamMgr:OnSynApplyerList(tbApplyerList)
+  _TeamDataCache().tbApplyer = {}
+  for _, v in pairs(tbApplyerList or {}) do
+    table.insert(_TeamDataCache().tbApplyer, v)
+  end
+  table.sort(_TeamDataCache().tbApplyer, function(a, b)
+    return a.nTime < b.nTime
+  end)
+  if tbApplyerList and next(tbApplyerList) then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "NewApplyer")
+  end
+end
+
+function TeamMgr:OnSynQuite()
+  if TeamMgr:HasTeam() then
+    Ui:CloseWindow("TeammateSelectPop")
+    if self:IsFollowTeammate() then
+      AFK:RawStop()
+      AFK:Start()
+    end
+  end
+  _TeamDataCache().tbTeamMember = {}
+  _TeamDataCache().tbApplyer = {}
+  _TeamDataCache().nCaptainID = 0
+  _TeamDataCache().nTeamID = 0
+  _TeamDataCache().nTargetActivityId = nil
+  _TeamDataCache().tbInviterList = {}
+  _TeamDataCache().tbFollow = nil
+  _TeamDataCache().bAutoMatching = false
+  self:ClearBecomeCaptainInfo()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "quite")
+  me.OnEvent("OnQuiteTeam")
+  Log("OnSynQuite")
+end
+
+function TeamMgr:OnSyncTeamMemberInfo(...)
+  local tbMemberInfo = {
+    ...
+  }
+  local bUpdate = false
+  for _, tbMember in pairs(tbMemberInfo) do
+    local member = TeamMgr:GetMemberData(tbMember[1])
+    if member then
+      if member.nHpPercent ~= tbMember[2] then
+        member.nHpPercent = tbMember[2]
+        bUpdate = true
+      end
+      if member.nMapId ~= tbMember[3] then
+        member.nMapId = tbMember[3]
+        bUpdate = true
+      end
+      member.nPosX = tbMember[4]
+      member.nPosY = tbMember[5]
+      if member.nLevel ~= tbMember[6] then
+        member.nLevel = tbMember[6]
+        bUpdate = true
+      end
+      member.bDrink = tbMember[7] and tbMember[7] > 0
+      if member.nMapTemplateId ~= tbMember[8] then
+        member.nMapTemplateId = tbMember[8]
+        bUpdate = true
+      end
+      if member.nPortrait ~= tbMember[9] then
+        member.nPortrait = tbMember[9]
+        bUpdate = true
+      end
+      if member.nVipLevel ~= tbMember[10] then
+        member.nVipLevel = tbMember[10]
+      end
+    else
+      Log("team c sync wrong, no member", tbMember[1])
+    end
+  end
+  if bUpdate then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "TeamUpdate")
+  end
+end
+
+function TeamMgr:OnSyncMemberPortrait(nMemberId, nPortrait)
+  if nMemberId == me.dwID then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "TeamUpdate")
+  end
+  local member = TeamMgr:GetMember(nMemberId)
+  if member then
+    member.nPortrait = nPortrait
+    EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "TeamUpdate")
+  end
+end
+
+function TeamMgr:OnSyncMemberPortraitFrame(nMemberId, nPortraitFrame)
+  if nMemberId == me.dwID then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "TeamUpdate")
+  end
+  local member = TeamMgr:GetMember(nMemberId)
+  if member then
+    member.nPortraitFrameID = nPortraitFrame
+    EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "TeamUpdate")
+  end
+end
+
+function TeamMgr:OnSynTeamCampChange(nNewCamp)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "TeamUpdate")
+end
+
+function TeamMgr:OnSynHpChange()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ROLE_HP_CHANGE)
+end
+
+function TeamMgr:OnSynPlayerNameChange(tbNewMemberData)
+  local tbTemamMember = _TeamDataCache().tbTeamMember
+  for i, tbData in pairs(tbTemamMember) do
+    if tbData.nPlayerID == tbNewMemberData.nPlayerID then
+      self:_GenerateMemberKinOrTongName(tbNewMemberData)
+      tbTemamMember[i] = tbNewMemberData
+      break
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "TeamUpdate")
+end
+
+function TeamMgr:OnSyncMemberFactionChange(tbNewMemberData)
+  local tbTemamMember = _TeamDataCache().tbTeamMember
+  for i, tbData in pairs(tbTemamMember) do
+    if tbData.nPlayerID == tbNewMemberData.nPlayerID then
+      self:_GenerateMemberKinOrTongName(tbNewMemberData)
+      tbTemamMember[i] = tbNewMemberData
+      break
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "TeamUpdate")
+end
+
+function TeamMgr:OnSyncMemberKinInfo(nPlayerId, nKinId, szKinName)
+  local tbTeamMember = _TeamDataCache().tbTeamMember
+  for i, tbData in pairs(tbTeamMember) do
+    local tbMember = tbData
+    if tbMember.nPlayerID == nPlayerId then
+      tbMember.nKinId = nKinId or 0
+      tbMember.szKinName = szKinName or ""
+      self:_GenerateMemberKinOrTongName(tbMember)
+    end
+  end
+end
+
+function TeamMgr:OnSyncMemberTongInfo(nPlayerId, nTongId, szTongName)
+  local tbTeamMember = _TeamDataCache().tbTeamMember
+  for i, tbData in pairs(tbTeamMember) do
+    local tbMember = tbData
+    if tbMember.nPlayerID == nPlayerId then
+      tbMember.nTongId = nTongId or 0
+      tbMember.szTongName = szTongName or ""
+      self:_GenerateMemberKinOrTongName(tbMember)
+    end
+  end
+end
+
+function TeamMgr:Ask4AllKindTeams()
+  RemoteServer.OnTeamUpRequest("Ask4AllKindTeams")
+end
+
+function TeamMgr:Ask4ActivityTeams(nActivityId)
+  self.nReqActivityId = nActivityId
+  if self.nReqTimer then
+    return
+  else
+    self.nReqTimer = Timer:Register(Env.GAME_FPS, self.Ask4ActivityTeams2, self)
+  end
+end
+
+function TeamMgr:Ask4ActivityTeams2()
+  local nActivityId = self.nReqActivityId
+  RemoteServer.OnTeamUpRequest("Ask4ActivityTeams", nActivityId)
+  if self.nReqTimer then
+    self.nReqTimer = nil
+  end
+end
+
+function TeamMgr:OnSynTargetActivityId(nActivityId)
+  if _TeamDataCache().nTargetActivityId == nActivityId then
+    return
+  end
+  _TeamDataCache().nTargetActivityId = nActivityId
+  if self:IsCaptain() and nActivityId and nActivityId ~= self.ACTIVITYID_NO_TARGET then
+    self:StartCheckTargetTimer()
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_QUICK_TEAM_UPDATE, "TargetId")
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_CHANGE_TARGET)
+end
+
+function TeamMgr:OnLevelChanged()
+  _TeamDataCache().nActivityListVersion = nil
+end
+
+function TeamMgr:OnSynActivityList(tbActivityList, nVersion)
+  _TeamDataCache().nActivityListVersion = nVersion
+  EventNotify.OnNotify(EventNotify.emNOTIFY_QUICK_TEAM_UPDATE, "ActivityList", true)
+end
+
+function TeamMgr:GetActivityId(szType, subtype)
+  local tbActivityList = self.TEAM_ACTIVITY_DATA
+  if not tbActivityList then
+    return
+  end
+  for _, tbActivity in pairs(tbActivityList) do
+    if tbActivity.szType == szType and tbActivity.subtype == subtype then
+      return tbActivity.nActivityId
+    end
+  end
+end
+
+function TeamMgr:OnSynAllKindTeams(tbTeams)
+  _TeamDataCache().tbAllKindTeams = tbTeams
+  _TeamDataCache().nAllKindTeamUpdateTime = GetTime()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_QUICK_TEAM_UPDATE, "AllTeams")
+end
+
+local nDelayUpdateTeamTime = 25
+
+function TeamMgr:OnSynActivityTeams(nActivityId, tbTeams)
+  table.sort(tbTeams, function(a, b)
+    if a.nTeamId == TeamMgr:GetTeamId() then
+      return true
+    elseif b.nTeamId == TeamMgr:GetTeamId() then
+      return false
+    end
+    return a.nCount > b.nCount
+  end)
+  _TeamDataCache().tbActivityTeams[nActivityId] = tbTeams
+  _TeamDataCache().tbActivityTeamUpdateTime[nActivityId] = GetTime() + nDelayUpdateTeamTime
+  EventNotify.OnNotify(EventNotify.emNOTIFY_QUICK_TEAM_UPDATE, "ActivityTeams", nActivityId)
+end
+
+function TeamMgr:GetActivityTeamUpdateTime(nActivityId)
+  return _TeamDataCache().tbActivityTeamUpdateTime[nActivityId] or 0
+end
+
+function TeamMgr:GetActivityTeams(nActivityId, bForce)
+  local tbTeams = _TeamDataCache().tbActivityTeams[nActivityId] or {}
+  if bForce or TeamMgr:GetActivityTeamUpdateTime(nActivityId) < GetTime() then
+    TeamMgr:Ask4ActivityTeams(nActivityId)
+  end
+  return tbTeams
+end
+
+function TeamMgr:GetAllKindTeams(bForce)
+  local tbTeams = _TeamDataCache().tbAllKindTeams or {}
+  if bForce or GetTime() - _TeamDataCache().nAllKindTeamUpdateTime >= 60 then
+    TeamMgr:Ask4AllKindTeams()
+  end
+  return tbTeams
+end
+
+function TeamMgr:OnSynQuickTeamsInfo(nActivityId, nTeamId, nMemberCount)
+  local tbTeams = TeamMgr:GetActivityTeams(nActivityId)
+  for nIdx, tbTeam in pairs(tbTeams) do
+    if tbTeam.nTeamId == nTeamId then
+      if nMemberCount >= TeamMgr.Cfg.MAX_MEMBER_COUNT or 0 == nMemberCount then
+        table.remove(tbTeams, nIdx)
+      else
+        tbTeam.nCount = nMemberCount
+      end
+      EventNotify.OnNotify(EventNotify.emNOTIFY_QUICK_TEAM_UPDATE, "ActivityTeams", nActivityId)
+      break
+    end
+  end
+end
+
+function TeamMgr:OnSynQuickMatchs(tbMatchIds)
+  _TeamDataCache().tbMatchingActIds = tbMatchIds or {}
+  EventNotify.OnNotify(EventNotify.emNOTIFY_QUICK_TEAM_UPDATE, "QuickMatchs", true)
+  if tbMatchIds then
+    me.CenterMsg(i18n.Get(self.Terms.WaitingForQuickMatch))
+  end
+  self:ChangeTimerState("WaitQuickMatch")
+end
+
+function TeamMgr:OnSyncTeamQuickMatch(tbMatchIds)
+  if tbMatchIds then
+    _TeamDataCache().bAutoMatching = true
+    me.CenterMsg(i18n.Get(self.Terms.WaitingForQuickMatch))
+  else
+    _TeamDataCache().bAutoMatching = false
+  end
+  self:ChangeTimerState("WaitTeamQuickMatch")
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_QUICK_MATCH)
+end
+
+function TeamMgr:NoticeCaptainEnterActivityFail(nActivityId, nCountDownTime)
+  local function fnEnter()
+    self:EnterActivity()
+  end
+  
+  local function fnAgree()
+    if Map:GetClassDesc(me.nMapTemplateId) == "fight" and 0 ~= me.nFightMode then
+      local nX, nY = Map:GetDefaultPos(me.nMapTemplateId)
+      AutoPath:GotoAndCallEx(me.nMapId, nX, nY, function()
+        fnEnter()
+      end, 10000)
+    else
+      fnEnter()
+    end
+  end
+  
+  local function fnDisagree()
+  end
+  
+  local function fnClose()
+    fnAgree()
+    Ui:CloseWindow("UIMessageBox")
+  end
+  
+  local szMsg = i18n.Get(self.Terms.ReturnSafeAreaConfirm)
+  me.MsgBox(szMsg, {
+    {
+      i18n.Get(self.Terms.Agree),
+      fnAgree
+    },
+    {
+      i18n.Get(self.Terms.Disagree),
+      fnDisagree
+    }
+  }, nil, nCountDownTime, fnClose)
+end
+
+function TeamMgr:NoticeEnterActivity(nActivityId, nCountDownTime, szName, bNoTimes, bNoFightMode)
+  local function fnEnter()
+    RemoteServer.OnTeamUpRequest("AgreeEnterActivity", nActivityId, true)
+  end
+  
+  local function fnAgree()
+    if Map:GetClassDesc(me.nMapTemplateId) == "fight" and 0 ~= me.nFightMode and not bNoFightMode then
+      if TownPortal:CanDoTownPortal() then
+        TownPortal:DoTownPortal()
+      else
+        local nX, nY = Map:GetDefaultPos(me.nMapTemplateId)
+        AutoPath:GotoAndCallEx(me.nMapId, nX, nY, function()
+          fnEnter()
+        end, 10000)
+      end
+    else
+      fnEnter()
+    end
+  end
+  
+  local function fnDisagree()
+    RemoteServer.OnTeamUpRequest("AgreeEnterActivity", nActivityId, false)
+  end
+  
+  if Client.SceneModule.IsLoading() then
+    fnDisagree()
+    return
+  end
+  
+  local function fnClose()
+    fnAgree()
+    Ui:CloseWindow("UIMessageBox")
+  end
+  
+  local szMsg
+  if bNoTimes then
+    szMsg = i18n.Get(self.Terms.ActivityJoinConfirmMember, szName)
+  else
+    szMsg = i18n.Get(self.Terms.ActivityJoinConfirmMember2, szName)
+  end
+  if nActivityId == self.ACTIVITY_ID.LeaveKongQueHe then
+    szMsg = i18n.EasyGet("\233\152\159\233\149\191\233\128\137\230\139\169<color=#28ff28>{0}</color>\239\188\140\230\152\175\229\144\166\229\144\140\230\132\143\239\188\159", szName)
+  end
+  me.MsgBox(szMsg, {
+    {
+      i18n.Get(self.Terms.Agree),
+      fnAgree
+    },
+    {
+      i18n.Get(self.Terms.Disagree),
+      fnDisagree
+    }
+  }, nil, nCountDownTime, fnClose)
+end
+
+function TeamMgr:CaptainWaitingMsgBox(nCountDownTime)
+  local function fnClose()
+    Ui:CloseWindow("UIMessageBox")
+  end
+  
+  local bCanShow = false
+  local nActivityId = self:GetCurActivityId()
+  if not nActivityId then
+    return
+  end
+  if nActivityId == self.ACTIVITY_ID.LeaveKongQueHe or nActivityId == self.ACTIVITY_ID.KongQueHeYunBiao then
+    for _, tbMember in ipairs(self:GetMembers()) do
+      if tbMember.nPlayerID ~= me.dwID and not self:IsFollowMe(tbMember.nPlayerID) then
+        bCanShow = true
+        break
+      end
+    end
+  else
+    bCanShow = true
+  end
+  if bCanShow then
+    me.MsgBox(i18n.Get(self.Terms.CaptainWaiting), {
+      {
+        i18n.szOk,
+        fnClose
+      }
+    }, nil, nCountDownTime, fnClose, nil, Ui.TimeOutBtnIndex.Center)
+  end
+end
+
+function TeamMgr:EnterActivityResult(bSucceed, szRefucerName, szActivityName)
+  Ui:CloseWindow("UIMessageBox")
+  if not bSucceed then
+    me.CenterMsg(i18n.Get(self.Terms.ActivityJoinDisagreed, szRefucerName, szActivityName or ""))
+  end
+end
+
+function TeamMgr:IsGuaJiActivity(szType)
+  return "XiuLian" == szType
+end
+
+function TeamMgr:EnterActivity()
+  if not TeamMgr:IsCaptain() then
+    me.CenterMsg(i18n.Get(self.Terms.PermissionDenied))
+    return false
+  end
+  if not TeamMgr:HasTeam() then
+    me.CenterMsg(i18n.Get(self.Terms.NoTeam))
+    return false
+  end
+  local nActivityId = TeamMgr:GetCurActivityId()
+  if not nActivityId then
+    me.CenterMsg(i18n.Get(self.Terms.NoActivity))
+    return false
+  end
+  local _, _, _, szActivityType = TeamMgr:GetCurActivityInfo()
+  if self:IsGuaJiActivity(szActivityType) then
+    self:OpenFieldPracticeWindow()
+    return true
+  end
+  
+  local function fnEnter()
+    RemoteServer.OnTeamUpRequest("EnterActivity", nActivityId)
+    TeamMgr:CancelTeamQuickMatch()
+  end
+  
+  local function fnAgree()
+    Ui:CloseWindow("UIMessageBox")
+    local bRet, szMsg = ActivityCheck:CheckCanEnterActivityEx(me, nil, fnEnter, false, false, true, nil, {"TeamPanel", "UITeam"}, false)
+    if not bRet then
+      me.CenterMsg(szMsg)
+      return true
+    end
+    return true
+  end
+  
+  if #TeamMgr:GetMembers() < TeamMgr.Cfg.MAX_MEMBER_COUNT - 1 then
+    if TeamMgr.CAN_ENTER_WITH_ASSIST_NPC[szActivityType] then
+      local szMsg = i18n.EasyGet("\233\152\159\228\188\141\228\186\186\230\149\176\230\156\170\230\187\161\239\188\140\230\152\175\229\144\166\230\143\144\229\137\141\232\191\155\229\133\165\230\180\187\229\138\168\239\188\136\228\186\186\230\149\176\228\184\141\232\182\179\228\188\154\231\148\177\230\177\159\230\185\150\228\190\160\229\174\162\229\137\141\230\157\165\229\138\169\230\136\152\239\188\137")
+      Ui:OpenWindow("UIMessageBox", szMsg, {
+        {fnAgree},
+        {},
+        {fnAgree}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      }, nil, 5)
+    elseif TeamMgr.QUICK_TEAM_FULL_CHECK[szActivityType] then
+      local szMsg = i18n.Get(self.Terms.ActivityJoinConfirm2)
+      Ui:OpenWindow("UIMessageBox", szMsg, {
+        {fnAgree},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      })
+    else
+      fnAgree()
+    end
+  else
+    fnAgree()
+  end
+  self:StopTimer()
+end
+
+function TeamMgr:AutoSetAndEnterActivity(nActivityId)
+  RemoteServer.OnTeamUpRequestAndEndCallClient("QuickTeamUpSetting", {
+    "TeamMgr:EnterActivity"
+  }, nActivityId)
+end
+
+function TeamMgr:OpenFieldPracticeWindow()
+  if Ui:WindowVisible("UITeam") then
+    Ui:CloseWindow("UITeam")
+  end
+  Ui:OpenWindow("UIFieldPractice")
+end
+
+function TeamMgr:CreateOnePersonTeam(nActivityId, bAutoAgree)
+  if TeamMgr:HasTeam() then
+    me.CenterMsg(i18n.Get(self.Terms.MeInTeam))
+    return false
+  end
+  if not TeamMgr:CanTeam(me.nMapTemplateId) then
+    me.CenterMsg(i18n.Get(self.Terms.MapLimitWhenJoin))
+    return false
+  end
+  if me.GetCamp() == Npc.CampTypeDef.camp_type_player then
+    me.CenterMsg(i18n.Get(self.Terms.NewbieLimit))
+    return false
+  end
+  RemoteServer.OnTeamUpRequest("CreateOnePersonTeam", nActivityId, bAutoAgree or TeamMgr:IsAutoAgree())
+  return true
+end
+
+function TeamMgr:QuickMatchs(tbActivityIds)
+  if not tbActivityIds or not next(tbActivityIds) then
+    return
+  end
+  if TeamMgr:HasTeam() then
+    me.CenterMsg(i18n.Get(self.Terms.MeInTeam))
+    return false
+  end
+  RemoteServer.OnTeamUpRequest("ActivityQuickMatchs", tbActivityIds)
+end
+
+function TeamMgr:CancelQuickMatchs()
+  if not next(_TeamDataCache().tbMatchingActIds) then
+    return
+  end
+  RemoteServer.OnTeamUpRequest("ActivityCancelQuickMatchs")
+end
+
+function TeamMgr:TeamQuickMatch()
+  if not TeamMgr:HasTeam() then
+    me.CenterMsg(i18n.Get(self.Terms.NoTeam))
+    return false
+  end
+  if not TeamMgr:IsCaptain() then
+    me.CenterMsg(i18n.Get(self.Terms.PermissionDenied))
+    return false
+  end
+  if Ui.bInZone then
+    me.CenterMsg(i18n.EasyGet("\232\183\168\230\156\141\228\184\173\228\184\141\232\131\189\229\140\185\233\133\141"))
+    return false
+  end
+  RemoteServer.OnTeamUpRequest("AllowTeamQuickMatch")
+end
+
+function TeamMgr:CancelTeamQuickMatch()
+  if not TeamMgr:HasTeam() then
+    me.CenterMsg(i18n.Get(self.Terms.NoTeam))
+    return false
+  end
+  if not TeamMgr:IsCaptain() then
+    me.CenterMsg(i18n.Get(self.Terms.PermissionDenied))
+    return false
+  end
+  RemoteServer.OnTeamUpRequest("CloseTeamQuickMatch")
+end
+
+function TeamMgr:ApplyActivityTeam(nActivityId, nTeamId)
+  if not TeamMgr:CanTeam(me.nMapTemplateId) then
+    me.CenterMsg(i18n.Get(self.Terms.MapLimitWhenJoin))
+    return false
+  end
+  if nTeamId == TeamMgr:GetTeamId() then
+    me.CenterMsg(i18n.Get(self.Terms.MeInTeam))
+    return false
+  end
+  if TeamMgr:HasTeam() then
+    RemoteServer.OnTeamUpRequest("CheckCanApplyActivityTeam", nActivityId, nTeamId)
+  else
+    RemoteServer.OnTeamUpRequest("ApplyActivityTeam", nActivityId, nTeamId)
+  end
+end
+
+function TeamMgr:ApplyActivityTeamFail(nActivityId, nTeamId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_APPLY_ACT_FAIL, nActivityId, nTeamId)
+end
+
+function TeamMgr:CanNotApplyActivityTeam(nActivityId, nTeamId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_APPLY_ACT_FAIL, nActivityId, nTeamId)
+end
+
+function TeamMgr:CanApplyActivityTeam(nActivityId, nTeamId)
+  me.MsgBox(i18n.Get(self.Terms.TeamChangedConfirm), {
+    {
+      i18n.szOk,
+      function()
+        RemoteServer.OnTeamUpRequest("ApplyActivityTeam", nActivityId, nTeamId)
+      end
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function TeamMgr:SetTeamActivity(nActivityId)
+  if not TeamMgr:HasTeam() then
+    me.CenterMsg(i18n.Get(self.Terms.NoTeam))
+    return false
+  end
+  if not TeamMgr:IsCaptain() then
+    me.CenterMsg(i18n.Get(self.Terms.PermissionDenied))
+    return false
+  end
+  if self:GetCurActivityId() == nActivityId then
+    return true
+  end
+  RemoteServer.OnTeamUpRequest("QuickTeamUpSetting", nActivityId)
+  return true
+end
+
+function TeamMgr:_GetNearbyTeamIds()
+  local tbRet = {}
+  local tbNpcList = KNpc.GetNpcListInCurrentMap()
+  for _, pNpc in pairs(tbNpcList) do
+    if pNpc.dwTeamID > 0 then
+      tbRet[pNpc.dwTeamID] = true
+    end
+  end
+  return tbRet
+end
+
+function TeamMgr:SyncNearbyTeams()
+  local tbTeamIds = self:_GetNearbyTeamIds()
+  if not next(tbTeamIds) then
+    return
+  end
+  RemoteServer.OnSyncNearbyTeamsReq(tbTeamIds)
+end
+
+function TeamMgr:OnSyncNearbyTeams(tbTeams)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_NEARBY_TEAMS, tbTeams)
+end
+
+function TeamMgr:OnLostConnect()
+  if self:IsFollowTeammate() then
+    local tbTeammate = self:CheckAndGetMeFollowTeammate()
+    if tbTeammate then
+      AFK:SetFollowTeammateIdCache(tbTeammate.nPlayerID)
+    end
+    AutoPath:StopGoto()
+    self:StopFollowMember(true)
+  end
+end
+
+function TeamMgr:GetActivityTargetTreeData()
+  local tbTree = {}
+  local tbItems = TeamMgr:GetActivityList()
+  local tbActivityClass = {}
+  local tbSubTypes = {}
+  table.insert(tbTree, {
+    tbData = {
+      szName = i18n.Get(self.Terms.ActivityDefault)
+    }
+  })
+  local nPos = 0
+  for _, tbItem in ipairs(tbItems) do
+    if tbItem.szType == tbItem.subtype then
+      table.insert(tbTree, {tbData = tbItem})
+      nPos = nPos + 1
+    else
+      if not tbActivityClass[tbItem.szType] then
+        table.insert(tbTree, {
+          tbData = {
+            szType = tbItem.szType,
+            subtype = tbItem.szType
+          },
+          bHasLeaves = true
+        })
+        nPos = nPos + 1
+        tbActivityClass[tbItem.szType] = {
+          tbLeaves = {},
+          nPos = nPos + 1
+        }
+        table.insert(tbSubTypes, tbActivityClass[tbItem.szType])
+      end
+      if tbItem.nActivityId == self.nCurActivityId then
+        tbActivityClass[tbItem.szType].bDown = true
+      end
+      table.insert(tbActivityClass[tbItem.szType].tbLeaves, tbItem)
+    end
+  end
+  table.sort(tbSubTypes, function(a, b)
+    return a.nPos > b.nPos
+  end)
+  for _, subTypes in ipairs(tbSubTypes) do
+    for k, tbItem in ipairs(subTypes.tbLeaves) do
+      table.insert(tbTree, subTypes.nPos + k, tbItem)
+    end
+  end
+  return tbTree
+end
+
+function TeamMgr:OnMapLoaded(nMapTemplateID, nLastMapTemplateId)
+  self:_CheckAutoMatch(nMapTemplateID)
+  self:_CheckSpecialFubenLeave(nMapTemplateID, nLastMapTemplateId)
+  local nFollowId = self:GetMeFollowTeammate()
+  if not nFollowId then
+    return
+  end
+  local tbMemberData = TeamMgr:GetMember(nFollowId)
+  if not tbMemberData then
+    self:StopFollowMember()
+    return
+  end
+  self:StartFollowMember(nFollowId, tbMemberData.nNpcID, true)
+end
+
+function TeamMgr:_CheckAutoMatch(nMapTemplateID)
+  if not _TeamDataCache().tbMatchingActIds or not next(_TeamDataCache().tbMatchingActIds) then
+    return
+  end
+  if not me.szFubenType then
+    return
+  end
+  if not Map:IsFuben(nMapTemplateID) then
+    return
+  end
+  self:CancelQuickMatchs()
+end
+
+function TeamMgr:_CheckSpecialFubenLeave(nMapTemplateID, nLastMapTemplateId)
+  if not me.szFubenType then
+    return
+  end
+  if Map:IsFuben(nMapTemplateID) then
+    return
+  end
+  if not Map:IsFuben(nLastMapTemplateId) then
+    return
+  end
+  local szFubenType = me.szFubenType
+  me.szFubenType = nil
+  if not self:HasTeam() then
+    return
+  end
+  if not self:IsCaptain() then
+    return
+  end
+  local nLeftTimes = TeamMgr:GetActivityLeftTimes(me, szFubenType)
+  if not nLeftTimes then
+    return
+  end
+  self:OnSpecialFubenLeave(nLeftTimes > 0)
+end
+
+function TeamMgr:OnSpecialFubenLeave(bHasTimes, szFubenType)
+  if bHasTimes then
+    local nCountDownTime = 5
+    local szMsg = i18n.Get(self.Terms.ActivityJoinConfirm3, nCountDownTime)
+    
+    local function fnAgree()
+      self:EnterActivity()
+    end
+    
+    local function fnDisagree()
+    end
+    
+    local function fnClose()
+      self:EnterActivity()
+    end
+    
+    me.MsgBox(szMsg, {
+      {
+        i18n.Get(self.Terms.Agree),
+        fnAgree
+      },
+      {
+        i18n.Get(self.Terms.Disagree),
+        fnDisagree
+      }
+    }, nil, nCountDownTime, fnClose)
+  else
+    local szMsg
+    local tbItem = self:_CheckActivityHasLeftTimes(szFubenType)
+    if tbItem then
+      local szTypeName = tbItem.szName or TeamMgr.TEAM_ACTIVITY_NAME[tbItem.szType]() or tbItem.szType
+      szMsg = i18n.Get(self.Terms.ActivityChangedConfirm, szTypeName)
+      
+      local function fnAgree()
+        if self:SetTeamActivity(tbItem.nActivityId) then
+          RemoteServer.OnTeamUpRequest("EnterActivity", tbItem.nActivityId)
+        end
+      end
+      
+      local function fnDisagree()
+      end
+      
+      me.MsgBox(szMsg, {
+        {
+          i18n.Get(self.Terms.Agree),
+          fnAgree
+        },
+        {
+          i18n.Get(self.Terms.Disagree),
+          fnDisagree
+        }
+      })
+    else
+      szMsg = i18n.Get(self.Terms.ActivityChangedConfirm2)
+      
+      local function fnAgree()
+        local data = self:GetActivityTargetTreeData()
+        Ui:OpenWindow("TeamTargetPanel", data)
+      end
+      
+      local function fnDisagree()
+      end
+      
+      me.MsgBox(szMsg, {
+        {
+          i18n.Get(self.Terms.Agree),
+          fnAgree
+        },
+        {
+          i18n.Get(self.Terms.Disagree),
+          fnDisagree
+        }
+      })
+    end
+  end
+end
+
+function TeamMgr:_CheckActivityHasLeftTimes(szOrgType)
+  local tbTarget = {}
+  local tbNoNeedCheck = {}
+  local bHas
+  local tbCanJoin = {}
+  local tbItems = TeamMgr:GetActivityList()
+  for _, szType in pairs(tbTarget) do
+    if bHas then
+      break
+    end
+    if szType ~= szOrgType then
+      for _, tbItem in ipairs(tbItems) do
+        if tbItem.szType == szType then
+          local nLeftTimes = TeamMgr:GetActivityLeftTimes(me, szType)
+          if nLeftTimes and nLeftTimes > 0 then
+            bHas = true
+            if tbNoNeedCheck[szType] then
+              return tbItem
+            end
+            table.insert(tbCanJoin, tbItem)
+          end
+        end
+      end
+    end
+  end
+  if not next(tbCanJoin) then
+    return
+  end
+  return tbCanJoin[#tbCanJoin]
+end
+
+function TeamMgr:SyncCheckFullResult(bRet, nTargetPlayerID)
+  if bRet then
+    local function fnOK()
+      TeamMgr:Quite()
+      
+      RemoteServer.OnTeamRequest("Apply", nTargetPlayerID)
+    end
+    
+    me.MsgBox(i18n.Get(self.Terms.TeamChangedConfirm), {
+      {
+        i18n.szOk,
+        fnOK
+      },
+      {
+        i18n.szCancel
+      }
+    })
+  end
+end
+
+function TeamMgr:UpdateVoiceOpen(bOpen)
+  _TeamDataCache().bVoiceOpen = bOpen
+end
+
+function TeamMgr:IsVoiceOpen()
+  return _TeamDataCache().bVoiceOpen
+end
+
+function TeamMgr:UploadVoiceState(nState)
+  RemoteServer.OnTeamRequest("UploadVoiceState", nState)
+end
+
+function TeamMgr:UpdateVoiceState(nState)
+  _TeamDataCache().nVoiceState = nState
+end
+
+function TeamMgr:GetVoiceState()
+  return _TeamDataCache().nVoiceState
+end
+
+function TeamMgr:UploadVoiceValue(nVoiceId)
+  RemoteServer.OnTeamRequest("UploadVoiceValue", nVoiceId)
+end
+
+function TeamMgr:UpdateVoiceValue(nMemberId, nVoiceId)
+  local tbVoiceValue = _TeamDataCache().tbVoiceValue
+  tbVoiceValue[nMemberId] = nVoiceId
+end
+
+function TeamMgr:GetVoiceValue(nMemberId)
+  local tbVoiceValue = _TeamDataCache().tbVoiceValue
+  return tbVoiceValue[nMemberId]
+end
+
+function TeamMgr:SyncAllVoiceData(bVoiceOpen, nState, tbVoiceValue)
+  self:UpdateVoiceOpen(bVoiceOpen)
+  self:UpdateVoiceState(nState)
+  _TeamDataCache().tbVoiceValue = tbVoiceValue or {}
+end
+
+function TeamMgr:SaveAssistNpc(tbAssistNpc)
+  self.tbAssistNpc = tbAssistNpc
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TEAM_UPDATE, "AssistNpc")
+end
+
+function TeamMgr:GetAssistNpc()
+  return self.tbAssistNpc or {}
+end
+
+function TeamMgr:CheckAddAutoBegin()
+  if self:HasTeam() and self:IsCaptain() and self:GetCurActivityId() > 0 then
+    local _, _, _, szActivityType = TeamMgr:GetCurActivityInfo()
+    if TeamMgr.CAN_ENTER_WITH_ASSIST_NPC[szActivityType] then
+      self:ChangeTimerState("WaitDungeon")
+    end
+  end
+end
+
+function TeamMgr:ChangeTimerState(szState)
+  if not self.nTimer then
+    self.nTimer = Timer:Register(Env.GAME_FPS, self.TimerCheck, self)
+  end
+  self.nRecordTime = GetTime()
+  self.szState = szState
+end
+
+function TeamMgr:StopTimer()
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+  end
+  self:TimerClear()
+end
+
+function TeamMgr:TimerClear()
+  self.nTimer = nil
+  self.nRecordTime = nil
+  self.szState = nil
+end
+
+function TeamMgr:TimerCheck()
+  if self.szState and self.tbTimerCallBackList[self.szState] then
+    if self.nRecordTime < GetTime() - self.tbTimerCallBackList[self.szState][1] then
+      local bContinue = self[self.tbTimerCallBackList[self.szState][2]](self)
+      if not bContinue then
+        self:TimerClear()
+      end
+      return bContinue
+    end
+  else
+    self:TimerClear()
+    return false
+  end
+  return true
+end
+
+function TeamMgr:QuickMatchTimeOut()
+  if self:IsMatchingAct() and not self:HasTeam() then
+    local tb = TeamMgr:GetMatchingActivityIds()
+    assert(tb)
+    local nActivityIds, _ = next(tb)
+    TeamMgr:CreateOnePersonTeam(nActivityIds, true)
+    return false
+  else
+    return false
+  end
+end
+
+function TeamMgr:DungeonTimeOut()
+  if self:HasTeam() and self:IsCaptain() and self:GetCurActivityId() then
+    local _, _, _, szActivityType = TeamMgr:GetCurActivityInfo()
+    if TeamMgr.CAN_ENTER_WITH_ASSIST_NPC[szActivityType] then
+      self:EnterActivity()
+    end
+  end
+  return false
+end
+
+function TeamMgr:TeamQuickMatchTimeOut()
+  if not self:IsTeamMatchingAct() or not self:IsCaptain() then
+    return false
+  end
+  local nActivityId = TeamMgr:GetCurActivityId()
+  if not nActivityId then
+    me.CenterMsg(i18n.Get(self.Terms.NoActivity))
+    return false
+  end
+  
+  local function agreementFunc()
+    RemoteServer.OnTeamUpRequest("EnterActivity", nActivityId)
+    TeamMgr:CancelTeamQuickMatch()
+  end
+  
+  local function disagreementFunc()
+    self:ChangeTimerState("WaitTeamQuickMatch")
+    return true
+  end
+  
+  if #TeamMgr:GetMembers() < TeamMgr.Cfg.MAX_MEMBER_COUNT - 1 then
+    local szMsg = i18n.EasyGet("\229\189\147\229\137\141\230\156\170\229\140\185\233\133\141\229\136\176\229\133\182\228\187\150\231\142\169\229\174\182\239\188\140\230\152\175\229\144\166\229\140\185\233\133\141\230\177\159\230\185\150\233\171\152\230\137\139\229\143\130\228\184\142\230\180\187\229\138\168")
+    Ui:OpenWindow("UIMessageBox", szMsg, {
+      {agreementFunc},
+      {disagreementFunc}
+    }, {
+      i18n.szOK,
+      i18n.szCancel
+    })
+  end
+  return false
+end
+
+function TeamMgr:StartCheckTargetTimer()
+  if self.nCheckTargetTimer then
+    Timer:Close(self.nCheckTargetTimer)
+    self.nCheckTargetTimer = nil
+  end
+  if self:GetCurActivityId() == self.ACTIVITYID_NO_TARGET then
+    return
+  end
+  self.nCheckTargetTimer = Timer:Register(Env.GAME_FPS * self.nCheckTargetCD, self.OnTimerCheckTarget, self)
+  self.nRecordStateTime = GetTime()
+  self.nCurPlayerExp = me.GetExp()
+end
+
+function TeamMgr:OnTimerCheckTarget()
+  if not self.nRecordStateTime then
+    self.nCheckTargetTimer = nil
+    return false
+  end
+  if self:GetCurActivityId() == self.ACTIVITY_ID.XiuLian and me.GetExp() ~= self.nCurPlayerExp then
+    self.nRecordStateTime = GetTime()
+  end
+  if GetTime() - self.nRecordStateTime > self.nChangeTargetCD then
+    self:SetTeamActivity(self.ACTIVITYID_NO_TARGET)
+    self.nCheckTargetTimer = nil
+    return false
+  end
+  return true
+end
+
+function TeamMgr:EnterActivitySuccess(nActivityId)
+  if self.nCheckTargetTimer then
+    Timer:Close(self.nCheckTargetTimer)
+  end
+  self.nCheckTargetTimer = nil
+end
+
+TeamMgr.tbTimerCallBackList = {
+  WaitTeamQuickMatch = {
+    30,
+    "TeamQuickMatchTimeOut"
+  }
+}
+
+function TeamMgr:ClearUp()
+  TeamMgr:StopTimer()
+  if not Map:IsNotClearAssistNpc(me.nMapTemplateId) then
+    self.tbAssistNpc = {}
+  end
+end
+
+function TeamMgr:SendRecruit()
+  local function func(tbWnd)
+    if not tbWnd then
+      return
+    end
+    tbWnd:AddRecruit()
+  end
+  
+  local szWndName = "UIChat"
+  if Ui:WindowVisible(szWndName) then
+    return func(Ui:GetWindow(szWndName))
+  end
+  Ui:OpenWindowWithCallback(szWndName, function(_, tbWnd)
+    func(tbWnd)
+  end, nil, ChatMgr.ChannelType.Public)
+end
+
+function TeamMgr:SendRecruitMsg(szMsg)
+  local function func(tbWnd)
+    if not tbWnd then
+      return
+    end
+    tbWnd:AddRecruitMsg(szMsg)
+  end
+  
+  local szWndName = "UIChat"
+  if Ui:WindowVisible(szWndName) then
+    return func(Ui:GetWindow(szWndName))
+  end
+  Ui:OpenWindowWithCallback(szWndName, function(_, tbWnd)
+    func(tbWnd)
+  end, nil, ChatMgr.ChannelType.Public)
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, TeamMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, TeamMgr.ClearUp, TeamMgr)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, TeamMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, TeamMgr.CloseSyncTargetTimer, TeamMgr)

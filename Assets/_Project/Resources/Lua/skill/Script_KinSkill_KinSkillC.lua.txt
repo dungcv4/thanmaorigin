@@ -1,0 +1,231 @@
+Require("CommonScript/KinSkill/KinSkill.lua")
+KinSkill.OffsetTime = 14400
+
+local function GenErrorMsg(tbEnumStr)
+  local tbMsg = {}
+  for _, szEnumStr in ipairs(tbEnumStr) do
+    tbMsg[KinSkill.ErrCode[szEnumStr]] = KinSkill.MSG[szEnumStr]
+  end
+  return tbMsg
+end
+
+local ErrorMsg = GenErrorMsg({
+  "SKILL_NOT_EXIST",
+  "HAS_BEEN_MAX_LEVEL",
+  "KINCONTRIB_IS_NOT_ENOUGH",
+  "NOT_IN_KIN",
+  "HAS_BEEN_LIMITED_BY_BUILDING_LEVEL",
+  "COIN_IS_NOT_ENOUGH",
+  "KinSkillPermissionDenied"
+})
+
+function KinSkill:GetErrorMsg(nErrorCode, ...)
+  local szMsg = ErrorMsg[nErrorCode]
+  if szMsg then
+    return i18n.Get(szMsg, ...)
+  else
+    assert(szMsg, nErrorCode)
+  end
+end
+
+function KinSkill:OnServerResult(nErrorCode, tbParam)
+  local szMsg = self:GetErrorMsg(nErrorCode, table.unpack(tbParam or {}))
+  if szMsg then
+    if nErrorCode == self.ErrCode.COIN_IS_NOT_ENOUGH then
+      GainCurrency:ReadyForJump("Coin")
+    else
+      me.CenterMsg(szMsg, true)
+    end
+  end
+end
+
+function KinSkill:UpGradeC(nSkillID)
+  if GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    me.CenterMsg(i18n.EasyGet("\230\138\128\232\131\189\229\141\135\231\186\167\229\164\177\232\180\165\239\188\140\232\175\183\232\191\148\229\155\158\229\142\159\230\156\141\230\147\141\228\189\156"))
+    return
+  end
+  RemoteServer.OnKinSkillRequest(KinSkill.Protocol.C2SUpGrade, nSkillID)
+end
+
+function KinSkill:OnUpGrade(nID, nOrgLevel, nLevel)
+  self:RefreshMagicalAttrib(me, nID, nOrgLevel, nLevel)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_KINSKILL_SYNC_UPGRADE, nID, nLevel)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinSkill)
+  self:MarkLight()
+end
+
+function KinSkill:OnSyncSkillModification(tbSkillLv)
+  local nLevel
+  for nSkillId, tbInfo in pairs(self.tbKinSkill) do
+    nLevel = nil ~= tbSkillLv[nSkillId] and tbSkillLv[nSkillId] or 0
+    self:RemoveMagicAttrib(me.GetNpc(), nSkillId, nLevel)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_KINSKILL_SYNC_DATA)
+end
+
+function KinSkill:GetSortedSkillInfoList()
+  local tbList = {}
+  for _, tbInfo in pairs(self:GetKinSkillCfg()) do
+    table.insert(tbList, tbInfo)
+  end
+  table.sort(tbList, function(tbFirst, tbSecond)
+    return tbFirst.nSortInUI < tbSecond.nSortInUI
+  end)
+  return tbList
+end
+
+function KinSkill:GetSkillList()
+  local tbSkillList = {}
+  for _, tbInfo in pairs(self:GetKinSkillCfg()) do
+    table.insert(tbSkillList, self:GetPlayerOneSkillInfo(tbInfo))
+  end
+  return tbSkillList
+end
+
+function KinSkill:GetSkillBaseInfo(nSkillID)
+  local tbCfg = self:GetKinSkillCfg()
+  local nSkillLevel = self:GetSkillLevelC(nSkillID, tbCfg)
+  return {
+    nSkillID = nSkillID,
+    szName = tbCfg[nSkillID] and tbCfg[nSkillID].szName or "",
+    nLevel = nSkillLevel,
+    szIconAltlas = tbCfg[nSkillID] and tbCfg[nSkillID].szIconAtlas or ""
+  }
+end
+
+function KinSkill:GetSkillLevelC(nSkillID, tbCfg)
+  return me.GetUserValue(self.SaveKey, tbCfg[nSkillID].nSaveKeyIndex)
+end
+
+function KinSkill:FormatMagicDesc(tbUpGrade, nSkillID, nSkillLevel)
+  if not tbUpGrade[nSkillID] or not tbUpGrade[nSkillID][nSkillLevel] then
+    return ""
+  end
+  local tbResult = {}
+  local szMagicDesc, szMagicValue
+  for _, tbInfo in ipairs(tbUpGrade[nSkillID][nSkillLevel].tbAttr) do
+    szMagicDesc, szMagicValue = FightSkill:GetMagicDescSplit(tbInfo[1], {
+      table.unpack(tbInfo, 2)
+    })
+    table.insert(tbResult, string.format("%s\239\188\154%s", szMagicDesc, szMagicValue))
+  end
+  return table.concat(tbResult, "\n")
+end
+
+local function genUpGradeCost(tbUpGrade, nSkillID, nLevel)
+  if not tbUpGrade[nSkillID] or not tbUpGrade[nSkillID][nLevel] then
+    return 0, 0
+  end
+  return tbUpGrade[nSkillID][nLevel].nCoin, tbUpGrade[nSkillID][nLevel].nKinContrib
+end
+
+function KinSkill:GetPlayerOneSkillInfo(tbInfo)
+  local tbSkillCfg = self:GetKinSkillCfg()
+  local tbUpGrade = self:GetUpGradeCfg()
+  local nSkillID = tbInfo.nSkillID
+  local nSkillLevel = self:GetSkillLevelC(nSkillID, tbSkillCfg)
+  local szCurMagicDesc = self:FormatMagicDesc(tbUpGrade, nSkillID, nSkillLevel)
+  local szNextMagicDesc = self:FormatMagicDesc(tbUpGrade, nSkillID, nSkillLevel + 1)
+  local nCoin, nKinContrib = genUpGradeCost(tbUpGrade, nSkillID, nSkillLevel + 1)
+  local nCurKinContrib = me.GetMoney("KinContrib")
+  local nCurCoin = me.GetMoney("Coin")
+  local szKinContribFmt = nKinContrib <= nCurKinContrib and KinSkill.MSG.COST_IS_ENOUGH_TXT or KinSkill.MSG.COST_IS_NOT_ENOUGH_TXT
+  local szCoinFmt = nCoin <= nCurCoin and KinSkill.MSG.COST_IS_ENOUGH_TXT or KinSkill.MSG.COST_IS_NOT_ENOUGH_TXT
+  local tbSkillInfo = {
+    nID = tbInfo.nSkillID,
+    nLevel = nSkillLevel,
+    szName = tbSkillCfg[nSkillID].szName,
+    szDesc = tbSkillCfg[nSkillID].szDesc,
+    szCurMagicDesc = szCurMagicDesc or "",
+    szNextMagicDesc = szNextMagicDesc or "",
+    szCostValueOne = i18n.Get(szKinContribFmt, nCurKinContrib, nKinContrib),
+    szCostValueTwo = i18n.Get(szCoinFmt, nCurCoin, nCoin),
+    szIconAltlas = tbSkillCfg[nSkillID].szIconAtlas,
+    bMax = nSkillLevel >= self:GetSkillMaxLevel(nSkillID)
+  }
+  return tbSkillInfo
+end
+
+function KinSkill:OnLogin()
+  self:CheckRedPoint()
+end
+
+function KinSkill:GetBuildingLimitedValue()
+  local nBuildingLevel = Kin:GetBuildingLevel(Kin.Def.Building_Skill)
+  local tbUpCfg = Kin:GetBuildUpgradeSetting(Kin.Def.Building_Skill)
+  return tbUpCfg[nBuildingLevel].nLimitedValue
+end
+
+function KinSkill:CanLightRedPoint(nSkillID, nKinContrib, nCoin, nLimitedValue)
+  nKinContrib = nKinContrib or me.GetMoney("KinContrib")
+  nCoin = nCoin or me.GetMoney("Coin")
+  nLimitedValue = nLimitedValue or KinSkill:GetBuildingLimitedValue()
+  local tbUpGrade = KinSkill:GetUpGradeCfgBySkillID(nSkillID)
+  local nLevel = KinSkill:GetSkillLevel(me, nSkillID)
+  local tbCfg = KinSkill:GetKinSkillCfg()
+  local nNextLevel = nLevel + 1
+  local nNeedLevel = tbCfg[nSkillID].nRedPointLevel
+  while nLimitedValue > nLevel and tbUpGrade[nNextLevel] and nKinContrib >= tbUpGrade[nNextLevel].nKinContrib and nCoin >= tbUpGrade[nNextLevel].nCoin do
+    nCoin = nCoin - tbUpGrade[nNextLevel].nCoin
+    nKinContrib = nKinContrib - tbUpGrade[nNextLevel].nKinContrib
+    nNextLevel = nNextLevel + 1
+    nLevel = nLevel + 1
+    nNeedLevel = nNeedLevel - 1
+    if nNeedLevel <= 0 then
+      return true
+    end
+  end
+  return false
+end
+
+function KinSkill:CheckRedPoint()
+  local pPlayer = me
+  local szKey = string.format("KinSkillRedPoint_%s", me.dwID)
+  local nLastLightTime = Ui.PlayerPrefs.GetInt(szKey)
+  local nCurTime = GetTime()
+  local bDiffDay = Lib:IsDiffDay(self.OffsetTime, nCurTime, nLastLightTime)
+  if not bDiffDay then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinSkill)
+    return
+  end
+  local nLimitedValue = self:GetBuildingLimitedValue()
+  local nKinContrib = pPlayer.GetMoney("KinContrib")
+  local nCoin = pPlayer.GetMoney("Coin")
+  local tbCfg = self:GetKinSkillCfg()
+  local bLight = false
+  for nSkillID, _ in pairs(tbCfg) do
+    if self:CanLightRedPoint(nSkillID, nKinContrib, nCoin, nLimitedValue) then
+      bLight = true
+      break
+    end
+  end
+  if not bLight then
+    self:MarkLight(nCurTime)
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinSkill)
+    return
+  end
+  RedPointMgr:LightRedPoint(RedPointMgr.EVENT.KinSkill)
+end
+
+function KinSkill:MarkLight(nTime)
+  nTime = nTime or GetTime()
+  Ui.PlayerPrefs.SetInt(string.format("KinSkillRedPoint_%s", me.dwID), nTime)
+end
+
+function KinSkill:UpdateRedPointInitStatus(bStatus)
+  self.bRedPointInit = bStatus
+end
+
+function KinSkill:GetRedPointInitStatus()
+  return self.bRedPointInit
+end
+
+function KinSkill:OnCrossDay()
+  Log("KinSkill:OnCrossDay")
+  self:CheckRedPoint()
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, KinSkill)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, KinSkill.CheckRedPoint, KinSkill)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, KinSkill)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, KinSkill.OnCrossDay, KinSkill)

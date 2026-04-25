@@ -1,0 +1,279 @@
+local tbWnd = Ui:CreateWindow("UIWarsituation")
+tbWnd.tbDisplayFuns = tbWnd.tbDisplayFuns or {}
+tbWnd.tbDisplayFuns.Player = tbWnd.tbDisplayFuns.Player or {}
+local tbDisplayFuns_Player = tbWnd.tbDisplayFuns.Player
+tbWnd.tbDisplayFuns.Faction = tbWnd.tbDisplayFuns.Faction or {}
+local tbDisplayFuns_Faction = tbWnd.tbDisplayFuns.Faction
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnPrePage = "node/imgBG/Content/Right/btnPrePage",
+  btnNextPage = "node/imgBG/Content/Right/btnNextPage",
+  btnLastPage = "node/imgBG/Content/Right/btnLastPage",
+  btnFirstPage = "node/imgBG/Content/Right/btnFirstPage",
+  txtPage = "node/imgBG/Content/Right/txtPage",
+  TreeRoot = "node/imgBG/Content/Left/TypeList/UITree",
+  btnMyPosition = "node/imgBG/Content/Bottom",
+  txtMyInfoLabelName1 = "node/imgBG/Content/Bottom/txtMyInfoLabelName1",
+  txtMyInfoLabelValue1 = "node/imgBG/Content/Bottom/txtMyInfoLabelValue1",
+  txtMyInfoLabelName2 = "node/imgBG/Content/Bottom/txtMyInfoLabelName2",
+  txtMyInfoLabelValue2 = "node/imgBG/Content/Bottom/txtMyInfoLabelValue2",
+  txtMyInfoLabelName3 = "node/imgBG/Content/Bottom/txtMyInfoLabelName3",
+  txtMyInfoLabelValue3 = "node/imgBG/Content/Bottom/txtMyInfoLabelValue3",
+  txtMyInfoLabelNoData = "node/imgBG/Content/Bottom/txtMyInfoLabelNoData",
+  RankTitle = "node/imgBG/Content/Right/titles/TitleWarsituation",
+  RankTemplate = "node/imgBG/Content/Right/RankList/Content/TemplateWarsituation",
+  NotInfo = "node/imgBG/Content/Right/RankList/NotInfo"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_UI_WARSITUATION_UPDATE,
+      self.OnSynRankData
+    }
+  }
+end
+
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnPrePage = function(self)
+    self:PrePage()
+  end,
+  btnNextPage = function(self)
+    self:NextPage()
+  end,
+  btnMyPosition = function(self)
+    self:JumpToMyPosition()
+  end,
+  btnLastPage = function(self)
+    self:LastPage()
+  end,
+  btnFirstPage = function(self)
+    self:FirstPage()
+  end
+}
+
+function tbWnd:FirstPage()
+  if 1 == self.nCurPage then
+    return
+  end
+  self.nCurPage = 1
+  self:UpdateRank()
+end
+
+function tbWnd:LastPage()
+  if self.nCurPage == self.nMaxPage then
+    return
+  end
+  self.nCurPage = self.nMaxPage
+  self:UpdateRank()
+end
+
+function tbWnd:PrePage()
+  if self.nCurPage <= 1 then
+    return
+  end
+  self.nCurPage = self.nCurPage - 1
+  self:UpdateRank()
+end
+
+function tbWnd:NextPage()
+  if self.nCurPage >= self.nMaxPage then
+    return
+  end
+  self.nCurPage = self.nCurPage + 1
+  self:UpdateRank()
+end
+
+function tbWnd:JumpToMyPosition()
+  local nPage = math.max(math.ceil(self.nMyRank / self.nNumsPerPage), 1)
+  if self.nCurPage == nPage then
+    return
+  end
+  self.nCurPage = nPage
+  self:UpdateRank()
+end
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.uiTree = Ui:NewTree(self, tbControls.TreeRoot, self.onClickTreeBigBtn, self.onClickTreeSmallBtn)
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.RankTemplate)
+end
+
+function tbWnd:OnOpen(tbData)
+  self.tbRequestDataFn = tbData.tbRequestDataFn
+  self.nNumsPerPage = tbData.nNumsPerPage
+  self.nCurPage = 1
+  self.szCurKey = nil
+  self.szCurMode = nil
+  self.pPanel:SetActive(tbControls.NotInfo, false)
+  self.uiTree:SetData(tbData.tbBigData, tbData.tbSmallData)
+  self.uiTree:SelectNode(1)
+end
+
+function tbWnd:onClickTreeBigBtn(tbInfo)
+  self.szCurMode = tbInfo.szMode
+  self:SetTitle(tbInfo.tbTitle, tbInfo.tbMyTitle)
+  if tbInfo.bHaveSmall then
+    self.uiTree:AutoSelectSmall(tbInfo.szKey)
+  else
+    self.szCurKey = tbInfo.szKey
+    self:UpdateRank()
+  end
+end
+
+function tbWnd:onClickTreeSmallBtn(tbInfo)
+  self.szCurKey = tbInfo.szKey
+  self.nCurPage = 1
+  self.szCurMode = tbInfo.szMode
+  self:UpdateRank()
+end
+
+function tbWnd:SetTitle(tbTitle, tbMyTitle)
+  self.pPanel:SetActive(tbControls.RankTitle, true)
+  for i = 1, 5 do
+    if tbTitle[i] then
+      self.pPanel:SetActive(tbControls.RankTitle .. "/label" .. i, true)
+      self.pPanel:Label_SetText(tbControls.RankTitle .. "/label" .. i, tbTitle[i])
+    else
+      self.pPanel:SetActive(tbControls.RankTitle .. "/label" .. i, false)
+    end
+  end
+  for i = 1, 3 do
+    if tbMyTitle[i] then
+      self.pPanel:SetActive(self["txtMyInfoLabelName" .. i], true)
+      self.pPanel:Label_SetText(self["txtMyInfoLabelName" .. i], tbMyTitle[i])
+      self.pPanel:SetActive(self["txtMyInfoLabelValue" .. i], true)
+    else
+      self.pPanel:SetActive(self["txtMyInfoLabelName" .. i], false)
+      self.pPanel:SetActive(self["txtMyInfoLabelValue" .. i], false)
+    end
+  end
+  self.pPanel:SetActive(self.txtMyInfoLabelNoData, false)
+end
+
+function tbWnd:SetMyRankInfo_NOData()
+  self.pPanel:SetActive(tbControls.txtMyInfoLabelName1, false)
+  self.pPanel:SetActive(tbControls.txtMyInfoLabelValue1, false)
+  self.pPanel:SetActive(tbControls.txtMyInfoLabelName2, false)
+  self.pPanel:SetActive(tbControls.txtMyInfoLabelValue2, false)
+  self.pPanel:SetActive(tbControls.txtMyInfoLabelName3, false)
+  self.pPanel:SetActive(tbControls.txtMyInfoLabelValue3, false)
+  self.pPanel:SetActive(tbControls.txtMyInfoLabelNoData, true)
+  self.pPanel:Button_SetEnable(tbControls.btnMyPosition, false)
+end
+
+function tbWnd:OnSynRankData(szKey, nPage)
+  if self.szCurKey ~= szKey or self.nCurPage ~= nPage then
+    return
+  end
+  local tbRequestDataFn = Lib:CopyTB(self.tbRequestDataFn)
+  table.insert(tbRequestDataFn, self.szCurKey)
+  table.insert(tbRequestDataFn, self.nCurPage)
+  table.insert(tbRequestDataFn, false)
+  local _, tbRankData, tbMyData = Lib:CallBack(tbRequestDataFn)
+  self:UpdateRank(tbRankData, tbMyData)
+end
+
+function tbWnd:UpdateRank(tbRankData, tbMyData)
+  if not tbRankData then
+    local tbRequestDataFn = Lib:CopyTB(self.tbRequestDataFn)
+    table.insert(tbRequestDataFn, self.szCurKey)
+    table.insert(tbRequestDataFn, self.nCurPage)
+    table.insert(tbRequestDataFn, true)
+    _, tbRankData, tbMyData = Lib:CallBack(tbRequestDataFn)
+  end
+  self.tbScrollView:Clear()
+  local tbMode = self.tbDisplayFuns[self.szCurMode]
+  if tbRankData and not Lib:IsEmptyTB(tbRankData) then
+    for nIndex, tbData in ipairs(tbRankData) do
+      self.tbScrollView:SetElement(nIndex, function(tbElement)
+        tbMode:SetElement(tbElement, self, tbData, nIndex)
+      end)
+    end
+    local nMaxNum = tbRankData.nMaxNum or 0
+    self.nMaxPage = math.max(math.ceil(nMaxNum / self.nNumsPerPage), 1)
+    self.pPanel:Label_SetText(self.txtPage, string.format("%d/%d", self.nCurPage, self.nMaxPage))
+  end
+  if tbMyData then
+    self.pPanel:SetActive(tbControls.txtMyInfoLabelNoData, false)
+    self.pPanel:Button_SetEnable(tbControls.btnMyPosition, true)
+    for nIndex, nValue in ipairs(tbMyData) do
+      self.pPanel:Label_SetText(self["txtMyInfoLabelValue" .. nIndex], nValue)
+    end
+    for i = 1, 3 do
+      if tbMyData[i] then
+        self.pPanel:SetActive(self["txtMyInfoLabelName" .. i], true)
+        self.pPanel:SetActive(self["txtMyInfoLabelValue" .. i], true)
+        self.pPanel:Label_SetText(self["txtMyInfoLabelValue" .. i], tbMyData[i])
+      else
+        self.pPanel:SetActive(self["txtMyInfoLabelName" .. i], false)
+        self.pPanel:SetActive(self["txtMyInfoLabelValue" .. i], false)
+      end
+    end
+    self.nMyRank = tbMyData[1]
+  else
+    self:SetMyRankInfo_NOData()
+  end
+end
+
+function tbDisplayFuns_Player:SetElement(tbElement, tbUIWarsituation, tbData, nIndex)
+  local pPanel = tbElement.pPanel
+  local nRank = (tbUIWarsituation.nCurPage - 1) * tbUIWarsituation.nNumsPerPage + nIndex
+  if nRank <= 3 then
+    pPanel:SetActive("txtRank", false)
+    pPanel:SetActive("UIRankNo", true)
+    pPanel:SetActive("UIRankNo/imgNO1", 1 == nRank)
+    pPanel:SetActive("UIRankNo/imgNO2", 2 == nRank)
+    pPanel:SetActive("UIRankNo/imgNO3", 3 == nRank)
+  else
+    pPanel:SetActive("UIRankNo", false)
+    pPanel:SetActive("txtRank", true)
+    pPanel:Label_SetText("txtRank", nRank)
+  end
+  pPanel:SetActive("btnName", false)
+  if tbData.nFaction == me.nFaction then
+    pPanel:Sprite_SetColor("Main", 255, 255, 255, 255)
+  else
+    pPanel:Sprite_SetColor("Main", 0, 0, 0, 20)
+  end
+  local SpFaction = Faction:GetIcon(tbData.nFaction)
+  pPanel:Sprite_SetSprite("imgPlayerFaction", SpFaction)
+  pPanel:Label_SetText("txtValue", tbData.nScore)
+  pPanel:Label_SetText("txtPlayerName", tbData.szName)
+  pPanel:SetActive("txtKinName", true)
+  pPanel:Label_SetText("txtKinName", tbData.nKillNums)
+  pPanel:SetActive("txtPlayerName/HonorTitle", false)
+end
+
+function tbDisplayFuns_Faction:SetElement(tbElement, tbUIWarsituation, tbData, nIndex)
+  local pPanel = tbElement.pPanel
+  local nRank = (tbUIWarsituation.nCurPage - 1) * tbUIWarsituation.nNumsPerPage + nIndex
+  if nRank <= 3 then
+    pPanel:SetActive("txtRank", false)
+    pPanel:SetActive("UIRankNo", true)
+    pPanel:SetActive("UIRankNo/imgNO1", 1 == nRank)
+    pPanel:SetActive("UIRankNo/imgNO2", 2 == nRank)
+    pPanel:SetActive("UIRankNo/imgNO3", 3 == nRank)
+  else
+    pPanel:SetActive("UIRankNo", false)
+    pPanel:SetActive("txtRank", true)
+    pPanel:Label_SetText("txtRank", nRank)
+  end
+  pPanel:SetActive("btnName", false)
+  if tbData.nFaction == me.nFaction then
+    pPanel:Sprite_SetColor("Main", 255, 255, 255, 255)
+  else
+    pPanel:Sprite_SetColor("Main", 0, 0, 0, 20)
+  end
+  local SpFaction = Faction:GetIcon(tbData.nFaction)
+  pPanel:Sprite_SetSprite("imgPlayerFaction", SpFaction)
+  pPanel:Label_SetText("txtValue", tbData.nScore)
+  local szName = Faction:GetName(tbData.nFaction)
+  pPanel:Label_SetText("txtPlayerName", szName)
+  pPanel:SetActive("txtPlayerName/HonorTitle", false)
+  pPanel:SetActive("txtKinName", false)
+end

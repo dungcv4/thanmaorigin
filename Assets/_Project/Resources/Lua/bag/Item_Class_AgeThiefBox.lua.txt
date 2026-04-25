@@ -1,0 +1,96 @@
+local tbItem = Item:GetClass("AgeThiefBox")
+
+function tbItem:OnUse(it)
+  return self:OnUseMany(it, 1)
+end
+
+function tbItem:OnTimeOut(pItem, pPlayer)
+  Item:OnTimeOutHelper(pItem, pPlayer, "AgeThiefBox")
+end
+
+function tbItem:OnUseMany(it, nCount)
+  local pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.AgeThief)
+  if not pInstance then
+    Log("AgeThiefBox: use AgeThiefBox failed, pInstance is nil, nPlayerId=%d, nCount=%d", me.dwID, nCount)
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\229\183\178\231\187\147\230\157\159\239\188\140\230\151\160\230\179\149\228\189\191\231\148\168"))
+    return nCount
+  end
+  local nLeftBag = me.GetFreeBagCount()
+  if nLeftBag <= 0 then
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\231\169\186\233\151\180\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\228\189\191\231\148\168\239\188\129"))
+    return 0
+  end
+  local nRemainAwardCount = pInstance:GetRemainAwardCount(me)
+  local nSeniorAwardCount = math.min(nCount, nRemainAwardCount)
+  local nNormalAwardCount = nCount - nSeniorAwardCount
+  if nSeniorAwardCount > 0 then
+    if not pInstance.tbConfig.nAwardId or not pInstance.tbConfig.nSeniorAwardKey then
+      LogErr("AgeThiefBox: Give SeniorAward faild, nSeniorAwardKey is nil, nPlayerId=%d, nSeniorAwardCount=%d", me.dwID, nSeniorAwardCount)
+      nCount = nCount - nSeniorAwardCount
+    else
+      pInstance:SetRemainAwardCount(me, nRemainAwardCount - nSeniorAwardCount)
+      for i = 1, nSeniorAwardCount do
+        Award:GiveAward(me.dwID, pInstance.tbConfig.nAwardId, pInstance.tbConfig.nSeniorAwardKey, {
+          nLogReason = Env.LogWay_AgeThief
+        })
+      end
+    end
+  end
+  if nNormalAwardCount > 0 then
+    if not pInstance.tbConfig.nAwardId or not pInstance.tbConfig.nNormalAwardKey then
+      LogErr("AgeThiefBox: Give NormalAward faild, nNormalAwardKey is nil, nPlayerId=%d, nNormalAwardCount=%d", me.dwID, nNormalAwardCount)
+      nCount = nCount - nNormalAwardCount
+    else
+      for i = 1, nNormalAwardCount do
+        Award:GiveAward(me.dwID, pInstance.tbConfig.nAwardId, pInstance.tbConfig.nNormalAwardKey, {
+          nLogReason = Env.LogWay_AgeThief
+        })
+      end
+    end
+  end
+  return nCount
+end
+
+function tbItem:GetClientDefaultUseCount(nItemId)
+  local pItem = me.GetItemInBag(nItemId)
+  local pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.AgeThief)
+  if not pInstance or not pInstance:IsOpen() then
+    return 0
+  end
+  local nLastAwardCount = pInstance:GetRemainAwardCount(me)
+  local nResult = 0
+  if nLastAwardCount > 0 then
+    nResult = math.min(pItem.nCount, nLastAwardCount)
+  else
+    nResult = math.min(pItem.nCount, Item.UseManyLimit.AgeThiefBox)
+  end
+  return nResult
+end
+
+function tbItem:OnClientUse(it)
+  local pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.AgeThief)
+  if not pInstance or not pInstance:IsOpen() then
+    return 0
+  end
+  local nLastAwardCount = pInstance:GetRemainAwardCount(me)
+  if it.nCount > 1 then
+    return 1
+  elseif 1 == it.nCount then
+    if nLastAwardCount > 0 then
+      return 1
+    else
+      local function funcOK()
+        RemoteServer.UseItem(it.dwId)
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\228\187\138\230\151\165\233\171\152\231\186\167\229\165\150\229\138\177\230\172\161\230\149\176\229\183\178\231\148\168\229\174\140\239\188\140\231\187\167\231\187\173\228\189\191\231\148\168\229\176\134\232\142\183\229\190\151\228\191\157\229\186\149\229\165\150\229\138\177\239\188\140\230\152\175\229\144\166\228\189\191\231\148\168\239\188\159"), {
+        {funcOK},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      })
+    end
+  end
+  return 0
+end

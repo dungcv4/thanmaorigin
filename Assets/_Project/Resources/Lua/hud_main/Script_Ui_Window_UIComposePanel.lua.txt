@@ -1,0 +1,150 @@
+local tbWnd = Ui:CreateClass("UIComposePanel", "UIPanel")
+local tbControls = {
+  txtTitle = "txtTitle",
+  Plus = "Compose/Viewport/Content/Plus",
+  btnExtraAward = "btnExtraAward",
+  Materials = "Materials",
+  MaterialsTemplate = "Compose/Viewport/Content/Materials/Template",
+  imgIcon = "imgItemBg/imgIcon",
+  Hud_Effect = "Hud_Effect",
+  txtRemainingValue = "Remaining/txtRemainingValue",
+  Remaining = "Remaining",
+  btnMake = "btnMake",
+  imgAward = "btnExtraAward/imgAward",
+  imgAwardOpen = "btnExtraAward/imgAwardOpen",
+  imgAward_Recieve = "btnExtraAward/imgAward_Recieve"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:NotifyEvents()
+  return {}
+end
+
+tbWnd.tbOnClick = {
+  btnMake = function(self)
+    self.fnMake()
+  end
+}
+
+function tbWnd:Init(tbFormula, fnMake, fnCheckExtAward, fnCheckStatus, fnMaxComposeCount)
+  self.fnMake = fnMake
+  self.tbFormula = tbFormula
+  self.fnCheckExtAward = fnCheckExtAward
+  self.fnCheckAll = fnCheckStatus
+  self.fnMaxComposeCount = fnMaxComposeCount
+  self.bImportant = tbFormula.bImportant
+  local tbProduct = self.tbFormula.tbProduct
+  local tbMaterials = self.tbFormula.tbMaterials
+  if not next(tbProduct) or not next(tbMaterials) then
+    return
+  end
+  self.pPanel:SetActive(tbControls.Hud_Effect, 1 == self.bImportant)
+  local szProductName, nProductIconImage = Award:GetAwardNameAndIcon(me, table.unpack(tbProduct))
+  self.pPanel:Label_SetText(tbControls.txtTitle, i18n.Parse(szProductName))
+  local _, szIcon = Item:GetIcon(nProductIconImage)
+  self.pPanel:Sprite_SetSprite(tbControls.imgIcon, szIcon)
+  self.pPanel:SetActive(tbControls.Remaining, false)
+  if not self.tbMaterialsView then
+    self.tbMaterialsView = Ui:NewItemGridView(self, tbControls.MaterialsTemplate)
+  else
+    local szPlusKey, tbGrid
+    for i = 1, #self.tbMaterialsView.tbItemList do
+      tbGrid = self.tbMaterialsView:GetUIItemGridByIndex(i)
+      if tbGrid then
+        szPlusKey = self.tbMaterialsView:GetItemKey(i) .. "/btnPlus"
+        self.pPanel:SetActive(szPlusKey, false)
+      end
+    end
+    self.tbMaterialsView:Reset()
+  end
+  local tbShowList = {tbProduct}
+  Lib:MergeTable(tbShowList, tbMaterials)
+  local nMaterialCount = #tbShowList
+  for i = 2, 6 do
+    local szKey = string.format("%s/Plus%d", tbControls.Plus, i)
+    self.pPanel:SetActive(szKey, i < nMaterialCount)
+  end
+  for nIndex, tbMaterialInfo in ipairs(tbShowList) do
+    self.tbMaterialsView:SetItem(nIndex, tbMaterialInfo, true)
+    local szPlusKey = self.tbMaterialsView:GetItemKey(nIndex) .. "/btnPlus"
+    self.pPanel:Button_BindEvent(szPlusKey, function()
+      self:Buy(tbMaterialInfo)
+    end)
+  end
+end
+
+function tbWnd:Refresh()
+  local tbProduct = self.tbFormula.tbProduct
+  local tbMaterials = self.tbFormula.tbMaterials
+  if not next(tbProduct) or not next(tbMaterials) then
+    return
+  end
+  local nMaterialIndex = 1
+  local tbGrid = self.tbMaterialsView:GetUIItemGridByIndex(nMaterialIndex)
+  if tbGrid then
+    local szPlusKey = self.tbMaterialsView:GetItemKey(nMaterialIndex) .. "/btnPlus"
+    self.pPanel:SetActive(szPlusKey, false)
+  end
+  for nIndex, tbMaterialInfo in ipairs(tbMaterials) do
+    nMaterialIndex = nIndex + 1
+    local tbGrid = self.tbMaterialsView:GetUIItemGridByIndex(nMaterialIndex)
+    if tbGrid then
+      local szPlusKey = self.tbMaterialsView:GetItemKey(nMaterialIndex) .. "/btnPlus"
+      self:DealLabelSuffix(tbGrid, szPlusKey, tbMaterialInfo)
+    end
+  end
+  self.pPanel:SetActive(tbControls.imgAward, false)
+  self.pPanel:SetActive(tbControls.imgAward_Recieve, false)
+  self.pPanel:SetActive(tbControls.imgAwardOpen, false)
+  local bCanGetExtraAward = self.fnCheckExtAward()
+  local bHasGetAllExtraAward = self.fnCheckAll()
+  if bCanGetExtraAward then
+    self.pPanel:SetActive(tbControls.imgAward_Recieve, true)
+  elseif bHasGetAllExtraAward then
+    self.pPanel:SetActive(tbControls.imgAwardOpen, true)
+  else
+    self.pPanel:SetActive(tbControls.imgAward, true)
+  end
+  self.pPanel:SetActive(tbControls.Remaining, true)
+  local nLeftTimes = self.fnMaxComposeCount()
+  self.pPanel:Label_SetText(tbControls.txtRemainingValue, nLeftTimes)
+  self.pPanel:Button_SetEnable(tbControls.btnMake, nLeftTimes > 0)
+end
+
+function tbWnd:Buy(tbMaterialInfo)
+  if "Item" == tbMaterialInfo[1] and Shop:ChecItemAvaliable(tbMaterialInfo[2]) then
+    Shop:OpenShopBuyWidDefault(tbMaterialInfo[2])
+  end
+end
+
+function tbWnd:DealLabelSuffix(tbGrid, szPlusKey, tbMaterialInfo)
+  if not tbGrid or not next(tbMaterialInfo) then
+    return
+  end
+  local nHaveCount = 0
+  local nAwardType = Player.AwardType[tbMaterialInfo[1]]
+  local nNeedCount = 0
+  if nAwardType then
+    nNeedCount = tbMaterialInfo[Player.AwardTypeCountIndex[nAwardType]]
+    if Player.AwardTypeCountIndex[nAwardType] == Player.AwardTypeCountIndex[Player.AwardType.Item] then
+      nHaveCount = me.GetItemCountByTypeInBag(tbMaterialInfo[2])
+      tbGrid:LabelSuffix_SetText(string.format("%d/%d", nHaveCount, nNeedCount))
+    else
+      nHaveCount = me.GetMoney(tbMaterialInfo[1])
+      tbGrid:LabelSuffix_SetText(string.format("%d", nNeedCount))
+    end
+  else
+    return 0
+  end
+  if nNeedCount <= nHaveCount then
+    tbGrid:LabelSuffix_SetColor("Green")
+    self.pPanel:SetActive(szPlusKey, false)
+  else
+    tbGrid:LabelSuffix_SetColor("Red")
+    if "Item" == tbMaterialInfo[1] then
+      self.pPanel:SetActive(szPlusKey, Shop:ChecItemAvaliable(tbMaterialInfo[2]))
+    else
+      self.pPanel:SetActive(szPlusKey, false)
+    end
+  end
+end

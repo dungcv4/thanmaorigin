@@ -1,0 +1,177 @@
+local tbWnd = Ui:CreateClass("UIQingmingVisitGrave", "UIPanel")
+tbWnd.ElementPath = {
+  btnGo = "ImgAll/btnWork",
+  txtActivityName = "ImgAll/txtActivityName",
+  txtActivityDesc = "ImgAll/txtInfo",
+  txtNum = "ImgAll/txtNum",
+  txtBtnName = "ImgAll/btnWork/Text"
+}
+tbWnd.tbType = {Person = 1, Rank = 2}
+local tbControls = {
+  Template1 = "Left/List01/List/Viewport/Content/Template",
+  Template2 = "Left/List02/List/Viewport/Content/Template",
+  Template = "Right/List/Viewport/Content/Template",
+  btnReward = "Right/btnGift",
+  txtReward = "Right/btnGift/Text",
+  btnHelp = "Right/txtTitle/btnHelp",
+  txtTime01 = "Right/txtTime01",
+  txtLevel = "Right/txtLV",
+  txtTitle = "Right/txtTitle"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.szHelpKey)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbLeftElementPath = {
+    [self.tbType.Person] = {
+      Template = tbControls.Template1,
+      txtSecondTitle = "Left/List01/txtSecondTittle"
+    },
+    [self.tbType.Rank] = {
+      Template = tbControls.Template2,
+      txtSecondTitle = "Left/List02/txtSecondTittle"
+    }
+  }
+  self.szTime = tbControls.txtTime01
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.Template)
+  self.tbListView = {}
+end
+
+function tbWnd:OnOpen(nEntranceIndex, nIndex)
+  self.nEntranceIndex = nEntranceIndex or self.nEntranceIndex
+  if self.nEntranceIndex then
+    self:UpdateInfo(self.nEntranceIndex, nIndex)
+  end
+end
+
+function tbWnd:UpdateInfo(nEntranceIndex, nIndex)
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(nEntranceIndex)
+  local tbInfo = self.tbActivityList[nIndex]
+  if not tbInfo then
+    return
+  end
+  self.tbEntranceRankData = ActivityMgr.EntranceSchedule:GetEntranceRankData(nEntranceIndex)
+  self.nIndex = nIndex
+  self.szHelpKey = tbInfo.szHelpKey
+  local nActId = tbInfo.nId
+  self.nAchieveActId = ActivityMgr.CommonEntryLinkData[nActId].tbSetting.nAchieveActId
+  self:UpdateLeftActivity()
+  self:UpdateRightActivity()
+end
+
+function tbWnd:UpdateListView(nType, tbAward, szTemplate)
+  if not tbAward then
+    return
+  end
+  if not self.tbListView[nType] then
+    self.tbListView[nType] = Ui:NewScrollView(self, szTemplate)
+  end
+  self.tbListView[nType]:Clear()
+  for i = 1, #tbAward do
+    self.tbListView[nType]:SetElement(i, function(tbElement)
+      self:UpdateListElement(tbElement, tbAward[i])
+    end, true)
+  end
+end
+
+function tbWnd:UpdateListElement(tbElement, tbAward)
+  local tbGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  tbGrid:SetClickEnable(true)
+  if "Item" == tbAward[1] then
+    tbGrid:SetItemByTemplate(tbAward[2], tbAward[3], nil, nil, {bShowTip = true})
+    local szName = Item:GetName(tbAward[2], me)
+    tbElement.pPanel:Label_SetText("txtActivityName", szName)
+  else
+    tbGrid:SetDigitalItem(tbAward[1], tbAward[3])
+    local szName = Currency:GetName(tbAward[1])
+    tbElement.pPanel:Label_SetText("txtActivityName", szName)
+  end
+end
+
+function tbWnd:UpdateLeftActivity()
+  local tbSetting = ActivityMgr.CommonEntryLinkData[self.tbActivityList[self.nIndex].nId].tbSetting
+  if tbSetting then
+    for index, szValue in ipairs(tbSetting.tbszInfo) do
+      local tbPath = self.tbLeftElementPath[index]
+      if tbPath then
+        self.pPanel:Label_SetText(tbPath.txtSecondTitle, i18n.EasyGet(szValue))
+      end
+      local nShowAwardKey = tbSetting.tbShowAwardKey[index]
+      local nShowItemId = tbSetting.tbShowItemId[index]
+      if nShowAwardKey and nShowItemId then
+        local tbAward = Award:GetAward(nShowItemId, nShowAwardKey)
+        self:UpdateListView(index, tbAward, tbPath.Template)
+      end
+    end
+  end
+end
+
+function tbWnd:UpdateRightActivity()
+  local tbInfo = self.tbActivityList[self.nIndex]
+  if not tbInfo then
+    return
+  end
+  self.pPanel:Label_SetText(self.txtTitle, tbInfo.szName)
+  local nActId = self.tbActivityList[self.nIndex].nId
+  local pInstance = ActivityMgr:GetInstanceById(nActId)
+  local nEndTime = pInstance:GetEndTime()
+  local bEnd = nEndTime < GetTime()
+  self.pPanel:Label_SetText(tbControls.txtReward, i18n.EasyGet("\232\183\179\232\189\172\230\180\187\229\138\168"))
+  self.pPanel:SetActive(tbControls.btnReward, false)
+  self.pPanel:Label_SetText(tbControls.txtLevel, i18n.EasyGet("\231\173\137\231\186\167\233\153\144\229\136\182\239\188\154{0}", tbInfo.nLevel))
+  if not bEnd then
+    local nDiff = nEndTime - GetTime()
+    local szTime = i18n.EasyGet("<color=#1FFB24>{0}</color> {1}\229\144\142\231\187\147\230\157\159", tbInfo.szShowTime, Lib:TimeDesc2(nDiff))
+    self.pPanel:Label_SetText(self.szTime, szTime)
+  else
+    local szTime = i18n.EasyGet("<color=#1FFB24>{0}</color> \230\180\187\229\138\168\229\183\178\231\187\147\230\157\159", tbInfo.szShowTime)
+    self.pPanel:Label_SetText(self.szTime, szTime)
+  end
+  self.tbScrollView:Clear()
+  for index, tbInfo in ipairs(ActivityMgr.CommonEntryLinkData[nActId].tbSetp) do
+    self.tbScrollView:SetElement(index, function(tbElement)
+      tbElement.pPanel:SetActive(self.ElementPath.txtActivityDesc, true)
+      tbElement.pPanel:Label_SetText(self.ElementPath.txtActivityDesc, i18n.Get(tbInfo.szTime))
+      tbElement.pPanel:SetActive(self.ElementPath.btnGo, true)
+      tbElement.pPanel:Label_SetText(self.ElementPath.txtBtnName, i18n.Get(tbInfo.szButtonName))
+      tbElement.pPanel:Button_SetEnable(self.ElementPath.btnGo, not bEnd)
+      tbElement.pPanel:SetActive(self.ElementPath.txtActivityName, true)
+      tbElement.pPanel:Label_SetText(self.ElementPath.txtActivityName, i18n.Get(tbInfo.szInfo))
+      tbElement.pPanel:Label_SetText(self.ElementPath.txtNum, i18n.EasyGet("{0}", index))
+      if tbInfo.szCallBack then
+        Ui:Button_BindEvent(tbElement.pPanel, self.ElementPath.btnGo, self.OnClickGo, self, tbInfo.szCallBack, tbInfo.szParam)
+      end
+      local tbRedPoint = Lib:SplitStr(tbInfo.szRedPoint, "|")
+      if tbRedPoint and #tbRedPoint > 0 then
+        local tbRedPointId = {}
+        for _, szRedPoint in ipairs(tbRedPoint) do
+          table.insert(tbRedPointId, RedPointMgr.EVENT[szRedPoint])
+        end
+        RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, self.ElementPath.btnGo, tbRedPointId)
+      end
+    end)
+  end
+end
+
+function tbWnd:OnClickGo(szCallBack, szParam)
+  local fn = ActivityMgr.tbJumpFunc[szCallBack]
+  local tbParam = Lib:SplitStrTry2Num(szParam, "|")
+  fn(self.tbActivityList[self.nIndex].nId, table.unpack(tbParam))
+  if "GotoPos" == szCallBack or "GotoNPC" == szCallBack then
+    Ui:CloseWindow("UIQingmingActivity")
+  end
+end
+
+function tbWnd:OnClose()
+  for key, ItemGridScrollView in pairs(self.tbItemGridScrollView or {}) do
+    ItemGridScrollView:Clear()
+  end
+  self.tbScrollView:Clear()
+  for _, tbValue in pairs(self.tbListView) do
+    tbValue:Clear()
+  end
+end

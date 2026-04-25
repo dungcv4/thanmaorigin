@@ -1,0 +1,60 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.WuLinZhengFeng)
+tbActivity.Last_Login_Time = "WuLinZhengFeng_Last_Login_TimeFrame"
+tbActivity.CrossDayTime = 14400
+local Protocol = {
+  [tbActivity.Protocol.OnAwardPlayerListResp] = "OnAwardPlayerListResp"
+}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    me.CenterMsg(i18n.EasyGet("\230\156\141\229\138\161\231\171\175\232\190\147\229\133\165\233\148\153\232\175\175"))
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:ReqAwardPlayerList()
+  if self.tbAwardPlayerListCache and next(self.tbAwardPlayerListCache) then
+    self:OnAwardPlayerListResp(self.tbAwardPlayerListCache)
+    return
+  elseif self.tbConfig.szAwardTimeFrame and 1 ~= GetTimeFrameState(self.tbConfig.szAwardTimeFrame) then
+    self:OnAwardPlayerListResp({})
+    return
+  end
+  ActivityMgr:CallServerScript(self.nId, tbActivity.Protocol.AwardPlayerListReq)
+end
+
+function tbActivity:OnAwardPlayerListResp(tbRankInfo)
+  self.tbAwardPlayerListCache = tbRankInfo
+  if not next(self.tbAwardPlayerListCache) then
+    if not self.tbConfig.szAwardTimeFrame or 1 ~= GetTimeFrameState(self.tbConfig.szAwardTimeFrame) then
+      EventNotify.OnNotify(EventNotify.emNOTIFY_WULINZHENGFENG_NOT_AWARD_UI)
+    else
+      EventNotify.OnNotify(EventNotify.emNOTIFY_WULINZHENGFENG_AWARD_UI, self.tbAwardPlayerListCache)
+    end
+  else
+    EventNotify.OnNotify(EventNotify.emNOTIFY_WULINZHENGFENG_AWARD_UI, self.tbAwardPlayerListCache)
+  end
+end
+
+function tbActivity:CheckFirstLogin()
+  local nLastTime = LocalData:GetRoleNumber(self.Last_Login_Time, 0)
+  local nNowTime = GetTime()
+  if Lib:IsDiffDay(self.CrossDayTime, nLastTime, nNowTime) then
+    self:OnLightRedPoint()
+  end
+end
+
+function tbActivity:OnLightRedPoint()
+  local pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.WuLinZhengFeng)
+  if pInstance and pInstance:IsOpen() and not RedPointMgr:CheckEvent(RedPointMgr.EVENT.WuLinZhengFeng) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.WuLinZhengFeng)
+  end
+  LocalData:SetRoleNumber(self.Last_Login_Time, GetTime())
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, tbActivity)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, tbActivity.OnLightRedPoint, tbActivity)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, tbActivity)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, tbActivity.CheckFirstLogin, tbActivity)

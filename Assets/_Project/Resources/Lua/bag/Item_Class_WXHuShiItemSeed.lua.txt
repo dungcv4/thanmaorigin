@@ -1,0 +1,120 @@
+Require("CommonScript/WuXue/WXHuShiCommon.lua")
+local tbItem = Item:GetClass("WXHuShiItemSeed")
+tbItem.BASE_RANDOM_ATTR_BEGIN = WXHuShi.nBaseAttrSaveBegin
+
+function tbItem:OnCreate(pItem)
+  self:OnAddRandomBaseAttri(pItem)
+end
+
+function tbItem:OnAddRandomBaseAttri(pItem)
+  if not pItem or pItem.szClass ~= "WXHuShiItemSeed" then
+    return
+  end
+  local nHuShiTemplateId = KItem.GetItemExtParam(pItem.dwTemplateId, WXHuShi.EXT_PARAM_SEED_TO_HUSHI)
+  local tbCfg, nAttrNum = WXHuShi:GetHuShiBaseAttrCfg(nHuShiTemplateId)
+  if not tbCfg then
+    LogErr("Can't find HuShiBaseAttrCfg by templateId,nHuShiTemplateId = ", pItem.dwTemplateId, nHuShiTemplateId)
+    return
+  end
+  local pFunc = Lib:GetRandomSelect2(tbCfg)
+  for i = 1, nAttrNum do
+    local nIndex = pFunc()
+    local nAttrId = tbCfg[nIndex].nAttrId
+    local szAttrType = WXHuShi.Cfg.tbAttrId2AttrType[nAttrId]
+    if not szAttrType then
+      LogErr("OnAddRandomBaseAttri Can't find AttrType by attrId = ", nAttrId)
+    end
+    local tbV = {}
+    for i = 1, 3 do
+      if "basic_damage_v" == szAttrType and 3 == i then
+        tbV[i] = tbV[1]
+      else
+        local nMin = tbCfg[nIndex]["nAttrValueMin" .. i]
+        local nMax = tbCfg[nIndex]["nAttrValueMax" .. i]
+        if nMax and nMin and nMin <= nMax then
+          tbV[i] = MathRandom(0, nMax - nMin) + nMin
+        else
+          tbV[i] = 0
+        end
+      end
+    end
+    self:SetRandomBaseAttrInfo(pItem, i, nAttrId, tbV)
+  end
+end
+
+function tbItem:SetRandomBaseAttrInfo(pItem, nIndex, nAttrId, tbV, nOffSet)
+  nOffSet = nOffSet or 0
+  pItem.SetIntValue((nIndex - 1) * WXHuShi.ATTR_SAVE_OFFSET + self.BASE_RANDOM_ATTR_BEGIN + nOffSet, nAttrId)
+  for j = 1, 3 do
+    pItem.SetIntValue((nIndex - 1) * WXHuShi.ATTR_SAVE_OFFSET + self.BASE_RANDOM_ATTR_BEGIN + j + nOffSet, tbV[j] or 0)
+  end
+end
+
+function tbItem:GetRandomBaseAttrInfo(pItem, nOffSet)
+  nOffSet = nOffSet or 0
+  local tbRet = {}
+  for i = 1, 2 do
+    local nAttrId = pItem.GetIntValue((i - 1) * WXHuShi.ATTR_SAVE_OFFSET + tbItem.BASE_RANDOM_ATTR_BEGIN + nOffSet)
+    if nAttrId > 0 then
+      local tbV = {}
+      for j = 1, 3 do
+        tbV[j] = pItem.GetIntValue((i - 1) * WXHuShi.ATTR_SAVE_OFFSET + tbItem.BASE_RANDOM_ATTR_BEGIN + j + nOffSet)
+      end
+      tbRet[i] = {nAttrId, tbV}
+    end
+  end
+  return tbRet
+end
+
+function tbItem:GetItemAttr(pItem)
+  local tbRandomBaseAttr = self:GetRandomBaseAttrInfo(pItem)
+  local tbRet = self:GetItemAttrByTemplateId(pItem.dwTemplateId, tbRandomBaseAttr)
+  return tbRet
+end
+
+function tbItem:GetItemAttrByTemplateId(dwTemplateId, tbRandomBaseAttr)
+  local tbRet = {}
+  table.insert(tbRet, {
+    i18n.EasyGet("\229\159\186\231\161\128\229\177\158\230\128\167")
+  })
+  print("tbRandomBaseAttr", #tbRandomBaseAttr)
+  for i, tbV in ipairs(tbRandomBaseAttr) do
+    local szAttrType = WXHuShi.Cfg.tbAttrId2AttrType[tbV[1]]
+    local szDesc = FightSkill:GetMagicDesc(szAttrType, tbV[2])
+    if szDesc and "" ~= szDesc then
+      local szAttrbColor = Item.tbTipsColorDef.EquipBaseAttrb.ColorName or "Red"
+      table.insert(tbRet, {szDesc, szAttrbColor})
+    end
+  end
+  return tbRet
+end
+
+function tbItem:GetChatLinkInfo(pItem)
+  if pItem.szClass ~= "WXHuShiItemSeed" then
+    return
+  end
+  local tbInfo = {}
+  tbInfo.nTemplateId = pItem.dwTemplateId
+  tbInfo.RandomAttrInfo = self:GetRandomBaseAttrInfo(pItem)
+  return tbInfo
+end
+
+function tbItem:GetUseSetting(nItemTemplateId, nItemId)
+  if not nItemId then
+    return
+  end
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  
+  local function fnIdentify()
+    WXHuShi:HSIdentifyReqC(nItemId, pItem.nCount)
+    Ui:CloseWindow("UIItemTips")
+  end
+  
+  local tbSetting = {}
+  tbSetting.szFirstName = i18n.EasyGet("\233\137\180\229\174\154")
+  tbSetting.fnFirst = fnIdentify
+  return tbSetting
+end

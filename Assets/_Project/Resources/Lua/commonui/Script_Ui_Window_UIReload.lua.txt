@@ -1,0 +1,114 @@
+local tbWnd = Ui:CreateWindow("UIReload")
+tbWnd.tbControls = {
+  btnReload = "imgBG/btnReload",
+  btnCancel = "imgBG/btnCancel",
+  inputContent = "imgBG/inputContent"
+}
+tbWnd.tbOnClick = {
+  btnReload = function(self)
+    if not next(self.RemainCmd) then
+      me.CenterMsg("no change file!")
+    else
+      self:DoCommand()
+    end
+    self.RemainCmd = {}
+    self:Close()
+  end,
+  btnCancel = function(self)
+    self.RemainCmd = {}
+    self:Close()
+  end
+}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.RemainCmd = {}
+end
+
+function tbWnd:OnOpen(szFileName)
+  self.szFileName = szFileName
+  self.RemainCmd[self.szFileName] = true
+  self:OnChangeFile()
+end
+
+function tbWnd:OnChangeFile()
+  local szAllCmd = ""
+  for szFileName, _ in pairs(self.RemainCmd) do
+    szAllCmd = szAllCmd .. szFileName .. "\n"
+  end
+  self.pPanel:Input_SetText(self.inputContent, szAllCmd)
+end
+
+function tbWnd:DoCommand()
+  local szAllCmd = ""
+  local szCmd = ""
+  local szLogInfo = "load file \n"
+  for szFileName, _ in pairs(self.RemainCmd) do
+    local szType = string.match(szFileName, "^([^/]*)/")
+    if not szType then
+      return
+    end
+    Log("Reload:", szType)
+    local szCC = "DoScript(\"%s\");\n"
+    local szCS = "GMCommand(\"DoScript('%s')\")\n"
+    local szCZ = "GMCommand(\"DoScript('%s')\", 2, 1)\n"
+    local szCG = "GMCommand(\"DoScript('%s')\", 2, 2)\n"
+    if "Script" == szType then
+      szCmd = szCmd .. string.format(szCC, szFileName)
+      szLogInfo = szLogInfo .. szFileName .. "\n"
+    elseif "ServerScript" == szType then
+      szCmd = szCmd .. string.format(szCS, szFileName)
+      szCmd = szCmd .. string.format(szCZ, szFileName)
+      szCmd = szCmd .. string.format(szCG, szFileName)
+    elseif "ZoneScript" == szType then
+      szCmd = szCmd .. string.format(szCZ, szFileName)
+      szCmd = szCmd .. string.format(szCG, szFileName)
+    elseif "CommonScript" == szType then
+      szCmd = szCmd .. string.format(szCC, szFileName)
+      szCmd = szCmd .. string.format(szCS, szFileName)
+      szCmd = szCmd .. string.format(szCZ, szFileName)
+      szCmd = szCmd .. string.format(szCG, szFileName)
+      szLogInfo = szLogInfo .. szFileName .. "\n"
+    end
+    szAllCmd = szAllCmd .. szCmd
+  end
+  if "" == szAllCmd then
+    return
+  end
+  local fnCmd, szMsg = load(szAllCmd)
+  if not fnCmd then
+    print(fnCmd)
+    error("Do GmCmd failed:" .. szMsg)
+    return
+  end
+  local bRet, nRetCode = pcall(fnCmd)
+  if not bRet then
+    print(nRetCode)
+    local szInfo = debug.traceback()
+    print(szInfo)
+    self.pPanel:Input_SetText(self.inputContent, szInfo)
+    return
+  end
+  Log(szLogInfo)
+  self.pPanel:Input_SetText(self.inputContent, "")
+  self:ReloadSkill()
+  CS.LuaTables.Init()
+end
+
+function tbWnd:ReloadSkill()
+  local szSkillId = ""
+  local tbSkillId = {}
+  for szFileName, _ in pairs(self.RemainCmd) do
+    local luaName = string.match(szFileName, "Skill/(.*).lua")
+    if luaName then
+      local tbSkillMerge = FightSkill:GetAllSkillIdByLuaName(luaName)
+      tbSkillId = Lib:MergeTable(tbSkillId, tbSkillMerge)
+      szSkillId = Lib:ConcatStr(tbSkillMerge)
+    end
+  end
+  if "" ~= szSkillId then
+    local commandScript = string.format("GM:SkillReload({%s})", szSkillId)
+    GMCommand(commandScript)
+    KFightSkill.ReloadDataBySkillId(table.unpack(tbSkillId))
+  end
+end

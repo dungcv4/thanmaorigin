@@ -1,0 +1,183 @@
+Require("Script/ShenBingPu/ShenBingPuC.lua")
+local tbWnd = Ui:CreateClass("UIOtherDivineInfo", "UIPanel")
+local ShenBingPuC = Item.ShenBingPu
+local tbControls = {
+  txtFightPower = "Left/txtFightPower",
+  btnHonor = "Left/Btn_Honor",
+  btnSuit = "Left/txtTittle/Btn_Suit",
+  NpcModel = "Left/NpcModel",
+  TopItemGrid = "Left/TopItem",
+  MiddleItemGrid = "Left/MiddletItem",
+  DownItemGrid = "Left/DownItem",
+  txtWeaponName = "Right/txtTittleName",
+  UIGridItem = "Right/UIGridItem",
+  txtFixedAttrTittle = "Right/txtTittle01",
+  txtRandAttrTittle = "Right/txtTittle02",
+  RightEmpty = "RightEmpty",
+  Right = "Right",
+  FixedAttrTemplate = "Right/Scroll View01/Viewport/Content/Template",
+  RandAttrTemplate = "Right/Scroll View02/Viewport/Content/Template",
+  ShenBing_Effect = "Left/ShenBing_Effect"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  local obj = self.pPanel:GetObject(tbControls.NpcModel)
+  self.tbNpcModel = obj:GetComponent(Ui.UINpcModel)
+  self.tbSlot2Grid = {}
+  self.tbTopItemGrid = Ui:NewExistItemGrid(self, tbControls.TopItemGrid)
+  self.tbSlot2Grid[Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1] = self.tbTopItemGrid
+  self.tbMiddleItemGrid = Ui:NewExistItemGrid(self, tbControls.MiddleItemGrid)
+  self.tbSlot2Grid[Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON2] = self.tbMiddleItemGrid
+  self.tbDownItemGrid = Ui:NewExistItemGrid(self, tbControls.DownItemGrid)
+  self.tbSlot2Grid[Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON3] = self.tbDownItemGrid
+  self.tbItemGrid = Ui:NewExistItemGrid(self, tbControls.UIGridItem)
+  self.tbFixedAttrView = Ui:NewScrollView(self, tbControls.FixedAttrTemplate)
+  self.tbRandAttrView = Ui:NewScrollView(self, tbControls.RandAttrTemplate)
+end
+
+function tbWnd:OnOpen()
+  self.pAsyncRole = self.tbOwner.pAsyncRole
+  self.tbExtEquips = self.tbOwner.tbExtEquips
+  self.tbUsingWeapon = {}
+  for i = Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1, Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON3 do
+    local nWeaponId = self.tbExtEquips[i]
+    if nWeaponId then
+      local pWeapon = KItem.GetItemObj(nWeaponId)
+      if pWeapon then
+        self.tbUsingWeapon[i] = pWeapon
+      end
+    end
+  end
+  self:UpdateFightPowerInfo()
+  self:UpdateHonor()
+  self:UpdateSuitAttrBtn()
+  self:UpdateThreeGridView()
+  self:UpdateNpcModel()
+  self:OnThreeGridClicked(Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1)
+end
+
+function tbWnd:UpdateFightPowerInfo()
+  local nTotalFightPower = ShenBingPuC:CalcFightPowerAsync(self.pAsyncRole, self.tbUsingWeapon)
+  self.pPanel:Label_SetText(tbControls.txtFightPower, i18n.EasyGet("\230\136\152\229\138\155\229\128\188  {0}", nTotalFightPower))
+end
+
+function tbWnd:UpdateSuitAttrBtn()
+  local _, _, szSuitAttrName, _ = ShenBingPuC:GetPlayerAllSuitAttrAsync(self.pAsyncRole)
+  if not Lib:IsEmptyStr(szSuitAttrName) then
+    self.pPanel:Label_SetText(tbControls.btnSuit, string.format("%s\227\128\139", i18n.Get(szSuitAttrName)))
+  else
+    self.pPanel:Label_SetText(tbControls.btnSuit, i18n.EasyGet("\230\156\170\230\191\128\230\180\187\227\128\139"))
+  end
+  Ui:Button_BindEvent(self.pPanel, tbControls.btnSuit, self.ShowSuitAttrSmallPanel, self)
+end
+
+function tbWnd:ShowSuitAttrSmallPanel()
+  local tbWindow = Ui:GetWindow("UIViewRole")
+  if tbWindow then
+    tbWindow:OpenDivineSuitActive(self.pAsyncRole)
+  end
+end
+
+function tbWnd:UpdateHonor()
+  local nCurHonorLevel = ShenBingPuC:GetHornorLevelAsync(self.pAsyncRole)
+  local szEffectName = Item.ShenBingPu.CFG.HONOR[nCurHonorLevel] and Item.ShenBingPu.CFG.HONOR[nCurHonorLevel][3] or ""
+  self.pPanel:SetActive(tbControls.ShenBing_Effect .. "/ShenBing01", nCurHonorLevel <= 0)
+  local nIndex = 2
+  local szKey = string.format("ShenBing%02d", nIndex)
+  while self.pPanel:IsObjectExist(tbControls.ShenBing_Effect .. "/" .. szKey) do
+    self.pPanel:SetActive(tbControls.ShenBing_Effect .. "/" .. szKey, szKey == szEffectName)
+    nIndex = nIndex + 1
+    szKey = string.format("ShenBing%02d", nIndex)
+  end
+  Ui:Button_BindEvent(self.pPanel, tbControls.btnHonor, self.ShowHonorSmallPanel, self)
+end
+
+function tbWnd:ShowHonorSmallPanel()
+  local tbWindow = Ui:GetWindow("UIViewRole")
+  if tbWindow then
+    tbWindow:OpenDivineHonorActive(self.pAsyncRole)
+  end
+end
+
+function tbWnd:UpdateThreeGridView()
+  for nSlot, tbGrid in pairs(self.tbSlot2Grid) do
+    local pWeapon = self.tbUsingWeapon[nSlot]
+    if pWeapon then
+      tbGrid:SetItem(pWeapon.dwId, pWeapon.dwTemplateId, nil, self.pAsyncRole.GetFaction(), self.pAsyncRole.GetFactionSect(), self.pAsyncRole.GetSex())
+    else
+      tbGrid:Clear()
+    end
+    tbGrid:SetClickEnable(true, self.OnThreeGridClicked, self, nSlot)
+    tbGrid:Plus_SetActive(false)
+  end
+end
+
+function tbWnd:OnThreeGridClicked(nSlot)
+  local tbGrid = self.tbSlot2Grid[nSlot]
+  if not tbGrid then
+    return
+  end
+  if self.nPrevSelectSlot then
+    local tbPrevGrid = self.tbSlot2Grid[self.nPrevSelectSlot]
+    if tbPrevGrid then
+      tbPrevGrid.pPanel:SetActive("ImgSelcet", false)
+    end
+  end
+  tbGrid.pPanel:SetActive("ImgSelcet", true)
+  self:UpdateRightAttrInfo(nSlot)
+  self.nPrevSelectSlot = nSlot
+end
+
+function tbWnd:UpdateRightAttrInfo(nSlot)
+  local pWeapon = self.tbUsingWeapon[nSlot]
+  if pWeapon then
+    local szWeaponName = i18n.Parse(KItem.GetItemShowInfo(pWeapon.dwTemplateId, self.pAsyncRole.GetFaction(), self.pAsyncRole.GetFactionSect(), self.pAsyncRole.GetSex()))
+    self.pPanel:Label_SetText(tbControls.txtWeaponName, i18n.Parse(szWeaponName))
+    self.tbItemGrid:SetItem(pWeapon.dwId, pWeapon.dwTemplateId, nil, self.pAsyncRole.GetFaction(), self.pAsyncRole.GetFactionSect(), self.pAsyncRole.GetSex())
+    self.pPanel:Label_SetText(tbControls.txtFixedAttrTittle, i18n.EasyGet("\229\159\186\231\161\128\229\177\158\230\128\167"))
+    self.pPanel:Label_SetText(tbControls.txtRandAttrTittle, i18n.EasyGet("\233\154\143\230\156\186\229\177\158\230\128\167"))
+    self.tbFixedAttrView:Reset()
+    local tbAllFixedAttr = ShenBingPuC:GetAllFixedAttrAsync(self.pAsyncRole, pWeapon) or {}
+    local tbAllBaseFixedAttr = ShenBingPuC:GetAllFixedAttrAsync(self.pAsyncRole, pWeapon, 1) or {}
+    for nIndex, tbFixedAttrInfo in ipairs(tbAllFixedAttr) do
+      self.tbFixedAttrView:SetElement(nIndex, function(tbElement)
+        self:SetAttrElement(tbElement, pWeapon.dwTemplateId, tbFixedAttrInfo, tbAllBaseFixedAttr[nIndex])
+      end)
+    end
+    self.tbRandAttrView:Reset()
+    local tbAllRandAttr = ShenBingPuC:GetAllRandAttrAsync(self.pAsyncRole, pWeapon) or {}
+    for nIndex, tbRandAttrInfo in ipairs(tbAllRandAttr) do
+      self.tbRandAttrView:SetElement(nIndex, function(tbElement)
+        self:SetAttrElement(tbElement, pWeapon.dwTemplateId, tbRandAttrInfo)
+      end)
+    end
+    self.pPanel:SetActive(tbControls.RightEmpty, false)
+    self.pPanel:SetActive(tbControls.Right, true)
+  else
+    self.pPanel:SetActive(tbControls.RightEmpty, true)
+    self.pPanel:SetActive(tbControls.Right, false)
+  end
+  self.tbItemGrid:Plus_SetActive(false)
+end
+
+function tbWnd:SetAttrElement(tbElement, nWeaponTemplate, tbAttrInfo, tbBaseAttrInfo)
+  local szAttrDesc, nAttrValue, nAttrBaseValue = ShenBingPuC:GetWeaponAttrDiff(tbAttrInfo, tbBaseAttrInfo)
+  if nAttrBaseValue then
+    tbElement.pPanel:Label_SetText("txtAttrTip", string.format("%s+%d", szAttrDesc, nAttrBaseValue))
+    tbElement.pPanel:Label_SetText("txtAttrValueUp", i18n.EasyGet("\239\188\136\229\188\186\229\140\150+{0}\239\188\137", nAttrValue - nAttrBaseValue))
+    tbElement.pPanel:SetActive("txtAttrValueUp", true)
+  else
+    local nMin, nMax = ShenBingPuC:GetRandAttrValRange(nWeaponTemplate, tbAttrInfo.nAttrId)
+    tbElement.pPanel:Label_SetText("txtAttrTip", string.format("%s+%d\239\188\136%d-%d\239\188\137", szAttrDesc, nAttrValue, nMin, nMax))
+    tbElement.pPanel:SetActive("txtAttrValueUp", false)
+  end
+end
+
+function tbWnd:UpdateNpcModel()
+  self.pPanel:SetActive(tbControls.NpcModel, false)
+end
+
+function tbWnd:OnClose()
+  self.tbNpcModel:Release()
+end

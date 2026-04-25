@@ -1,0 +1,356 @@
+local tbWnd = Ui:CreateWindow("UIKinFlagAnswer")
+tbWnd.tbControls = {
+  txtIndex = "node/imgBG/Content/txtIndex",
+  txtRightCountValue = "node/imgBG/Content/txtRightCount/txtRightCountValue",
+  txtQuestion = "node/imgBG/Content/txtQuestion",
+  Btn = "node/imgBG/Content/Options/Btn",
+  btnClose = "node/imgBG/btnClose",
+  txtRightCount = "node/imgBG/Content/txtRightCount"
+}
+local tbAnswerType = {YuanXiaoAnswerType = 1}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    if self.nType and self.nType == tbAnswerType.YuanXiaoAnswerType then
+      local function fnOk()
+        self:Close()
+      end
+      
+      local szNotice = i18n.EasyGet("\228\184\173\233\128\148\233\128\128\229\135\186\229\144\142\228\184\141\228\188\154\228\184\173\230\173\162\231\173\148\233\162\152\230\151\182\233\151\180\239\188\140\228\184\148\228\188\154\233\154\143\230\156\186\233\128\137\230\139\169\232\175\165\233\162\152\231\173\148\230\161\136\239\188\140\230\152\175\229\144\166\231\161\174\229\174\154\231\166\187\229\188\128\239\188\159")
+      Ui:OpenWindow("UIMessageBox", szNotice, {
+        {fnOk},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      })
+    else
+      self:Close()
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+end
+
+function tbWnd:OnOpen(bIsHuaDeng, nQuestionId, nActivityId, nType)
+  self.pPanel:Label_SetText(self.txtIndex, "")
+  self.nType = nType
+  if bIsHuaDeng then
+    self.tbActivity = ActivityMgr:GetInstanceById(nActivityId)
+    self.tbOptionStr = {
+      "A",
+      "B",
+      "C",
+      "D"
+    }
+    for i = 1, 4 do
+      Ui:Button_BindEvent(self.pPanel, self.Btn .. self.tbOptionStr[i], function()
+        if self.nHuaDengQuestionTimer then
+          Timer:Close(self.nHuaDengQuestionTimer)
+        end
+        self:UpdateHuaDengQuestionView(nQuestionId, i)
+        self.tbActivity:ReqAnswerQuestion(i)
+        self:Close()
+      end)
+      self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Dichen", false)
+      self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Renshu", false)
+      self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/TextRenshu", false)
+    end
+    self.nTime = 0
+    if self.nHuaDengQuestionTimer then
+      Timer:Close(self.nHuaDengQuestionTimer)
+    end
+    self.nHuaDengQuestionTimer = Timer:Register(Env.GAME_FPS, self.OnTimerCB, self)
+    local nQuestionTime = self.tbActivity:GetQuestionTime()
+    self.pPanel:Label_SetText(self.txtIndex, i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154{0}", nQuestionTime))
+    self:UpdateHuaDengQuestionView(nQuestionId)
+  elseif nType == tbAnswerType.YuanXiaoAnswerType then
+    self.tbActivity = ActivityMgr:GetInstanceById(nActivityId)
+    self.tbOptionStr = {
+      "A",
+      "B",
+      "C",
+      "D"
+    }
+    for i = 1, 4 do
+      Ui:Button_BindEvent(self.pPanel, self.Btn .. self.tbOptionStr[i], function()
+        if not self.bIsTap then
+          return
+        end
+        self.tbActivity:ReqAnswerQuestion(i)
+      end)
+      self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Dichen", false)
+      self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Renshu", false)
+      self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/TextRenshu", false)
+    end
+    self:UpdateQuestion(nQuestionId)
+  else
+    self.tbOptionStr = {
+      "A",
+      "B",
+      "C",
+      "D"
+    }
+    for i = 1, 4 do
+      Ui:Button_BindEvent(self.pPanel, self.Btn .. self.tbOptionStr[i], function()
+        TongParty:CSQuestionReq(i)
+      end)
+      self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Dichen", true)
+      self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Renshu", true)
+      self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/TextRenshu", true)
+    end
+    self:UpdateAnswer()
+    self:SetAnswerTimer()
+    self:UpdateSelectCount()
+  end
+end
+
+function tbWnd:OnClose()
+  if self.nAnswerTimer then
+    Timer:Close(self.nAnswerTimer)
+    self.nAnswerTimer = nil
+  end
+  for i = 1, 4 do
+    self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Hook", false)
+    self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Fork", false)
+  end
+  if self.nHuaDengQuestionTimer then
+    Timer:Close(self.nHuaDengQuestionTimer)
+    self.nHuaDengQuestionTimer = nil
+  end
+  if self.nCloseTimer then
+    Timer:Close(self.nCloseTimer)
+  end
+  if self.bIsTap then
+    self:AnswerQuestion(MathRandom(4))
+  end
+end
+
+function tbWnd:OnLeave()
+  self:Close()
+end
+
+function tbWnd:UpdateAnswer()
+  local tbDoneAnswer = TongParty.tbDoneAnswer[TongParty.nCurQuiz]
+  for i = 1, 4 do
+    if tbDoneAnswer and tbDoneAnswer[1] == i then
+      if 1 == tbDoneAnswer[2] then
+        self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Hook", true)
+      else
+        self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Fork", true)
+      end
+    end
+  end
+  local nRightNum = TongParty:GetAnswerRightNum()
+  self.pPanel:Label_SetText(self.txtRightCountValue, nRightNum .. "/" .. TongParty.nCurQuiz)
+end
+
+function tbWnd:NextQuiz()
+  for i = 1, 4 do
+    self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Hook", false)
+    self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Fork", false)
+  end
+  self:SetAnswerTimer()
+end
+
+function tbWnd:UpdateHook(bIsRight, nAnswerId)
+  if bIsRight then
+    self.pPanel:SetActive(self.Btn .. self.tbOptionStr[nAnswerId] .. "/Hook", true)
+  else
+    self.pPanel:SetActive(self.Btn .. self.tbOptionStr[nAnswerId] .. "/Fork", true)
+  end
+end
+
+function tbWnd:NextActivityQuiz(bIsRight, nAnswerId)
+  self:UpdateHook(bIsRight, nAnswerId)
+  self:CloseTimer()
+  self:SetYuanXiaoAnswerTimer()
+end
+
+function tbWnd:SetAnswerTimer()
+  local nLeftTime = TongParty.nQuestionTime - GetTime()
+  if nLeftTime > 0 then
+    self.pPanel:Label_SetText(self.txtIndex, i18n.EasyGet("\231\172\172{0}\233\162\152\239\188\136{1}\231\167\146\239\188\137", TongParty.nCurQuiz, nLeftTime))
+  end
+  if self.nAnswerTimer then
+    Timer:Close(self.nAnswerTimer)
+    self.nAnswerTimer = nil
+  end
+  self.nAnswerTimer = Timer:Register(Env.GAME_FPS, function(self)
+    local nLeftTime = TongParty.nQuestionTime - GetTime()
+    if nLeftTime >= 0 then
+      self.pPanel:Label_SetText(self.txtIndex, i18n.EasyGet("\231\172\172{0}\233\162\152\239\188\136{1}\231\167\146\239\188\137", TongParty.nCurQuiz, nLeftTime))
+      return true
+    else
+      return false
+    end
+  end, self)
+  local nRightNum = TongParty:GetAnswerRightNum()
+  self.pPanel:Label_SetText(self.txtRightCountValue, nRightNum .. "/" .. TongParty.nCurQuiz)
+  local tbQuestion = TongParty:GetCurQuestion()
+  self.pPanel:Label_SetText(self.txtQuestion, tbQuestion and i18n.Parse(tbQuestion.szQuiz))
+  for i = 1, 4 do
+    self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[i] .. "/txtAnswer", tbQuestion and i18n.Parse(tbQuestion.tbOption[i]))
+  end
+end
+
+function tbWnd:UpdateSelectCount()
+  local tbSelectCount = TongParty:GetSelectCount()
+  for nIndex = 1, 4 do
+    self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[nIndex] .. "/TextRenshu", tbSelectCount[nIndex] or 0)
+  end
+end
+
+function tbWnd:UpdateHuaDengQuestionView(nQuestionId, nAnswerId)
+  local tbQuestionData = self.tbActivity:GetQuestionData(nQuestionId)
+  if nil == tbQuestionData then
+    return
+  end
+  self.pPanel:SetActive(self.txtRightCount, false)
+  self.pPanel:SetActive(self.btnClose, false)
+  self.pPanel:Label_SetText(self.txtQuestion, i18n.Parse(tbQuestionData.szQuestion))
+  self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[1] .. "/txtAnswer", i18n.Parse(tbQuestionData.szChoice1))
+  self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[2] .. "/txtAnswer", i18n.Parse(tbQuestionData.szChoice2))
+  self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[3] .. "/txtAnswer", i18n.Parse(tbQuestionData.szChoice3))
+  self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[4] .. "/txtAnswer", i18n.Parse(tbQuestionData.szChoice4))
+  if nil == nAnswerId then
+    for i = 1, 4 do
+      self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Hook", false)
+      self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Fork", false)
+    end
+  elseif nAnswerId == tbQuestionData.nAnswerId then
+    self.pPanel:SetActive(self.Btn .. self.tbOptionStr[nAnswerId] .. "/Hook", true)
+  else
+    self.pPanel:SetActive(self.Btn .. self.tbOptionStr[nAnswerId] .. "/Fork", true)
+  end
+end
+
+function tbWnd:OnTimerCB()
+  self.nTime = self.nTime + 1
+  local nQuestionTime = self.tbActivity:GetQuestionTime()
+  if nQuestionTime <= self.nTime then
+    self.tbActivity:ReqAnswerQuestion(0)
+    self:Close()
+    return false
+  else
+    if nQuestionTime - self.nTime >= 0 then
+      self.pPanel:Label_SetText(self.txtIndex, i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154{0}", nQuestionTime - self.nTime))
+    end
+    return true
+  end
+end
+
+function tbWnd:UpdateHuaDengQuestionView(nQuestionId, nAnswerId)
+  local tbQuestionData = self.tbActivity:GetQuestionData(nQuestionId)
+  if nil == tbQuestionData then
+    return
+  end
+  self.pPanel:SetActive(self.txtRightCount, false)
+  self.pPanel:SetActive(self.btnClose, false)
+  self.pPanel:Label_SetText(self.txtQuestion, i18n.Parse(tbQuestionData.szQuestion))
+  self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[1] .. "/txtAnswer", i18n.Parse(tbQuestionData.szChoice1))
+  self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[2] .. "/txtAnswer", i18n.Parse(tbQuestionData.szChoice2))
+  self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[3] .. "/txtAnswer", i18n.Parse(tbQuestionData.szChoice3))
+  self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[4] .. "/txtAnswer", i18n.Parse(tbQuestionData.szChoice4))
+  if nil == nAnswerId then
+    for i = 1, 4 do
+      self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Hook", false)
+      self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Fork", false)
+    end
+  elseif nAnswerId == tbQuestionData.nAnswerId then
+    self.pPanel:SetActive(self.Btn .. self.tbOptionStr[nAnswerId] .. "/Hook", true)
+  else
+    self.pPanel:SetActive(self.Btn .. self.tbOptionStr[nAnswerId] .. "/Fork", true)
+  end
+end
+
+function tbWnd:OnTimerCB()
+  self.nTime = self.nTime + 1
+  local nQuestionTime = self.tbActivity:GetQuestionTime()
+  if nQuestionTime <= self.nTime then
+    self.tbActivity:ReqAnswerQuestion(0)
+    self:Close()
+    return false
+  else
+    if nQuestionTime - self.nTime >= 0 then
+      self.pPanel:Label_SetText(self.txtIndex, i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154{0}", nQuestionTime - self.nTime))
+    end
+    return true
+  end
+end
+
+function tbWnd:AnswerQuestion(nIndex)
+  self.tbActivity:ReqAnswerQuestion(nIndex)
+  self:CloseTimer()
+end
+
+function tbWnd:UpdateQuestion(nQuestionId)
+  local tbQuestionData = self.tbActivity:GetQuestionData(nQuestionId)
+  if nil == tbQuestionData then
+    return
+  end
+  local tbQuestionCfg = self.tbActivity:GetQuestionCfg()
+  if nil == tbQuestionCfg then
+    return
+  end
+  self.bIsTap = true
+  local nAnswerTime = self.tbActivity:GetAnswerTime()
+  local nAnswerNum = self.tbActivity:GetAnswerNum(me)
+  local nLeftTime = nAnswerTime - GetTime()
+  if nLeftTime >= 0 then
+    self.pPanel:Label_SetText(self.txtIndex, i18n.EasyGet("\231\172\172{0}\233\162\152\239\188\136{1}\231\167\146\239\188\137", nAnswerNum + 1, nLeftTime))
+  end
+  for i = 1, 4 do
+    self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Hook", false)
+    self.pPanel:SetActive(self.Btn .. self.tbOptionStr[i] .. "/Fork", false)
+  end
+  local nRightNum = self.tbActivity:GetAnswerRightNum(me)
+  self.pPanel:Label_SetText(self.txtRightCountValue, nRightNum .. "/" .. tbQuestionCfg.nDailyAnswerNum)
+  self.pPanel:Label_SetText(self.txtQuestion, i18n.Parse(tbQuestionData.szQuestion))
+  self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[1] .. "/txtAnswer", i18n.Parse(tbQuestionData.szChoice1))
+  self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[2] .. "/txtAnswer", i18n.Parse(tbQuestionData.szChoice2))
+  self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[3] .. "/txtAnswer", i18n.Parse(tbQuestionData.szChoice3))
+  self.pPanel:Label_SetText(self.Btn .. self.tbOptionStr[4] .. "/txtAnswer", i18n.Parse(tbQuestionData.szChoice4))
+  self.nCloseTimer = Timer:Register(Env.GAME_FPS, function(self)
+    local nAnswerTime = self.tbActivity:GetAnswerTime()
+    local nAnswerNum = self.tbActivity:GetAnswerNum(me)
+    local nLeftTime = nAnswerTime - GetTime()
+    if nLeftTime >= 0 then
+      self.pPanel:Label_SetText(self.txtIndex, i18n.EasyGet("\231\172\172{0}\233\162\152\239\188\136{1}\231\167\146\239\188\137", nAnswerNum + 1, nLeftTime))
+      return true
+    else
+      self:AnswerQuestion(MathRandom(4))
+      return false
+    end
+  end, self)
+end
+
+function tbWnd:ReqQuestionId()
+  self.tbActivity:ReqQuestionId()
+end
+
+function tbWnd:SetYuanXiaoAnswerTimer()
+  local tbQuestionCfg = self.tbActivity:GetQuestionCfg()
+  if nil == tbQuestionCfg then
+    return
+  end
+  self.bIsTap = false
+  local nAnswerNum = self.tbActivity:GetAnswerNum(me)
+  if nAnswerNum < tbQuestionCfg.nDailyAnswerNum then
+    self.nCloseTimer = Timer:Register(Env.GAME_FPS * 2, self.ReqQuestionId, self)
+  else
+    self.nCloseTimer = Timer:Register(Env.GAME_FPS * 2, self.Finish, self)
+  end
+end
+
+function tbWnd:Finish()
+  me.CenterMsg(i18n.EasyGet("\231\173\148\233\162\152\229\183\178\229\174\140\230\136\144\227\128\130"))
+  self:Close()
+end
+
+function tbWnd:CloseTimer()
+  if self.nCloseTimer then
+    Timer:Close(self.nCloseTimer)
+    self.nCloseTimer = nil
+  end
+end

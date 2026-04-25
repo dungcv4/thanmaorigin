@@ -1,0 +1,335 @@
+local tbWnd = Ui:CreateClass("UIZhenyuanNingJu", "UIPanel")
+local tbControls = {
+  LeftItemTemplate = "panel/PartnerList/Viewport/Content/Template",
+  PartnerTxtName = "panel/PartnerInfo/PartnerName/txtName",
+  PartnerInfoSeries = "panel/PartnerInfo/PartnerName/Series",
+  ZhenYuanTemplate = "panel/Results/Template",
+  Quality = "panel/Quality",
+  TxtEnhanceCost = "panel/Cost/imgMoney/txtEnhanceCost",
+  TxtCost = "panel/Cost/Cost/CostCell/txtCost",
+  txtItemDiscountNum = "panel/Cost/Cost/CostCell/txtItemDiscountNum",
+  CostItemUIItemGrid = "panel/Cost/Cost/UIItemGrid",
+  PartnerImgModel = "panel/PartnerInfo/imgModel",
+  btnEnhance = "panel/Cost/btnEnhance",
+  btnAdd = "panel/Cost/Cost/btnAdd",
+  UpPartnerGroup = "panel/UpPartnerGroup",
+  EmptyPanelNingJu = "EmptyPanelNingJu",
+  Toggle10 = "panel/Cost/Toggle10",
+  txtUpTime = "panel/UpActivityGroup/txtUpTime",
+  UpActivityGroup = "panel/UpActivityGroup"
+}
+tbWnd.tbControls = tbControls
+local tbSeries = {
+  [1] = "Metal",
+  [2] = "Wood",
+  [3] = "Water",
+  [4] = "Fire",
+  [5] = "Earth"
+}
+local tbImgQualityBgList = {
+  [1] = "UI/atlas/partnernew/img_partnerNew_listbg_sss.png",
+  [2] = "UI/atlas/partnernew/img_partnerNew_listbg_ss.png",
+  [3] = "UI/atlas/partnernew/img_partnerNew_listbg_s.png",
+  [4] = "UI/atlas/partnernew/img_partnerNew_listbg_a.png",
+  [5] = "UI/atlas/partnernew/img_partnerNew_listbg_b.png"
+}
+local tbPartnerOrderEffect = {
+  [1] = "Effect_SSS",
+  [2] = "Effect_SS",
+  [3] = "Effect_S"
+}
+tbWnd.tbOnClick = {
+  btnEnhance = function(self)
+    local nTimeNow = GetTime()
+    if nTimeNow < self.nLastClickTime + 1 then
+      return
+    end
+    self.nLastClickTime = nTimeNow
+    self:NingJu()
+  end,
+  btnAdd = function(self)
+    local tbPartnerList = self:GetAllPartners()
+    local tbPartner = tbPartnerList[self.nSelectIndex]
+    if not tbPartner then
+      return
+    end
+    local tbItemCfg = Item.ZhenYuan:GetCompoundCfg(tbPartner.nTemplateId, Item.ZhenYuan:GetPlayerMaxOrder(me) - self.nSelectOrder)
+    if not tbItemCfg then
+      return
+    end
+    if tbItemCfg.nMaterialsId == Item.ZhenYuan.nZhenYuanJinTieId then
+      Shop:OpenShopBuyWid(tbItemCfg.nMaterialsId, true, "LimitBuy")
+    else
+      Shop:OpenShopBuyWid(tbItemCfg.nMaterialsId, true, "YuanBao")
+    end
+  end,
+  UpPartnerGroup = function(self)
+    local tbUi = Ui:GetWindow("UIZhenyuanEnhance")
+    if tbUi then
+      tbUi:RefreshMingXia(true)
+    end
+  end,
+  UpActivityGroup = function(self)
+    Ui:OnHelpClicked("ZhenYuanActivity")
+  end
+}
+
+function tbWnd:OnCreate()
+  self.nSelectIndex = 1
+  self.nSelectOrder = 0
+  self.nLastClickTime = 0
+  self.tbLeftItemList = Ui:NewScrollView(self, tbControls.LeftItemTemplate, function(self, nIndex, tbElement)
+    self.tbLeftItemList:SetElement(self.nSelectIndex, function(tbElement)
+      tbElement.pPanel:SetActive("imgSelected", false)
+    end)
+    self.nSelectIndex = nIndex
+    local pPanel = tbElement.pPanel
+    pPanel:SetActive("imgSelected", true)
+    self:PartnerNingJuInfo()
+  end)
+  self.tbZhenYuanNingJuList = Ui:NewScrollView(self, tbControls.ZhenYuanTemplate, nil)
+  self.pItemGrid = nil
+  local pPartnerModelObj = self.pPanel:GetObject(tbControls.PartnerImgModel)
+  self.goPartnerModel = pPartnerModelObj:GetComponent(Ui.UINpcModel)
+  self.pPanel:Dropdown_BindEvent(tbControls.Quality, function(value)
+    self:RefreshOrder(value)
+  end)
+  local bContinuousState = Item.ZhenYuan:GetContinuousState()
+  Ui:Toggle_UnBindEvent(self.pPanel, tbControls.Toggle10)
+  self.pPanel:Toggle_SetChecked(tbControls.Toggle10, bContinuousState)
+  Ui:Toggle_BindEvent(self.pPanel, tbControls.Toggle10, function(self, isOn)
+    self.pPanel:Toggle_SetChecked(tbControls.Toggle10, isOn)
+    Item.ZhenYuan:SetContinuousState(isOn)
+    self:refreshCost()
+  end, self)
+end
+
+function tbWnd:OnOpen(nIndex)
+  self.nSelectIndex = 1
+  local tbPartnerList = self:GetAllPartners()
+  if #tbPartnerList <= 0 then
+    self.pPanel:SetActive("panel", false)
+    self.pPanel:SetActive("EmptyPanelNingJu", true)
+    return
+  end
+  self.pPanel:SetActive("EmptyPanelNingJu", false)
+  self.pPanel:SetActive("panel", true)
+  self:RefreshPartnerList()
+  self:PartnerNingJuInfo()
+  self:SelectOrder()
+end
+
+function tbWnd:OnClose()
+  self.tbLeftItemList:Reset()
+  self.tbZhenYuanNingJuList:Reset()
+  local tbUi = Ui:GetWindow("UIZhenyuanEnhance")
+  if tbUi then
+    tbUi:RefreshMingXia(false)
+  end
+  if self.nAutoLianHuaTimer then
+    Timer:Close(self.nAutoLianHuaTimer)
+    self.nAutoLianHuaTimer = nil
+  end
+end
+
+function tbWnd:NingJu()
+  local tbPartnerList = self:GetAllPartners()
+  local tbPartner = tbPartnerList[self.nSelectIndex]
+  Item.ZhenYuan:NingJu(tbPartner.nPartnerId, Item.ZhenYuan:GetPlayerMaxOrder(me) - self.nSelectOrder)
+end
+
+function tbWnd:RefreshOrder(nLevel)
+  self.nSelectOrder = nLevel
+  self.pPanel:Dropdown_SetValue(tbControls.Quality, nLevel)
+  self:PartnerNingJuInfo()
+end
+
+function tbWnd:SelectOrder()
+  local tbOptions = {}
+  local nMaxOrder = Item.ZhenYuan:GetPlayerMaxOrder(me)
+  for i = nMaxOrder, 1, -1 do
+    table.insert(tbOptions, i18n.Get(LifeSkill.MSG.DropdownOption, i))
+  end
+  self.pPanel:Dropdown_ResetOptions(tbControls.Quality, tbOptions)
+  self.pPanel:Dropdown_SetValue(tbControls.Quality, self.nSelectOrder)
+end
+
+function tbWnd:PartnerNingJuInfo()
+  local tbPartnerList = self:GetAllPartners()
+  local tbPartner = tbPartnerList[self.nSelectIndex]
+  if not tbPartner then
+    return
+  end
+  if self.nAutoLianHuaTimer then
+    Timer:Close(self.nAutoLianHuaTimer)
+    self.nAutoLianHuaTimer = nil
+  end
+  if self:ShowActivityCountdown(tbPartner.nTemplateId) then
+    self.nAutoLianHuaTimer = Timer:Register(Env.GAME_FPS * 30, self.ShowActivityCountdown, self, tbPartner.nTemplateId)
+  end
+  self.pPanel:Label_SetText(tbControls.PartnerTxtName, i18n.Parse(tbPartner.szName))
+  for nIndex, szValue in ipairs(tbSeries) do
+    if nIndex == tbPartner.nSeries then
+      self.pPanel:SetActive(tbControls.PartnerInfoSeries .. "/" .. tbSeries[nIndex], true)
+    else
+      self.pPanel:SetActive(tbControls.PartnerInfoSeries .. "/" .. tbSeries[nIndex], false)
+    end
+  end
+  self.tbZhenYuanNingJuList:Reset()
+  local tbItemCfg = Item.ZhenYuan:GetCompoundCfg(tbPartner.nTemplateId, Item.ZhenYuan:GetPlayerMaxOrder(me) - self.nSelectOrder)
+  if not tbItemCfg then
+    return
+  end
+  local tbnWeight = tbItemCfg.tbnWeight
+  local tbMingXiaMap = Item.ZhenYuan:GetMingXiaTable()
+  local szColor = "NewGreen"
+  local bIsAct = false
+  if Item.ZhenYuan:IsShowActivity(tbPartner.nTemplateId) then
+    tbnWeight = tbItemCfg.tbnActivityQuality
+    szColor = "NewOrange"
+    bIsAct = true
+  elseif tbMingXiaMap[tbPartner.nTemplateId] then
+    tbnWeight = tbItemCfg.tbnMingXiaQuality
+    szColor = "NewOrange"
+  end
+  local nTbLens = #tbItemCfg.tbnItemId
+  for nIndex, nValue in ipairs(tbItemCfg.tbnItemId) do
+    self.tbZhenYuanNingJuList:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      if not tbElement.pGrid then
+        tbElement.pGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      end
+      tbElement.pGrid:SetItemByTemplate(nValue, 1, nil, nil, nil, nil, nil, {
+        nBindType = tbItemCfg.nIsBind
+      })
+      tbElement.pGrid:SetClickEnable(true)
+      local szPro = tostring(tbnWeight[nIndex] / 10000)
+      pPanel:Label_SetText("txtPercent", i18n.Parse(szPro .. "%"))
+      pPanel:Label_SetColorByName("txtPercent", szColor)
+      if bIsAct then
+        if nTbLens > 1 and nTbLens == nIndex then
+          pPanel:SetActive("PercentUp", true)
+        else
+          pPanel:SetActive("PercentUp", false)
+        end
+      else
+        pPanel:SetActive("PercentUp", false)
+      end
+    end)
+  end
+  self:PartnerModel(tbPartner.nTemplateId)
+  if not self.pItemGrid then
+    self.pItemGrid = Ui:NewExistItemGrid(self, tbControls.CostItemUIItemGrid)
+  end
+  self.pItemGrid:SetItemByTemplate(tbItemCfg.nMaterialsId, 1)
+  self.pItemGrid:SetClickEnable(true)
+  local nCount = me.GetItemCountByTypeInBag(tbItemCfg.nMaterialsId)
+  local nConsumeNum = tbItemCfg.nConsumeNum
+  local nYuanQiNum = tbItemCfg.nYuanQiNum
+  local nRealConsume = Item.ZhenYuan:GetTotalConsumeNum(me, tbItemCfg, 1)
+  if Item.ZhenYuan:GetContinuousState() then
+    nConsumeNum = nConsumeNum * Item.ZhenYuan.nContinuousZhenYuandrawing
+    nYuanQiNum = nYuanQiNum * Item.ZhenYuan.nContinuousZhenYuandrawing
+    nRealConsume = Item.ZhenYuan:GetTotalConsumeNum(me, tbItemCfg, Item.ZhenYuan.nContinuousZhenYuandrawing)
+  end
+  self.pPanel:Label_SetText(tbControls.TxtCost, i18n.Parse(tostring(nCount) .. "/" .. tostring(nRealConsume)))
+  if nRealConsume ~= nConsumeNum then
+    self.pPanel:SetActive(tbControls.txtItemDiscountNum, true)
+    self.pPanel:Label_SetText(tbControls.txtItemDiscountNum, i18n.Parse(tostring(nConsumeNum)))
+  else
+    self.pPanel:SetActive(tbControls.txtItemDiscountNum, false)
+  end
+  self.pPanel:Label_SetText(tbControls.TxtEnhanceCost, i18n.Parse(tostring(nYuanQiNum)))
+end
+
+function tbWnd:refreshCost()
+  local tbPartnerList = self:GetAllPartners()
+  local tbPartner = tbPartnerList[self.nSelectIndex]
+  if not tbPartner then
+    return
+  end
+  local tbItemCfg = Item.ZhenYuan:GetCompoundCfg(tbPartner.nTemplateId, Item.ZhenYuan:GetPlayerMaxOrder(me) - self.nSelectOrder)
+  if not tbItemCfg then
+    return
+  end
+  local nCount = me.GetItemCountByTypeInBag(tbItemCfg.nMaterialsId)
+  local nConsumeNum = tbItemCfg.nConsumeNum
+  local nYuanQiNum = tbItemCfg.nYuanQiNum
+  local nRealConsume = Item.ZhenYuan:GetTotalConsumeNum(me, tbItemCfg, 1)
+  if Item.ZhenYuan:GetContinuousState() then
+    nConsumeNum = nConsumeNum * Item.ZhenYuan.nContinuousZhenYuandrawing
+    nYuanQiNum = nYuanQiNum * Item.ZhenYuan.nContinuousZhenYuandrawing
+    nRealConsume = Item.ZhenYuan:GetTotalConsumeNum(me, tbItemCfg, Item.ZhenYuan.nContinuousZhenYuandrawing)
+  end
+  self.pPanel:Label_SetText(tbControls.TxtCost, i18n.Parse(tostring(nCount) .. "/" .. tostring(nRealConsume)))
+  if nRealConsume ~= nConsumeNum then
+    self.pPanel:SetActive(tbControls.txtItemDiscountNum, true)
+    self.pPanel:Label_SetText(tbControls.txtItemDiscountNum, i18n.Parse(tostring(nConsumeNum)))
+  else
+    self.pPanel:SetActive(tbControls.txtItemDiscountNum, false)
+  end
+  self.pPanel:Label_SetText(tbControls.TxtEnhanceCost, i18n.Parse(tostring(nYuanQiNum)))
+end
+
+function tbWnd:PartnerModel(nTemplateId)
+  local nNpcTemplateId = Partner.tbAllPartnerInfo[nTemplateId].nNpcTemplateId
+  local nNpcResId = KNpc.GetNpcTemplateInfo(nNpcTemplateId).nNpcResID
+  self.goPartnerModel:ShowNpc(nNpcResId)
+  if Partner.tbPartnerScaleInfo[nNpcResId].Scale ~= "" then
+    self.goPartnerModel.fModelScale = 125 * Partner.tbPartnerScaleInfo[nNpcResId].Scale
+  else
+    self.goPartnerModel.fModelScale = 125
+  end
+end
+
+function tbWnd:RefreshPartnerList()
+  local tbPartnerList = self:GetAllPartners()
+  local tbMingXiaMap = Item.ZhenYuan:GetMingXiaTable()
+  for nIndex, tbValue in ipairs(tbPartnerList) do
+    self.tbLeftItemList:SetElement(nIndex, function(tbElement)
+      if self.nSelectIndex == nIndex then
+        tbElement.pPanel:SetActive("imgSelected", true)
+      else
+        tbElement.pPanel:SetActive("imgSelected", false)
+      end
+      tbElement.pPanel:Sprite_SetSprite("imgQualityBg", tbImgQualityBgList[tbValue.nQualityLevel])
+      tbElement.pPanel:Label_SetText("txtPartnerName", i18n.Parse(tbValue.szName))
+      if tbMingXiaMap[tbValue.nTemplateId] then
+        tbElement.pPanel:SetActive("imgArrow", true)
+      else
+        tbElement.pPanel:SetActive("imgArrow", false)
+      end
+      tbElement.pPanel:SetActive(tbPartnerOrderEffect[1], false)
+      tbElement.pPanel:SetActive(tbPartnerOrderEffect[2], false)
+      tbElement.pPanel:SetActive(tbPartnerOrderEffect[3], false)
+      if tbValue.nQualityLevel <= #tbPartnerOrderEffect then
+        tbElement.pPanel:SetActive(tbPartnerOrderEffect[tbValue.nQualityLevel], true)
+      end
+      for nIndex, szValue in ipairs(tbSeries) do
+        if nIndex == tbValue.nSeries then
+          tbElement.pPanel:SetActive("Series/" .. tbSeries[nIndex], true)
+        else
+          tbElement.pPanel:SetActive("Series/" .. tbSeries[nIndex], false)
+        end
+      end
+    end)
+  end
+end
+
+function tbWnd:GetAllPartners()
+  return Item.ZhenYuan:GetAllPartners()
+end
+
+function tbWnd:ShowActivityCountdown(nPartnerId)
+  if Item.ZhenYuan:IsShowActivity(nPartnerId) then
+    self.pInstance = ActivityMgr:GetInstanceById(Item.ZhenYuan:GetActivityId())
+    local nDiff = self.pInstance:GetEndTime() - GetTime()
+    local szTime = i18n.EasyGet("\230\180\187\229\138\168\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154{0}", Lib:TimeDesc5(nDiff))
+    self.pPanel:SetActive(tbControls.UpActivityGroup, true)
+    self.pPanel:Label_SetText(tbControls.txtUpTime, szTime)
+    return true
+  else
+    self.pPanel:SetActive(tbControls.UpActivityGroup, false)
+  end
+  return false
+end

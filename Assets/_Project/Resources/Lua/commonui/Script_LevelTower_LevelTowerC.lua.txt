@@ -1,0 +1,266 @@
+Require("CommonScript/LevelTower/LevelTowerCommon.lua")
+LevelTower = LevelTower or {}
+LevelTower.LevelTowerC = LevelTower.LevelTowerC or {}
+local LevelTowerC = LevelTower.LevelTowerC
+
+function LevelTower:ServerRequest(szCmd, ...)
+  if LevelTowerC[szCmd] then
+    LevelTowerC[szCmd](LevelTowerC, ...)
+  end
+end
+
+function LevelTowerC:RegisterFuBenUIChecker()
+  FubenUIController:RegisterChecker(LevelTower.Cfg.tbMapList, self)
+end
+
+function LevelTowerC:OnFubenMapLoaded()
+  FubenUIController:OpenDefaultFuBenUI()
+end
+
+function LevelTowerC:OnLeave(nTemplateID, nMapID)
+end
+
+LevelTowerC:RegisterFuBenUIChecker()
+local tbContent2Index = {
+  Status = 1,
+  LevelDesc = 2,
+  TargetDesc = 3,
+  Process = 4,
+  AlphaScore = 5
+}
+
+function LevelTowerC:OnSyncFuBenAllInfo(tbData)
+  Lib:LogFormat("LevelTowerC: OnSyncFuBenAllInfo")
+  self.tbData = tbData or self.tbData
+  local tbTimeParam = {
+    {
+      [1] = tbData.nRestTime,
+      [2] = i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154%s")
+    }
+  }
+  FubenUIController:ShowDefaultInfo(tbTimeParam, self:GenUIInfo())
+end
+
+function LevelTowerC:OnSyncFuBenProcessInfo(nProcess)
+  Lib:LogFormat("LevelTowerC: OnSyncTargetInfo, nProcess = %d", nProcess)
+  self.tbData.nProcess = nProcess
+  self:UpdateFuBenUI()
+end
+
+function LevelTowerC:OnSyncFuBenScoreInfo(nScore, szScore)
+  Lib:LogFormat("LevelTowerC: OnSyncFuBenScoreInfo, nScore = %d, szScore = %s", nScore, szScore)
+  self.tbData.nScore = nScore
+  self.tbData.szScore = szScore
+  self:UpdateFuBenUI()
+end
+
+function LevelTowerC:OnSyncFuBenStatusInfo(szStatus)
+  Lib:LogFormat("LevelTowerC: OnSyncFuBenStatusInfo, szStatus = %s", szStatus)
+  self.tbData.szStatus = szStatus
+  self:UpdateFuBenUI()
+end
+
+function LevelTowerC:OnSyncFuBenRestTimeInfo(nRestTime)
+  Lib:LogFormat("LevelTowerC: OnSyncFuBenRestTimeInfo, nRestTime = %d", nRestTime)
+  local tbTimeParam = {
+    {
+      [1] = nRestTime,
+      [2] = i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154%s")
+    }
+  }
+  FubenUIController:ShowDefaultInfo(tbTimeParam, self:GenUIInfo())
+end
+
+function LevelTowerC:OnSyncFuBenResultInfo(nResult)
+  Lib:LogFormat("LevelTowerC: OnSyncFuBenResultInfo, nResult = %d", nResult)
+  self.tbData.nResult = nResult
+  local bIsCaptain = TeamMgr:IsCaptain(me.dwID)
+  if nResult == LevelTower.tbResult.Success then
+    Ui:OpenWindow("UIGetAwardShow_Towersuccess", self.tbData.nLevel, bIsCaptain, bIsCaptain)
+  else
+    Ui:OpenWindow("UIGetAwardShow_Towerfail", self.tbData.nLevel, bIsCaptain, bIsCaptain)
+  end
+end
+
+function LevelTowerC:OnStartGoToNpc()
+  if TeamMgr:IsCaptain(me.dwID) then
+    TeamMgr:StartFollowMember()
+  end
+end
+
+function LevelTowerC:OnCaptainConfirmContinueLevel(nResult)
+  local tbOKCallBack = {
+    LevelTowerC.DoMemberConfirm,
+    LevelTowerC,
+    true
+  }
+  local tbCancelCallBack = {
+    LevelTowerC.DoMemberConfirm,
+    LevelTowerC,
+    false
+  }
+  local tbTimerEndCallback = tbOKCallBack
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UPDATE_SETTLEUIBTN, false)
+  if nResult == LevelTower.tbResult.Fail then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\233\135\141\230\150\176\230\140\145\230\136\152\239\188\159\239\188\136%s\231\167\146\229\144\142\232\135\170\229\138\168\229\144\140\230\132\143\239\188\137"), {
+      tbOKCallBack,
+      tbCancelCallBack,
+      tbTimerEndCallback
+    }, {
+      i18n.EasyGet("\229\144\140\230\132\143"),
+      i18n.szCancel
+    }, nil, 5, nil)
+  else
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\230\140\145\230\136\152\228\184\139\228\184\128\229\177\130\239\188\159\239\188\136%s\231\167\146\229\144\142\232\135\170\229\138\168\229\144\140\230\132\143\239\188\137"), {
+      tbOKCallBack,
+      tbCancelCallBack,
+      tbTimerEndCallback
+    }, {
+      i18n.EasyGet("\229\144\140\230\132\143"),
+      i18n.szCancel
+    }, nil, 5, nil)
+  end
+end
+
+function LevelTowerC:GenUIInfo()
+  if self.tbData.szStatus == LevelTower.tbStatus.Prepare then
+    return {
+      [tbContent2Index.Status] = i18n.EasyGet("\229\133\179\229\141\161\229\135\134\229\164\135\233\152\182\230\174\181"),
+      [tbContent2Index.LevelDesc] = i18n.EasyGet("\229\189\147\229\137\141\229\133\179\229\141\161\239\188\154{0}", string.format("%s\194\183%s", LevelTower:GetLevelName(self.tbData.nLevel))),
+      [tbContent2Index.TargetDesc] = nil,
+      [tbContent2Index.Process] = nil,
+      [tbContent2Index.AlphaScore] = nil
+    }
+  elseif self.tbData.szStatus == LevelTower.tbStatus.Challenge then
+    if not Lib:IsEmptyStr(self.tbData.szProcessDesc) then
+      return {
+        [tbContent2Index.Status] = i18n.EasyGet("\229\133\179\229\141\161\230\140\145\230\136\152\233\152\182\230\174\181"),
+        [tbContent2Index.LevelDesc] = i18n.EasyGet("\229\189\147\229\137\141\229\133\179\229\141\161\239\188\154{0}", string.format("%s\194\183%s", LevelTower:GetLevelName(self.tbData.nLevel))),
+        [tbContent2Index.TargetDesc] = i18n.EasyGet("\232\191\135\229\133\179\230\157\161\228\187\182\239\188\154{0}", self.tbData.szTargetDesc),
+        [tbContent2Index.Process] = i18n.EasyGet("{0}\239\188\154{1}", self.tbData.szProcessDesc, self.tbData.nProcess),
+        [tbContent2Index.AlphaScore] = i18n.EasyGet("\229\189\147\229\137\141\232\175\132\231\186\167\239\188\154{0}", self.tbData.szScore)
+      }
+    else
+      return {
+        [tbContent2Index.Status] = i18n.EasyGet("\229\133\179\229\141\161\230\140\145\230\136\152\233\152\182\230\174\181"),
+        [tbContent2Index.LevelDesc] = i18n.EasyGet("\229\189\147\229\137\141\229\133\179\229\141\161\239\188\154{0}", string.format("%s\194\183%s", LevelTower:GetLevelName(self.tbData.nLevel))),
+        [tbContent2Index.TargetDesc] = i18n.EasyGet("\232\191\135\229\133\179\230\157\161\228\187\182\239\188\154{0}", self.tbData.szTargetDesc),
+        [tbContent2Index.Process] = nil,
+        [tbContent2Index.AlphaScore] = i18n.EasyGet("\229\189\147\229\137\141\232\175\132\231\186\167\239\188\154{0}", self.tbData.szScore)
+      }
+    end
+  elseif self.tbData.szStatus == LevelTower.tbStatus.Settlement then
+    if self.tbData.nResult == LevelTower.tbResult.Success then
+      return {
+        [tbContent2Index.Status] = i18n.EasyGet("\230\140\145\230\136\152\230\136\144\229\138\159\239\188\129\n\230\129\173\229\150\156\229\164\167\228\190\160\228\187\172\232\191\135\229\133\179\239\188\140\231\131\164\228\184\170\231\129\171\230\149\180\233\161\191\228\184\128\228\184\139\229\144\167\239\188\129"),
+        [tbContent2Index.LevelDesc] = i18n.EasyGet("\229\189\147\229\137\141\229\133\179\229\141\161\239\188\154{0}", string.format("%s\194\183%s", LevelTower:GetLevelName(self.tbData.nLevel))),
+        [tbContent2Index.TargetDesc] = nil,
+        [tbContent2Index.Process] = nil,
+        [tbContent2Index.AlphaScore] = nil
+      }
+    else
+      return {
+        [tbContent2Index.Status] = i18n.EasyGet("\230\140\145\230\136\152\229\164\177\232\180\165\239\188\129\n\232\131\156\232\180\165\228\185\131\229\133\181\229\174\182\229\184\184\228\186\139\239\188\140\229\164\167\228\190\160\232\175\183\231\168\141\229\144\142\233\135\141\232\175\149\239\188\129"),
+        [tbContent2Index.LevelDesc] = i18n.EasyGet("\229\189\147\229\137\141\229\133\179\229\141\161\239\188\154{0}", string.format("%s\194\183%s", LevelTower:GetLevelName(self.tbData.nLevel))),
+        [tbContent2Index.TargetDesc] = nil,
+        [tbContent2Index.Process] = nil,
+        [tbContent2Index.AlphaScore] = nil
+      }
+    end
+  end
+end
+
+function LevelTowerC:UpdateFuBenUI()
+  for nIndex, szContent in pairs(self:GenUIInfo() or {}) do
+    FubenUIController:ShowDefaultContentIndexInfo(nIndex, szContent)
+  end
+end
+
+function LevelTowerC:OnSyncPassLevelInfo(tbPassInfo)
+  Lib:LogFormat("LevelTowerC: OnSyncPassLevelInfo")
+  self.tbPassInfo = tbPassInfo
+  self.tbPassInfo.nVersion = nil
+end
+
+function LevelTowerC:OnSyncTeamMinPassLevel(nLevel)
+  Lib:LogFormat("LevelTowerC: OnSyncTeamMinPassLevel, nLevel = %d", nLevel)
+  self.nTeamMinPassLevel = nLevel
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UPDATE_TEAM_MINLEVEL)
+end
+
+function LevelTowerC:OnSyncPassLevelSingleInfo(nLevel, tbInfo)
+  Lib:LogFormat("LevelTowerC: OnSyncPassLevelSingleInfo, nLevel = %d", nLevel)
+  self.tbPassInfo = self.tbPassInfo or {}
+  self.tbPassInfo[nLevel] = tbInfo
+end
+
+function LevelTowerC:GetPassLevelInfoByLevelOrder()
+  local tb = Lib:CopyTB(self.tbPassInfo)
+  table.sort(tb, function(a, b)
+    return a.nLevel < b.nLevel
+  end)
+  return tb
+end
+
+function LevelTowerC:GetPassLevelInfoByTimeOrder()
+  local tb = self:GetPassLevelInfoByLevelOrder()
+  table.sort(tb, function(a, b)
+    return a.nFirstPassTime > b.nFirstPassTime
+  end)
+end
+
+function LevelTowerC:GetTeamMinPassLevel()
+  return self.nTeamMinPassLevel or 0
+end
+
+function LevelTowerC:DoCaptainConfirm(bContinue)
+  if not TeamMgr:IsCaptain(me.dwID) then
+    me.CenterMsg(i18n.EasyGet("\230\130\168\228\184\141\230\152\175\233\152\159\233\149\191"))
+    return
+  end
+  if true == bContinue and TeamMgr:GetMembersCount() > 1 then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\232\175\183\231\173\137\229\190\133\233\152\159\229\145\152\229\144\140\230\132\143\232\191\155\229\133\165\239\188\154%s"), {
+      {}
+    }, {
+      i18n.szOk
+    }, nil, 10, nil)
+  end
+  RemoteServer.RequestLevelTower(LevelTower.C2SProtocol.ReqConfirmContinueLevelByCaptain, bContinue)
+end
+
+function LevelTowerC:DoMemberConfirm(bContinue)
+  if self.tbData.szStatus ~= LevelTower.tbStatus.Settlement then
+    me.CenterMsg(i18n.EasyGet("\229\133\179\229\141\161\232\191\152\230\156\170\231\187\147\231\174\151"))
+    return
+  end
+  if TeamMgr:IsCaptain(me.dwID) then
+    return
+  end
+  if false == bContinue then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_UPDATE_SETTLEUIBTN, true)
+  end
+  RemoteServer.RequestLevelTower(LevelTower.C2SProtocol.ReqConfirmContinueLevelByMember, bContinue)
+end
+
+function LevelTowerC:DoRequestEnterFuBen(nTargetLevel)
+  local nCaptainId = TeamMgr:GetTeamDataCache().nCaptainID
+  if nCaptainId <= 0 then
+    me.CenterMsg(i18n.EasyGet("\229\137\141\230\150\185\229\141\177\233\153\169\239\188\140\232\175\183\229\164\167\228\190\160\231\187\132\233\152\159\229\144\142\229\134\141\230\157\165\239\188\129"))
+    return
+  elseif nCaptainId ~= me.dwID then
+    me.CenterMsg(i18n.EasyGet("\229\175\185\228\184\141\232\181\183\239\188\140\230\130\168\228\184\141\230\152\175\233\152\159\233\149\191"))
+    return
+  end
+  RemoteServer.RequestLevelTower(LevelTower.C2SProtocol.RequestEnterFuben, nTargetLevel)
+end
+
+function LevelTowerC:DoRequestExitFuBen()
+  if TeamMgr:IsCaptain(me.dwID) then
+    return
+  end
+  RemoteServer.RequestLevelTower(LevelTower.C2SProtocol.ReqExitLevel)
+end
+
+function LevelTowerC:ReqTeamMinPassLevel()
+  RemoteServer.RequestLevelTower(LevelTower.C2SProtocol.ReqTeamMinLevel)
+end

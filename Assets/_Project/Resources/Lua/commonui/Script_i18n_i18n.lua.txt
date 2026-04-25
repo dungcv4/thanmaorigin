@@ -1,0 +1,66 @@
+Require("CommonScript/i18n/i18n_index.lua")
+local LanguageModule = luanet.import_type("LanguageModule")
+setmetatable(i18n, {__index = LanguageModule})
+local ParseHandle = {
+  {
+    Pattern = "<i18n=(.-)>",
+    Handler = function(szKey)
+      return LanguageModule.Get(szKey)
+    end
+  },
+  {
+    Pattern = "<fmt=(.+)>",
+    Handler = function(szParams)
+      local tbParams = Lib:DecodeJson(szParams)
+      local tbParsedParams = {}
+      for i = 2, #tbParams do
+        table.insert(tbParsedParams, i18n.Parse(tbParams[i]))
+      end
+      return LanguageModule.Format(tbParams[1], table.unpack(tbParsedParams))
+    end
+  }
+}
+
+function i18n.Parse(szMsg)
+  if type(szMsg) ~= "string" then
+    return szMsg
+  end
+  if not szMsg or "" == szMsg then
+    return ""
+  end
+  local szRet = szMsg
+  local status
+  for _, proc in ipairs(ParseHandle) do
+    status, szRet, _ = xpcall(string.gsub, Lib.ShowStack, szRet, proc.Pattern, proc.Handler)
+  end
+  if not status then
+    return szMsg
+  else
+    return szRet
+  end
+end
+
+function i18n.EasyGet(szCHS, ...)
+  return i18n.Get(i18n.CHS_TO_KEY[szCHS] or szCHS, table.unpack({
+    ...
+  }))
+end
+
+function i18n.GetDiscountText(nDiscount)
+  if nDiscount > 0 and nDiscount < 10 then
+    local szDiscountText = ""
+    local szLanguage = i18n.CurrentLanguageCode()
+    if "zh-CN" == szLanguage or "zh-TW" == szLanguage then
+      szDiscountText = i18n.EasyGet("{0}\230\138\152", nDiscount)
+    else
+      szDiscountText = string.format("-%d%%", 100 - nDiscount * 10)
+    end
+    return szDiscountText
+  else
+    return ""
+  end
+end
+
+function i18n.Encode(szKey)
+  return string.format("<i18n=%s>", szKey)
+end

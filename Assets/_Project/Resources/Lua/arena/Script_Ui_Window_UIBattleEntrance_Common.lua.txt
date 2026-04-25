@@ -1,0 +1,202 @@
+local tbWnd = Ui:CreateWindow("UIBattleEntrance_Common")
+local tbControls = {
+  btnClose = "imgBG/btnClose",
+  btnEnter = "imgBG/panelInfo/btnEnter",
+  txtLeftCount = "imgBG/panelInfo/panelTimes/txtLeftCount",
+  txtOpenTime = "imgBG/panelInfo/Time/txtOpenTime",
+  txtCurNum = "imgBG/panelInfo/txtCurNum",
+  txtSetupTime = "imgBG/panelInfo/panelSetupTime/txtSetupTime",
+  txtEnroll = "imgBG/panelInfo/txtEnroll",
+  txtEnrolling = "imgBG/panelInfo/txtEnrolling",
+  txtTitle = "imgBG/txtTitle",
+  btnPlus = "imgBG/panelInfo/panelTimes/btnPlus",
+  txtEdictCount = "imgBG/panelInfo/panelItemTimes/txtLeftCount",
+  btnEdictPlus = "imgBG/panelInfo/panelItemTimes/btnPlus",
+  uiItemGrid = "imgBG/panelInfo/panelItemTimes/UIItemGrid",
+  txtTime = "imgBG/panelInfo/Time",
+  txtOpenInfo = "imgBG/panelInfo/txtOpenInfo",
+  panelItemTimes = "imgBG/panelInfo/panelItemTimes"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnEnter = function(self)
+    Lib:CallBack(self.tbSignUpFn)
+  end,
+  btnPlus = function(self)
+    self:OnClickBtnPlus()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_UI_BATTLEENTRANCE_COMMON_UPDATE,
+      self.SyncInfo
+    },
+    {
+      EventNotify.emNOTIFY_BUY_DEGREE_SUCCESS,
+      self.onRefreshInfo
+    },
+    {
+      EventNotify.emNOTIFY_MAP_SWITCH,
+      self.Close
+    },
+    {
+      EventNotify.emNOTIFY_LOGIN_ZONE,
+      self.Close
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.nLeftTime = 0
+  self.pPanel:SetActive(tbControls.btnEdictPlus, false)
+  self.EdictGrid = Ui:NewExistItemGrid(self, tbControls.uiItemGrid)
+  self.EdictGrid:SetClickEnable(true)
+end
+
+function tbWnd:OnOpen(tbData)
+  self.szDegreeName = tbData.szDegreeName
+  self.szAddDegreeName = tbData.szAddDegreeName
+  self.szOpenTimeDesc = tbData.szOpenTimeDesc
+  self.tbUpdateFn = tbData.tbUpdateFn
+  self.tbSignUpFn = tbData.tbSignUpFn
+  self.szTittle = tbData.szTittle
+  self.szState = tbData.szState
+  self.szDesc = tbData.szDesc
+  self.szAttendDesc = tbData.szAttendDesc
+  self.bHidePlus = tbData.bHidePlus
+  self:onRefreshInfo(tbData.nCanUseCount, tbData.nLeftTimes)
+  self.nLeftTime = 0
+  self.pPanel:Label_SetText(tbControls.txtSetupTime, "--:--")
+  local tbInfo = Item:GetClass("CountAddProp"):GetAddDegreeInfo(self.szDegreeName)
+  if tbInfo and tbInfo.TemplateId and 0 ~= tbInfo.TemplateId then
+    self.EdictGrid:SetItemByTemplate(tbInfo.TemplateId, 0)
+  else
+    self.pPanel:SetActive(self.uiItemGrid, false)
+    self.pPanel:SetActive(self.txtEdictCount, false)
+  end
+  if self.szDesc then
+    self.pPanel:SetActive(self.txtTime, false)
+    self.pPanel:SetActive(self.txtOpenInfo, true)
+    local szDesc = i18n.EasyGet("\229\188\128\230\148\190\230\151\182\233\151\180\239\188\154{0}\n{1}", self.szOpenTimeDesc, self.szDesc)
+    self.pPanel:Label_SetText(self.txtOpenInfo, szDesc)
+  end
+  if self.szAttendInfo then
+    self.pPanel:SetActive(self.txtTime, false)
+    self.pPanel:SetActive(self.txtOpenInfo, true)
+    local szDesc = i18n.EasyGet("\229\188\128\230\148\190\230\151\182\233\151\180\239\188\154{0}\n{1}", self.szOpenTimeDesc, self.szDesc)
+    self.pPanel:Label_SetText(self.txtOpenInfo, szDesc)
+  end
+end
+
+function tbWnd:OnClose()
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+  end
+  if self.nTimer2 then
+    Timer:Close(self.nTimer2)
+  end
+end
+
+function tbWnd:onRefreshInfo(nCanUseCount, nMaxUseCount)
+  if not Ui:WindowVisible(self.ClassName) then
+    return
+  end
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+  end
+  if self.nTimer2 then
+    Timer:Close(self.nTimer2)
+  end
+  self.pPanel:Label_SetText(tbControls.txtOpenTime, self.szOpenTimeDesc)
+  local nLeftTimes
+  if nCanUseCount then
+    nLeftTimes = nCanUseCount
+  else
+    nLeftTimes = DegreeCtrl:GetDegree(me, self.szDegreeName)
+  end
+  local nRightTimes
+  if nMaxUseCount then
+    nRightTimes = nMaxUseCount
+  else
+    nRightTimes = DegreeCtrl:GetMaxDegree(self.szDegreeName, me)
+  end
+  self.pPanel:Label_SetText(tbControls.txtLeftCount, string.format("%d/%d", nLeftTimes, nRightTimes))
+  local tbInfo = Item:GetClass("CountAddProp"):GetAddDegreeInfo(self.szDegreeName)
+  self.pPanel:SetActive(tbControls.btnPlus, nLeftTimes <= 0 and tbInfo and not self.bHidePlus)
+  self.pPanel:SetActive(tbControls.panelItemTimes, self.szAddDegreeName)
+  if self.szAddDegreeName then
+    self.pPanel:Label_SetText(tbControls.txtEdictCount, string.format("%d/%d", DegreeCtrl:GetDegree(me, self.szAddDegreeName), DegreeCtrl:GetMaxDegree(self.szAddDegreeName, me)))
+  end
+  self.pPanel:SetActive(tbControls.txtCurNum, false)
+  self.nTimer = Timer:Register(Env.GAME_FPS * 5, function()
+    Lib:CallBack(self.tbUpdateFn)
+    return true
+  end)
+  self.nTimer2 = Timer:Register(Env.GAME_FPS, self.UpdataTime, self)
+end
+
+function tbWnd:SyncInfo(szState, nWaitlistNum, nLeftTime)
+  self.pPanel:SetActive(tbControls.txtCurNum, true)
+  if self.szAttendDesc then
+    self.pPanel:Label_SetText(tbControls.txtCurNum, self.szAttendDesc .. ":" .. nWaitlistNum)
+  else
+    self.pPanel:Label_SetText(tbControls.txtCurNum, i18n.EasyGet("\229\189\147\229\137\141\230\138\165\229\144\141\228\186\186\230\149\176\239\188\154{0}", nWaitlistNum))
+  end
+  self.pPanel:Label_SetText(tbControls.txtTitle, self.szTittle)
+  self.pPanel:Label_SetText(tbControls.txtEnrolling, szState or self.szState)
+  self.nLeftTime = nLeftTime
+  self:UpdataTime()
+end
+
+function tbWnd:UpdataTime()
+  if self.nLeftTime > 0 then
+    self.nLeftTime = self.nLeftTime - 1
+    self.pPanel:Label_SetText(tbControls.txtSetupTime, string.format("%02d:%02d", math.floor(self.nLeftTime / 60), math.mod(self.nLeftTime, 60)))
+  end
+  return true
+end
+
+function tbWnd:OnClickBtnPlus()
+  local bAdd, szErrMsg = self:CheckAddTimes()
+  if not bAdd and szErrMsg then
+    me.CenterMsg(szErrMsg)
+  end
+end
+
+function tbWnd:CheckAddTimes()
+  local tbInfo = Item:GetClass("CountAddProp"):GetAddDegreeInfo(self.szDegreeName)
+  if not tbInfo then
+    return false, i18n.EasyGet("\231\188\186\229\176\145\233\133\141\231\189\174")
+  end
+  local szName = Item:GetName(tbInfo.TemplateId, me)
+  if DegreeCtrl:GetDegree(me, tbInfo.CostDegree) <= 0 then
+    return false, i18n.EasyGet("\230\130\168\228\187\138\230\151\165\229\183\178\231\187\143\228\189\191\231\148\168\232\191\135{0}\228\186\134", szName)
+  end
+  local nCount, tbItemList = me.GetItemCountByTypeInBag(tbInfo.TemplateId)
+  if nCount <= 0 then
+    Shop:OpenShopBuyWidDefault(tbInfo.TemplateId, 1)
+    return false, i18n.EasyGet("\230\130\168\231\154\132\232\131\140\229\140\133\229\134\133\230\178\161\230\156\137{0}", szName)
+  end
+  
+  local function agreeFunc()
+    local _, pItem = next(tbItemList)
+    if pItem then
+      RemoteServer.UseItem(pItem.dwId)
+    end
+  end
+  
+  local function cancelFunc()
+  end
+  
+  local tbItemInfo = Item:GetItemBaseProp(tbInfo.TemplateId)
+  Ui:OpenWindow("UIMessageBoxBig", i18n.EasyGet("\230\130\168\231\154\132\232\131\140\229\140\133\229\134\133\230\139\165\230\156\137{0}{1}\228\184\170\239\188\140\231\142\176\228\189\191\231\148\1681\228\184\170\229\162\158\229\138\160\228\184\128\230\172\161\229\143\130\228\184\142\230\172\161\230\149\176", szName, nCount), {agreeFunc, cancelFunc}, {
+    i18n.EasyGet("\231\161\174\229\174\154"),
+    i18n.EasyGet("\229\143\150\230\182\136")
+  })
+  return true, nil
+end

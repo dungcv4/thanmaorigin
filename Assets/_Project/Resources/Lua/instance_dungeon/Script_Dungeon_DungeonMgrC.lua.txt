@@ -1,0 +1,272 @@
+Dungeon.nEnterAutoRunTime = 10
+Dungeon.bEnterAutoRunSwitch = Dungeon.bEnterAutoRunSwitch or false
+
+function Dungeon:ExitDungeon()
+  self:SetAutoRunDungeonState(false)
+  RemoteServer.ExitDungeon()
+end
+
+function Dungeon:SetTargetPos(nX, nY)
+  me.tbFubenInfo = me.tbFubenInfo or {}
+  me.tbFubenInfo.tbTargetPos = {nX, nY}
+  EventNotify.OnNotify(EventNotify.emNOTIFY_FUBEN_TARGET_CHANGE)
+end
+
+function Dungeon:ClearTargetPos()
+  me.tbFubenInfo = me.tbFubenInfo or {}
+  me.tbFubenInfo.tbTargetPos = {}
+  EventNotify.OnNotify(EventNotify.emNOTIFY_FUBEN_TARGET_CHANGE)
+end
+
+function Dungeon:SetTargetInfo(szInfo, nTime)
+  me.tbFubenInfo = me.tbFubenInfo or {}
+  me.tbFubenInfo.tbTargetInfo = {szInfo, nTime}
+  EventNotify.OnNotify(EventNotify.emNOTIFY_FUBEN_TARGET_CHANGE)
+end
+
+function Dungeon:GetTargetPos()
+  me.tbFubenInfo = me.tbFubenInfo or {}
+  local tbInfo = me.tbFubenInfo.tbTargetPos or {}
+  return tbInfo[1], tbInfo[2]
+end
+
+function Dungeon:SetAutoRunDungeonState(bState)
+  if not self.bEnterAutoRunSwitch then
+    return
+  end
+  self.bAutoRunState = bState
+  if bState then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_FUBEN_TARGET_CHANGE)
+  end
+end
+
+function Dungeon:GetAutoRunDungeonState()
+  return self.bAutoRunState
+end
+
+function Dungeon:OnAFKStateChange(bAFKState)
+  if not self.bEnterAutoRunSwitch then
+    return
+  end
+  if bAFKState == AFK.LeadFightStateTB.emStop then
+    self:SetAutoRunDungeonState(false)
+    self:ResetNotManualTime()
+  elseif bAFKState == AFK.LeadFightStateTB.emAutoFight then
+    self:OnStopPlayerMove()
+  end
+end
+
+function Dungeon:OnPlayerMove()
+  self:CancelAutoEnter()
+  if not self.bEnterAutoRunSwitch then
+    return
+  end
+  self:SetAutoRunDungeonState(false)
+  self:ResetNotManualTime()
+  self:StopARCheckTimer()
+  self:StopStartARCheckTimer()
+end
+
+function Dungeon:OnStopPlayerMove()
+  if not self.bEnterAutoRunSwitch then
+    return
+  end
+  self:StopARCheckTimer()
+  if not self.nAutoRunCheckTimer and not Dungeon:GetAutoRunDungeonState() then
+    self.nAutoRunCheckTimer = Timer:Register(Env.GAME_FPS, function()
+      if AFK:IsLeadFightInFightStep() then
+        if AFK and AFK.AFKAutoFight and AFK.AFKAutoFight.tbAutoFightAI then
+          local tbBlackboard = AFK.AFKAutoFight.tbAutoFightAI:GetBlackboard()
+          local nTargetNpcId = tbBlackboard.nTargetNpcId
+          if not nTargetNpcId or nTargetNpcId <= 0 then
+            self:StopStartARCheckTimer()
+            self.nStartAutoRunCheckTimer = Timer:Register(Env.GAME_FPS * Dungeon.nEnterAutoRunTime, function()
+              Dungeon:SetAutoRunDungeonState(true)
+              self.nStartAutoRunCheckTimer = nil
+              return false
+            end)
+            self.nAutoRunCheckTimer = nil
+            return false
+          end
+        end
+      else
+        self.nAutoRunCheckTimer = nil
+        return false
+      end
+      return true
+    end)
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_AFK_STATE, Dungeon)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_AFK_STATE, Dungeon.OnAFKStateChange, Dungeon)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MOVE_BY_STICK, Dungeon)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_MOVE_BY_STICK, Dungeon.OnPlayerMove, Dungeon)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_STOP_MOVE_BY_STICK, Dungeon)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_STOP_MOVE_BY_STICK, Dungeon.OnStopPlayerMove, Dungeon)
+
+function Dungeon:OpenAutoRunTimer()
+  self.bEnterAutoRunSwitch = true
+  if not self.nAutoRunTimer then
+    self.nNotManualTime = 0
+    self.nAutoRunTimer = Timer:Register(Env.GAME_FPS, function()
+      self.nNotManualTime = self.nNotManualTime + 1
+      if self.nNotManualTime >= Dungeon.nEnterAutoRunTime and not AFK:IsFollowFightRunning() then
+        if not AFK:IsLeadFightRunning() then
+          AFK:Start()
+        end
+        if not self:GetAutoRunDungeonState() then
+          Dungeon:SetAutoRunDungeonState(true)
+        end
+      end
+      return true
+    end)
+  end
+end
+
+function Dungeon:ResetNotManualTime()
+  self.nNotManualTime = 0
+end
+
+function Dungeon:StopAutoRunTimer()
+  self.bEnterAutoRunSwitch = false
+  if self.nAutoRunTimer then
+    Timer:Close(self.nAutoRunTimer)
+    self.nAutoRunTimer = nil
+  end
+end
+
+function Dungeon:StopARCheckTimer()
+  if self.nAutoRunCheckTimer then
+    Timer:Close(self.nAutoRunCheckTimer)
+    self.nAutoRunCheckTimer = nil
+  end
+end
+
+function Dungeon:StopStartARCheckTimer()
+  if self.nStartAutoRunCheckTimer then
+    Timer:Close(self.nStartAutoRunCheckTimer)
+    self.nStartAutoRunCheckTimer = nil
+  end
+end
+
+function Dungeon:ClearCache()
+  self:ResetNotManualTime()
+  self:StopAutoRunTimer()
+  self:SetAutoRunDungeonState(false)
+  self:StopARCheckTimer()
+  self:StopStartARCheckTimer()
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Dungeon)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Dungeon.ClearCache, Dungeon)
+Dungeon.tbAutoFubenName = {
+  YiJunFuBen = {
+    function()
+      return i18n.EasyGet("\228\185\137\229\134\155\229\137\175\230\156\172")
+    end,
+    TeamMgr.ACTIVITY_ID.YiJun
+  },
+  Barracks = {
+    function()
+      return i18n.EasyGet("\229\134\155\232\144\165\229\137\175\230\156\172")
+    end,
+    TeamMgr.ACTIVITY_ID.FuNiuMountain
+  },
+  XoyoGame = {
+    function()
+      return i18n.EasyGet("\233\128\141\233\129\165\232\176\183")
+    end,
+    TeamMgr.ACTIVITY_ID.XoyoGame1
+  },
+  GuanFuTongJi = {
+    function()
+      return i18n.EasyGet("\229\174\152\229\186\156\233\128\154\231\188\137")
+    end,
+    TeamMgr.ACTIVITY_ID.GuanFuTongJi
+  }
+}
+Dungeon.tbAutoFubenSubName = {
+  XoyoGame = {
+    [1] = {
+      function()
+        return i18n.EasyGet("\230\153\174\233\128\154")
+      end,
+      TeamMgr.ACTIVITY_ID.XoyoGame1
+    }
+  }
+}
+
+function Dungeon:OnFubenFinish(szFubenType, nSubType)
+  if not self.tbAutoFubenName[szFubenType] then
+    return
+  end
+  if not self.nAutoEnterFubenTimer then
+    self.nAutoEnterFubenTimer = Timer:Register(Env.GAME_FPS * 5, self.OpenAutoSurePopup, self, szFubenType, nSubType)
+  end
+end
+
+function Dungeon:OpenAutoSurePopup(szFubenType, nSubType)
+  self.nAutoEnterFubenTimer = nil
+  local szFubenName = ""
+  local szSubName = ""
+  local nActiveId
+  if not Calendar.tbCheckComplete[szFubenType]() then
+    Calendar.tbButtonFuncs["Do" .. szFubenType]()
+  elseif not Calendar.tbCheckComplete.YiJunFuBen() then
+    Calendar.tbButtonFuncs.DoYiJunFuBen()
+    szFubenType = "YiJunFuBen"
+    nSubType = nil
+  elseif not Calendar.tbCheckComplete.Barracks() then
+    Calendar.tbButtonFuncs.DoBarracks()
+    szFubenType = "Barracks"
+    nSubType = nil
+  elseif not Calendar.tbCheckComplete.XoyoGame() then
+    Calendar.tbButtonFuncs.DoXoyoGame()
+    szFubenType = "XoyoGame"
+    if not nSubType then
+      nSubType = 1
+    end
+  elseif not Calendar.tbCheckComplete.GuanFuTongJi() then
+    Calendar.tbButtonFuncs.DoGuanFuTongJi()
+    szFubenType = "GuanFuTongJi"
+    nSubType = nil
+  else
+    return
+  end
+  szFubenName = self.tbAutoFubenName[szFubenType][1]()
+  nActiveId = self.tbAutoFubenName[szFubenType][2]
+  if nSubType then
+    szSubName = self.tbAutoFubenSubName[szFubenType][nSubType][1]()
+    nActiveId = self.tbAutoFubenSubName[szFubenType][nSubType][2]
+  end
+  
+  local function fnOk()
+    RemoteServer.OnSureAutoEnterFuben(nActiveId)
+  end
+  
+  local function fnDefCallBack()
+    RemoteServer.OnSureAutoEnterFuben(nActiveId)
+  end
+  
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\231\187\167\231\187\173\229\143\130\229\138\160{0}?", szFubenName .. szSubName), {
+    {fnOk},
+    {},
+    {fnDefCallBack}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  }, nil, 12)
+end
+
+function Dungeon:CancelAutoEnter(szUiName)
+  if szUiName and ("UIMapLoading" == szUiName or "UIHudRightSkill" == szUiName) then
+    return
+  end
+  if self.nAutoEnterFubenTimer then
+    Timer:Close(self.nAutoEnterFubenTimer)
+    self.nAutoEnterFubenTimer = nil
+  end
+end
+
+EventNotify:RegistNotify(EventNotify.emNOTIFY_WND_OPENED, Dungeon.CancelAutoEnter, Dungeon)

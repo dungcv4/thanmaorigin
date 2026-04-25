@@ -1,0 +1,923 @@
+Require("CommonScript/JingMai/JingMaiCfg.lua")
+Require("CommonScript/Player/FightPowerCommom.lua")
+Require("CommonScript/AttributeModule/AttributeModule.lua")
+JingMai.nSyncValueOffset = 50
+JingMai.nSyncValueActiveCount = 1
+JingMai.nSyncValueAttrDataOffset = 1
+JingMai.nSyncValueZhouTianHuMaiFuOffset = 29
+JingMai.nSyncValueHuMaiFuDataOffset = 4
+JingMai.nSyncValueAttrQualityOffset = 41
+JingMai.nSyncZhouTianQualityOffset = 3
+JingMai.nMaxQuality = 7
+JingMai.nMaxJingMai = 9
+JingMai.nMaxXueWei = 9
+JingMai.nZhouTianNeedXueWei = 3
+JingMai.nZhouTianCount = 3
+JingMai.JMCommonSaveGroup = GetGroupKey("JingMaiCommon")
+JingMai.nBeginRecoverTimeSaveId = 1
+JingMai.nMaiQIValueSaveId = 2
+JingMai.TotalCostMaiQiValue = 3
+JingMai.tbSaveGroupKey = JingMai.tbSaveGroupKey or {}
+JingMai.nMaxGrade = 3
+JingMai.tbJingMaiKey = {}
+JingMai.tbJMKey2JMIndex = {}
+for i = 1, JingMai.nMaxJingMai do
+  JingMai.tbJingMaiKey[i] = "JingMai" .. i
+  JingMai.tbJMKey2JMIndex[JingMai.tbJingMaiKey[i]] = i
+end
+JingMai.nErrorType = {
+  ET_None = 0,
+  ET_XueWeiNotActive = 1,
+  ET_AttrFull = 2,
+  ET_NotEnoughItem = 3,
+  ET_NotEnoughMaiQi = 4,
+  ET_LevelLimit = 5,
+  ET_CannotXiuLian = 6,
+  ET_XueWeiActived = 7,
+  ET_JingMaiNotOpen = 8,
+  ET_JingMaiActived = 9,
+  ET_CannotActive = 10
+}
+
+function JingMai:GetJMSaveIndex(nGrade, nJMIndex)
+  return (nGrade - 1) * 10 + nJMIndex
+end
+
+for nGrade = 2, JingMai.nMaxGrade do
+  for nJMIndex = 1, JingMai.nMaxJingMai do
+    local nIndex = JingMai:GetJMSaveIndex(nGrade, nJMIndex)
+    JingMai.tbJingMaiKey[nIndex] = "JingMai" .. nIndex
+    JingMai.tbJMKey2JMIndex[JingMai.tbJingMaiKey[nIndex]] = nIndex
+  end
+end
+for nGrade = 1, JingMai.nMaxGrade do
+  for nJMIndex = 1, JingMai.nMaxJingMai do
+    local nIndex = JingMai:GetJMSaveIndex(nGrade, nJMIndex)
+    JingMai.tbSaveGroupKey[nIndex] = GetGroupKey(JingMai.tbJingMaiKey[nIndex])
+  end
+end
+JingMai.ACTIVE_XUEWEI_COUNT = 1
+JingMai.XUEWEI_XIULIAN_COUNT_OFFSET = 1
+JingMai.XUEWEI_ATTR_DATA_BEGIN = 10
+JingMai.XUEWEI_ATTR_DATA_OFFSET = 3
+JingMai.XUEWEI_ATTR_DATA_END = 37
+JingMai.XUEWEI_RANDOM_ATTR_DATA_BEGIN = 40
+JingMai.XUEWEI_RANDOM_ATTR_DATA_END = 67
+JingMai.XUEWEI_ZHOUTIAN_HUMAIFU_BEGIN = 70
+JingMai.XUEWEI_ZHOUTIAN_HUMAIFU_OFFSET = 5
+JingMai.XUEWEI_ATTR_QUALITY_OFFSET = 90
+JingMai.XUEWEI_RANDOM_ATTR_QUALITY_OFFSET = 100
+JingMai.ZHOUTIAN_XIULIAN_COUNT_OFFSET = 110
+JingMai.ZHOUTIAN_QUALITY_OFFSET = 113
+JingMai.ZHOUTIAN_RANDOM_QUALITY_OFFSET = 116
+JingMai.tbHMFIdentifyType = {IT_JinYin = 1, IT_YinYin = 2}
+JingMai.nMaiQiDanItemId = 35299
+JingMai.nMaiQiDanItemId2 = 35296
+JingMai.nMaiQiItemId = 35300
+JingMai.nJingMaiShiId = 35302
+JingMai.nYinZhenId = 35301
+JingMai.tbHuMaiShi2ZHouTianIndex = {}
+
+function JingMai:Init()
+  for i = 1, #self.JMHuMaiId do
+    for j = 1, #self.JMHuMaiId[i] do
+      self.tbHuMaiShi2ZHouTianIndex[self.JMHuMaiId[i][j]] = i
+    end
+  end
+end
+
+JingMai:Init()
+JingMai.tbZhouTianAttrAddType = {
+  ZTADT_1 = 1,
+  ZTADT_2 = 2,
+  ZTADT_13 = 3
+}
+JingMai.nZhouTianBaseAttrQuality = 100
+
+function JingMai:LoadJingMaiAttrCfg()
+  local tbCfg = Lib:EasyLoadTabFile("Setting/JingMai/JingMaiAttrPool.tab")
+  self.tbJMAttrCfg = {}
+  self.tbAttrId2CompareIndex = {}
+  for _, tbData in ipairs(tbCfg) do
+    if not self.tbJMAttrCfg[tbData.nAttrId] then
+      self.tbJMAttrCfg[tbData.nAttrId] = {}
+    end
+    tbData.nAttrValueMin2 = tbData.nAttrValueMin2 or 0
+    tbData.nAttrValueMax2 = tbData.nAttrValueMax2 or 0
+    tbData.nAttrValueMin3 = tbData.nAttrValueMin3 or 0
+    tbData.nAttrValueMax3 = tbData.nAttrValueMax3 or 0
+    self.tbJMAttrCfg[tbData.nAttrId][tbData.nQuality] = {
+      szAttrType = tbData.szAttrType,
+      [1] = {
+        tbData.nAttrValueMin1,
+        tbData.nAttrValueMax1
+      },
+      [2] = {
+        tbData.nAttrValueMin2,
+        tbData.nAttrValueMax2
+      },
+      [3] = {
+        tbData.nAttrValueMin3,
+        tbData.nAttrValueMax3
+      }
+    }
+    if not self.tbAttrId2CompareIndex[tbData.nAttrId] then
+      self.tbAttrId2CompareIndex[tbData.nAttrId] = {}
+      if tbData.nAttrValueMin1 == tbData.nAttrValueMax1 then
+        self.tbAttrId2CompareIndex[tbData.nAttrId] = 2
+      else
+        self.tbAttrId2CompareIndex[tbData.nAttrId] = 1
+      end
+    end
+  end
+  self.tbJMAttrCfg = SetReadOnly(self.tbJMAttrCfg)
+end
+
+JingMai:LoadJingMaiAttrCfg()
+
+function JingMai:GetXueWeiMinAttrCfg(nJMIndex, nXWIndex)
+  local nAttrId = self:GetXueWeiAttrID(nJMIndex, nXWIndex)
+  local tbRet = {}
+  tbRet[1] = self.tbJMAttrCfg[nAttrId][1][1][1]
+  tbRet[2] = self.tbJMAttrCfg[nAttrId][1][2][1]
+  tbRet[3] = self.tbJMAttrCfg[nAttrId][1][3][1]
+  return tbRet
+end
+
+function JingMai:LoadJingMaiZhouTianAttrCfg()
+  local tbCfg = Lib:EasyLoadTabFile("Setting/JingMai/JingMaiZhouTianAttr.tab")
+  self.tbZhouTianAttrCfg = {}
+  for _, tbData in ipairs(tbCfg) do
+    if not self.tbZhouTianAttrCfg[tbData.nAttrId] then
+      self.tbZhouTianAttrCfg[tbData.nAttrId] = {}
+    end
+    tbData.nAttrValue2 = tbData.nAttrValue2 or 0
+    tbData.nAttrValue3 = tbData.nAttrValue3 or 0
+    self.tbZhouTianAttrCfg[tbData.nAttrId][tbData.nQuality] = {
+      tbData.szAttrType,
+      tbData.nAttrValue1,
+      tbData.nAttrValue2,
+      tbData.nAttrValue3
+    }
+  end
+  self.tbZTAttrAddPercentIndexType = {}
+  for nAttrId, tbV in pairs(self.tbZhouTianAttrCfg) do
+    if tbV[1][2] == tbV[2][2] then
+      self.tbZTAttrAddPercentIndexType[nAttrId] = self.tbZhouTianAttrAddType.ZTADT_2
+    elseif tbV[1][2] ~= tbV[1][4] then
+      self.tbZTAttrAddPercentIndexType[nAttrId] = self.tbZhouTianAttrAddType.ZTADT_1
+    else
+      self.tbZTAttrAddPercentIndexType[nAttrId] = self.tbZhouTianAttrAddType.ZTADT_13
+    end
+  end
+  self.tbZhouTianAttrCfg = SetReadOnly(self.tbZhouTianAttrCfg)
+end
+
+JingMai:LoadJingMaiZhouTianAttrCfg()
+
+function JingMai:LoadJingMaiRandomAttrCfg()
+  local tbCfg = Lib:EasyLoadTabFile("Setting/JingMai/JingMaiRandomWeight.tab")
+  self.tbJingMaiRandomWeight = {}
+  for _, tbData in ipairs(tbCfg) do
+    if not self.tbJingMaiRandomWeight[tbData.nXiuLianId] then
+      self.tbJingMaiRandomWeight[tbData.nXiuLianId] = {}
+    end
+    local tbWeight = self.tbJingMaiRandomWeight[tbData.nXiuLianId]
+    for i = 1, self.nMaxQuality do
+      local nWeightKey = "nQualityWeight" .. i
+      local nMinInCountKey = "nMinInCount" .. i
+      local nMaxCountKey = "nMaxCount" .. i
+      tbWeight[i] = {
+        nQuality = i,
+        nWeight = tbData[nWeightKey],
+        nMinInCount = tbData[nMinInCountKey],
+        nMaxCount = tbData[nMaxCountKey]
+      }
+    end
+  end
+  self.tbJingMaiRandomWeight = SetReadOnly(self.tbJingMaiRandomWeight)
+end
+
+JingMai:LoadJingMaiRandomAttrCfg()
+
+function JingMai:GetAttrRandomCfg(nXiuLianId, nHadRandomCount)
+  local tbCfg = self.tbJingMaiRandomWeight[nXiuLianId]
+  local tbRet = {}
+  for nQuality, tbV in ipairs(tbCfg) do
+    if nHadRandomCount >= tbV.nMinInCount then
+      table.insert(tbRet, tbV)
+    end
+  end
+  return tbRet
+end
+
+function JingMai:GetJingMaiName(nJMIndex)
+  return i18n.Get(self.JingMaiInfo[nJMIndex])
+end
+
+function JingMai:GetHuMaiFuSellAddYinZhen(pItem)
+  local tbHuMaiFu = Item:GetClass("HuMaiFu")
+  local tbItemHuMaiFuData = tbHuMaiFu:GetAddAttrData(pItem)
+  local nAddValue = 0
+  local nAddCount = tbItemHuMaiFuData[1]
+  for nAttrIndex = 1, nAddCount do
+    local nAttrQuality = self:GetHuMaiFuAttrQuality(tbItemHuMaiFuData[nAttrIndex + 1])
+    nAddValue = nAddValue + self.JMHuMaiSell[nAttrIndex][nAttrQuality]
+  end
+  return nAddValue
+end
+
+function JingMai:GetXueWeiAttrValue(pPlayer, nJMIndex, nXWIndex, nGrade)
+  local nSaveGroudIndex = self:GetJMSaveIndex(nGrade, nJMIndex)
+  if not self.tbSaveGroupKey[nSaveGroudIndex] then
+    return {
+      0,
+      0,
+      0
+    }
+  end
+  local nAttrValue1 = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_ATTR_DATA_BEGIN + self.XUEWEI_ATTR_DATA_OFFSET * (nXWIndex - 1) + 1)
+  local nAttrValue2 = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_ATTR_DATA_BEGIN + self.XUEWEI_ATTR_DATA_OFFSET * (nXWIndex - 1) + 2)
+  local nAttrValue3 = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_ATTR_DATA_BEGIN + self.XUEWEI_ATTR_DATA_OFFSET * (nXWIndex - 1) + 3)
+  return {
+    nAttrValue1,
+    nAttrValue2,
+    nAttrValue3
+  }
+end
+
+function JingMai:GetXueWeiRandomAttrValue(pPlayer, nJMIndex, nXWIndex, nGrade)
+  local nSaveGroudIndex = self:GetJMSaveIndex(nGrade, nJMIndex)
+  if not self.tbSaveGroupKey[nSaveGroudIndex] then
+    return {
+      0,
+      0,
+      0
+    }
+  end
+  local nAttrValue1 = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_RANDOM_ATTR_DATA_BEGIN + self.XUEWEI_ATTR_DATA_OFFSET * (nXWIndex - 1) + 1)
+  local nAttrValue2 = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_RANDOM_ATTR_DATA_BEGIN + self.XUEWEI_ATTR_DATA_OFFSET * (nXWIndex - 1) + 2)
+  local nAttrValue3 = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_RANDOM_ATTR_DATA_BEGIN + self.XUEWEI_ATTR_DATA_OFFSET * (nXWIndex - 1) + 3)
+  return {
+    nAttrValue1,
+    nAttrValue2,
+    nAttrValue3
+  }
+end
+
+function JingMai:GetActiveXueWeiCount(pPlayer, nJMIndex, nGrade)
+  local nSaveGroudIndex = self:GetJMSaveIndex(nGrade, nJMIndex)
+  if not self.tbSaveGroupKey[nSaveGroudIndex] then
+    return 0
+  end
+  local nActiveCount = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.ACTIVE_XUEWEI_COUNT)
+  return nActiveCount
+end
+
+function JingMai:GetXueWeiRandomCount(pPlayer, nJMIndex, nXWIndex, nGrade)
+  local nSaveGroudIndex = self:GetJMSaveIndex(nGrade, nJMIndex)
+  if not self.tbSaveGroupKey[nSaveGroudIndex] then
+    return 0
+  end
+  local nRandomCount = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_XIULIAN_COUNT_OFFSET + nXWIndex)
+  return nRandomCount
+end
+
+function JingMai:GetZhouTianRandomCount(pPlayer, nJMIndex, nZTIndex, nGrade)
+  local nSaveGroudIndex = self:GetJMSaveIndex(nGrade, nJMIndex)
+  if not self.tbSaveGroupKey[nSaveGroudIndex] then
+    return 0
+  end
+  local nRandomCount = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.ZHOUTIAN_XIULIAN_COUNT_OFFSET + nZTIndex)
+  return nRandomCount
+end
+
+function JingMai:GetXueWeiQuality(pPlayer, nJMIndex, nXWIndex, nGrade)
+  local nSaveGroudIndex = self:GetJMSaveIndex(nGrade, nJMIndex)
+  if not self.tbSaveGroupKey[nSaveGroudIndex] then
+    return 0
+  end
+  local nZTIndex = self:DoXWIndex2ZTIndex(nXWIndex)
+  local nZTQuality = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.ZHOUTIAN_QUALITY_OFFSET + nZTIndex)
+  if nZTQuality > 0 then
+    return nZTQuality
+  end
+  local nQuality = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_ATTR_QUALITY_OFFSET + nXWIndex)
+  return nQuality
+end
+
+function JingMai:GetZhouTianQuality(pPlayer, nJMIndex, nZTIndex, nGrade)
+  local nSaveGroudIndex = self:GetJMSaveIndex(nGrade, nJMIndex)
+  if not self.tbSaveGroupKey[nJMIndex] then
+    return 0
+  end
+  local nZTQuality = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.ZHOUTIAN_QUALITY_OFFSET + nZTIndex)
+  if nZTQuality > 0 then
+    return nZTQuality
+  end
+  nZTQuality = #self.QualityInfo
+  for i = 1, self.nZhouTianNeedXueWei do
+    local nXWIndex = self.nZhouTianNeedXueWei * (nZTIndex - 1) + i
+    local nXWQuality = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_ATTR_QUALITY_OFFSET + nXWIndex)
+    nZTQuality = math.min(nZTQuality, nXWQuality)
+  end
+  return nZTQuality
+end
+
+function JingMai:GetZhouTianRandomQuality(pPlayer, nJMIndex, nZTIndex, nGrade)
+  local nSaveGroudIndex = self:GetJMSaveIndex(nGrade, nJMIndex)
+  if not self.tbSaveGroupKey[nSaveGroudIndex] then
+    return 0
+  end
+  local nQuality = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.ZHOUTIAN_RANDOM_QUALITY_OFFSET + nZTIndex)
+  return nQuality
+end
+
+function JingMai:GetZhouTianHuMaiFuData(pPlayer, nJMIndex, nZTIndex, nGrade)
+  local nSaveGroudIndex = self:GetJMSaveIndex(nGrade, nJMIndex)
+  if not self.tbSaveGroupKey[nSaveGroudIndex] then
+    return {
+      0,
+      0,
+      0,
+      0,
+      0
+    }
+  end
+  local nAddAttrCount = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_ZHOUTIAN_HUMAIFU_BEGIN + self.XUEWEI_ZHOUTIAN_HUMAIFU_OFFSET * (nZTIndex - 1) + 1)
+  local nAddAttrPercent1 = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_ZHOUTIAN_HUMAIFU_BEGIN + self.XUEWEI_ZHOUTIAN_HUMAIFU_OFFSET * (nZTIndex - 1) + 2)
+  local nAddAttrPercent2 = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_ZHOUTIAN_HUMAIFU_BEGIN + self.XUEWEI_ZHOUTIAN_HUMAIFU_OFFSET * (nZTIndex - 1) + 3)
+  local nAddAttrPercent3 = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_ZHOUTIAN_HUMAIFU_BEGIN + self.XUEWEI_ZHOUTIAN_HUMAIFU_OFFSET * (nZTIndex - 1) + 4)
+  local nTradeLimitType = pPlayer.GetUserValue(self.tbSaveGroupKey[nSaveGroudIndex], self.XUEWEI_ZHOUTIAN_HUMAIFU_BEGIN + self.XUEWEI_ZHOUTIAN_HUMAIFU_OFFSET * (nZTIndex - 1) + 5)
+  return {
+    nAddAttrCount,
+    nAddAttrPercent1,
+    nAddAttrPercent2,
+    nAddAttrPercent3,
+    nTradeLimitType
+  }
+end
+
+function JingMai:GetHuMaiFuTemplateId(pPlayer, nJMIndex, nZTIndex, nGrade)
+  local tbHuMaiFuData = self:GetZhouTianHuMaiFuData(pPlayer, nJMIndex, nZTIndex, nGrade)
+  if tbHuMaiFuData[1] <= 0 then
+    return
+  end
+  local nItemQuality = self:GetHuMaiFuItemQuality(tbHuMaiFuData)
+  local nTemplateId = self.JMHuMaiId[nZTIndex][nItemQuality]
+  return nTemplateId
+end
+
+function JingMai:GetHuMaiFuItemQuality(tbHuMaiFuData)
+  local nItemQuality = 1
+  local nAddCount = tbHuMaiFuData[1]
+  for i = 1, nAddCount do
+    local nAttrQuality = JingMai:GetHuMaiFuAttrQuality(tbHuMaiFuData[i + 1])
+    nItemQuality = math.max(nItemQuality, nAttrQuality)
+  end
+  return nItemQuality
+end
+
+function JingMai:GetHuMaiFuAttrQuality(nValue)
+  for i = #self.JMHuMaiColor, 1, -1 do
+    if nValue >= self.JMHuMaiColor[i][1] then
+      return i
+    end
+  end
+  return 1
+end
+
+function JingMai:GetRestoreMaiQiCfg()
+  local tbRestoreCfg = self.tbRecoverMaiQiCfg[1]
+  for _, tbV in ipairs(self.tbRecoverMaiQiCfg) do
+    if 1 ~= GetTimeFrameState(tbV.szTimeFrame) then
+      break
+    end
+    tbRestoreCfg = tbV
+  end
+  return tbRestoreCfg
+end
+
+function JingMai:GetMaiQiRecoverCfg()
+  local nRestoreOnePointMaiQiTime = self.tbRecoverMaiQiCfg[1].nRestoreOnePointMaiQiTime
+  local nMaiQiUpperLimit = self.tbRecoverMaiQiCfg[1].nMaiQiUpperLimit
+  for _, tbEntry in ipairs(self.tbRecoverMaiQiCfg) do
+    if 1 ~= GetTimeFrameState(tbEntry.szTimeFrame) then
+      break
+    end
+    nRestoreOnePointMaiQiTime = tbEntry.nRestoreOnePointMaiQiTime
+    nMaiQiUpperLimit = tbEntry.nMaiQiUpperLimit
+  end
+  return nRestoreOnePointMaiQiTime, nMaiQiUpperLimit
+end
+
+function JingMai:GetMaiQiValue(pPlayer)
+  if MODULE_GAMESERVER and 0 == pPlayer.GetUserValue(self.JMCommonSaveGroup, self.nBeginRecoverTimeSaveId) then
+    pPlayer.SetUserValue(self.JMCommonSaveGroup, self.nBeginRecoverTimeSaveId, GetTime())
+  end
+  local nCurValue = pPlayer.GetUserValue(self.JMCommonSaveGroup, self.nMaiQIValueSaveId)
+  local tbRMQCfg = self:GetRestoreMaiQiCfg()
+  if nCurValue >= tbRMQCfg.nMaiQiUpperLimit then
+    return nCurValue
+  else
+    local nRate = tbRMQCfg.nRestoreOnePointMaiQiTime
+    local nBeginTime = pPlayer.GetUserValue(self.JMCommonSaveGroup, self.nBeginRecoverTimeSaveId)
+    local nHadRecoverTime = GetTime() - nBeginTime
+    local nAddValue = math.floor(nHadRecoverTime / nRate)
+    nCurValue = nCurValue + nAddValue
+    return math.min(nCurValue, tbRMQCfg.nMaiQiUpperLimit)
+  end
+end
+
+function JingMai:DoXWIndex2ZTIndex(nXWIndex)
+  local nZTIndex = math.ceil(nXWIndex / self.nZhouTianNeedXueWei)
+  return nZTIndex
+end
+
+function JingMai:IsSystemTimeframeOpen(nJMIndex, nGrade)
+  nJMIndex = nJMIndex or 1
+  nGrade = nGrade or 1
+  if 1 ~= GetTimeFrameState(self.JingMaiTimeFrame[nGrade][nJMIndex]) then
+    return false
+  end
+  return true
+end
+
+function JingMai:GetNeedPlayerLevel(nGrade, nJMIndex, nXWIndex)
+  return self.JingMaiOpenLevel[nGrade][nJMIndex][nXWIndex]
+end
+
+function JingMai:IsSystemOpen(pPlayer, nJMIndex, nGrade)
+  nJMIndex = nJMIndex or 1
+  nGrade = nGrade or 1
+  if not self:IsSystemTimeframeOpen(nJMIndex, nGrade) then
+    return false
+  end
+  if pPlayer.nTotalLevel < self:GetNeedPlayerLevel(nGrade, nJMIndex, 1) then
+    return false
+  end
+  return true
+end
+
+function JingMai:GetXueWeiName(nJMIndex, nXWIndex)
+  return i18n.Get(self.JMXueWeiInfo[nJMIndex][nXWIndex][1])
+end
+
+function JingMai:CanActiveXueWei(pPlayer, nJMIndex, nXWIndex, nGrade)
+  if not self:IsSystemOpen(pPlayer, nJMIndex, nGrade) then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\187\143\232\132\137\230\156\170\229\188\128\229\144\175"), JingMai.nErrorType.ET_JingMaiNotOpen
+  end
+  if pPlayer.IsMaskPlayerAttr() then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\228\184\141\229\143\175\229\134\178\231\169\180"), JingMai.nErrorType.ET_CannotActive
+  end
+  if not self.JMXueWeiInfo[nJMIndex][nXWIndex] then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\187\143\232\132\137\229\183\178\230\137\147\233\128\154"), JingMai.nErrorType.ET_JingMaiActived
+  end
+  local nActiveIndex = self:GetActiveXueWeiCount(pPlayer, nJMIndex, nGrade)
+  if nXWIndex <= nActiveIndex then
+    return false, i18n.EasyGet("\231\169\180\228\189\141\229\183\178\230\191\128\230\180\187"), JingMai.nErrorType.ET_XueWeiActived
+  end
+  local nCheckJMIndex = nJMIndex
+  local nCheckXWIndex = nXWIndex - 1
+  local nActiveC = nActiveIndex
+  if nCheckJMIndex > 1 and 1 == nXWIndex then
+    nCheckJMIndex = nCheckJMIndex - 1
+    nCheckXWIndex = self.nMaxXueWei
+    nActiveC = self:GetActiveXueWeiCount(pPlayer, nCheckJMIndex, nGrade)
+  end
+  if nCheckXWIndex > nActiveC then
+    local nXWName = JingMai:GetXueWeiName(nCheckJMIndex, nCheckXWIndex)
+    return false, i18n.EasyGet("\233\156\128\230\191\128\230\180\187{0}\231\169\180", nXWName), JingMai.nErrorType.ET_XueWeiNotActive
+  end
+  local nNeedLevel = self:GetNeedPlayerLevel(nGrade, nJMIndex, nXWIndex)
+  if nNeedLevel > pPlayer.nTotalLevel then
+    return false, i18n.EasyGet("\232\167\146\232\137\178\231\173\137\231\186\167\232\190\190\229\136\176{0}\229\144\142\229\188\128\229\144\175", nNeedLevel), JingMai.nErrorType.ET_LevelLimit
+  end
+  local nNeedJMZhenQi = self.JMXueWeiInfo[nJMIndex][nXWIndex][3]
+  local nHadJMZhenQi = self:GetMaiQiValue(pPlayer)
+  if nNeedJMZhenQi > nHadJMZhenQi then
+    return false, i18n.EasyGet("\232\132\137\230\176\148\228\184\141\232\182\179"), JingMai.nErrorType.ET_NotEnoughMaiQi
+  end
+  return true
+end
+
+function JingMai:CanXiuLianXueWei(pPlayer, nJMIndex, nZTIndex, nGrade)
+  if not self:IsSystemOpen(pPlayer, nJMIndex, nGrade) then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\187\143\232\132\137\230\156\170\229\188\128\229\144\175"), JingMai.nErrorType.ET_JingMaiNotOpen
+  end
+  if pPlayer.IsMaskPlayerAttr() then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\228\184\141\229\143\175\228\191\174\231\130\188", JingMai.nErrorType.ET_CannotXiuLian)
+  end
+  local nActiveCount = self:GetActiveXueWeiCount(pPlayer, nJMIndex, nGrade)
+  local nNeedActiveCount = nZTIndex * self.nZhouTianNeedXueWei
+  if nActiveCount < nNeedActiveCount then
+    local nXWName = JingMai:GetXueWeiName(nJMIndex, nNeedActiveCount)
+    return false, i18n.EasyGet("\233\156\128\230\191\128\230\180\187{0}\231\169\180", nXWName), JingMai.nErrorType.ET_XueWeiNotActive
+  end
+  local nNeedJMZhenQi = self.JMZTXWXiuLianInfo[nJMIndex][nZTIndex][1]
+  local nNeedItemId = self.JMZTXWXiuLianInfo[nJMIndex][nZTIndex][2]
+  local nNeedItemNum = self.JMZTXWXiuLianInfo[nJMIndex][nZTIndex][3]
+  local nHadJMZhenQi = self:GetMaiQiValue(pPlayer)
+  if nNeedJMZhenQi > nHadJMZhenQi then
+    return false, i18n.EasyGet("\230\130\168\231\154\132\232\132\137\230\176\148\228\184\141\232\182\179"), JingMai.nErrorType.ET_NotEnoughMaiQi
+  end
+  local nCurNum = pPlayer.GetItemCountByTypeInBag(nNeedItemId)
+  if nNeedItemNum > nCurNum then
+    return false, i18n.EasyGet("\230\130\168\231\154\132{0}\228\184\141\232\182\179", Item:GetName(nNeedItemId, pPlayer)), JingMai.nErrorType.ET_NotEnoughItem
+  end
+  return true
+end
+
+function JingMai:CanHuMaiFuIdentify(pPlayer, nIdentifyType, nCount)
+  local nCurNum = pPlayer.GetItemCountByTypeInBag(self.nHuMaiFuId)
+  if nCount > nCurNum then
+    return false, i18n.EasyGet("\230\182\136\232\128\151\233\129\147\229\133\183\230\149\176\233\135\143\228\184\141\232\182\179")
+  end
+  if nIdentifyType == self.tbHMFIdentifyType.IT_JinYin then
+    nCurNum = pPlayer.GetItemCountByTypeInBag(self.nJinYinId)
+    if nCurNum < self.nJinYinNum * nCount then
+      return false, i18n.EasyGet("\230\182\136\232\128\151\233\129\147\229\133\183\230\149\176\233\135\143\228\184\141\232\182\179")
+    end
+  else
+    nCurNum = pPlayer.GetItemCountByTypeInBag(self.nYinYinId)
+    if nCurNum < self.nYinYinNum * nCount then
+      return false, i18n.EasyGet("\230\182\136\232\128\151\233\129\147\229\133\183\230\149\176\233\135\143\228\184\141\232\182\179")
+    end
+  end
+  local nLeftBag = pPlayer.GetFreeBagCount()
+  if nCount > nLeftBag then
+    return false, i18n.EasyGet("\232\131\140\229\140\133\229\183\178\230\187\161\239\188\140\232\175\183\229\133\136\230\184\133\231\144\134\232\131\140\229\140\133")
+  end
+  return true
+end
+
+function JingMai:CanPutOnHuMaiFu(pPlayer, nJMIndex, nZTIndex, nItemId, nGrade)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return false, i18n.EasyGet("\233\129\147\229\133\183\228\184\141\229\173\152\229\156\168")
+  end
+  if pPlayer.IsMaskPlayerAttr() then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\228\184\141\229\143\175\231\169\191\230\136\180\230\138\164\232\132\137\231\172\166")
+  end
+  local nItemZTIndex = self.tbHuMaiShi2ZHouTianIndex[pItem.dwTemplateId]
+  if nItemZTIndex ~= nZTIndex then
+    return false, i18n.EasyGet("\230\138\164\232\132\137\231\159\179\229\173\148\228\189\141\228\184\141\229\140\185\233\133\141")
+  end
+  local nXueWeiCount = self:GetActiveXueWeiCount(pPlayer, nJMIndex, nGrade)
+  if nXueWeiCount < nZTIndex * self.nZhouTianNeedXueWei then
+    return false, i18n.EasyGet("\229\145\168\229\164\169\230\156\170\230\191\128\230\180\187")
+  end
+  return true
+end
+
+function JingMai:GetXueWeiAttrID(nJMIndex, nXWIndex)
+  return self.JMXueWeiInfo[nJMIndex][nXWIndex][2]
+end
+
+function JingMai:GetXueWeiAttrValueRange(nJMIndex, nXWIndex)
+  local nAttrId = self:GetXueWeiAttrID(nJMIndex, nXWIndex)
+  local tbAttrCfg = self.tbJMAttrCfg[nAttrId]
+  local nMaxQuality = #tbAttrCfg
+  local nCompareIndex = self.tbAttrId2CompareIndex[nAttrId] or 1
+  local nMinValue = tbAttrCfg[1][nCompareIndex][1]
+  local nMaxValue = tbAttrCfg[nMaxQuality][nCompareIndex][2]
+  return nMinValue, nMaxValue
+end
+
+function JingMai:RefreshXueWeiAttr(pPlayer, nJMIndex, nXWIndex, tbAttrValueOld, tbAttrValueNew)
+  self:UpdateXueWeiAttr(pPlayer.GetNpc(), nJMIndex, nXWIndex, tbAttrValueOld, false, pPlayer.dwID)
+  self:UpdateXueWeiAttr(pPlayer.GetNpc(), nJMIndex, nXWIndex, tbAttrValueNew, true, pPlayer.dwID)
+end
+
+function JingMai:UpdateXueWeiAttr(pNpc, nJMIndex, nXWIndex, tbAttrValue, bIsApply, nPlayerId)
+  local nAttrId = self:GetXueWeiAttrID(nJMIndex, nXWIndex)
+  if not self.tbJMAttrCfg[nAttrId] or tbAttrValue[1] <= 0 then
+    return
+  end
+  local szAttrType = self.tbJMAttrCfg[nAttrId][1].szAttrType
+  if bIsApply then
+    pNpc.ApplyMagicAttrib(szAttrType, table.unpack(tbAttrValue))
+    if nPlayerId then
+      AttributeHelp:LogAttrApply(nPlayerId, "JingMai", szAttrType, table.unpack(tbAttrValue))
+    end
+  else
+    pNpc.RemoveMagicAttrib(szAttrType, table.unpack(tbAttrValue))
+    if nPlayerId then
+      AttributeHelp:LogAttrRemove(nPlayerId, "JingMai", szAttrType, table.unpack(tbAttrValue))
+    end
+  end
+end
+
+function JingMai:RefreshZhouTianAttr(pPlayer, nJMIndex, nZTIndex, nOldZTQuality, nNewZTQuality)
+  self:UpdateZhouTianAttr(pPlayer.GetNpc(), nJMIndex, nZTIndex, nOldZTQuality, false, pPlayer.dwID)
+  self:UpdateZhouTianAttr(pPlayer.GetNpc(), nJMIndex, nZTIndex, nNewZTQuality, true, pPlayer.dwID)
+end
+
+function JingMai:UpdateZhouTianAttr(pNpc, nJMIndex, nZTIndex, nQuality, bIsApply, nPlayerId)
+  local tbZTAttrCfg = self.JMZhouTianAttrInfo[nJMIndex][nZTIndex]
+  for _, nAttrId in ipairs(tbZTAttrCfg) do
+    local tbAttrCfg = self.tbZhouTianAttrCfg[nAttrId][nQuality]
+    if tbAttrCfg then
+      if bIsApply then
+        pNpc.ApplyMagicAttrib(table.unpack(tbAttrCfg))
+        if nPlayerId then
+          AttributeHelp:LogAttrApply(nPlayerId, "JingMai", table.unpack(tbAttrCfg))
+        end
+      else
+        pNpc.RemoveMagicAttrib(table.unpack(tbAttrCfg))
+        if nPlayerId then
+          AttributeHelp:LogAttrRemove(nPlayerId, "JingMai", table.unpack(tbAttrCfg))
+        end
+      end
+    end
+  end
+end
+
+function JingMai:UpdateZTHuMaiFuAddAttr(pNpc, nJMIndex, nZTIndex, bIsApply, tbHuMaiFuData, nPlayerId)
+  local tbZTAttrCfg = self.JMZhouTianAttrInfo[nJMIndex][nZTIndex]
+  local nAddCount = tbHuMaiFuData[1]
+  for nIndex, nAttrId in ipairs(tbZTAttrCfg) do
+    local tbAttrCfg = self.tbZhouTianAttrCfg[nAttrId][self.nZhouTianBaseAttrQuality]
+    if tbAttrCfg and nIndex <= nAddCount then
+      local nAttrAddType = self.tbZTAttrAddPercentIndexType[nAttrId]
+      local szAttrType, nAttrValue1, nAttrValue2, nAttrValue3 = table.unpack(tbAttrCfg)
+      local nAddValue1 = nAttrValue1
+      local nAddValue2 = nAttrValue2
+      local nAddValue3 = nAttrValue3
+      if self.tbZhouTianAttrAddType.ZTADT_1 == nAttrAddType then
+        nAddValue1 = math.floor(nAddValue1 * tbHuMaiFuData[nIndex + 1] / 100)
+      elseif self.tbZhouTianAttrAddType.ZTADT_2 == nAttrAddType then
+        nAddValue2 = math.floor(nAddValue2 * tbHuMaiFuData[nIndex + 1] / 100)
+      else
+        nAddValue1 = math.floor(nAddValue1 * tbHuMaiFuData[nIndex + 1] / 100)
+        nAddValue3 = math.floor(nAddValue3 * tbHuMaiFuData[nIndex + 1] / 100)
+      end
+      if bIsApply then
+        pNpc.ApplyMagicAttrib(szAttrType, nAddValue1, nAddValue2, nAddValue3)
+        if nPlayerId then
+          AttributeHelp:LogAttrApply(nPlayerId, "JingMai", szAttrType, nAddValue1, nAddValue2, nAddValue3)
+        end
+      else
+        pNpc.RemoveMagicAttrib(szAttrType, nAddValue1, nAddValue2, nAddValue3)
+        if nPlayerId then
+          AttributeHelp:LogAttrRemove(nPlayerId, "JingMai", szAttrType, nAddValue1, nAddValue2, nAddValue3)
+        end
+      end
+    end
+  end
+end
+
+function JingMai:GetJMAllFightPower(pPlayer)
+  local nFightPower = self:CalcJingMaiZhouTianFightPower(pPlayer) + self:CalcJingMaiXueWeiFightPower(pPlayer)
+  return nFightPower
+end
+
+function JingMai:OnEquip(pPlayer)
+  for nGrade = 1, self.nMaxGrade do
+    for nJMIndex = 1, self.nMaxJingMai do
+      for nXWIndex = 1, self.nMaxXueWei do
+        local tbAttrValue = self:GetXueWeiAttrValue(pPlayer, nJMIndex, nXWIndex, nGrade)
+        self:UpdateXueWeiAttr(pPlayer.GetNpc(), nJMIndex, nXWIndex, tbAttrValue, true, pPlayer.dwID)
+      end
+      for nZTIndex = 1, self.nZhouTianCount do
+        local nQuality = self:GetZhouTianQuality(pPlayer, nJMIndex, nZTIndex, nGrade)
+        if nQuality > 0 then
+          self:UpdateZhouTianAttr(pPlayer.GetNpc(), nJMIndex, nZTIndex, self.nZhouTianBaseAttrQuality, true, pPlayer.dwID)
+          self:UpdateZhouTianAttr(pPlayer.GetNpc(), nJMIndex, nZTIndex, nQuality, true, pPlayer.dwID)
+          local tbHuMaiData = self:GetZhouTianHuMaiFuData(pPlayer, nJMIndex, nZTIndex, nGrade)
+          self:UpdateZTHuMaiFuAddAttr(pPlayer.GetNpc(), nJMIndex, nZTIndex, true, tbHuMaiData, pPlayer.dwID)
+        end
+      end
+    end
+  end
+end
+
+function JingMai:OnUnEquip(pPlayer)
+  for nGrade = 1, self.nMaxGrade do
+    for nJMIndex = 1, self.nMaxJingMai do
+      for nXWIndex = 1, self.nMaxXueWei do
+        local tbAttrValue = self:GetXueWeiAttrValue(pPlayer, nJMIndex, nXWIndex, nGrade)
+        self:UpdateXueWeiAttr(pPlayer.GetNpc(), nJMIndex, nXWIndex, tbAttrValue, false, pPlayer.dwID)
+      end
+      for nZTIndex = 1, self.nZhouTianCount do
+        local nQuality = self:GetZhouTianQuality(pPlayer, nJMIndex, nZTIndex, nGrade)
+        if nQuality > 0 then
+          self:UpdateZhouTianAttr(pPlayer.GetNpc(), nJMIndex, nZTIndex, self.nZhouTianBaseAttrQuality, false, pPlayer.dwID)
+          self:UpdateZhouTianAttr(pPlayer.GetNpc(), nJMIndex, nZTIndex, nQuality, false, pPlayer.dwID)
+          local tbHuMaiData = self:GetZhouTianHuMaiFuData(pPlayer, nJMIndex, nZTIndex, nGrade)
+          self:UpdateZTHuMaiFuAddAttr(pPlayer.GetNpc(), nJMIndex, nZTIndex, false, tbHuMaiData, pPlayer.dwID)
+        end
+      end
+    end
+  end
+end
+
+function JingMai:GetSyncDataXueWeiAttrValue(pPlayerAsync, nJMIndex, nXWIndex, nGrade)
+  local nIdx = self.nSyncValueOffset * (nJMIndex - 1) + self.nSyncValueAttrDataOffset + self.XUEWEI_ATTR_DATA_OFFSET * (nXWIndex - 1)
+  local nAttrValue1 = pPlayerAsync.GetJingMaiByGrade(nGrade, nIdx + 1)
+  local nAttrValue2 = pPlayerAsync.GetJingMaiByGrade(nGrade, nIdx + 2)
+  local nAttrValue3 = pPlayerAsync.GetJingMaiByGrade(nGrade, nIdx + 3)
+  return {
+    nAttrValue1,
+    nAttrValue2,
+    nAttrValue3
+  }
+end
+
+function JingMai:GetSyncHuMaiShiData(pPlayerAsync, nJMIndex, nZTIndex, nGrade)
+  local nIdx = self.nSyncValueOffset * (nJMIndex - 1) + self.nSyncValueZhouTianHuMaiFuOffset + self.nSyncValueHuMaiFuDataOffset * (nZTIndex - 1)
+  local nAddCount = pPlayerAsync.GetJingMaiByGrade(nGrade, nIdx + 1)
+  local nAttrValue1 = pPlayerAsync.GetJingMaiByGrade(nGrade, nIdx + 2)
+  local nAttrValue2 = pPlayerAsync.GetJingMaiByGrade(nGrade, nIdx + 3)
+  local nAttrValue3 = pPlayerAsync.GetJingMaiByGrade(nGrade, nIdx + 4)
+  return {
+    nAddCount,
+    nAttrValue1,
+    nAttrValue2,
+    nAttrValue3
+  }
+end
+
+function JingMai:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  for nGrade = 1, self.nMaxGrade do
+    for nJMIndex = 1, self.nMaxJingMai do
+      for nXWIndex = 1, self.nMaxXueWei do
+        local tbAttrValue = self:GetSyncDataXueWeiAttrValue(pPlayerAsync, nJMIndex, nXWIndex, nGrade)
+        self:UpdateXueWeiAttr(pNpc, nJMIndex, nXWIndex, tbAttrValue, true)
+      end
+      for nZTIndex = 1, self.nZhouTianCount do
+        local nIdx = self.nSyncZhouTianQualityOffset * (nJMIndex - 1) + nZTIndex
+        local nZTQuality = pPlayerAsync.GetJingMaiZhouTianQualityByGrade(nGrade, nIdx)
+        if nZTQuality <= 0 then
+          nZTQuality = #JingMai.QualityInfo
+          for j = 1, self.nZhouTianNeedXueWei do
+            local nXWIndex = (nZTIndex - 1) * self.nZhouTianNeedXueWei + j
+            local nIdx = self.nSyncValueOffset * (nJMIndex - 1) + self.nSyncValueAttrQualityOffset + nXWIndex
+            local nXWQuality = pPlayerAsync.GetJingMaiByGrade(nGrade, nIdx)
+            nZTQuality = math.min(nZTQuality, nXWQuality)
+          end
+        end
+        if nZTQuality > 0 then
+          self:UpdateZhouTianAttr(pNpc, nJMIndex, nZTIndex, self.nZhouTianBaseAttrQuality, true)
+          self:UpdateZhouTianAttr(pNpc, nJMIndex, nZTIndex, nZTQuality, true)
+          local tbHuMaiData = self:GetSyncHuMaiShiData(pPlayerAsync, nJMIndex, nZTIndex, nGrade)
+          self:UpdateZTHuMaiFuAddAttr(pNpc, nJMIndex, nZTIndex, true, tbHuMaiData)
+        end
+      end
+    end
+  end
+end
+
+AttributeModule:Register("JingMai", JingMai)
+
+function JingMai:CalcPerXueWeiFightPower(pPlayer, nJMIndex, nXWIndex, nGrade)
+  local nFightPower = 0
+  local tbAttrValue = self:GetXueWeiAttrValue(pPlayer, nJMIndex, nXWIndex, nGrade)
+  local nAttrId = self:GetXueWeiAttrID(nJMIndex, nXWIndex)
+  if self.tbJMAttrCfg[nAttrId] then
+    local szAttrType = self.tbJMAttrCfg[nAttrId][1].szAttrType
+    local nIndex = self.tbAttrId2CompareIndex[nAttrId]
+    if AttrFightPowerFactor[szAttrType] then
+      nFightPower = tbAttrValue[nIndex] * AttrFightPowerFactor[szAttrType] / 10000
+    end
+  end
+  return nFightPower
+end
+
+function JingMai:CalcPerZhouTianFightPower(pPlayer, nJMIndex, nZTIndex, nGrade)
+  local nFightPower = 0
+  local tbZTAttrCfg = self.JMZhouTianAttrInfo[nJMIndex][nZTIndex]
+  local nZTQuality = self:GetZhouTianQuality(pPlayer, nJMIndex, nZTIndex, nGrade)
+  if nZTQuality > 0 then
+    local tbHuMaiData = self:GetZhouTianHuMaiFuData(pPlayer, nJMIndex, nZTIndex, nGrade)
+    local nAddCount = tbHuMaiData[1]
+    for nIndex, nAttrId in ipairs(tbZTAttrCfg) do
+      local tbAttrCfg = self.tbZhouTianAttrCfg[nAttrId][nZTQuality]
+      local nIdx = self.tbZTAttrAddPercentIndexType[nAttrId]
+      if tbAttrCfg then
+        local szAttrType = tbAttrCfg[1]
+        if AttrFightPowerFactor[szAttrType] then
+          nFightPower = nFightPower + tbAttrCfg[nIdx + 1] * AttrFightPowerFactor[szAttrType] / 10000
+        end
+      end
+      local tbAttrActiveCfg = self.tbZhouTianAttrCfg[nAttrId][self.nZhouTianBaseAttrQuality]
+      if tbAttrActiveCfg then
+        local szAttrType = tbAttrActiveCfg[1]
+        if AttrFightPowerFactor[szAttrType] then
+          nFightPower = nFightPower + tbAttrActiveCfg[nIdx + 1] * AttrFightPowerFactor[szAttrType] / 10000
+        end
+        if nIndex <= nAddCount then
+          local nAddValue1 = math.floor(tbAttrActiveCfg[nIdx + 1] * tbHuMaiData[nIndex + 1] / 100)
+          nFightPower = nFightPower + nAddValue1 * AttrFightPowerFactor[szAttrType] / 10000
+        end
+      end
+    end
+  end
+  return nFightPower
+end
+
+function JingMai:CalcPerJingMaiFightPower(pPlayer, nJMIndex, nGrade)
+  local nFightPower = 0
+  for nXWIndex = 1, self.nMaxXueWei do
+    nFightPower = nFightPower + self:CalcPerXueWeiFightPower(pPlayer, nJMIndex, nXWIndex, nGrade)
+  end
+  for nZTIndex = 1, self.nZhouTianCount do
+    nFightPower = nFightPower + self:CalcPerZhouTianFightPower(pPlayer, nJMIndex, nZTIndex, nGrade)
+  end
+  return nFightPower
+end
+
+function JingMai:CalcFightPower(pPlayer, szType)
+  if "JingMaiZhouTian" == szType then
+    return self:CalcJingMaiZhouTianFightPower(pPlayer)
+  end
+  if "JingMaiXueWei" == szType then
+    return self:CalcJingMaiXueWeiFightPower(pPlayer)
+  end
+  return 0
+end
+
+function JingMai:CalcJingMaiXueWeiFightPower(pPlayer)
+  local nFightPower = 0
+  for nGrade = 1, JingMai.nMaxGrade do
+    for i = 1, JingMai.nMaxJingMai do
+      local szType = JingMai.tbJingMaiKey[i]
+      local nJMIndex = self.tbJMKey2JMIndex[szType]
+      for nXWIndex = 1, self.nMaxXueWei do
+        nFightPower = nFightPower + self:CalcPerXueWeiFightPower(pPlayer, nJMIndex, nXWIndex, nGrade)
+      end
+    end
+  end
+  return nFightPower
+end
+
+function JingMai:CalcJingMaiZhouTianFightPower(pPlayer)
+  local nFightPower = 0
+  for nGrade = 1, JingMai.nMaxGrade do
+    for i = 1, JingMai.nMaxJingMai do
+      local szType = JingMai.tbJingMaiKey[i]
+      local nJMIndex = self.tbJMKey2JMIndex[szType]
+      for nZTIndex = 1, self.nZhouTianCount do
+        nFightPower = nFightPower + self:CalcPerZhouTianFightPower(pPlayer, nJMIndex, nZTIndex, nGrade)
+      end
+    end
+  end
+  return nFightPower
+end
+
+FightPower:RegisterFPSystemModule(JingMai.tbJingMaiKey, JingMai)
+FightPower:RegisterFPSystemModule({
+  "JingMaiZhouTian",
+  "JingMaiXueWei"
+}, JingMai)
+
+function JingMai:CheckJMConfig()
+  for nJMIndex = 1, #self.JMXueWeiInfo do
+    for nXWIndex = 1, #self.JMXueWeiInfo[nJMIndex] do
+      local nAttrId = self:GetXueWeiAttrID(nJMIndex, nXWIndex)
+      if not self.tbJMAttrCfg[nAttrId] then
+        LogErr("JingMai:CheckJMConfig error! JingMaiAttrPool not had nAttrId", nAttrId)
+        return false
+      end
+      for nQIndex = 1, self.nMaxQuality do
+        if not self.tbJMAttrCfg[nAttrId][nQIndex] then
+          LogErr("JingMai:CheckJMConfig error! JingMaiAttrPool not had nAttrId, nQIndex", nAttrId, nQIndex)
+          return false
+        end
+      end
+    end
+  end
+  for nJMIndex = 1, #self.JMZhouTianAttrInfo do
+    for nZTIndex = 1, #self.JMZhouTianAttrInfo[nJMIndex] do
+      for i = 1, #self.JMZhouTianAttrInfo[nJMIndex][nZTIndex] do
+        local nAttrId = self.JMZhouTianAttrInfo[nJMIndex][nZTIndex][i]
+        if not self.tbZhouTianAttrCfg[nAttrId] then
+          LogErr("JingMai:CheckJMConfig error! JingMaiZhouTianAttr not had nAttrId", nAttrId)
+          return false
+        end
+        for nQIndex = 1, self.nMaxQuality do
+          if not self.tbZhouTianAttrCfg[nAttrId][nQIndex] then
+            LogErr("JingMai:CheckJMConfig error! JingMaiAttrPool not had nAttrId, nQIndex", nAttrId, nQIndex)
+            return false
+          end
+        end
+        if not self.tbZhouTianAttrCfg[nAttrId][self.nZhouTianBaseAttrQuality] then
+          LogErr("JingMai:CheckJMConfig error! JingMaiAttrPool not had nAttrId, nQIndex", nAttrId, self.nZhouTianBaseAttrQuality)
+          return false
+        end
+      end
+    end
+  end
+  for _, tbInfo in pairs(self.JMZTXWXiuLianInfo) do
+    for _, tbV in pairs(tbInfo) do
+      local nXiuLianId = tbV[4]
+      if not self.tbJingMaiRandomWeight[nXiuLianId] then
+        LogErr("JingMai:CheckJMConfig error! JingMaiRandomWeight not had nXiuLianId", nXiuLianId)
+        return false
+      end
+    end
+  end
+  return true
+end
+
+Validator:Register(JingMai.CheckJMConfig, JingMai)

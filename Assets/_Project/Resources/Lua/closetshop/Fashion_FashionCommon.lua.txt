@@ -1,0 +1,432 @@
+Require("CommonScript/AttributeModule/AttributeModule.lua")
+Fashion.SAVE_GROUP = GetGroupKey("Fashion")
+Fashion.FASHION_EFFECT_GROUP = GetGroupKey("FashionEffect")
+Fashion.HIDE_FEATURE_SAVE_GROUP = GetGroupKey("HideFeature")
+Fashion.APPLY_ATTR_ID_OFFSET = 6
+
+function Fashion:ExpandSexAndFillSetting(tbFashionSettings, tbTmp)
+  if -1 == tbTmp.nLimitSex then
+    local tbTmpCopy = Lib:CopyTB(tbTmp)
+    tbTmpCopy.nLimitSex = 0
+    tbFashionSettings[tbTmp.nFashionId][tbTmp.nLimitFaction][tbTmp.nLimitFactionSect][0] = tbTmpCopy
+    local tbTmpCopy = Lib:CopyTB(tbTmp)
+    tbTmpCopy.nLimitSex = 1
+    tbFashionSettings[tbTmp.nFashionId][tbTmp.nLimitFaction][tbTmp.nLimitFactionSect][1] = tbTmpCopy
+  else
+    tbFashionSettings[tbTmp.nFashionId][tbTmp.nLimitFaction][tbTmp.nLimitFactionSect][tbTmp.nLimitSex] = tbTmp
+  end
+end
+
+function Fashion:ExpandFactionSectAndFillSetting(tbFashionSettings, tbTmp)
+  if -1 == tbTmp.nLimitFactionSect then
+    for nFactionSectId, _ in pairs(Faction.tbFactionSectInfo[tbTmp.nLimitFaction]) do
+      local tbTmpCopy = Lib:CopyTB(tbTmp)
+      tbTmpCopy.nLimitFactionSect = nFactionSectId
+      tbFashionSettings[tbTmp.nFashionId][tbTmp.nLimitFaction][nFactionSectId] = tbFashionSettings[tbTmp.nFashionId][tbTmp.nLimitFaction][nFactionSectId] or {}
+      self:ExpandSexAndFillSetting(tbFashionSettings, tbTmpCopy)
+    end
+  else
+    tbFashionSettings[tbTmp.nFashionId][tbTmp.nLimitFaction][tbTmp.nLimitFactionSect] = tbFashionSettings[tbTmp.nFashionId][tbTmp.nLimitFaction][tbTmp.nLimitFactionSect] or {}
+    self:ExpandSexAndFillSetting(tbFashionSettings, tbTmp)
+  end
+end
+
+function Fashion:ExpandAndFillSetting(tbFashionSettings, tbTmp)
+  if -1 == tbTmp.nLimitFaction then
+    for nFactionId, _ in pairs(Faction.tbFactionSectInfo) do
+      local tbTmpCopy = Lib:CopyTB(tbTmp)
+      tbTmpCopy.nLimitFaction = nFactionId
+      tbFashionSettings[tbTmp.nFashionId][nFactionId] = tbFashionSettings[tbTmp.nFashionId][nFactionId] or {}
+      self:ExpandFactionSectAndFillSetting(tbFashionSettings, tbTmpCopy)
+    end
+  else
+    tbFashionSettings[tbTmp.nFashionId][tbTmp.nLimitFaction] = tbFashionSettings[tbTmp.nFashionId][tbTmp.nLimitFaction] or {}
+    self:ExpandFactionSectAndFillSetting(tbFashionSettings, tbTmp)
+  end
+end
+
+function Fashion:LoadFashionSetting()
+  self.tbFashionSettings = {}
+  self.tbHorseFashionFlag = {}
+  local tbTmpSettings = Lib:LoadTabFileEx("Setting/Appearance/Appearance.tab", "dsddddddsdddddsds", nil, {
+    "nFashionId",
+    "szName",
+    "nLimitFaction",
+    "nLimitFactionSect",
+    "nLimitSex",
+    "nResId",
+    "nIconId",
+    "nBigIconId",
+    "szDesc",
+    "nPart",
+    "nLayer",
+    "nQuality",
+    "nPrettyValue",
+    "nRequireLevel",
+    "szExpiredDate",
+    "nAddEnhanceEffect",
+    "szEffect2FashionIds"
+  }, nil, 3, false)
+  for _, tbTmp in pairs(tbTmpSettings) do
+    tbTmp.tbEffect2FashionIds = Lib:SplitStr(tbTmp.szEffect2FashionIds, "|")
+    for nIndex, szId in ipairs(tbTmp.tbEffect2FashionIds) do
+      tbTmp.tbEffect2FashionIds[nIndex] = tonumber(szId)
+    end
+  end
+  for _, tbTmp in pairs(tbTmpSettings) do
+    tbTmp.tbFashion2EffectIds = {}
+    for _, tbSetting in pairs(tbTmpSettings) do
+      if Lib:Is_include(tbTmp.nFashionId, tbSetting.tbEffect2FashionIds) then
+        table.insert(tbTmp.tbFashion2EffectIds, tbSetting.nFashionId)
+      end
+    end
+  end
+  for nRow, tbTmp in pairs(tbTmpSettings) do
+    if tbTmp.nFashionId > 0 and string.len(tbTmp.szName) > 0 and tbTmp.nResId > 0 and tbTmp.nIconId > 0 and tbTmp.nBigIconId > 0 and tbTmp.nPart > 0 then
+      self.tbFashionSettings[tbTmp.nFashionId] = self.tbFashionSettings[tbTmp.nFashionId] or {}
+      tbTmp.nPart = tbTmp.nPart - 1
+      if tbTmp.nPart == Npc.NpcResPartsDef.npc_part_horse then
+        self.tbHorseFashionFlag[tbTmp.nFashionId] = true
+      end
+      self:ExpandAndFillSetting(self.tbFashionSettings, tbTmp)
+    end
+  end
+  Validator:Register(self.CheckFashionSetting, self)
+  self.tbFashionSettings = SetReadOnly(self.tbFashionSettings)
+end
+
+function Fashion:CheckFashionSetting()
+  local nPrettyValue
+  for nFashionId, tbFactions in pairs(self.tbFashionSettings) do
+    nPrettyValue = nil
+    for nFaction, tbFactionSect in pairs(tbFactions) do
+      for nFactionSect, tbSex in pairs(tbFactionSect) do
+        for nSex, tbFashion in pairs(tbSex) do
+          nPrettyValue = nPrettyValue or tbFashion.nPrettyValue
+          if nPrettyValue ~= tbFashion.nPrettyValue then
+            LogErr("Fashion:CheckFashionSetting error. the nPrettyValue of the fashion", nFashionId, " is different.", nPrettyValue, tbFashion.nPrettyValue, nFaction, nFactionSect, nSex)
+            return false
+          end
+        end
+      end
+    end
+  end
+  return true
+end
+
+Fashion:LoadFashionSetting()
+
+function Fashion:GetFashion(pPlayer, nFashionId)
+  local tbData = self:GetPlayerFashionData(pPlayer)
+  return tbData.tbFashionHaveList[nFashionId]
+end
+
+function Fashion:GetFashionSetting(pPlayer, nFashionId)
+  local tbResult = self:GetCanUseFashionSetting(pPlayer, nFashionId)
+  if tbResult then
+    return tbResult, true
+  end
+  local tbResult = self.tbFashionSettings[nFashionId]
+  if not tbResult then
+    return nil, false
+  end
+  tbResult = tbResult[pPlayer.nFaction] or tbResult[0] or Lib:PickCasualOne(tbResult)
+  if not tbResult then
+    return nil, false
+  end
+  tbResult = tbResult[pPlayer.nFactionSect] or tbResult[-1] or Lib:PickCasualOne(tbResult)
+  if not tbResult then
+    return nil, false
+  end
+  tbResult = tbResult[self:GetSex(pPlayer)] or tbResult[-1] or Lib:PickCasualOne(tbResult)
+  if not tbResult then
+    return nil, false
+  end
+  return tbResult, false
+end
+
+function Fashion:GetCanUseFashionSetting(pPlayer, nFashionId)
+  local tbResult = self.tbFashionSettings[nFashionId]
+  if not tbResult then
+    return
+  end
+  tbResult = tbResult[pPlayer.nFaction] or tbResult[0]
+  if not tbResult then
+    return
+  end
+  tbResult = tbResult[pPlayer.nFactionSect] or tbResult[-1]
+  if not tbResult then
+    return
+  end
+  tbResult = tbResult[self:GetSex(pPlayer)] or tbResult[-1]
+  if not tbResult then
+    return
+  end
+  if tbResult.nRequireLevel > pPlayer.nLevel then
+    return
+  end
+  return tbResult
+end
+
+function Fashion:LoadFashionPart()
+  local tbPartConfig = Lib:LoadTabFileEx("Setting/Appearance/AppearancePart.tab", "ddddsdsss", nil, {
+    "nPartId",
+    "nLayer",
+    "nEnable",
+    "nCanHide",
+    "szName",
+    "nSort",
+    "szDefRmdShopItem",
+    "szNormalIcon",
+    "szSelectedIcon"
+  }, nil, 3, true)
+  self.tbAppearancePart = {}
+  for _, tbPart in ipairs(tbPartConfig) do
+    if 1 == tbPart.nEnable then
+      tbPart.nPartId = tbPart.nPartId - 1
+      tbPart.tbRecomShopItemId = Lib:SplitStr2Num(tbPart.szDefRmdShopItem, "|")
+      table.insert(self.tbAppearancePart, tbPart)
+    end
+  end
+  table.sort(self.tbAppearancePart, function(a, b)
+    return a.nSort > b.nSort
+  end)
+  Validator:Register(self.CheckAppearancePart, self)
+end
+
+function Fashion:CheckAppearancePart()
+  for _, tbPart in ipairs(self.tbAppearancePart) do
+    local tbPromoteIds = Lib:SplitStr2Num(tbPart.szDefRmdShopItem, "|")
+    for _, nShopItemId in ipairs(tbPromoteIds) do
+      if nShopItemId > 0 then
+        local tbShopItem = Shop:GetFashionItem(nShopItemId)
+        if not tbShopItem then
+          LogErr("FashionCommon:CheckAppearancePart get fashionShopItem is nil by nShopItemId:", nShopItemId, "PartId:", tbPart.nPartId)
+          return false
+        end
+      end
+    end
+  end
+  return true
+end
+
+Fashion:LoadFashionPart()
+
+function Fashion:GetPartConfigByPartId(nPartId, nLayer)
+  for nIndex, tbPart in ipairs(self.tbAppearancePart) do
+    if tbPart.nPartId == nPartId and tbPart.nLayer == nLayer then
+      return nIndex, tbPart
+    end
+  end
+  return nil
+end
+
+function Fashion:GetSex(pPlayer)
+  if MODULE_GAMECLIENT and self.nTemporarySex then
+    return self.nTemporarySex
+  end
+  return pPlayer.nSex
+end
+
+function Fashion:GetPlayerFashionData(pPlayer)
+  local tbData
+  if MODULE_GAMESERVER then
+    tbData = pPlayer.GetScriptTable("Fashion")
+    local tbEffectData = pPlayer.GetScriptTable("FashionEffect")
+    if tbEffectData and tbEffectData.tbFashionHaveList then
+      setmetatable(tbData.tbFashionHaveList, {
+        __index = tbEffectData.tbFashionHaveList
+      })
+    end
+  elseif MODULE_GAMECLIENT then
+    tbData = self.tbFashionClientData
+  end
+  tbData.tbFashionHaveList = tbData.tbFashionHaveList or {}
+  return tbData
+end
+
+function Fashion:GetWearingEffectFashionIdByPart(pPlayer, nPart)
+  return pPlayer.GetUserValue(self.FASHION_EFFECT_GROUP, nPart + 1) or 0
+end
+
+function Fashion:IsAllFactionCanUse(nFashionId)
+  if not self.tbFashionSettings[nFashionId] then
+    return false
+  end
+  for nFactionId, _ in pairs(Faction.tbFactionSectInfo) do
+    if not self.tbFashionSettings[nFashionId][nFactionId] then
+      return false
+    end
+  end
+  return true
+end
+
+function Fashion:IsFactionSectCanUse(nFashionId, nFaction, nFactionSect)
+  return self.tbFashionSettings[nFashionId] and self.tbFashionSettings[nFashionId][nFaction] and self.tbFashionSettings[nFashionId][nFaction][nFactionSect]
+end
+
+function Fashion:GetAllCanUseFactionAndSectTexts(nFashionId)
+  local tbResult = {}
+  local tbUniq = {}
+  local tbSetting1 = self.tbFashionSettings[nFashionId]
+  if not tbSetting1 then
+    return tbResult
+  end
+  for nLimitFaction, tbSetting2 in pairs(tbSetting1) do
+    for nLimitFactionSect, tbSetting3 in pairs(tbSetting2) do
+      if nLimitFaction > 0 and nLimitFactionSect >= 0 and Faction.tbFactionSectInfo[nLimitFaction][nLimitFactionSect] then
+        local szSectName = Faction.tbFactionSectInfo[nLimitFaction][nLimitFactionSect][1]
+        if not tbUniq[szSectName] then
+          tbUniq[szSectName] = true
+          table.insert(tbResult, szSectName)
+        end
+      end
+    end
+  end
+  return tbResult
+end
+
+function Fashion:GetFashionSettingNotPlayer(nFashionId, nFaction, nFactionSect, nSex)
+  local tbResult = self.tbFashionSettings[nFashionId]
+  if not tbResult then
+    return
+  end
+  tbResult = tbResult[nFaction] or tbResult[0]
+  if not tbResult then
+    return
+  end
+  tbResult = tbResult[nFactionSect] or tbResult[-1]
+  if not tbResult then
+    return
+  end
+  tbResult = tbResult[nSex] or tbResult[-1]
+  if not tbResult then
+    return
+  end
+  return tbResult
+end
+
+function Fashion:GetPrettyValue(pPlayer)
+  local nPrettyValue = 0
+  for nFashionId, tbFashionInfo in pairs(self:GetPlayerFashionData(pPlayer).tbFashionHaveList) do
+    if (not tbFashionInfo.nExpiredTime or tbFashionInfo.nExpiredTime <= 0) and (not tbFashionInfo.szExpiredDate or Lib:IsEmptyStr(tbFashionInfo.szExpiredDate)) then
+      local tbFashionSetting = Fashion:GetFashionSetting(pPlayer, nFashionId)
+      if nil ~= tbFashionSetting then
+        nPrettyValue = nPrettyValue + tbFashionSetting.nPrettyValue
+      end
+    end
+  end
+  return nPrettyValue
+end
+
+Fashion.tbAttrDoChange = {
+  [Npc.NpcResPartsDef.npc_part_horse] = function(pPlayer, nOldId, nNewId)
+    if nOldId and nOldId >= 0 then
+      Fashion:RemoveHorseFashionAttr(pPlayer, nOldId)
+    end
+    if nNewId and nNewId >= 0 then
+      Fashion:ApplyHorseFashionAttr(pPlayer, nNewId)
+    end
+  end,
+  [Npc.NpcResPartsDef.npc_part_weapon] = function(pPlayer, nOldId, nNewId)
+    if nOldId and nOldId >= 0 then
+      Fashion:RemoveWeaponFashionAttr(pPlayer, nOldId)
+    end
+    if nNewId and nNewId >= 0 then
+      Fashion:ApplyWeaponFashionAttr(pPlayer, nNewId)
+    end
+  end
+}
+
+function Fashion:ChangeFashionAttr(pPlayer, nPart, nOldFashionId, nNewFashionId)
+  if not pPlayer then
+    return
+  end
+  local fnReSetAttr = self.tbAttrDoChange[nPart]
+  if not fnReSetAttr then
+    return
+  end
+  fnReSetAttr(pPlayer, nOldFashionId, nNewFashionId)
+end
+
+function Fashion:ApplyHorseFashionAttr(pPlayer, nNewId)
+  Horse:ApplyHorseFashionAttr(pPlayer.GetNpc(), pPlayer.nRideState, nNewId)
+end
+
+function Fashion:RemoveHorseFashionAttr(pPlayer, nOldId)
+  Horse:RemoveHorseFashionAttr(pPlayer.GetNpc(), pPlayer.nRideState, nOldId, true)
+end
+
+function Fashion:ApplyWeaponFashionAttr(pPlayer, nNewFashionId)
+  local pNpc = pPlayer.GetNpc()
+  local tbAttr = Fashion.AttrCfg[nNewFashionId]
+  if not tbAttr then
+    return
+  end
+  pNpc.ApplyMagicAttrib(table.unpack(tbAttr))
+end
+
+function Fashion:RemoveWeaponFashionAttr(pPlayer, nOldFashionId)
+  local pNpc = pPlayer.GetNpc()
+  local tbAttr = Fashion.AttrCfg[nOldFashionId]
+  if not tbAttr then
+    return
+  end
+  pNpc.RemoveMagicAttrib(table.unpack(tbAttr))
+end
+
+function Fashion:OnEquip(pPlayer)
+  for nPart = Npc.NpcResPartsDef.npc_part_body, Npc.NpcResPartsDef.npc_res_part_count - 1 do
+    local nFashionId = self:GetApplyAttrFashionId(pPlayer, nPart)
+    local tbSetting = self:GetFashionSetting(pPlayer, nFashionId)
+    if tbSetting and nPart ~= Npc.NpcResPartsDef.npc_part_horse then
+      self:ChangeFashionAttr(pPlayer, tbSetting.nPart, -1, nFashionId)
+    end
+  end
+end
+
+function Fashion:OnUnEquip(pPlayer)
+  for nPart = Npc.NpcResPartsDef.npc_part_body, Npc.NpcResPartsDef.npc_res_part_count - 1 do
+    local nFashionId = self:GetApplyAttrFashionId(pPlayer, nPart)
+    local tbSetting = self:GetFashionSetting(pPlayer, nFashionId)
+    if tbSetting and nPart ~= Npc.NpcResPartsDef.npc_part_horse then
+      self:ChangeFashionAttr(pPlayer, tbSetting.nPart, nFashionId, -1)
+    end
+  end
+end
+
+AttributeModule:Register("Fashion", Fashion)
+
+function Fashion:GetApplyAttrFashionId(pPlayer, nPart)
+  nPart = nPart + 1
+  local nFashionId = pPlayer.GetUserValue(Fashion.SAVE_GROUP, nPart + Fashion.APPLY_ATTR_ID_OFFSET)
+  if nFashionId <= 0 then
+    nFashionId = pPlayer.GetUserValue(Fashion.SAVE_GROUP, nPart)
+  end
+  return nFashionId
+end
+
+function Fashion:IsFeatureHide(pPlayer, nResPart)
+  local nEquipPos = Item.NPC_RES_PART_TO_EQUIPPOS[nResPart]
+  if not nEquipPos then
+    return false
+  end
+  local _, tbPartConfig = self:GetPartConfigByPartId(nResPart, Npc.NpcPartLayerDef.npc_part_layer_base)
+  if not tbPartConfig or 1 ~= tbPartConfig.nCanHide then
+    return false
+  end
+  local nId = nResPart + 1
+  return 1 == pPlayer.GetUserValue(Fashion.HIDE_FEATURE_SAVE_GROUP, nId)
+end
+
+function Fashion:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  for nPart = Npc.NpcResPartsDef.npc_part_body, Npc.NpcResPartsDef.npc_res_part_count - 1 do
+    local nFashionId = pPlayerAsync.GetFashion(nPart + 1)
+    if nPart ~= Npc.NpcResPartsDef.npc_part_horse then
+      local tbAttr = Fashion.AttrCfg[nFashionId]
+      if tbAttr then
+        pNpc.ApplyMagicAttrib(table.unpack(tbAttr))
+      end
+    end
+  end
+end

@@ -1,0 +1,58 @@
+SpeechBalloon.SAVE_GROUP = GetGroupKey("SpeechBalloon")
+SpeechBalloon.CUR_SPEECHBALLON_GROUPID = 1
+
+function SpeechBalloon:LoadSetting()
+  local szFilePath = "Setting/SpeechBalloon/SpeechBalloon.tab"
+  local tbSpeechBallonFile = Lib:EasyLoadTabFile(szFilePath, {"nIndex"})
+  self.tbSetting = SetReadOnly(tbSpeechBallonFile)
+end
+
+SpeechBalloon:LoadSetting()
+
+function SpeechBalloon:GetInfoById(nIndex)
+  return self.tbSetting[nIndex]
+end
+
+function SpeechBalloon:GetPlayerSpeechBalloonId(pPlayer)
+  return pPlayer.GetUserValue(self.SAVE_GROUP, self.CUR_SPEECHBALLON_GROUPID)
+end
+
+function SpeechBalloon:CheckId(nId)
+  assert(nId, "[SpeechBalloon CheckPFIdExist Id Null]")
+  local bIsExist = self.tbSetting[nId]
+  return bIsExist
+end
+
+function SpeechBalloon:IsPermanentSpeechBalloon(pPlayer, nId, tbPlayerData)
+  if MODULE_GAMESERVER then
+    tbPlayerData = self:GetPlayerData(pPlayer)
+  end
+  if tbPlayerData[nId] and tbPlayerData[nId].nGetTime == tbPlayerData[nId].nLimitTime then
+    return true
+  end
+  return false
+end
+
+function SpeechBalloon:CheckValid(pPlayer, nId, tbPlayerData)
+  if self:IsPermanentSpeechBalloon(pPlayer, nId, tbPlayerData) then
+    return true
+  end
+  if MODULE_GAMESERVER then
+    tbPlayerData = self:GetPlayerData(pPlayer)
+  end
+  if not tbPlayerData[nId] then
+    return false
+  end
+  local nTime = GetTime()
+  if nTime < tbPlayerData[nId].nLimitTime then
+    if MODULE_GAMESERVER and tbPlayerData[nId].nLimitTime - nTime < 86400 then
+      local nRestTime = tbPlayerData[nId].nLimitTime - nTime
+      self.tbCheckBalloonTimer = self.tbCheckBalloonTimer or {}
+      self.tbCheckBalloonTimer[pPlayer.dwID] = Timer:Register(Env.GAME_FPS * (nRestTime + 5), self.CheckExpiredByPlayerId, self, pPlayer.dwID)
+      Log(string.format("PlayerSpeechBalloon:CheckExpired next time=%f hour, playerID=%s", (nRestTime + 5) / 3600, pPlayer.dwID))
+    end
+    return true
+  else
+    return false
+  end
+end

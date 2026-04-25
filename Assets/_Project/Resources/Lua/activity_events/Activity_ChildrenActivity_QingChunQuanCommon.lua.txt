@@ -1,0 +1,275 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+Require("CommonScript/Activity/ActivityMgrDef.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.QingChunQuan)
+tbActivity.nSaveGroupId = GetGroupKey("QingChunQuan")
+tbActivity.nSaveXingFuQuanID = 1
+tbActivity.nSaveHuanLeQuanID = 2
+tbActivity.nSaveHandInXingFuQuanID = 3
+tbActivity.nSaveHandInHuanLeQuanID = 4
+tbActivity.nSaveGainAwardID = 5
+tbActivity.AwardSaveID = {
+  [1] = 6,
+  [2] = 7,
+  [3] = 8,
+  [4] = 9,
+  [5] = 10,
+  [6] = 11
+}
+tbActivity.nSaveAlertMailID = 12
+tbActivity.nSaveLastStartTime = 13
+tbActivity.QuanID = {
+  XingFuQuanID = 1118,
+  HuanLeQuanID = 1117,
+  ZhiFeiJiID = 1109
+}
+tbActivity.Protocol = {
+  MakeXingFuQuan = 1,
+  MakeHuanLeQuan = 2,
+  GetExtraAward = 3
+}
+tbActivity.AwardType = {XINGFUQUAN = "XINGFUQUAN", HUANLEQUAN = "HUANLEQUAN"}
+tbActivity.MaxQuanNum = {MakeXingFuQuan = 100, MakeHuanLeQuan = 100}
+tbActivity.QuanAwardKey = {XingFu = 20, HuanLe = 19}
+tbActivity.HandInAwardID = 1116
+tbActivity.QUANTYPE = {XINGFUQUAN = 1, HUANLEQUAN = 2}
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/ChildrenActivity/QingChunQuan/QingChunQuan.tab"
+  local tbField = {
+    "nConfigId",
+    "szSaveKey",
+    "szMailTitle",
+    "szMailFrom",
+    "szLogWay",
+    "szDesc",
+    "szName",
+    "nLevel",
+    "nShowAwardId",
+    "nShowAwardKey",
+    "szShowTime",
+    "szTimeOut",
+    "szAlertTime",
+    "szAlertMFrom",
+    "szAlertMTitle",
+    "szAlertMText"
+  }
+  local tbActivityConfig = Lib:LoadTabFileEx(szFilepath, "dssssssdddssssss", "nConfigId", tbField)
+  self.ACTIVITY_CONFIG = {}
+  for nConfigId, tbConfig in pairs(tbActivityConfig or {}) do
+    tbConfig.nTimeOut = not Lib:IsEmptyStr(tbConfig.szTimeOut) and Lib:ParseDateTime(tbConfig.szTimeOut) or 0
+    tbConfig.nAlertTime = Lib:ParseDateTime(tbConfig.szAlertTime)
+    self.ACTIVITY_CONFIG[nConfigId] = tbConfig
+  end
+  local szFilepath = "Setting/Activity/ChildrenActivity/QingChunQuan/QuanFormala.tab"
+  local tbField = {
+    "nConfigId",
+    "szFormalaType",
+    "nTemplateID",
+    "szName",
+    "nCount"
+  }
+  local tbQuanFormulaConfig = Lib:LoadTabFileEx(szFilepath, "dsdsd", nil, tbField)
+  for _, tbConfig in pairs(tbQuanFormulaConfig or {}) do
+    local nConfigId = tbConfig.nConfigId
+    assert(self.ACTIVITY_CONFIG[nConfigId], string.format("load QingChunQuan  not exist", nConfigId))
+    self.ACTIVITY_CONFIG[nConfigId].XingFuQuanFormula = self.ACTIVITY_CONFIG[nConfigId].XingFuQuanFormula or {}
+    self.ACTIVITY_CONFIG[nConfigId].XingFuQuan = self.ACTIVITY_CONFIG[nConfigId].XingFuQuan or {}
+    self.ACTIVITY_CONFIG[nConfigId].HuanLeQuanFormula = self.ACTIVITY_CONFIG[nConfigId].HuanLeQuanFormula or {}
+    self.ACTIVITY_CONFIG[nConfigId].HuanLeQuan = self.ACTIVITY_CONFIG[nConfigId].HuanLeQuan or {}
+    if tbConfig.szFormalaType == "XINGFUFORMALA" then
+      table.insert(self.ACTIVITY_CONFIG[nConfigId].XingFuQuanFormula, tbConfig)
+    elseif tbConfig.szFormalaType == "XINGFUQUAN" then
+      table.insert(self.ACTIVITY_CONFIG[nConfigId].XingFuQuan, tbConfig)
+    elseif tbConfig.szFormalaType == "HUANLEFORMALA" then
+      table.insert(self.ACTIVITY_CONFIG[nConfigId].HuanLeQuanFormula, tbConfig)
+    elseif tbConfig.szFormalaType == "HUANLEQUAN" then
+      table.insert(self.ACTIVITY_CONFIG[nConfigId].HuanLeQuan, tbConfig)
+    end
+  end
+  local szFilepath = "Setting/Activity/ChildrenActivity/QingChunQuan/QuanExtraAward.tab"
+  local tbField = {
+    "nConfigId",
+    "nIndex",
+    "szAwardType",
+    "nNeedQuanNum",
+    "nAwardID",
+    "nAwardKey",
+    "szInfo"
+  }
+  local tbExtraAwardConfig = Lib:LoadTabFileEx(szFilepath, "ddsddds", nil, tbField)
+  for _, tbConfig in pairs(tbExtraAwardConfig or {}) do
+    local nConfigId = tbConfig.nConfigId
+    assert(self.ACTIVITY_CONFIG[nConfigId], string.format("load QingChunQuan not exist", nConfigId))
+    self.ACTIVITY_CONFIG[nConfigId].XingFuQuanExtraAward = self.ACTIVITY_CONFIG[nConfigId].XingFuQuanExtraAward or {}
+    self.ACTIVITY_CONFIG[nConfigId].HuanLeQuanExtraAward = self.ACTIVITY_CONFIG[nConfigId].HuanLeQuanExtraAward or {}
+    if "XINGFUQUAN" == tbConfig.szAwardType then
+      table.insert(self.ACTIVITY_CONFIG[nConfigId].XingFuQuanExtraAward, tbConfig)
+    elseif "HUANLEQUAN" == tbConfig.szAwardType then
+      table.insert(self.ACTIVITY_CONFIG[nConfigId].HuanLeQuanExtraAward, tbConfig)
+    end
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+  self.bLoadConfig = true
+end
+
+function tbActivity:CanJoin(nLevel)
+  return nLevel >= self.tbConfig.nLevel
+end
+
+function tbActivity:GetExtraAwardSaveID(nIndex)
+  return self.AwardSaveID[nIndex]
+end
+
+function tbActivity:GetExtraAwardCfg(nQuanType)
+  local tbExtraAwardCfg
+  if nQuanType == self.QUANTYPE.XINGFUQUAN then
+    tbExtraAwardCfg = self.tbConfig.XingFuQuanExtraAward
+  elseif nQuanType == self.QUANTYPE.HUANLEQUAN then
+    tbExtraAwardCfg = self.tbConfig.HuanLeQuanExtraAward
+  end
+  return tbExtraAwardCfg
+end
+
+function tbActivity:HandInQuanIsEnough(pPlayer, tbExtraAwardItem)
+  local nQuanHandInSaveID
+  if tbExtraAwardItem.szAwardType == "XINGFUQUAN" then
+    nQuanHandInSaveID = self.nSaveHandInXingFuQuanID
+  elseif tbExtraAwardItem.szAwardType == "HUANLEQUAN" then
+    nQuanHandInSaveID = self.nSaveHandInHuanLeQuanID
+  end
+  if not nQuanHandInSaveID then
+    LogErr("HandInQuanIsEnough error")
+    return false
+  end
+  local nNeedCount = tbExtraAwardItem.nNeedQuanNum
+  local nHandInCount = pPlayer.GetUserValue(self.nSaveGroupId, nQuanHandInSaveID)
+  print("nHandInCount", nNeedCount, nHandInCount)
+  return nNeedCount <= nHandInCount
+end
+
+function tbActivity:HasGetExtraAward(pPlayer, nIndex)
+  local nSaveID = self:GetExtraAwardSaveID(nIndex)
+  return pPlayer.GetUserValue(self.nSaveGroupId, nSaveID) > 0
+end
+
+function tbActivity:GetPlayerCanMakeQuanNum(pPlayer, nQuanType)
+  local thFormula = self:GetQuanFormula(nQuanType)
+  if not thFormula then
+    LogErr("GetPlayerCanMakeQuanNum formula nil ")
+    return false
+  end
+  local nMaxNum = 200
+  for _, tbItem in pairs(thFormula) do
+    local nTemplateID = tbItem.nTemplateID
+    local nNeedCount = tbItem.nCount
+    local nHaveCount = pPlayer.GetItemCountByTypeInBag(nTemplateID)
+    local nCurCanMake = math.floor(nHaveCount / nNeedCount)
+    if nMaxNum > nCurCanMake then
+      nMaxNum = nCurCanMake
+    end
+  end
+  local nLeftXingFu, nLeftHuanLe = self:GetLeftQuanMakeCount()
+  local nLeftTime = 200
+  if nQuanType == self.QUANTYPE.XINGFUQUAN then
+    nLeftTime = nLeftXingFu
+  elseif nQuanType == self.QUANTYPE.HUANLEQUAN then
+    nLeftTime = nLeftHuanLe
+  end
+  nMaxNum = math.min(nMaxNum, nLeftTime)
+  return nMaxNum
+end
+
+function tbActivity:GetQuanFormula(nQuanType)
+  local thFormula
+  if nQuanType == self.QUANTYPE.XINGFUQUAN then
+    thFormula = self.ACTIVITY_CONFIG[self.nConfigId].XingFuQuanFormula
+  elseif nQuanType == self.QUANTYPE.HUANLEQUAN then
+    thFormula = self.ACTIVITY_CONFIG[self.nConfigId].HuanLeQuanFormula
+  end
+  if not thFormula then
+    LogErr("GetQuanFormula error ", nQuanType)
+  end
+  return thFormula
+end
+
+function tbActivity:GetLeftQuanMakeCount()
+  local nLeftXingFuQuanMakeCount = self.MaxQuanNum.MakeXingFuQuan - me.GetUserValue(self.nSaveGroupId, self.nSaveXingFuQuanID)
+  local nLeftHuanLeQuanMakeCount = self.MaxQuanNum.MakeHuanLeQuan - me.GetUserValue(self.nSaveGroupId, self.nSaveHuanLeQuanID)
+  return nLeftXingFuQuanMakeCount, nLeftHuanLeQuanMakeCount
+end
+
+function tbActivity:CanGetExtraAward(pPlayer, nQuanType, nIndex)
+  if not pPlayer then
+    return false
+  end
+  local tbExtraAwardCfg = self:GetExtraAwardCfg(nQuanType)
+  if not tbExtraAwardCfg then
+    LogErr("GetExtraAward tbExtraAwardCfg nil")
+    return false
+  end
+  local tbExtraAwardItem = tbExtraAwardCfg[nIndex]
+  if not tbExtraAwardItem then
+    LogErr("GetExtraAward tbExtraAwardItem nil")
+    return false
+  end
+  local bHandInEnough = self:HandInQuanIsEnough(pPlayer, tbExtraAwardItem)
+  if not bHandInEnough then
+    return false, i18n.EasyGet("\228\184\138\232\180\161\231\178\189\229\173\144\230\149\176\233\135\143\228\184\141\232\182\179\239\188\129")
+  end
+  local bHasGetExtraAward = self:HasGetExtraAward(pPlayer, tbExtraAwardItem.nIndex)
+  if bHasGetExtraAward then
+    return false, i18n.EasyGet("\230\130\168\229\183\178\233\162\134\229\143\150\232\191\135\232\175\165\229\165\150\229\138\177\239\188\129")
+  end
+  return true
+end
+
+function tbActivity:HaveQuanMakeTime(pPlayer, nQuanType, nQuanNum)
+  local nHaveQuanMakeTime = self:GetQuanMakeCount(pPlayer, nQuanType)
+  local nMaxQuanMakeTime = self:GetMaxQuanMakeCount(nQuanType)
+  return nMaxQuanMakeTime >= nHaveQuanMakeTime + nQuanNum
+end
+
+function tbActivity:GetQuanMakeCount(pPlayer, nQuanType)
+  local nCount = self:GetMaxQuanMakeCount(nQuanType)
+  if nQuanType == self.QUANTYPE.XINGFUQUAN then
+    nCount = pPlayer.GetUserValue(self.nSaveGroupId, self.nSaveXingFuQuanID)
+  elseif nQuanType == self.QUANTYPE.HUANLEQUAN then
+    nCount = pPlayer.GetUserValue(self.nSaveGroupId, self.nSaveHuanLeQuanID)
+  end
+  return nCount
+end
+
+function tbActivity:GetMaxQuanMakeCount(nQuanType)
+  local nCount = Env.INT_MAX
+  if nQuanType == self.QUANTYPE.XINGFUQUAN then
+    nCount = self.MaxQuanNum.MakeXingFuQuan
+  elseif nQuanType == self.QUANTYPE.HUANLEQUAN then
+    nCount = self.MaxQuanNum.MakeHuanLeQuan
+  end
+  return nCount
+end
+
+function tbActivity:CheckPlayerCanMakeQuan(pPlayer, nQuanType, nQuanNum)
+  nQuanNum = nQuanNum or 1
+  local thFormula = self:GetQuanFormula(nQuanType)
+  if not thFormula then
+    LogErr("CheckPlayerCanMakeQuan formula nil ")
+    return false
+  end
+  local bHaveMakeTimes = self:HaveQuanMakeTime(pPlayer, nQuanType, nQuanNum)
+  if not bHaveMakeTimes then
+    return false, i18n.EasyGet("\229\136\182\228\189\156\230\172\161\230\149\176\228\184\141\232\182\179!")
+  end
+  for _, tbItem in pairs(thFormula) do
+    local nTemplateID = tbItem.nTemplateID
+    local nNeedCount = tbItem.nCount * nQuanNum
+    local nHaveCount = pPlayer.GetItemCountByTypeInBag(nTemplateID)
+    if nNeedCount > nHaveCount then
+      return false, i18n.EasyGet("\230\137\128\233\156\128\231\137\169\229\147\129\228\184\141\232\182\179!")
+    end
+  end
+  return true
+end

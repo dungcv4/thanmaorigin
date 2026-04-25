@@ -1,0 +1,641 @@
+Require("CommonScript/Item/Other/StoneCfg.lua")
+Require("CommonScript/AttributeModule/AttributeModule.lua")
+local Stone = Item.Stone
+Stone.SAVE_STONE_GROUP = GetGroupKey("EquipStone")
+Stone.LIMIT_TYPE_OFFSET = 100
+Stone.GRADE_SCORE_LEVEL = 201
+Stone.GRADE_SCORE_MAXLEVEL = 202
+Stone.FORGE_DOUBLE_NUM = 203
+Stone.INSET_COUNT_MAX = 7
+Stone.nComposeNeed = 3
+Stone.nForgeNeed = 3
+Stone.szShopLimitTimeFrame = "OpenLevel79"
+Stone.JingHuaId = 507
+Stone.MAX_LEVEL = 7
+Stone.MAX_EXCHANGE_NUM = 20
+Stone.MAX_SPLIT_NUM = 20
+
+function Stone:GetStoneHoleTemplateId(pPlayer, nEquipPos, nHoleIndex)
+  if nEquipPos < Item.EQUIPPOS_HELM or nEquipPos > Item.EQUIPPOS_AMULET then
+    return 0
+  end
+  return pPlayer.GetUserValue(self.SAVE_STONE_GROUP, nEquipPos * Item.EQUIPPOS_MAIN_NUM + nHoleIndex)
+end
+
+function Stone:GetStoneHoleLimitType(pPlayer, nEquipPos, nHoleIndex)
+  return pPlayer.GetUserValue(self.SAVE_STONE_GROUP, self.LIMIT_TYPE_OFFSET + nEquipPos * Item.EQUIPPOS_MAIN_NUM + nHoleIndex)
+end
+
+function Stone:GetStoneGradeScoreLevel(pPlayer)
+  return pPlayer.GetUserValue(self.SAVE_STONE_GROUP, self.GRADE_SCORE_LEVEL)
+end
+
+function Stone:LoadStoneInfo()
+  local tbParam = {
+    "TemplateId",
+    "ComposeId",
+    "SplitId1",
+    "SplitCount1",
+    "SplitId2",
+    "SplitCount2",
+    "SplitId3",
+    "SplitCount3",
+    "Helm",
+    "Armor",
+    "Belt",
+    "Cuff",
+    "Boots",
+    "Weapon",
+    "Necklace",
+    "Ring",
+    "Pendant",
+    "Amulet",
+    "FightPower",
+    "AttribType1",
+    "Value11",
+    "Value21",
+    "Value31",
+    "AttribType2",
+    "Value12",
+    "Value22",
+    "Value32",
+    "CostCoin",
+    "Unique",
+    "ConversionId",
+    "ConversionNum"
+  }
+  local tbCfg = Lib:LoadTabFileEx("Setting/Item/Other/Stone.tab", "dddddddddddddddddddsdddsddddddd", nil, {
+    table.unpack(tbParam)
+  })
+  self.tbStoneInfo = {}
+  self.tbEquipPos2Stone = {}
+  for i = 0, Item.EQUIPPOS_AMULET do
+    self.tbEquipPos2Stone[i] = {}
+  end
+  local tbn2p = Item.EQUIPNAME2POS
+  local nReductionFactor = 10
+  local tbSplitId = {}
+  local tbSplitCount = {}
+  for i = 1, 3 do
+    tbSplitId[i] = "SplitId" .. i
+    tbSplitCount[i] = "SplitCount" .. i
+  end
+  for i, v in ipairs(tbCfg) do
+    local tbSplitAward = {}
+    for i = 1, 3 do
+      if v[tbSplitId[i]] and v[tbSplitId[i]] > 0 and v[tbSplitCount[i]] and v[tbSplitCount[i]] > 0 then
+        table.insert(tbSplitAward, {
+          v[tbSplitId[i]],
+          v[tbSplitCount[i]]
+        })
+      end
+    end
+    self.tbStoneInfo[v.TemplateId] = {
+      ComposeId = v.ComposeId,
+      tbSplitAward = tbSplitAward,
+      FightPower = v.FightPower,
+      CostCoin = v.CostCoin,
+      Unique = v.Unique,
+      ConversionId = v.ConversionId,
+      ConversionNum = v.ConversionNum
+    }
+    local tbInfo = self.tbStoneInfo[v.TemplateId]
+    tbInfo.tbAttri = {}
+    tbInfo.tbAttri[1] = {
+      v.AttribType1,
+      v.Value11 / nReductionFactor,
+      v.Value21 / nReductionFactor,
+      v.Value31 / nReductionFactor
+    }
+    if v.AttribType2 and v.AttribType2 ~= "" then
+      tbInfo.tbAttri[2] = {
+        v.AttribType2,
+        v.Value12 / nReductionFactor,
+        v.Value22 / nReductionFactor,
+        v.Value32 / nReductionFactor
+      }
+    end
+    tbInfo.tbEquipPos = {}
+    tbInfo.tbEquipPos[tbn2p.Helm] = v.Helm
+    tbInfo.tbEquipPos[tbn2p.Armor] = v.Armor
+    tbInfo.tbEquipPos[tbn2p.Belt] = v.Belt
+    tbInfo.tbEquipPos[tbn2p.Cuff] = v.Cuff
+    tbInfo.tbEquipPos[tbn2p.Boots] = v.Boots
+    tbInfo.tbEquipPos[tbn2p.Weapon] = v.Weapon
+    tbInfo.tbEquipPos[tbn2p.Necklace] = v.Necklace
+    tbInfo.tbEquipPos[tbn2p.Ring] = v.Ring
+    tbInfo.tbEquipPos[tbn2p.Pendant] = v.Pendant
+    tbInfo.tbEquipPos[tbn2p.Amulet] = v.Amulet
+    tbInfo.nTagIcon = -1
+    if 1 == v.Helm then
+      self.tbEquipPos2Stone[Item.EQUIPPOS_HELM][v.TemplateId] = true
+      tbInfo.nTagIcon = Item.EQUIPPOS_HELM
+    end
+    if 1 == v.Armor then
+      self.tbEquipPos2Stone[Item.EQUIPPOS_ARMOR][v.TemplateId] = true
+      tbInfo.nTagIcon = Item.EQUIPPOS_ARMOR
+    end
+    if 1 == v.Belt then
+      self.tbEquipPos2Stone[Item.EQUIPPOS_BELT][v.TemplateId] = true
+      tbInfo.nTagIcon = Item.EQUIPPOS_BELT
+    end
+    if 1 == v.Cuff then
+      self.tbEquipPos2Stone[Item.EQUIPPOS_CUFF][v.TemplateId] = true
+      tbInfo.nTagIcon = Item.EQUIPPOS_CUFF
+    end
+    if 1 == v.Boots then
+      self.tbEquipPos2Stone[Item.EQUIPPOS_BOOTS][v.TemplateId] = true
+      tbInfo.nTagIcon = Item.EQUIPPOS_BOOTS
+    end
+    if 1 == v.Weapon then
+      self.tbEquipPos2Stone[Item.EQUIPPOS_WEAPON][v.TemplateId] = true
+      tbInfo.nTagIcon = Item.EQUIPPOS_WEAPON
+    end
+    if 1 == v.Necklace then
+      self.tbEquipPos2Stone[Item.EQUIPPOS_NECKLACE][v.TemplateId] = true
+      tbInfo.nTagIcon = Item.EQUIPPOS_NECKLACE
+    end
+    if 1 == v.Ring then
+      self.tbEquipPos2Stone[Item.EQUIPPOS_RING][v.TemplateId] = true
+      tbInfo.nTagIcon = Item.EQUIPPOS_RING
+    end
+    if 1 == v.Pendant then
+      self.tbEquipPos2Stone[Item.EQUIPPOS_PENDANT][v.TemplateId] = true
+      tbInfo.nTagIcon = Item.EQUIPPOS_PENDANT
+    end
+    if 1 == v.Amulet then
+      self.tbEquipPos2Stone[Item.EQUIPPOS_AMULET][v.TemplateId] = true
+      tbInfo.nTagIcon = Item.EQUIPPOS_AMULET
+    end
+    if v.Helm + v.Armor + v.Belt + v.Cuff + v.Boots + v.Weapon + v.Necklace + v.Ring + v.Pendant + v.Amulet > 1 then
+      tbInfo.nTagIcon = -1
+    end
+  end
+  for i, v in ipairs(tbCfg) do
+    local nComposeId = self.tbStoneInfo[v.TemplateId].ComposeId
+    if self.tbStoneInfo[v.TemplateId].ComposeId > 0 then
+      self.tbStoneInfo[nComposeId].nBeComposedId = v.TemplateId
+    end
+  end
+  local tbParam1 = {
+    "TemplateId",
+    "Grade",
+    "Level"
+  }
+  local tbCfg1 = Lib:LoadTabFileEx("Setting/Item/Other/Stone_item.tab", "ddd", nil, {
+    table.unpack(tbParam1)
+  })
+  for i, v in ipairs(tbCfg1) do
+    if self.tbStoneInfo[v.TemplateId] then
+      self.tbStoneInfo[v.TemplateId].nGrade = v.Grade
+      self.tbStoneInfo[v.TemplateId].nLevel = v.Level
+    end
+  end
+  self.tbStoneInfo = SetReadOnly(self.tbStoneInfo)
+end
+
+Stone:LoadStoneInfo()
+Require("CommonScript/Shop/Shop.lua")
+
+function Shop:LoadStoneShop()
+  self.tbStoneShopWares = {}
+  local tbWares = Lib:LoadTabFileEx("Setting/Shop/StoneShop.tab", "dd", nil, {"nWareId", "nSort"})
+  for _, v in pairs(tbWares) do
+    local tbWareInfo = self.tbWares[v.nWareId]
+    if not tbWareInfo or tbWareInfo.szShopType ~= Shop.ShopTypeStr.Stone then
+      print("Load StoneShop.tab Error: not exist ware or shoptype error, [id, shoptype, error_shop_type] = ", v.nWareId, Shop.ShopTypeStr.Stone, tbWareInfo and tbWareInfo.szShopType)
+    else
+      table.insert(self.tbStoneShopWares, v)
+    end
+  end
+end
+
+Shop:LoadStoneShop()
+
+function Shop:GetStoneWareAvaliableList()
+  local tbRtn = {}
+  for _, v in pairs(self.tbStoneShopWares) do
+    local tbWare = self:GetAWare(v.nWareId)
+    if tbWare and self:CheckWareAvaliable(tbWare, me) then
+      table.insert(tbRtn, v)
+    end
+  end
+  if not Lib:IsEmptyTB(tbRtn) then
+    table.sort(tbRtn, function(a, b)
+      return a.nSort < b.nSort
+    end)
+  end
+  return tbRtn
+end
+
+function Stone:CheckIsOpen()
+  return true
+end
+
+function Stone:CheckIsCanCompose(nTemplateId)
+  local tbCfgStone = self.tbStoneInfo[nTemplateId]
+  if not tbCfgStone then
+    return false
+  end
+  if tbCfgStone.ComposeId <= 0 then
+    return false
+  end
+  return true
+end
+
+function Stone:GetIconTagPos(nTemplateId)
+  local tbCfgStone = self.tbStoneInfo[nTemplateId]
+  if not tbCfgStone then
+    return
+  end
+  return tbCfgStone.nTagIcon
+end
+
+function Stone:GetComposeInfo(nTemplateId)
+  if not self.tbStoneInfo[nTemplateId] then
+    return
+  end
+  return self.tbStoneInfo[nTemplateId].ComposeId, self.tbStoneInfo[nTemplateId].CostCoin
+end
+
+function Stone:CheckIsCanSplit(nTemplateId)
+  if not self.tbStoneInfo[nTemplateId] then
+    return false
+  end
+  if Lib:CountTB(self.tbStoneInfo[nTemplateId].tbSplitAward) <= 0 then
+    return false
+  end
+  return true
+end
+
+function Stone:CheckIsCanExchange(nTemplateId)
+  local tbCfgStone = self.tbStoneInfo[nTemplateId]
+  if not tbCfgStone then
+    return false
+  end
+  local ConversionId = tbCfgStone.ConversionId
+  if not ConversionId or ConversionId <= 0 then
+    return false
+  end
+  return true
+end
+
+function Stone:GetSplitInfo(nTemplateId)
+  if not self.tbStoneInfo[nTemplateId] then
+    return
+  end
+  return self.tbStoneInfo[nTemplateId].tbSplitAward
+end
+
+function Stone:GetStoneAttri(nTemplateId)
+  if self.tbStoneInfo[nTemplateId] then
+    return self.tbStoneInfo[nTemplateId].tbAttri
+  end
+  return {}
+end
+
+function Stone:CheckStonePos(nTemplateId, nPos)
+  if not self.tbStoneInfo[nTemplateId] then
+    return false
+  end
+  if 1 == self.tbStoneInfo[nTemplateId].tbEquipPos[nPos] then
+    return true
+  end
+  return false
+end
+
+function Stone:CheckYuanShiPos(nTemplateId, nPos)
+  local nStoneId
+  for id, tbData in pairs(self.tbYuanShiInfo) do
+    if tbData[5] == nTemplateId then
+      nStoneId = id
+    end
+  end
+  if not nStoneId then
+    return
+  end
+  return self:CheckStonePos(nStoneId, nPos)
+end
+
+function Stone:GetEquipStoneData(pPlayer, pEquip)
+  if pEquip.nEquipPos < Item.EQUIPPOS_HELM or pEquip.nEquipPos > Item.EQUIPPOS_AMULET then
+    return {}
+  end
+  local tbRet = {}
+  for i = 1, self.INSET_COUNT_MAX do
+    if pPlayer.GetStone then
+      tbRet[i] = pPlayer.GetStone((i - 1) * Item.EQUIPPOS_MAIN_NUM + pEquip.nEquipPos + 1)
+    else
+      tbRet[i] = self:GetStoneHoleTemplateId(pPlayer, pEquip.nEquipPos, i)
+    end
+  end
+  return tbRet
+end
+
+function Stone:GetForgeTimeframeOpenLevel()
+  local nOpenLevel = 0
+  for i, tbV in ipairs(Item.Stone.tbFrameTime2ForgeLevel) do
+    if 1 == GetTimeFrameState(tbV.szTimeFrame) then
+      nOpenLevel = math.max(nOpenLevel, tbV.nForgeLevel)
+    end
+  end
+  return nOpenLevel
+end
+
+function Stone:CanStoneForge(pPlayer, nTargetId, tbConsumeId)
+  if not nTargetId then
+    return false, i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\141\229\173\152\229\156\168")
+  end
+  local nLevel = Item:GetLevel(nTargetId)
+  if nLevel > self:GetForgeTimeframeOpenLevel() then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\173\137\231\186\167\229\142\159\231\159\179\230\156\170\229\188\128\229\144\175\230\137\147\233\128\160")
+  end
+  if not self.tbYuanShiInfo[nTargetId] then
+    return false, i18n.EasyGet("nTemplateId:{0} \230\151\160\233\133\141\231\189\174", nTargetId)
+  end
+  local tbCfg = self.tbYuanShiInfo[nTargetId]
+  if #tbConsumeId ~= self.nForgeNeed then
+    return false, i18n.EasyGet("\230\157\144\230\150\153\228\184\141\232\182\179")
+  end
+  local nConsumeYuanShiId = tbCfg[5]
+  local nNeedCoin = tbCfg[2]
+  local nConsumeStoneId1 = tbCfg[3]
+  local nConsumeStoneId2 = tbCfg[4]
+  local nHadNumYuanShi = pPlayer.GetItemCountByTypeInBag(nConsumeYuanShiId)
+  if nHadNumYuanShi < 1 then
+    return false, i18n.EasyGet("\230\157\144\230\150\153\228\184\141\232\182\179")
+  end
+  local nHadCoin = pPlayer.GetMoney("Coin")
+  if nNeedCoin > nHadCoin then
+    return false, i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179")
+  end
+  local tbTemp = {}
+  for i, v in ipairs(tbConsumeId) do
+    if tbTemp[v] then
+      tbTemp[v] = tbTemp[v] + 1
+    else
+      tbTemp[v] = 1
+    end
+  end
+  if tbTemp[nConsumeStoneId1] then
+    tbTemp[nConsumeStoneId1] = tbTemp[nConsumeStoneId1] + 1
+  else
+    tbTemp[nConsumeStoneId1] = 1
+  end
+  if tbTemp[nConsumeStoneId2] then
+    tbTemp[nConsumeStoneId2] = tbTemp[nConsumeStoneId2] + 1
+  else
+    tbTemp[nConsumeStoneId2] = 1
+  end
+  for id, v in pairs(tbTemp) do
+    local nHadNum = pPlayer.GetItemCountByTypeInBag(id)
+    if v > nHadNum then
+      return false, i18n.EasyGet("\230\157\144\230\150\153\228\184\141\232\182\179")
+    end
+  end
+  return true
+end
+
+function Stone:GetMaxHoleAndLevel(nLianHuaLevel, nEquipLevel, nEquipPos)
+  local tbLimitCfg = self.tbStoneHoleInfo[nEquipLevel]
+  if not tbLimitCfg then
+    return false
+  end
+  local nMaxHole, nMaxStoneLevel = 0, 0
+  if nLianHuaLevel > 0 then
+    nMaxHole, nMaxStoneLevel = tbLimitCfg[3], tbLimitCfg[4]
+  else
+    nMaxHole, nMaxStoneLevel = tbLimitCfg[1], tbLimitCfg[2]
+  end
+  return nMaxHole, nMaxStoneLevel
+end
+
+function Stone:CanPutOnWithReminderWindow(pPlayer, nEquipPos, nHoleIndex, nItemId, bNotCheckCoin)
+  local bRet, szErrMsg = self:CanPutOn(pPlayer, nEquipPos, nHoleIndex, nItemId, bNotCheckCoin)
+  if bRet then
+    return bRet, szErrMsg
+  elseif szErrMsg and szErrMsg == i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179") then
+    GainCurrency:ReadyForJump("Coin")
+    return bRet
+  else
+    return bRet, szErrMsg
+  end
+end
+
+function Stone:CanPutOn(pPlayer, nEquipPos, nHoleIndex, nItemId, bNotCheckCoin)
+  if pPlayer.IsMaskPlayerAttr() then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\230\151\160\230\179\149\231\169\191\230\136\180\229\174\157\231\159\179")
+  end
+  if nEquipPos < 0 or nEquipPos > Item.EQUIPPOS_AMULET then
+    return false, "Stone:CanPutOn EquipPos error"
+  end
+  if not nHoleIndex or nHoleIndex <= 0 or nHoleIndex > self.INSET_COUNT_MAX then
+    return false, "Stone:CanPutOn nHoleIndex errro"
+  end
+  local pEquip = pPlayer.GetEquipByPos(nEquipPos)
+  if not pEquip then
+    return false, i18n.EasyGet("\232\163\133\229\164\135\230\156\170\231\169\191\230\136\180")
+  end
+  local pStone = KItem.GetItemObj(nItemId)
+  if not pStone then
+    return false, i18n.EasyGet("\229\174\157\231\159\179\228\184\141\229\173\152\229\156\168")
+  end
+  local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(pPlayer, nEquipPos)
+  local nMaxHole, nMaxStoneLevel = self:GetMaxHoleAndLevel(nLianHuaLevel, pEquip.nLevel, nEquipPos)
+  if not nMaxHole then
+    return false, i18n.EasyGet("\229\174\157\231\159\179\233\133\141\231\189\174\233\148\153\232\175\175")
+  end
+  if nHoleIndex > nMaxHole then
+    return false, i18n.EasyGet("\232\175\165\229\173\148\228\189\141\229\176\154\230\156\170\229\188\128\229\144\175")
+  end
+  if nMaxStoneLevel < pStone.nLevel then
+    return false, i18n.EasyGet("\229\174\157\231\159\179\231\173\137\231\186\167\232\191\135\233\171\152")
+  end
+  local tbCfgStone = self.tbStoneInfo[pStone.dwTemplateId]
+  if not tbCfgStone then
+    return false, i18n.EasyGet("tbStoneInfo \233\133\141\231\189\174\228\184\141\229\173\152\229\156\168")
+  end
+  if 1 ~= tbCfgStone.tbEquipPos[nEquipPos] then
+    return false, i18n.EasyGet("\232\163\133\229\164\135\233\131\168\228\189\141\228\184\141\231\172\166")
+  end
+  local nTemplateId = self:GetStoneHoleTemplateId(pPlayer, nEquipPos, nHoleIndex)
+  if nTemplateId > 0 then
+    local tbInfo = Item:GetItemBaseProp(nTemplateId)
+    if not tbInfo then
+      return false, i18n.EasyGet("\231\137\169\229\147\129\233\133\141\231\189\174\228\184\141\229\173\152\229\156\168")
+    end
+    if pStone.nLevel < tbInfo.nLevel then
+      return false, i18n.EasyGet("\229\174\157\231\159\179\231\173\137\231\186\167\232\190\131\228\189\142")
+    end
+    if pStone.dwTemplateId == nTemplateId then
+      return false, i18n.EasyGet("\229\174\157\231\159\179\231\177\187\229\158\139\228\184\128\230\160\183\239\188\140\230\151\160\233\156\128\230\155\191\230\141\162")
+    end
+  end
+  if tbCfgStone.Unique and 1 == tbCfgStone.Unique then
+    for i = 1, self.INSET_COUNT_MAX do
+      if i ~= nHoleIndex then
+        nTemplateId = self:GetStoneHoleTemplateId(pPlayer, nEquipPos, i)
+        if nTemplateId > 0 then
+          local kind1 = math.floor(nTemplateId / 100)
+          local kind2 = math.floor(pStone.dwTemplateId / 100)
+          if kind1 == kind2 then
+            return false, i18n.EasyGet("\232\175\165\229\174\157\231\159\179\230\152\175\229\148\175\228\184\128\229\174\157\231\159\179\239\188\140\228\184\141\229\143\175\233\135\141\229\164\141\233\149\182\229\181\140\229\148\175\228\184\128\229\174\157\231\159\179")
+          end
+        end
+      end
+    end
+  end
+  local nCostCoin = self:GetPutOnCostCoinById(nItemId)
+  local nHadCoin = pPlayer.GetMoney("Coin")
+  if not bNotCheckCoin and nCostCoin > nHadCoin then
+    return false, i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179")
+  end
+  return true, ""
+end
+
+function Stone:GetPutOnCostCoinById(nItemId)
+  local pStone = KItem.GetItemObj(nItemId)
+  local tbCfgStone = self.tbStoneInfo[pStone.dwTemplateId]
+  local nCostCoin = tbCfgStone.CostCoin
+  return nCostCoin
+end
+
+function Stone:CanCompose(pPlayer, nEquipPos, nHoleIndex, bNotCheckCoin)
+  local nTemplateId = self:GetStoneHoleTemplateId(pPlayer, nEquipPos, nHoleIndex)
+  if nTemplateId <= 0 then
+    return false, i18n.EasyGet("\229\174\157\231\159\179\230\156\170\233\149\182\229\181\140")
+  end
+  local tbCfgStone = self.tbStoneInfo[nTemplateId]
+  if not tbCfgStone then
+    return false, i18n.EasyGet("nTemplateId:{0} \230\151\160\233\133\141\231\189\174", nTemplateId)
+  end
+  local ComposeId = tbCfgStone.ComposeId
+  if ComposeId <= 0 then
+    return false, i18n.EasyGet("\232\175\165\233\129\147\229\133\183\230\151\160\230\179\149\229\144\136\230\136\144")
+  end
+  local nHadNum = pPlayer.GetItemCountByTypeInBag(nTemplateId)
+  if nHadNum < self.nComposeNeed - 1 then
+    return false, i18n.EasyGet("\230\157\144\230\150\153\228\184\141\232\182\179")
+  end
+  local nCostCoin = tbCfgStone.CostCoin
+  if not bNotCheckCoin then
+    local nHadCoin = pPlayer.GetMoney("Coin")
+    if nCostCoin > nHadCoin then
+      return false, i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179")
+    end
+  end
+  local pEquip = pPlayer.GetEquipByPos(nEquipPos)
+  if not pEquip then
+    return false, i18n.EasyGet("\232\163\133\229\164\135\230\156\170\231\169\191\230\136\180")
+  end
+  local tbItemInfo = Item:GetItemBaseProp(ComposeId)
+  local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(pPlayer, nEquipPos)
+  local nMaxHole, nMaxStoneLevel = self:GetMaxHoleAndLevel(nLianHuaLevel, pEquip.nLevel, nEquipPos)
+  if not nMaxHole then
+    return false, i18n.EasyGet("tbStoneHoleInfo \233\133\141\231\189\174\228\184\141\229\173\152\229\156\168")
+  end
+  if nMaxStoneLevel < tbItemInfo.nLevel then
+    return false, i18n.EasyGet("\229\174\157\231\159\179\231\173\137\231\186\167\232\191\135\233\171\152")
+  end
+  return true, "", nCostCoin
+end
+
+function Stone:ApplyStoneAttrib(pPlayer, pEquip)
+  if pEquip.nEquipPos < Item.EQUIPPOS_HELM or pEquip.nEquipPos > Item.EQUIPPOS_AMULET then
+    return
+  end
+  for i = 1, self.INSET_COUNT_MAX do
+    local nTemplateId = self:GetStoneHoleTemplateId(pPlayer, pEquip.nEquipPos, i)
+    if nTemplateId > 0 then
+      self:ApplyPerStoneAttrib(pPlayer.GetNpc(), nTemplateId, pPlayer.dwID)
+    end
+  end
+end
+
+function Stone:ApplyPerStoneAttrib(pNpc, nTemplateId, nPlayerId)
+  if not self.tbStoneInfo[nTemplateId] then
+    return
+  end
+  local tbAttri = self.tbStoneInfo[nTemplateId].tbAttri
+  for i, v in ipairs(tbAttri) do
+    pNpc.ApplyMagicAttrib(table.unpack(v))
+    if nPlayerId then
+      AttributeHelp:LogAttrApply(nPlayerId, "Stone", table.unpack(v))
+    end
+  end
+end
+
+function Stone:RemoveStoneAttrib(pPlayer, pEquip)
+  if pEquip.nEquipPos < Item.EQUIPPOS_HELM or pEquip.nEquipPos > Item.EQUIPPOS_AMULET then
+    return
+  end
+  for i = 1, self.INSET_COUNT_MAX do
+    local nTemplateId = self:GetStoneHoleTemplateId(pPlayer, pEquip.nEquipPos, i)
+    if nTemplateId > 0 then
+      self:RemovePerStoneAttrib(pPlayer.GetNpc(), nTemplateId, pPlayer.dwID)
+    end
+  end
+end
+
+function Stone:RemovePerStoneAttrib(pNpc, nTemplateId, nPlayerId)
+  if not self.tbStoneInfo[nTemplateId] then
+    return
+  end
+  local tbAttri = self.tbStoneInfo[nTemplateId].tbAttri
+  for i, v in ipairs(tbAttri) do
+    pNpc.RemoveMagicAttrib(table.unpack(v))
+    if nPlayerId then
+      AttributeHelp:LogAttrRemove(nPlayerId, "Stone", table.unpack(v))
+    end
+  end
+end
+
+function Stone:ApplyGradeScoreAttrib(pNpc, nLevel, nPlayerId)
+  if self.tbGradeScoreInfo[nLevel] then
+    for i = 1, #self.tbGradeScoreInfo[nLevel] do
+      pNpc.ApplyMagicAttrib(table.unpack(self.tbGradeScoreInfo[nLevel][i]))
+      if nPlayerId then
+        AttributeHelp:LogAttrApply(nPlayerId, "Stone", table.unpack(self.tbGradeScoreInfo[nLevel][i]))
+      end
+    end
+  end
+end
+
+function Stone:RemoveGradeScoreAttrib(pNpc, nLevel, nPlayerId)
+  if self.tbGradeScoreInfo[nLevel] then
+    for i = 1, #self.tbGradeScoreInfo[nLevel] do
+      pNpc.RemoveMagicAttrib(table.unpack(self.tbGradeScoreInfo[nLevel][i]))
+      if nPlayerId then
+        AttributeHelp:LogAttrRemove(nPlayerId, "Stone", table.unpack(self.tbGradeScoreInfo[nLevel][i]))
+      end
+    end
+  end
+end
+
+function Stone:OnEquip(pPlayer)
+  local nGradeScoreLevel = self:GetStoneGradeScoreLevel(pPlayer)
+  if nGradeScoreLevel > 0 then
+    self:ApplyGradeScoreAttrib(pPlayer.GetNpc(), nGradeScoreLevel, pPlayer.dwID)
+  end
+end
+
+function Stone:OnUnEquip(pPlayer)
+  local nGradeScoreLevel = self:GetStoneGradeScoreLevel(pPlayer)
+  if nGradeScoreLevel > 0 then
+    self:RemoveGradeScoreAttrib(pPlayer.GetNpc(), nGradeScoreLevel, pPlayer.dwID)
+  end
+end
+
+function Stone:RefreshGradeScoreAttrib(pPlayer, nOrgLv, nNewLv)
+  self:RemoveGradeScoreAttrib(pPlayer.GetNpc(), nOrgLv, pPlayer.dwID)
+  self:ApplyGradeScoreAttrib(pPlayer.GetNpc(), nNewLv, pPlayer.dwID)
+end
+
+AttributeModule:Register("Stone", Stone)
+
+function Stone:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  local nStoneGradeScoreLevel = pPlayerAsync.GetStoneGradeScore()
+  if nStoneGradeScoreLevel and nStoneGradeScoreLevel > 0 then
+    Item.Stone:ApplyGradeScoreAttrib(pNpc, nStoneGradeScoreLevel)
+  end
+end

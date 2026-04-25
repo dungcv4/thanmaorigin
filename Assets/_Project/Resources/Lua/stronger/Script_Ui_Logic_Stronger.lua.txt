@@ -1,0 +1,347 @@
+Stronger.tbSystem = {
+  [1] = function()
+    return i18n.EasyGet("\232\163\133\229\164\135")
+  end,
+  [2] = function()
+    return i18n.EasyGet("\229\157\144\233\170\145")
+  end,
+  [3] = function()
+    return i18n.EasyGet("\230\138\128\232\131\189")
+  end,
+  [4] = function()
+    return i18n.EasyGet("\229\144\140\228\188\180")
+  end,
+  [5] = function()
+    return i18n.EasyGet("\233\152\181\230\179\149")
+  end,
+  [6] = function()
+    return i18n.EasyGet("\231\156\159\229\133\131")
+  end,
+  [7] = function()
+    return i18n.EasyGet("\231\187\143\232\132\137")
+  end
+}
+Stronger.tbGradeSpriteName = {
+  [1] = "UI/atlas/stronger/img_stronger_propccml.png",
+  [2] = "UI/atlas/stronger/img_stronger_propmsbx.png",
+  [3] = "UI/atlas/stronger/img_stronger_propsjpp.png",
+  [4] = "UI/atlas/stronger/img_stronger_propclbc.png",
+  [5] = "UI/atlas/stronger/img_stronger_proplhcq.png",
+  [6] = "UI/atlas/stronger/img_stronger_propdfzj.png"
+}
+Stronger.tbWayHandle = {
+  ui = function(tbInfo)
+    local szUi = tbInfo.Param1
+    return function()
+      if "UIStore" == szUi then
+        local nParam3 = tonumber(tbInfo.Param3)
+        if 0 == nParam3 then
+          nParam3 = nil
+        end
+        Ui:OpenWindow(szUi, tbInfo.Param2, nParam3)
+      else
+        local nParam2 = tonumber(tbInfo.Param2)
+        local nParam3 = tonumber(tbInfo.Param3)
+        if 0 == nParam2 then
+          nParam2 = nil
+        end
+        if 0 == nParam3 then
+          nParam3 = nil
+        end
+        Ui:OpenWindow(szUi, nParam2, nParam3)
+      end
+    end
+  end
+}
+
+function Stronger:SyncFightPower(nCurFightPower, tbFightPowerData)
+  self.nFightPower = nCurFightPower
+  self.tbFightPowerData = tbFightPowerData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_FIGHT_POWER_CHANGE, nCurFightPower)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_REFRESH_UISTRONG)
+  self:CheckRedPoint()
+end
+
+function Stronger:InitPanelCfg()
+  local tbConfig = Lib:LoadTabFileEx("Setting/Stronger/StrongerPanel.tab", "dssssdss", nil, {
+    "SystemId",
+    "szName",
+    "Name",
+    "Data",
+    "TimeFrame",
+    "LevelLimit",
+    "Action",
+    "RecommendTab"
+  })
+  self.tbStrongerConfig = {}
+  for _, tbSetting in ipairs(tbConfig) do
+    self.tbStrongerConfig[tbSetting.SystemId] = self.tbStrongerConfig[tbSetting.SystemId] or {}
+    table.insert(self.tbStrongerConfig[tbSetting.SystemId], tbSetting)
+  end
+  Stronger.tbRecommend = {}
+  for _, tbCfg in pairs(tbConfig) do
+    Stronger.tbRecommend[tbCfg.szName] = Lib:LoadTabFileEx(tbCfg.RecommendTab, "dd", "Level", {"Level", "FightPower"})
+  end
+  Stronger.tbRecommendTotal = Lib:LoadTabFileEx("Setting/Stronger/RecommendTotalFP.tab", "dd", "Level", {"Level", "FightPower"})
+  local tbAwards = Lib:LoadTabFileEx("Setting/Stronger/StrongerAwards.tab", "dsdsddds", nil, {
+    "Stage",
+    "StageName",
+    "FightPower",
+    "AwardType",
+    "AwardId",
+    "Count",
+    "UserValueKey",
+    "TimeFrame"
+  })
+  Stronger.tbAwardsCfg = {}
+  for _, tbInfo in pairs(tbAwards) do
+    Stronger.tbAwardsCfg[tbInfo.Stage] = Stronger.tbAwardsCfg[tbInfo.Stage] or {}
+    table.insert(Stronger.tbAwardsCfg[tbInfo.Stage], tbInfo)
+  end
+  local StrongerMultiCfg = Lib:LoadTabFileEx("Setting/Stronger/StrongerPanelMulti.tab", "dssdddd", nil, {
+    "SystemId",
+    "szName",
+    "Name",
+    "nWay1ID",
+    "nWay2ID",
+    "nWay3ID",
+    "nWay4ID"
+  })
+  Stronger.StrongerMultiCfg = {}
+  for _, tbInfo in pairs(StrongerMultiCfg) do
+    Stronger.StrongerMultiCfg[tbInfo.szName] = Stronger.StrongerMultiCfg[tbInfo.szName] or {}
+    Stronger.StrongerMultiCfg[tbInfo.szName].szName = tbInfo.szName
+    Stronger.StrongerMultiCfg[tbInfo.szName].Name = tbInfo.Name
+    Stronger.StrongerMultiCfg[tbInfo.szName].tbWay = {}
+    if tbInfo.nWay1ID and 0 ~= tbInfo.nWay1ID then
+      table.insert(Stronger.StrongerMultiCfg[tbInfo.szName].tbWay, tbInfo.nWay1ID)
+    end
+    if tbInfo.nWay2ID and 0 ~= tbInfo.nWay2ID then
+      table.insert(Stronger.StrongerMultiCfg[tbInfo.szName].tbWay, tbInfo.nWay2ID)
+    end
+    if tbInfo.nWay3ID and 0 ~= tbInfo.nWay3ID then
+      table.insert(Stronger.StrongerMultiCfg[tbInfo.szName].tbWay, tbInfo.nWay3ID)
+    end
+    if tbInfo.nWay4ID and 0 ~= tbInfo.nWay4ID then
+      table.insert(Stronger.StrongerMultiCfg[tbInfo.szName].tbWay, tbInfo.nWay4ID)
+    end
+  end
+  Stronger.StrongerMultiCfg = SetReadOnly(Stronger.StrongerMultiCfg)
+  local StrongWayCfg = Lib:LoadTabFileEx("Setting/Stronger/StrongerWay.tab", "sdsssss", nil, {
+    "szWayName",
+    "nWayID",
+    "szWayDesc",
+    "szWayType",
+    "Param1",
+    "Param2",
+    "Param3"
+  })
+  Stronger.StrongerWayCfg = {}
+  for _, tbInfo in ipairs(StrongWayCfg) do
+    Stronger.StrongerWayCfg[tbInfo.nWayID] = Stronger.StrongerWayCfg[tbInfo.nWayID] or {}
+    Stronger.StrongerWayCfg[tbInfo.nWayID].szWayName = tbInfo.szWayName
+    Stronger.StrongerWayCfg[tbInfo.nWayID].szWayDesc = tbInfo.szWayDesc
+    local handle = Stronger.tbWayHandle[tbInfo.szWayType]
+    if handle then
+      Stronger.StrongerWayCfg[tbInfo.nWayID].fnOnTrack = handle(tbInfo)
+    end
+  end
+  Stronger.StrongerWayCfg = SetReadOnly(Stronger.StrongerWayCfg)
+end
+
+Stronger:InitPanelCfg()
+
+function Stronger:GetFightPowerByType(szType)
+  if self.tbFightPowerData then
+    return self.tbFightPowerData[szType]
+  end
+  return nil
+end
+
+function Stronger:GetDetailFightPowerJudge(szTypeName, nLevel, nFightPower)
+  local nRecommend = 0
+  local judgeDesc = i18n.EasyGet("\229\136\157\229\135\186\232\140\133\229\186\144")
+  local szGradeSprite = Stronger.tbGradeSpriteName[1]
+  local cfg = self.tbRecommend[szTypeName][nLevel]
+  if not cfg then
+    return judgeDesc, nRecommend, szGradeSprite
+  end
+  nRecommend = cfg.FightPower
+  if nFightPower > nRecommend * 0.95 then
+    judgeDesc = i18n.EasyGet("\231\153\187\229\179\176\233\128\160\230\158\129")
+    szGradeSprite = Stronger.tbGradeSpriteName[6]
+  elseif nFightPower > nRecommend * 0.8 then
+    judgeDesc = i18n.EasyGet("\231\130\137\231\129\171\231\186\175\233\157\146")
+    szGradeSprite = Stronger.tbGradeSpriteName[5]
+  elseif nFightPower > nRecommend * 0.6 then
+    judgeDesc = i18n.EasyGet("\229\135\186\231\177\187\230\139\148\232\144\131")
+    szGradeSprite = Stronger.tbGradeSpriteName[4]
+  elseif nFightPower > nRecommend * 0.4 then
+    judgeDesc = i18n.EasyGet("\230\136\144\231\187\169\229\185\179\229\185\179")
+    szGradeSprite = Stronger.tbGradeSpriteName[3]
+  elseif nFightPower > nRecommend * 0.2 then
+    judgeDesc = i18n.EasyGet("\229\163\176\229\144\141\228\184\141\230\152\190")
+    szGradeSprite = Stronger.tbGradeSpriteName[2]
+  elseif nFightPower <= nRecommend * 0.2 then
+    judgeDesc = i18n.EasyGet("\229\136\157\229\135\186\232\140\133\229\186\144")
+    szGradeSprite = Stronger.tbGradeSpriteName[1]
+  end
+  return judgeDesc, nRecommend, szGradeSprite
+end
+
+function Stronger:CheckTimeFrame(szTimeFrame)
+  if not szTimeFrame or "" == szTimeFrame or 1 == GetTimeFrameState(szTimeFrame) then
+    return true
+  end
+  return false
+end
+
+function Stronger:CheckOpen()
+  return me.nLevel >= 25
+end
+
+function Stronger:GetCurStage()
+  local nStage = 1
+  for _, tbInfo in ipairs(self.tbAwardsCfg) do
+    for _, tbAward in ipairs(tbInfo) do
+      if 1 ~= GetTimeFrameState(tbInfo[1].TimeFrame) then
+        return nStage
+      end
+      nStage = tbAward.Stage
+      if 0 == me.GetUserValue(GetGroupKey("Stronger"), tbAward.UserValueKey) then
+        return tbAward.Stage
+      end
+    end
+  end
+  return nStage
+end
+
+function Stronger:CheckRedPoint()
+  local nStage = Stronger:GetCurStage()
+  for nIdx, tbItem in ipairs(Stronger.tbAwardsCfg[nStage]) do
+    local bHaveGet = 1 == me.GetUserValue(GetGroupKey("Stronger"), tbItem.UserValueKey)
+    local bCanGrab = self.nFightPower >= tbItem.FightPower and not bHaveGet
+    if bCanGrab then
+      RedPointMgr:LightRedPoint(RedPointMgr.EVENT[string.format("Stronger%d", nIdx)])
+    else
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT[string.format("Stronger%d", nIdx)])
+    end
+  end
+end
+
+function Stronger:RefreshUIStrong()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_REFRESH_UISTRONG)
+  self:CheckRedPoint()
+end
+
+function Stronger:OpenSkill()
+  Ui:OpenWindow("UISkill", 1)
+end
+
+function Stronger:OpenBook()
+end
+
+function Stronger:OpenBag()
+  Ui:OpenWindow("UIBag", 1)
+end
+
+function Stronger:OpenEnhance()
+  Ui:OpenWindow("UIEquipment", Ui.UIEquipment.tbSubPanelIndex.PANEL_TYPE_ENHANCE)
+end
+
+function Stronger:OpenInsect()
+  Ui:OpenWindow("UIEquipment", Ui.UIEquipment.tbSubPanelIndex.PANEL_TYPE_STONE)
+end
+
+function Stronger:OpenLianHua()
+  Ui:OpenWindow("UIEquipment", Ui.UIEquipment.tbSubPanelIndex.PANEL_TYPE_LIANHUA)
+end
+
+function Stronger:OpenJingZhu()
+  Ui:OpenWindow("UIEquipment", Ui.UIEquipment.tbSubPanelIndex.PANEL_TYPE_JINGZHU)
+end
+
+function Stronger:OpenWuXing(nType)
+  local tbEquip = me.GetEquips(1)
+  if tbEquip[Item.EQUIPPOS_WUXINGYIN] and 0 ~= tbEquip[Item.EQUIPPOS_WUXINGYIN] then
+    Ui:OpenWindow("UIWuxingyin", nType, tbEquip[Item.EQUIPPOS_WUXINGYIN])
+  else
+    me.CenterMsg(i18n.EasyGet("\232\175\183\229\133\136\232\163\133\229\164\135\228\186\148\232\161\140\229\141\176"))
+  end
+end
+
+function Stronger:OpenQiHun()
+  Ui:OpenWindow("UIEquipment", Ui.UIEquipment.tbSubPanelIndex.PANEL_TYPE_QIHUN)
+end
+
+function Stronger:OpenHonorLevel()
+  Ui:OpenWindow("UIHonorLevel")
+end
+
+function Stronger:OpenHorseDengJie()
+  Ui:OpenWindow("UIHorseJinjie")
+end
+
+function Stronger:OpenHorseXunYang()
+  Ui:OpenWindow("UIBag", 4)
+  Ui:GetPanelByName("UIHorsePanel").tbBtnGroup:Select(1)
+end
+
+function Stronger:OpenHorseEquip()
+  Ui:OpenWindow("UIBag", 4)
+  Ui:GetPanelByName("UIHorsePanel").tbBtnGroup:Select(2)
+end
+
+function Stronger:OpenPartner()
+  Partner:OpenPartnerMainUI()
+end
+
+function Stronger:OpenPartnerXiaYuan()
+  Partner:OpenPartnerMainUI(3)
+end
+
+function Stronger:OpenPartnerSkill()
+  Partner:OpenPartnerMainUI()
+end
+
+function Stronger:OpenPartnerEquip()
+  Partner:OpenPartnerMainUI(4)
+end
+
+function Stronger:OpenEquipBaseWnd()
+  local uiStronger = Ui:GetWindow("UIStronger")
+  if uiStronger then
+    uiStronger:OpenEquipBaseWnd()
+  end
+end
+
+function Stronger:OpenMijiWnd()
+  local bHaveSecretBook = false
+  for nRank = 1, Lib:CountTB(Item.SecretBook.tbRank) do
+    local pEquip = Item.SecretBook:GetWearSecretBook(me, nRank)
+    if pEquip then
+      bHaveSecretBook = true
+      break
+    end
+  end
+  if bHaveSecretBook then
+    Ui:OpenWindow("UISkill", 3)
+    return
+  end
+  local uiStronger = Ui:GetWindow("UIStronger")
+  if uiStronger then
+    uiStronger:OpenMijiWnd()
+  end
+end
+
+function Stronger:OpenZhenFaBase()
+  Ui:OpenWindow("UIZhenFa_New")
+end
+
+function Stronger:OpenZhenYuanBase()
+  Ui:OpenWindow("UIZhenyuanEnhance", 1)
+end
+
+function Stronger:OpenJingMaiXueWei()
+  JingMai:OpenJingMaiWindow()
+end

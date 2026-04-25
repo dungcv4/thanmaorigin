@@ -1,0 +1,142 @@
+local tbWnd = Ui:CreateWindow("UIActivityPreview")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  ServerInfo = "node/imgBG/Content/ServerInfo",
+  ActivityTemplate = "node/imgBG/Content/panelActivityList/maskLayer/paneBG/ActivityTemplate",
+  txtNoActivity = "node/imgBG/Content/txtNoActivity",
+  panelActivityList = "node/imgBG/Content/panelActivityList",
+  panelActivityDetail = "node/imgBG/Content/panelActivityDetail",
+  txtActivityTime = "node/imgBG/Content/panelActivityDetail/txtActivityTime",
+  txtActivityName = "node/imgBG/Content/panelActivityDetail/txtActivityName",
+  txtActDegreeTip = "node/imgBG/Content/panelActivityDetail/txtActDegreeTip",
+  txtActivityDesc = "node/imgBG/Content/panelActivityDetail/txtActivityDesc",
+  btnHelp = "node/imgBG/Content/panelActivityDetail/btnHelp",
+  txtLevelLimit = "node/imgBG/Content/panelActivityDetail/txtLevelLimit",
+  txtActDegree = "node/imgBG/Content/panelActivityDetail/txtActDegree",
+  ItemTemplate = "node/imgBG/Content/panelActivityDetail/AwardList/Viewport/Content/ItemTemplate",
+  txtOpenLevelLimit = "node/imgBG/Content/ServerInfo/txtOpenLevelLimit",
+  txtCurLevelLimit = "node/imgBG/Content/ServerInfo/txtCurLevelLimit",
+  txtCurOpenedDay = "node/imgBG/Content/ServerInfo/txtCurOpenedDay",
+  AwardList = "node/imgBG/Content/panelActivityDetail/AwardList"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.szHelpKey)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbAwardsList = Ui:NewItemGridView(self, tbControls.ItemTemplate)
+  self.tbActivityScrollView = Ui:NewScrollView(self, tbControls.ActivityTemplate, function(self, nIndex, tbElement)
+    self:OnUpdataDetail(tbElement.actid)
+  end)
+end
+
+local function funcPreviewActivity(tbElement, tbAct)
+  tbElement.actid = tbAct.nId
+  local pPanel = tbElement.pPanel
+  pPanel:Label_SetText("txtName", i18n.Parse(tbAct.szName))
+  pPanel:Sprite_SetSprite("imgActivity", tbAct.szIcon, false)
+  pPanel:Label_SetText("imgLabel/Text", i18n.Parse(tbAct.szTag))
+  local szOpenTime = tbAct.szTimeFrameOpen
+  if Lib:IsEmptyStr(szOpenTime) or 1 == GetTimeFrameState(szOpenTime) then
+    pPanel:Label_SetText("txtOpenLevel", i18n.EasyGet("{0}\231\186\167\229\188\128\229\144\175", tbAct.nLevelMin))
+  else
+    local nOpenServerTime = Lib:CalcTimeFrameOpenTime(szOpenTime)
+    local nOpenDay = Lib:GetLocalDay(nOpenServerTime) - Lib:GetLocalDay()
+    pPanel:Label_SetText("txtOpenLevel", i18n.EasyGet("{0}\229\164\169\229\144\142\229\188\128\229\144\175", nOpenDay))
+  end
+end
+
+function tbWnd:OnOpen()
+  local tbPreviewActivity = Calendar:GetPreviewActivity()
+  local nCount = #tbPreviewActivity
+  if nCount > 0 then
+    for i = 1, nCount do
+      self.tbActivityScrollView:SetElement(i, function(tbElement)
+        funcPreviewActivity(tbElement, tbPreviewActivity[i])
+      end)
+    end
+    self.tbActivityScrollView:ResetFrom(nCount + 1)
+    self.tbActivityScrollView:SelectElement(1)
+    self.pPanel:SetActive(tbControls.txtNoActivity, false)
+    self.pPanel:SetActive(tbControls.panelActivityList, true)
+    self.pPanel:SetActive(tbControls.panelActivityDetail, true)
+  else
+    self.pPanel:SetActive(tbControls.txtNoActivity, true)
+    self.pPanel:SetActive(tbControls.panelActivityList, false)
+    self.pPanel:SetActive(tbControls.panelActivityDetail, false)
+  end
+  self:UpdateTimeFrame()
+end
+
+function tbWnd:OnUpdataDetail(nActivityID)
+  local szKey, szType, szDesc, szHelpKey = Calendar:GetActivityDetail(nActivityID)
+  local tbActInfo = Calendar:GetActInfo(nActivityID)
+  if not (szKey and szType) or not szDesc then
+    Log("[ActivityTip OnOpen] Error, Not Found This Activity's Tip >>>>", nActivityID)
+    return 0
+  end
+  self.pPanel:Label_SetText(tbControls.txtActivityName, i18n.Parse(tbActInfo.szName))
+  if szHelpKey and "" ~= szHelpKey then
+    self.szHelpKey = szHelpKey
+    self.pPanel:SetActive(tbControls.btnHelp, true)
+  else
+    self.pPanel:SetActive(tbControls.btnHelp, false)
+  end
+  local nValue = Calendar:GetActValueInfo(nActivityID)
+  if nValue > 0 then
+    self.pPanel:SetActive(tbControls.txtActDegreeTip, true)
+    self.pPanel:SetActive(tbControls.txtActDegree, true)
+    self.pPanel:Label_SetText(tbControls.txtActDegree, nValue)
+  else
+    self.pPanel:SetActive(tbControls.txtActDegreeTip, false)
+    self.pPanel:SetActive(tbControls.txtActDegree, false)
+  end
+  local nLevelLimit = Calendar:GetActivityLevelMin(nActivityID)
+  local szLimit = "0"
+  if nLevelLimit and 0 ~= nLevelLimit then
+    szLimit = tostring(nLevelLimit)
+  end
+  self.pPanel:Label_SetText(tbControls.txtLevelLimit, szLimit)
+  local szTimeDesc1, szTimeDesc2 = Calendar:GetActivityTipTimeDesc(szKey)
+  local szTime = i18n.Parse(szTimeDesc1) .. i18n.Parse(szTimeDesc2)
+  self.pPanel:Label_SetText(tbControls.txtActivityTime, szTime)
+  szDesc = string.gsub(i18n.Parse(szDesc), "\\n", "\n")
+  self.pPanel:Label_SetText(tbControls.txtActivityDesc, szDesc)
+  local tbRewards = Calendar:GetActivityReward(nActivityID)
+  self.tbAwardsList:Clear()
+  for i = 1, #tbRewards do
+    self.tbAwardsList:SetItem(i, tbRewards[i], true)
+  end
+  self:GoLeft()
+end
+
+function tbWnd:GoLeft()
+  local scrollView = self.pPanel:GetObject(tbControls.AwardList):GetComponent("ScrollRect")
+  scrollView.horizontalNormalizedPosition = 0
+end
+
+function tbWnd:UpdateTimeFrame()
+  local tbPreViewInfo = Calendar:GetPreviewInfo()
+  self.pPanel:Label_SetText(tbControls.txtCurLevelLimit, i18n.EasyGet("\229\189\147\229\137\141\231\173\137\231\186\167\228\184\138\233\153\144\239\188\154<color=#c56d05>{0}</color>\231\186\167  (\232\190\190\229\136\176\231\173\137\231\186\167\228\184\138\233\153\144\229\144\142\239\188\140\231\187\167\231\187\173\232\142\183\229\190\151\231\154\132\231\187\143\233\170\140\229\135\143\229\141\138)", tbPreViewInfo.nCurMaxLevel))
+  if tbPreViewInfo.nCurMaxZongShiLevel and tbPreViewInfo.nCurMaxZongShiLevel > 0 then
+    self.pPanel:Label_SetText(tbControls.txtCurLevelLimit, i18n.EasyGet("\229\189\147\229\137\141\231\173\137\231\186\167\228\184\138\233\153\144\239\188\154<color=#c56d05>\229\174\151\229\184\136{0}</color>\231\186\167  (\232\190\190\229\136\176\231\173\137\231\186\167\228\184\138\233\153\144\229\144\142\239\188\140\231\187\167\231\187\173\232\142\183\229\190\151\231\154\132\231\187\143\233\170\140\229\135\143\229\141\138)", tbPreViewInfo.nCurMaxZongShiLevel))
+  end
+  if tbPreViewInfo.nWillOpenDay > 0 then
+    local nNextDayTime = 86400 * tbPreViewInfo.nNextOpenDay
+    local tbTime = Lib:OSDate("*t", nNextDayTime)
+    self.pPanel:Label_SetText(tbControls.txtOpenLevelLimit, i18n.EasyGet("\232\183\157\231\166\187\229\188\128\230\148\190<color=#c56d05>{0}</color>\231\186\167\228\184\138\233\153\144\239\188\154{1}\229\164\169\229\144\142\239\188\136{2}\230\156\136{3}\230\151\165\239\188\137", tbPreViewInfo.nNextMaxLevel, tbPreViewInfo.nWillOpenDay, tbTime.month, tbTime.day))
+    if tbPreViewInfo.nNextMaxZongShiLevel and tbPreViewInfo.nNextMaxZongShiLevel > 0 then
+      self.pPanel:Label_SetText(tbControls.txtOpenLevelLimit, i18n.EasyGet("\232\183\157\231\166\187\229\188\128\230\148\190<color=#c56d05>\229\174\151\229\184\136{0}</color>\231\186\167\228\184\138\233\153\144\239\188\154{1}\229\164\169\229\144\142\239\188\136{2}\230\156\136{3}\230\151\165\239\188\137", tbPreViewInfo.nNextMaxZongShiLevel, tbPreViewInfo.nWillOpenDay, tbTime.month, tbTime.day))
+    end
+    self.pPanel:SetActive(tbControls.txtOpenLevelLimit, true)
+  else
+    self.pPanel:SetActive(tbControls.txtOpenLevelLimit, false)
+  end
+  self.pPanel:Label_SetText(tbControls.txtCurOpenedDay, i18n.EasyGet("\230\156\141\229\138\161\229\153\168\229\183\178\229\188\128\230\148\190\239\188\154<color=#c56d05>{0}</color>\229\164\169", tbPreViewInfo.nOpenedDay))
+end

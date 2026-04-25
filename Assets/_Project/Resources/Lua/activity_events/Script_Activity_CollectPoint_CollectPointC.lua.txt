@@ -1,0 +1,134 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.CollectPoint)
+local Protocol = {
+  [tbActivity.Protocol.OnPointChange] = "OnPointChange",
+  [tbActivity.Protocol.OnFixBranch] = "OnFixBranch",
+  [tbActivity.Protocol.OnExchangeOpen] = "OnExchangeOpen"
+}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not Protocol or not Protocol[nProtocol] then
+    LogErr("[CollectPoint ] ServerRequest error", nProtocol)
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:GetExchangeInfo()
+  return self.tbConfig.tbExchange
+end
+
+function tbActivity:IsOpenExchange()
+  if GetTime() > Lib:GetDate2Time(self.tbConfig.nStartExchangeTime) and GetTime() < Lib:GetDate2Time(self.tbConfig.nEndExchangeTime) then
+    return true
+  end
+  return false
+end
+
+function tbActivity:ReqExchange(tbExchangeNums)
+  if not tbExchangeNums then
+    return
+  end
+  local tbAwardNums = {}
+  for nExchangeId, nNums in ipairs(tbExchangeNums) do
+    local tbExchangeInfo = self.tbConfig.tbExchange[nExchangeId]
+    if tbExchangeInfo then
+      local tbAward = Award:GetAward(tbExchangeInfo.nAwardId, tbExchangeInfo.nAwardKey)
+      for index, tbAwardInfo in ipairs(tbAward) do
+        local nAwardType = Player.AwardType[tbAwardInfo[1]]
+        if nAwardType == Player.award_type_money then
+          tbAwardNums[tbAwardInfo[1]] = tbAwardNums[tbAwardInfo[1]] or 0
+          tbAwardNums[tbAwardInfo[1]] = tbAwardNums[tbAwardInfo[1]] + (tbAwardInfo[3] or tbAwardInfo[2]) * nNums
+        end
+      end
+    end
+  end
+  local tbAwardDesc = {}
+  for szAwardType, nNums in pairs(tbAwardNums) do
+    if Player.AwardType[szAwardType] == Player.award_type_money and nNums > 0 then
+      local szName = Currency:GetName(szAwardType)
+      table.insert(tbAwardDesc, string.format("<color=#c56d05>%d</color>%s", nNums, szName))
+    end
+  end
+  local szAwardDesc = table.concat(tbAwardDesc, ",")
+  local szTips = i18n.EasyGet("\230\152\175\229\144\166\231\161\174\232\174\164\229\133\145\230\141\162{0}", szAwardDesc)
+  me.MsgBox(szTips, {
+    {
+      i18n.szOk,
+      function()
+        self:OnReqExchange(tbExchangeNums)
+      end
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function tbActivity:OnReqExchange(tbExchangeNums)
+  ActivityMgr:CallServerScript(self.nId, tbActivity.Protocol.OnExchangeReq, tbExchangeNums)
+end
+
+function tbActivity:OnOpen()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self.OnLogin, self)
+end
+
+function tbActivity:OnLogin()
+  self:CheckLightRedPoint()
+end
+
+function tbActivity:OnCrossDay()
+  self:CheckLightRedPoint()
+end
+
+function tbActivity:OnExchangeOpen()
+  self:CheckLightRedPoint()
+end
+
+function tbActivity:GetRedPointEventList()
+  return {
+    RedPointMgr.EVENT.CollectExchange,
+    RedPointMgr.EVENT.FixBranchAward
+  }
+end
+
+function tbActivity:CheckLightRedPoint()
+  self:CheckLightPointRedPoint()
+  self:CheckLightFixBranchRedPoint()
+end
+
+function tbActivity:CheckLightPointRedPoint(nPoint)
+  if not self:IsOpenExchange() then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.CollectExchange)
+    return
+  end
+  local nHave = nPoint or self:GetPoint(me)
+  if nHave > 0 then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.CollectExchange)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.CollectExchange)
+  end
+end
+
+function tbActivity:CheckLightFixBranchRedPoint()
+  local nRet = self:CheckCanGetDailyAward(me)
+  if nRet == tbActivity.DailyAwardMsg.Success then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.FixBranchAward)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.FixBranchAward)
+  end
+end
+
+function tbActivity:OnPointChange(nPoint)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_COLLECTPOINT_UPDATE, nPoint)
+  self:CheckLightRedPoint()
+end
+
+function tbActivity:OnFixBranch()
+  self:CheckLightFixBranchRedPoint()
+end
+
+function tbActivity:OnClose()
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.CollectExchange)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.FixBranchAward)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self)
+end

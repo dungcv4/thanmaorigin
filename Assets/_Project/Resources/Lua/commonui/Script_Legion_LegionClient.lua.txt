@@ -1,0 +1,983 @@
+Legion._CacheData = Legion._CacheData or {}
+Legion.nJoinLegionTime = Legion.nJoinLegionTime or 0
+Legion.State = Legion.State or Legion.Def.State.Close
+Legion.ClientSaveKey = {
+  szUnJoinedLegionTipsMsgKey = "szUnJoinedLegionTipsMsgKey"
+}
+
+function Legion:GetState()
+  return Legion.State
+end
+
+function Legion:SetState(nState)
+  Legion.State = nState
+end
+
+function Legion:OnSyncState(nState)
+  Legion:SetState(nState)
+end
+
+function Legion:CheckLegionSysOpenState()
+  if Legion.State == Legion.Def.State.Close then
+    return false
+  end
+  return true
+end
+
+function Legion:GetCareerMaxCount(nCareer)
+  local nLevel = Legion:GetLevel()
+  return Legion:GetMaxMember(nLevel or 1, nCareer)
+end
+
+function Legion:CacheData(szKey, tbData, nVersion)
+  Legion._CacheData[szKey] = {tbData = tbData, nVersion = nVersion}
+end
+
+function Legion:GetData(szKey)
+  local tbCache = Legion._CacheData[szKey]
+  if tbCache then
+    return tbCache.tbData, tbCache.nVersion
+  end
+end
+
+function Legion:GetLevel()
+  local tbBaseInfo = Legion:GetData("BaseInfo") or {}
+  return tbBaseInfo.nLevel or 1
+end
+
+function Legion:ClearCache()
+  Legion._CacheData = {}
+end
+
+function Legion:HasLegion()
+  me.dwLegionId = me.dwLegionId or 0
+  return 0 ~= me.dwLegionId
+end
+
+function Legion:IsSameLegion(nLegionId)
+  return 0 ~= me.dwLegionId and me.dwLegionId == nLegionId
+end
+
+function Legion:GetCreateTime()
+  local tbBase = self:GetBaseInfo()
+  return tbBase and tbBase.nCreateTime
+end
+
+function Legion:GetLegionName()
+  if not self:HasLegion() then
+    return ""
+  end
+  local tbBase = self:GetBaseInfo()
+  return tbBase and tbBase.szName
+end
+
+function Legion:GetLegionNameByNpcID(nNpcID)
+  if me.dwID == nNpcID then
+    return self:GetLegionName()
+  end
+  local pNpc = KNpc.GetById(nNpcID)
+  if not pNpc then
+    return ""
+  end
+  if not pNpc.szLegionTitle then
+    return ""
+  end
+  return pNpc.szLegionTitle
+end
+
+function Legion:OnCreateLegion(nLegionId, szLegionName)
+  Log("Legion:OnCreateLegion", nLegionId, szLegionName)
+  Timer:Register(Env.GAME_FPS * 1, function()
+    Legion:OpenLegionWindow()
+  end)
+end
+
+function Legion:OnLegionJoined(nLegionId, szLegionTitle, bLeader)
+  if Ui:WindowVisible("UILegionList") then
+    Timer:Register(Env.GAME_FPS * 1, function()
+      Legion:OpenLegionWindow()
+    end)
+  end
+  me.dwLegionId = nLegionId
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_BASEINFO, "New", bLeader)
+  self:UpdateBaseInfo()
+end
+
+function Legion:GetMyMemberData()
+  return self:GetMemberData(me.dwID)
+end
+
+function Legion:GetMyCareer()
+  if not Legion:HasLegion() then
+    return
+  end
+  local myMemberData = Legion:GetMyMemberData()
+  if not myMemberData then
+    local tbBaseInfo = self:GetBaseInfo()
+    return tbBaseInfo and tbBaseInfo.nCareer
+  else
+    return myMemberData.nCareer
+  end
+end
+
+function Legion:CheckMyAuthority(authority)
+  local nCareer
+  if Legion:AmIMaster() then
+    nCareer = Legion.Def.Career_Master
+  else
+    nCareer = self:GetMyCareer()
+  end
+  if not nCareer then
+    return
+  end
+  local careerAuthority = Legion.Def.Career_Authority[nCareer] or {}
+  if careerAuthority[authority] then
+    return true
+  end
+  return false
+end
+
+function Legion:CheckCanKickOut(nCareer)
+  if not Legion:CheckMyAuthority(Legion.Def.Authority_KickOut) then
+    return false
+  end
+  if not nCareer then
+    return false
+  end
+  local nMyCareer = self:GetMyCareer()
+  if nMyCareer ~= Legion.Def.Career_Master and nCareer < Legion.Def.Career_Normal then
+    return false
+  end
+  return true
+end
+
+function Legion:KickOutMember(nMemberId)
+  local tbData = Legion:GetMemberData(nMemberId)
+  if not tbData or not tbData.nCareer then
+    return
+  end
+  if not self:CheckCanKickOut(tbData.nCareer) then
+    return
+  end
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\231\161\174\232\174\164\229\176\134\231\142\169\229\174\182{0}\232\184\162\229\135\186\229\134\155\229\155\162\229\144\151\239\188\159", tbData.szName), {
+    {
+      function()
+        RemoteServer.OnLegionRequest("KickOutMember", nMemberId)
+      end
+    },
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function Legion:Create(szLegionName, szAddDeclare)
+  if Legion:HasLegion() then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.AlreadyJoinLegion))
+    return false
+  end
+  if me.nLevel < Legion.Cfg.nLevelLimit then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.LevelLimit, Legion.Cfg.nLevelLimit))
+    return false
+  end
+  if not szLegionName or "" == szLegionName then
+    me.CenterMsg(i18n.EasyGet("\232\175\183\232\190\147\229\133\165\229\134\155\229\155\162\229\144\141\229\173\151"))
+    return false
+  end
+  szLegionName = ChatMgr:Filter4CharString(szLegionName)
+  if string.find(szLegionName, "%s") then
+    me.CenterMsg(i18n.EasyGet("\229\134\155\229\155\162\229\144\141\229\189\147\228\184\173\228\184\141\229\143\175\229\144\171\230\156\137\231\169\186\230\160\188"))
+    return false
+  end
+  if ReplaceLimitWords(szLegionName) then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.IllegalChar))
+    return false
+  end
+  local bOk, nLen4TipMin, nLen4TipMax = Lib:CheckLength(szLegionName, i18n.CurrentLanguageCode(), Legion.Cfg.nMinLegionNameLength, Legion.Cfg.nMaxLegionNameLength)
+  if not bOk then
+    me.CenterMsg(i18n.EasyGet("\229\144\141\229\173\151\233\149\191\229\186\166\233\156\128\232\166\129\229\156\168{0}~{1}\228\184\170\229\173\151\229\134\133", nLen4TipMin, nLen4TipMax))
+    return false
+  end
+  if "" ~= szAddDeclare and ReplaceLimitWords(szAddDeclare) then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.IllegalChar))
+    return false
+  end
+  local bOk, nMin, nMax = Lib:CheckLength(szAddDeclare, i18n.CurrentLanguageCode(), 0, Legion.Cfg.nMaxAddDeclareLength)
+  if not bOk then
+    me.CenterMsg(i18n.EasyGet("\229\134\155\229\155\162\229\174\163\232\168\128\232\182\133\232\191\135\228\186\134\230\156\128\229\164\167{0}\228\184\170\229\173\151\230\149\176\231\154\132\233\153\144\229\136\182", nMax))
+    return false
+  end
+  local nItemCount = me.GetItemCountInBags(Legion.Cfg.nCreateLegionPriorityItem)
+  if nItemCount < 1 and me.GetMoney("YuanBao") < Legion.Cfg.nCreateLegionNeedYuanBao then
+    me.CenterMsg(i18n.EasyGet("\229\133\131\229\174\157\228\184\141\232\182\179{0}", Legion.Cfg.nCreateLegionNeedYuanBao))
+    return false
+  end
+  RemoteServer.OnLegionRequest("Create", szLegionName, szAddDeclare)
+  return true
+end
+
+function Legion:ChangeName(szLegionName, bFree)
+  if not Legion:HasLegion() then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.NoJoinLegion))
+    return false
+  end
+  if not self:CheckMyAuthority(Legion.Def.Authority_ChangeName) then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.PermissionDenied))
+    return false
+  end
+  if not szLegionName or "" == szLegionName then
+    return false
+  end
+  szLegionName = ChatMgr:Filter4CharString(szLegionName)
+  if string.find(szLegionName, "%s") then
+    me.CenterMsg(i18n.EasyGet("\229\134\155\229\155\162\229\144\141\229\189\147\228\184\173\228\184\141\229\143\175\229\144\171\230\156\137\231\169\186\230\160\188"))
+    return false
+  end
+  if ReplaceLimitWords(szLegionName) then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.IllegalChar))
+    return false
+  end
+  local bOk, nLen4TipMin, nLen4TipMax = Lib:CheckLength(szLegionName, i18n.CurrentLanguageCode(), Legion.Cfg.nMinLegionNameLength, Legion.Cfg.nMaxLegionNameLength)
+  if not bOk then
+    me.CenterMsg(i18n.EasyGet("\229\144\141\229\173\151\233\149\191\229\186\166\233\156\128\232\166\129\229\156\168{0}~{1}\228\184\170\229\173\151\229\134\133", nLen4TipMin, nLen4TipMax))
+    return false
+  end
+  if not bFree and me.GetMoney("YuanBao") < Legion.Cfg.nChangNameCost then
+    me.CenterMsg(i18n.EasyGet("\229\133\131\229\174\157\228\184\141\232\182\179{0}", Legion.Cfg.nChangNameCost))
+    return false
+  end
+  RemoteServer.OnLegionRequest("ChangeName", szLegionName)
+  return true
+end
+
+function Legion:Invite(nPlayerId)
+  assert(nPlayerId)
+  if not Legion:HasLegion() then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.NoJoinLegion))
+    return
+  end
+  RemoteServer.OnLegionRequest("Invite", nPlayerId)
+end
+
+function Legion:OnInvited(szInviter, szLegionName, nLegionId)
+  if self:HasLegion() then
+    return
+  end
+  Ui:SynNotifyMsg({
+    szType = "LegionInvited",
+    nTimeOut = GetTime() + 300,
+    szInviter = szInviter,
+    szLegionName = szLegionName,
+    nLegionId = nLegionId
+  })
+end
+
+function Legion:AgreeInvite(nLegionId)
+  RemoteServer.OnLegionRequest("AgreeInvite", nLegionId)
+end
+
+function Legion:SetMemberCareer(tbMemberCareer, nVersion)
+  Legion:CacheData("MemberCareer", tbMemberCareer, nVersion)
+end
+
+function Legion:GetMemberCareer()
+  return Legion:GetData("MemberCareer")
+end
+
+function Legion:UpdateMemberCareer()
+  local _, nVersion = Legion:GetMemberCareer()
+  RemoteServer.OnLegionRequest("SyncLegionCareer", nVersion)
+end
+
+function Legion:GetMemberCareerCount(nCareer)
+  local tbMemberList = self:GetMemberList() or {}
+  
+  local function fnEqual(tbMember, nCareer)
+    return tbMember.nCareer == nCareer
+  end
+  
+  return Lib:GetCountInTable(tbMemberList, fnEqual, nCareer)
+end
+
+function Legion:GetMemberCareerInfo(nCareer)
+  local tbMemberList = self:GetMemberList() or {}
+  
+  local function fnEqual(tbMember, nCareer)
+    return tbMember.nCareer == nCareer
+  end
+  
+  local nCount = 0
+  local tbCareerPos = {}
+  for _, tbItem in pairs(tbMemberList) do
+    if fnEqual(tbItem, nCareer) then
+      nCount = nCount + 1
+      if tbItem.nCareerPos then
+        tbCareerPos[tbItem.nCareerPos] = tbItem.nMemberId
+      end
+    end
+  end
+  return nCount, tbCareerPos
+end
+
+function Legion:OnSyncBaseInfo(tbBaseInfo, nVersion, nCareer)
+  tbBaseInfo.nCareer = nCareer
+  Legion:CacheData("BaseInfo", tbBaseInfo, nVersion)
+  Lib:Tree(tbBaseInfo)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_BASEINFO, "BaseInfo")
+end
+
+function Legion:GetBaseInfo()
+  return Legion:GetData("BaseInfo")
+end
+
+function Legion:UpdateBaseInfo()
+  if not Legion:HasLegion() then
+    return
+  end
+  local _, nVersion = Legion:GetBaseInfo()
+  RemoteServer.OnLegionRequest("SyncLegionBaseInfo", nVersion)
+end
+
+function Legion:GetMasterId()
+  local tbBaseInfo = self:GetBaseInfo()
+  return tbBaseInfo and tbBaseInfo.nMasterId
+end
+
+function Legion:AmIMaster()
+  return self:GetMasterId() == me.dwID
+end
+
+function Legion:AmICareer(nCareer)
+  if not self:HasLegion() then
+    return
+  end
+  local tbMember = self:GetMemberData(me.dwID)
+  if not tbMember then
+    return
+  end
+  return tbMember.nCareer == nCareer
+end
+
+function Legion:GetMemberData(nId)
+  local tbMemberList = Legion:GetData("MemberList") or {}
+  for _, tbData in pairs(tbMemberList) do
+    if tbData.nMemberId == nId then
+      return tbData
+    end
+  end
+end
+
+function Legion:InsertClientMember(tbCacheMember, tbCacheMap, tbMember)
+  if tbCacheMap[tbMember.nMemberId] then
+    for k, v in pairs(tbCacheMember) do
+      if v.nMemberId == tbMember.nMemberId then
+        table.remove(tbCacheMember, k)
+        break
+      end
+    end
+  end
+  table.insert(tbCacheMember, tbMember)
+  tbCacheMap[tbMember.nMemberId] = tbMember
+end
+
+function Legion:DeleteClientMember(tbCacheMember, tbCacheMap, tbMember)
+  if tbCacheMap[tbMember.nMemberId] then
+    for k, v in pairs(tbCacheMember) do
+      if v.nMemberId == tbMember.nMemberId then
+        table.remove(tbCacheMember, k)
+        break
+      end
+    end
+  end
+  tbCacheMap[tbMember.nMemberId] = nil
+end
+
+function Legion:OnSyncMemberList(tbMemberList)
+  local tbCacheMember, nVersion, tbCacheMap = self:GetMemberList()
+  tbCacheMember = tbCacheMember or {}
+  nVersion = nVersion or 0
+  tbCacheMap = tbCacheMap or {}
+  for _, tbMember in pairs(tbMemberList) do
+    if not tbMember.bDelete then
+      self:InsertClientMember(tbCacheMember, tbCacheMap, tbMember)
+    else
+      self:DeleteClientMember(tbCacheMember, tbCacheMap, tbMember)
+    end
+  end
+  Legion:CacheData("MemberList", tbCacheMember, nVersion)
+  Legion:CacheData("MemberMap", tbCacheMap, 0)
+end
+
+function Legion:OnSyncMemberListEnd(nSyncVersion)
+  local tbCacheMember, _ = self:GetMemberList()
+  Legion:CacheData("MemberList", tbCacheMember, nSyncVersion)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_BASEINFO, "MemberList")
+end
+
+function Legion:GetMemberList()
+  local tbCacheMember, nVersion = Legion:GetData("MemberList")
+  local tbCacheMap, nMapVersion = Legion:GetData("MemberMap")
+  return tbCacheMember, nVersion, tbCacheMap, nMapVersion
+end
+
+function Legion:UpdateMemberList(bForceUpdate)
+  self.nLegionMemberListLastUpdateTime = self.nLegionMemberListLastUpdateTime or 0
+  local nCurTime = GetTime()
+  local bForce = bForceUpdate or false
+  if not bForce and nCurTime - self.nLegionMemberListLastUpdateTime < 1 then
+    return
+  else
+    self.nLegionMemberListLastUpdateTime = nCurTime
+  end
+  local _, nVersion = Legion:GetMemberList()
+  if bForceUpdate then
+    nVersion = nil
+  end
+  RemoteServer.OnLegionRequest("SyncLegionMemberInfo", nVersion, me.dwID, me.dwLegionId)
+end
+
+function Legion:ClearUpdateTime()
+  Legion.nLegionMemberListLastUpdateTime = 0
+  Legion.nJoinLegionTime = 0
+  Legion.State = Legion.Def.State.Close
+  Legion:ClearCache()
+end
+
+function Legion:GetMemberMaxLevel()
+  local tbMembers = self:GetMemberList()
+  local nMaxLevel = 0
+  for _, member in pairs(tbMembers or {}) do
+    if nMaxLevel < member.nLevel then
+      nMaxLevel = member.nLevel
+    end
+  end
+  return nMaxLevel
+end
+
+function Legion:RequestChangeMaster(nMemberId)
+  local function fnChangeCareer()
+    RemoteServer.OnLegionRequest("RequestChangeMaster", nMemberId)
+  end
+  
+  local function fnNoticeChange()
+    local szTip = i18n.EasyGet("\228\189\160\230\152\175\229\144\166\232\166\129\229\176\134<color=#ffff0e> \229\134\155\229\155\162\233\149\191 </color>\232\129\140\228\189\141\228\188\160\228\189\141\231\187\153\229\136\171\228\186\186\239\188\159\n\228\188\160\228\189\141\229\144\142\228\189\160\229\176\134\230\136\144\228\184\186\230\153\174\233\128\154\230\136\144\229\145\152\227\128\130\239\188\136\228\188\160\228\189\141\230\151\182\239\188\140\229\133\182\228\187\150\228\187\187\229\145\189\229\176\134\230\151\160\230\149\136\227\128\130\239\188\137")
+    me.MsgBox(szTip, {
+      {
+        i18n.szOk,
+        function()
+          fnChangeCareer()
+        end
+      },
+      {
+        i18n.szCancel
+      }
+    })
+  end
+  
+  fnNoticeChange()
+end
+
+function Legion:ChangeCareers(tbCancelMember, tbSetCareerMember)
+  RemoteServer.OnLegionRequest("ChangeCareers", tbCancelMember, tbSetCareerMember)
+end
+
+function Legion:SignLegion()
+  if 0 ~= me.dwLegionId then
+    me.CenterMsg(i18n.EasyGet("\229\183\178\229\138\160\229\133\165\229\134\155\229\155\162"))
+    return false
+  end
+  if me.nLevel < Legion.Cfg.nLevelLimit then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.LevelLimit, Legion.Cfg.nLevelLimit))
+    return false
+  end
+  RemoteServer.OnLegionRequest("SignLegion")
+  return true
+end
+
+function Legion:ApplyLegion(nLegionId)
+  if 0 ~= me.dwLegionId then
+    me.CenterMsg(i18n.EasyGet("\229\183\178\229\138\160\229\133\165\229\134\155\229\155\162"))
+    return false
+  end
+  if me.nLevel < Legion.Cfg.nLevelLimit then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.LevelLimit, Legion.Cfg.nLevelLimit))
+    return false
+  end
+  RemoteServer.OnLegionRequest("Apply", nLegionId)
+  return true
+end
+
+function Legion:ApplyApplyer(nPlayerId)
+  if 0 ~= me.dwLegionId then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.AlreadyJoinLegion))
+    return false
+  end
+  if me.nLevel < Legion.Cfg.nLevelLimit then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.LevelLimit, Legion.Cfg.nLevelLimit))
+    return false
+  end
+  RemoteServer.OnLegionRequest("ApplyPlayer", nPlayerId)
+end
+
+function Legion:AgreeApply(nApplyerId)
+  RemoteServer.OnLegionRequest("AgreeApply", nApplyerId)
+end
+
+function Legion:DisAgreeApply(nApplyerId)
+  RemoteServer.OnLegionRequest("DisagreeApply", nApplyerId)
+end
+
+function Legion:CleanApplyList()
+  RemoteServer.OnLegionRequest("CleanApplyerList")
+  Legion:CacheData("ApplyList", {})
+  self:NotifyApplyRefresh()
+end
+
+function Legion:OnSyncApplyerList(tbApplyList, nVersion)
+  Legion:CacheData("ApplyList", tbApplyList, nVersion)
+  self:NotifyApplyRefresh()
+end
+
+function Legion:GetApplyerList()
+  return Legion:GetData("ApplyList") or {}
+end
+
+function Legion:UpdateApplyInfo(bManual)
+  if not Legion:CheckMyAuthority(Legion.Def.Authority_Recruit) then
+    return
+  end
+  local _, nVersion = Legion:GetApplyerList()
+  RemoteServer.OnLegionRequest("SyncApplyerList", nVersion, bManual)
+end
+
+function Legion:NotifyApplyRefresh()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_BASEINFO, "ApplyList")
+  local bEnable = false
+  if self:CheckMyAuthority(Legion.Def.Authority_Recruit) and not Lib:IsEmptyTB(self:GetApplyerList()) then
+    bEnable = true
+  end
+  bEnable = bEnable and self:IsNeedLightPointByApplyNewMember()
+  self:NotifyApplyRedPoint(bEnable)
+end
+
+function Legion:NotifyApplyRedPoint(bEnable)
+  if bEnable then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.LegionApply)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.LegionApply)
+  end
+end
+
+function Legion:OnClickQuitLegion()
+  RemoteServer.OnLegionRequest("ReqQuitInfo")
+end
+
+function Legion:OnSyncQuitInfo(nJoinLegionTime)
+  local function fnQuitLegion()
+    Legion:Quit()
+    
+    Ui:CloseWindow("UILegion")
+  end
+  
+  local szTip = ""
+  if GetTime() - nJoinLegionTime < Legion.Cfg.nJoinLegionTimeSpan then
+    local nDateTime = Legion.Cfg.nJoinLegionTimeSpan - (GetTime() - nJoinLegionTime)
+    szTip = i18n.EasyGet("\233\128\128\229\134\155\229\155\162\229\144\142\229\134\141\229\133\165\229\134\155\229\155\162\233\156\128\232\166\129<color=#c56d05>\231\173\137\229\190\133{0}</color>\239\188\140\230\152\175\229\144\166\233\128\128\229\135\186\229\134\155\229\155\162\239\188\159", Lib:TimeDesc8(nDateTime))
+  else
+    szTip = i18n.EasyGet("\233\128\128\229\134\155\229\155\162\229\144\142\229\134\141\229\133\165\229\134\155\229\155\162<color=#c56d05>\230\178\161\230\156\137\230\151\182\233\151\180\233\153\144\229\136\182</color>\239\188\140\230\152\175\229\144\166\233\128\128\229\135\186\229\134\155\229\155\162\239\188\159")
+  end
+  me.MsgBox(szTip, {
+    {
+      i18n.szOk,
+      function()
+        fnQuitLegion()
+      end
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function Legion:Quit()
+  RemoteServer.OnLegionRequest("Quit")
+end
+
+function Legion:OnQuit(bKickOut)
+  Legion:ClearCache()
+  me.dwLegionId = 0
+  if bKickOut then
+    me.CenterMsg(i18n.EasyGet("\228\189\160\229\183\178\232\162\171\232\184\162\229\135\186\229\134\155\229\155\162"))
+  else
+    me.CenterMsg(i18n.EasyGet("\228\189\160\229\183\178\230\136\144\229\138\159\233\128\128\229\135\186\229\134\155\229\155\162"))
+  end
+  self.nLegionMemberListLastUpdateTime = 0
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_BASEINFO, "Quit")
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.LegionApply)
+end
+
+function Legion:OnSyncRecruit(tbRecruitSetting, nVersion)
+  Legion:CacheData("RecruitSetting", tbRecruitSetting, nVersion)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_BASEINFO, "RecruitSetting")
+end
+
+function Legion:GetRecruitSetting()
+  return Legion:GetData("RecruitSetting")
+end
+
+function Legion:UpdateRecruitSetting()
+  local _, nVersion = Legion:GetRecruitSetting()
+  RemoteServer.OnLegionRequest("SyncRecruiSetting", nVersion)
+end
+
+function Legion:SetRecruitSetting(bAutoJoin, nFightValue)
+  RemoteServer.OnLegionRequest("SetRecruitSetting", bAutoJoin, nFightValue)
+end
+
+function Legion:UpdateJoinLegionsData(nPage, bSortByLToSLevel)
+  RemoteServer.OnLegionRequest("SyncLegions2Join", nPage, bSortByLToSLevel)
+end
+
+function Legion:OnSyncJoinInfo(tbJoinLegionsData, nPage, nMaxPage)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_BASEINFO, "JoinLegions", tbJoinLegionsData, nPage, nMaxPage)
+end
+
+function Legion:ChangePublicDeclare(szDeclare)
+  szDeclare = ReplaceLimitWords(szDeclare) or szDeclare
+  RemoteServer.OnLegionRequest("ChangePublicDeclare", szDeclare, i18n.CurrentLanguageCode())
+end
+
+function Legion:ChangeAddDeclare(szAddDeclare)
+  szAddDeclare = ReplaceLimitWords(szAddDeclare) or szAddDeclare
+  RemoteServer.OnLegionRequest("ChangeAddDeclare", szAddDeclare, i18n.CurrentLanguageCode())
+end
+
+function Legion:OnSyncDeclare(szDeclare)
+  local tbBaseInfo = Legion:GetBaseInfo()
+  if tbBaseInfo then
+    tbBaseInfo.szPublicDeclare = szDeclare
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_BASEINFO, "Declare")
+end
+
+function Legion:UpdateMailInfo()
+  local nMailCount = Legion:GetLeftMailCount()
+  RemoteServer.OnLegionRequest("SyncMailCount", nMailCount)
+end
+
+function Legion:GetLeftMailCount()
+  return Legion:GetData("MailCount")
+end
+
+function Legion:OnSyncMailCount(nCount)
+  Legion:CacheData("MailCount", nCount)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_MAIL_COUNT)
+end
+
+function Legion:SendMail(szContent)
+  if not Legion:CheckMyAuthority(Legion.Def.Authority_Mail) then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.PermissionDenied))
+    return false
+  end
+  local nLeftMailCount = Legion:GetLeftMailCount()
+  if nLeftMailCount <= 0 then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.MailCountLimit))
+    return false
+  end
+  local bOk, nErr = Legion:CheckMailContent(szContent)
+  if not bOk then
+    me.CenterMsg(Legion:GetErrorMsg(nErr))
+    return false
+  end
+  RemoteServer.OnLegionRequest("SendLegionMail", szContent)
+  return true
+end
+
+function Legion:OnSyncBattleRegion(nRegionId)
+  me.nBattleRegion = nRegionId
+end
+
+local SortFunction = {
+  Default = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      if a.nMemberId == me.dwID then
+        return true
+      end
+      if b.nMemberId == me.dwID then
+        return false
+      end
+      local bOnlineA = 1 == a.nIsOnLine
+      local bOnlineB = 1 == b.nIsOnLine
+      if bOnlineA == bOnlineB then
+        if a.nCareer == b.nCareer then
+          return a.nLevel > b.nLevel
+        else
+          return a.nCareer < b.nCareer
+        end
+      else
+        return bOnlineA
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByFaction = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      if a.nFaction == b.nFaction then
+        local aString = a.szName or ""
+        local bString = b.szName or ""
+        if bIsDown then
+          return aString > bString
+        else
+          return aString < bString
+        end
+      elseif bIsDown then
+        return a.nFaction > b.nFaction
+      else
+        return a.nFaction < b.nFaction
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByRank = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      if a.nHonorStarLevel == b.nHonorStarLevel then
+        local aString = a.szName or ""
+        local bString = b.szName or ""
+        if bIsDown then
+          return aString > bString
+        else
+          return aString < bString
+        end
+      elseif bIsDown then
+        return a.nHonorStarLevel > b.nHonorStarLevel
+      else
+        return a.nHonorStarLevel < b.nHonorStarLevel
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByName = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      local aString = a.szName or ""
+      local bString = b.szName or ""
+      if bIsDown then
+        return aString > bString
+      else
+        return aString < bString
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByLevel = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      if a.nLevel == b.nLevel then
+        local aString = a.szName or ""
+        local bString = b.szName or ""
+        if bIsDown then
+          return aString > bString
+        else
+          return aString < bString
+        end
+      elseif bIsDown then
+        return a.nLevel > b.nLevel
+      else
+        return a.nLevel < b.nLevel
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByCareer = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      if a.nCareer == b.nCareer then
+        local aString = a.szName or ""
+        local bString = b.szName or ""
+        if bIsDown then
+          return aString > bString
+        else
+          return aString < bString
+        end
+      elseif bIsDown then
+        return a.nCareer > b.nCareer
+      else
+        return a.nCareer < b.nCareer
+      end
+    end)
+    return tbMemberList
+  end
+}
+
+function Legion:GetSortFunction(szFunName)
+  return SortFunction[szFunName]
+end
+
+function Legion:OnLogin(bConnect)
+  local function fnCallBack()
+    if Legion:HasLegion() then
+      Legion:UpdateApplyInfo()
+      
+      Legion:UpdateMemberList()
+    end
+    Legion:UpdateJoinLegionTimeC()
+  end
+  
+  Timer:Register(Env.GAME_FPS * 1, fnCallBack)
+end
+
+function Legion:UpdateJoinLegionTimeC()
+  RemoteServer.OnLegionRequest("SyncJoinLegionTime")
+end
+
+function Legion:OnSyncJoinLegionTime(nTime)
+  Legion.nJoinLegionTime = nTime
+end
+
+function Legion:IsLegionVoiceManager()
+  local nMngCareer = Legion.Def.tbVoiceManagerCareer[Legion:GetMyCareer()]
+  return nil ~= nMngCareer and 1 == nMngCareer
+end
+
+function Legion:OpenLegionWindow(tbParams)
+  if me.nLevel < Legion.Cfg.nLevelLimit then
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.LevelLimit, Legion.Cfg.nLevelLimit))
+    return false
+  end
+  if not Legion:HasLegion() then
+    if not Ui:WindowVisible("UILegionList") then
+      Ui:OpenWindow("UILegionList")
+    end
+    Log("UILegionList")
+    return
+  elseif Ui:WindowVisible("UILegionList") then
+    Ui:CloseWindow("UILegionList")
+    Ui:CloseWindow("UICreateLegion")
+  end
+  Log("OpenLegionWindow", me.dwLegionId)
+  Ui:OpenWindow("UILegion", tbParams and tbParams[1])
+end
+
+local tbMsgCode2Msg = {
+  [Legion.Def.tbMsgCode.DuplicateLegionName] = Legion.Cfg.Msg.DuplicateLegionName,
+  [Legion.Def.tbMsgCode.LegionNameIllegal] = Legion.Cfg.Msg.LegionNameIllegal,
+  [Legion.Def.tbMsgCode.PermissionDenied] = Legion.Cfg.Msg.PermissionDenied,
+  [Legion.Def.tbMsgCode.NoJoinLegion] = Legion.Cfg.Msg.NoJoinLegion,
+  [Legion.Def.tbMsgCode.LegionNonExist] = Legion.Cfg.Msg.LegionNonExist,
+  [Legion.Def.tbMsgCode.AlreadyJoinLegion] = Legion.Cfg.Msg.AlreadyJoinLegion,
+  [Legion.Def.tbMsgCode.NormalMemberFull] = Legion.Cfg.Msg.NormalMemberFull,
+  [Legion.Def.tbMsgCode.NotInSameLegion] = Legion.Cfg.Msg.NotInSameLegion,
+  [Legion.Def.tbMsgCode.JoinLegionFail] = Legion.Cfg.Msg.JoinLegionFail,
+  [Legion.Def.tbMsgCode.CoolingTime] = Legion.Cfg.Msg.CoolingTime,
+  [Legion.Def.tbMsgCode.NoChange] = Legion.Cfg.Msg.NoChange,
+  [Legion.Def.tbMsgCode.MemberNonExist] = Legion.Cfg.Msg.MemberNonExist,
+  [Legion.Def.tbMsgCode.ItHasJoinedLegion] = Legion.Cfg.Msg.ItHasJoinedLegion,
+  [Legion.Def.tbMsgCode.ItHasNotJoinedLegion] = Legion.Cfg.Msg.ItHasNotJoinedLegion,
+  [Legion.Def.tbMsgCode.CareerMemberFull] = Legion.Cfg.Msg.CareerMemberFull,
+  [Legion.Def.tbMsgCode.CanNotKickOutYouself] = Legion.Cfg.Msg.CanNotKickOutYouself,
+  [Legion.Def.tbMsgCode.CantContainSpace] = Legion.Cfg.Msg.CantContainSpace,
+  [Legion.Def.tbMsgCode.NotInApplyList] = Legion.Cfg.Msg.NotInApplyList,
+  [Legion.Def.tbMsgCode.MasterCannotQuit] = Legion.Cfg.Msg.MasterCannotQuit,
+  [Legion.Def.tbMsgCode.CanNotAppointYourself] = Legion.Cfg.Msg.CanNotAppointYourself,
+  [Legion.Def.tbMsgCode.SetRecruitSuccess] = Legion.Cfg.Msg.SetRecruitSuccess,
+  [Legion.Def.tbMsgCode.JoinCdHM] = Legion.Cfg.Msg.JoinCdHM,
+  [Legion.Def.tbMsgCode.JoinCdM] = Legion.Cfg.Msg.JoinCdM,
+  [Legion.Def.tbMsgCode.LevelLimit] = Legion.Cfg.Msg.LevelLimit,
+  [Legion.Def.tbMsgCode.InviteSuccess] = Legion.Cfg.Msg.InviteSuccess,
+  [Legion.Def.tbMsgCode.ApplyListRefresh] = Legion.Cfg.Msg.ApplyListRefresh,
+  [Legion.Def.tbMsgCode.KickOutSuccess] = Legion.Cfg.Msg.KickOutSuccess,
+  [Legion.Def.tbMsgCode.PleaseEnterName] = Legion.Cfg.Msg.PleaseEnterName,
+  [Legion.Def.tbMsgCode.LegionNameLengthLimit] = function(szLegionName)
+    local bOk, nLen4TipMin, nLen4TipMax = Lib:CheckLength(szLegionName, i18n.CurrentLanguageCode(), Legion.Cfg.nMinLegionNameLength, Legion.Cfg.nMaxLegionNameLength)
+    return i18n.EasyGet("\229\144\141\229\173\151\233\149\191\229\186\166\233\156\128\232\166\129\229\156\168{0}~{1}\228\184\170\229\173\151\229\134\133", nLen4TipMin, nLen4TipMax)
+  end,
+  [Legion.Def.tbMsgCode.ChangeLegionNameSuccess] = Legion.Cfg.Msg.ChangeLegionNameSuccess,
+  [Legion.Def.tbMsgCode.JoinLegionSuccess] = Legion.Cfg.Msg.JoinLegionSuccess,
+  [Legion.Def.tbMsgCode.ApplyLegionSuccess] = Legion.Cfg.Msg.ApplyLegionSuccess,
+  [Legion.Def.tbMsgCode.ItIsFighting] = Legion.Cfg.Msg.ItIsFighting,
+  [Legion.Def.tbMsgCode.ChangeCareerSuccess] = Legion.Cfg.Msg.ChangeCareerSuccess,
+  [Legion.Def.tbMsgCode.OutOfLengthLimit] = Legion.Cfg.Msg.OutOfLengthLimit,
+  [Legion.Def.tbMsgCode.IllegalChar] = Legion.Cfg.Msg.IllegalChar,
+  [Legion.Def.tbMsgCode.NotModified] = Legion.Cfg.Msg.NotModified,
+  [Legion.Def.tbMsgCode.ModificationConflict] = Legion.Cfg.Msg.ModificationConflict,
+  [Legion.Def.tbMsgCode.JoinCdHMSelf] = Legion.Cfg.Msg.JoinCdHMSelf,
+  [Legion.Def.tbMsgCode.JoinCdMSelf] = Legion.Cfg.Msg.JoinCdMSelf,
+  [Legion.Def.tbMsgCode.PleaseEnterContent] = Legion.Cfg.Msg.PleaseEnterContent,
+  [Legion.Def.tbMsgCode.MailCountLimit] = Legion.Cfg.Msg.MailCountLimit,
+  [Legion.Def.tbMsgCode.NotEnoughMoney] = Legion.Cfg.Msg.NotEnoughMoney,
+  [Legion.Def.tbMsgCode.DomainBattlePhaseLimit] = Legion.Cfg.Msg.DomainBattlePhaseLimit,
+  [Legion.Def.tbMsgCode.LimitMonthCardCreateLegion] = Legion.Cfg.Msg.LimitMonthCardCreateLegion,
+  [Legion.Def.tbMsgCode.TieFuChengPhaseLimit] = Legion.Cfg.Msg.TieFuChengPhaseLimit,
+  [Legion.Def.tbMsgCode.CreateCDLimit] = Legion.Cfg.Msg.CreateCDLimit,
+  [Legion.Def.tbMsgCode.UnknownError] = Legion.Cfg.Msg.UnknownError,
+  [Legion.Def.tbMsgCode.TwoAreaBattlePhaseLimit] = Legion.Cfg.Msg.TwoAreaBattlePhaseLimit,
+  [Legion.Def.tbMsgCode.AlreadySignLegion] = Legion.Cfg.Msg.AlreadySignLegion,
+  [Legion.Def.tbMsgCode.NeedLegionPriorityItem] = Legion.Cfg.Msg.NeedLegionPriorityItem,
+  [Legion.Def.tbMsgCode.ForbidCreateLegion] = Legion.Cfg.Msg.ForbidCreateLegion,
+  [Legion.Def.tbMsgCode.ForbidSignLegion] = Legion.Cfg.Msg.ForbidSignLegion,
+  [Legion.Def.tbMsgCode.ResourceBattlePhaseLimit] = Legion.Cfg.Msg.ResourceBattlePhaseLimit
+}
+
+function Legion:GetErrorMsg(MsgCode)
+  local szMsg
+  if type(MsgCode) == "table" then
+    MsgCode[1] = tbMsgCode2Msg[MsgCode[1]]
+    if MsgCode[1] then
+      if type(MsgCode[1]) == "function" then
+        szMsg = MsgCode[1](table.unpack(MsgCode, 2))
+      else
+        szMsg = i18n.Get(table.unpack(MsgCode))
+      end
+    else
+      error("Legion:OnServerResult  Unknow MsgCode")
+    end
+  else
+    szMsg = tbMsgCode2Msg[MsgCode]
+    if szMsg then
+      szMsg = i18n.Get(szMsg)
+    else
+      error("Legion:OnServerResult  Unknow MsgCode")
+    end
+  end
+  return szMsg
+end
+
+function Legion:OnServerResult(szRequestType, bSuccess, MsgCode)
+  if MsgCode then
+    local szMsg = Legion:GetErrorMsg(MsgCode)
+    if szMsg then
+      me.CenterMsg(szMsg)
+    end
+  end
+  if bSuccess and "Apply" == szRequestType then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEGION_BASEINFO, szRequestType)
+  end
+end
+
+function Legion:AskMonitorUI(bMonitor)
+  RemoteServer.OnLegionRequest("RegistUpdatePlayerMemberListUI", bMonitor)
+end
+
+function Legion:IsNeedLightPointByApplyNewMember()
+  local emCareer = Legion:GetMyCareer()
+  if not emCareer then
+    return false
+  end
+  if emCareer == Legion.Def.Career_Master or emCareer == Legion.Def.Career_ViceMaster then
+    return true
+  end
+  return false
+end
+
+function Legion:GetMaxLegionOfficialLevel()
+  for i = 1, #self.Def.OfficialMaxLevelByTimeFrame do
+    if not GlobalDomainBattle.szZoneTimeFrame then
+      return #self.Def.OfficialTable
+    end
+    if Lib:CalcTimeFrameOpenDay(GlobalDomainBattle.szZoneTimeFrame) >= Lib:CalcTimeFrameOpenDay(self.Def.OfficialMaxLevelByTimeFrame[i].TimeFrame) then
+      return self.Def.OfficialMaxLevelByTimeFrame[i].MaxLevel
+    end
+  end
+  return 1
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Legion)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Legion.ClearUpdateTime, Legion)

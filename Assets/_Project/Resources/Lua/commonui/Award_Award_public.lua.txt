@@ -1,0 +1,1312 @@
+Award.FILE_AWARDLIST = "Setting/Award/AwardList.tab"
+Award.FILEDIR_AWARDDETAIL = "Setting/Award/Awards"
+Award.MaxRandValue = 1000000
+
+function Award:GiveAward(nPlayerId, nAwardId, nAwardKey, tbAwardParam)
+  if not self.tbAllAwards[nAwardId] then
+    print(string.format("[error] no awards, nAwardId = %s, nAwardKey = %s", nAwardId, nAwardKey))
+    return false
+  end
+  tbAwardParam = tbAwardParam or {}
+  self:GenerateDefaultAwardParam(tbAwardParam)
+  local tbAwards = self:GetAward(nAwardId, nAwardKey, tbAwardParam)
+  self:SaveLastAwards(tbAwards)
+  self:SendAward(nPlayerId, tbAwards, tbAwardParam)
+  return true
+end
+
+function Award:GiveAwardByLevel(nPlayerId, nAwardId, tbAwardParam)
+  local pPlayer = KPlayer.GetPlayerObjById(nPlayerId)
+  if not pPlayer then
+    return false
+  end
+  local nAwardKey = self:GetLevelAwardKey(pPlayer.nLevel)
+  self:GiveAward(nPlayerId, nAwardId, nAwardKey, tbAwardParam)
+  return true
+end
+
+function Award:GiveAwardWithTimes(nPlayerId, nAwardId, nAwardKey, nTimes, tbAwardParam)
+  if not self.tbAllAwards[nAwardId] then
+    print(string.format("[error] no awards, nAwardId = %s, nAwardKey = %s", nAwardId, nAwardKey))
+    return false
+  end
+  tbAwardParam = tbAwardParam or {}
+  self:GenerateDefaultAwardParam(tbAwardParam)
+  local tbAwards = self:GetAwardWithTimes(nAwardId, nAwardKey, nTimes, tbAwardParam)
+  self:SaveLastAwards(tbAwards)
+  self:SendAward(nPlayerId, tbAwards, tbAwardParam)
+  return true
+end
+
+function Award:GetAward(nAwardId, nAwardKey, tbAwardParam)
+  if not self.tbAllAwards[nAwardId] then
+    return {}
+  end
+  tbAwardParam = tbAwardParam or {}
+  self:GenerateDefaultAwardParam(tbAwardParam)
+  local tbFixAwards = self:GetAward_Fix(nAwardId, nAwardKey, tbAwardParam) or {}
+  local tbRandAwards = self:GetAward_Rand(nAwardId, nAwardKey, tbAwardParam) or {}
+  local tbAllAwards = Lib:MergeTable(tbFixAwards, tbRandAwards)
+  if not tbAwardParam.bNotMerge then
+    tbAllAwards = self:MergetSameTypeAward(tbAllAwards)
+  end
+  return tbAllAwards
+end
+
+function Award:GetAwardWithTimes(nAwardId, nAwardKey, nTimes, tbAwardParam)
+  if not self.tbAllAwards[nAwardId] then
+    return {}
+  end
+  tbAwardParam = tbAwardParam or {}
+  self:GenerateDefaultAwardParam(tbAwardParam)
+  local tbAllAwards = {}
+  for i = 1, nTimes do
+    local tbFixAwards = self:GetAward_Fix(nAwardId, nAwardKey, tbAwardParam) or {}
+    Lib:MergeTable(tbAllAwards, tbFixAwards)
+    local tbRandAwards = self:GetAward_Rand(nAwardId, nAwardKey, tbAwardParam) or {}
+    Lib:MergeTable(tbAllAwards, tbRandAwards)
+  end
+  if not tbAwardParam.bNotMerge then
+    tbAllAwards = self:MergetSameTypeAward(tbAllAwards)
+  end
+  return tbAllAwards
+end
+
+function Award:MergetSameTypeAward(tbAwards)
+  local tbAllAwards = {}
+  for _, tbInfo in pairs(tbAwards) do
+    local nAwardType = tbInfo[1]
+    local nCountIndex = Player.AwardTypeCountIndex[Player.AwardType[nAwardType]]
+    local nAwardSubType = 3 == nCountIndex and tbInfo[2] or nil
+    local nBindType = Player.AwardType[nAwardType] == Player.award_type_item and tbInfo[4] and tbInfo[4].nBindType or Item.eBINDTYPE.BIND
+    local bMatched = false
+    for _, tbExistAward in pairs(tbAllAwards) do
+      local nAwardType1 = tbExistAward[1]
+      local nCountIndex1 = Player.AwardTypeCountIndex[Player.AwardType[nAwardType1]]
+      local nAwardSubType1 = 3 == nCountIndex1 and tbExistAward[2] or nil
+      local nBindType1 = Player.AwardType[nAwardType1] == Player.award_type_item and tbExistAward[4] and tbExistAward[4].nBindType or Item.eBINDTYPE.BIND
+      if nAwardType == nAwardType1 and nAwardSubType == nAwardSubType1 and nBindType == nBindType1 and (nil ~= nAwardSubType or 2 == nCountIndex) then
+        bMatched = true
+      end
+      if bMatched then
+        tbExistAward[nCountIndex1] = tbExistAward[nCountIndex1] + tbInfo[nCountIndex]
+        break
+      end
+    end
+    if not bMatched then
+      local tbNew = Lib:CopyTB(tbInfo)
+      table.insert(tbAllAwards, tbNew)
+    end
+  end
+  return tbAllAwards
+end
+
+function Award:GetAward_Fix(nAwardId, nAwardKey, tbAwardParam)
+  if not self.tbAllAwards[nAwardId].tbFixAwards or not self.tbAllAwards[nAwardId].tbFixAwards[nAwardKey] then
+    return
+  end
+  tbAwardParam = tbAwardParam or {}
+  self:GenerateDefaultAwardParam(tbAwardParam)
+  local nRatio = tbAwardParam.nRatio
+  local tbItemExtParams = tbAwardParam.tbItemExtParams
+  local tbAwards = {}
+  for _, tbInfo in pairs(self.tbAllAwards[nAwardId].tbFixAwards[nAwardKey]) do
+    local TimeFrameStart = tbInfo.TimeFrameStart or ""
+    local TimeFrameEnd = tbInfo.TimeFrameEnd or ""
+    if self:CheckTimeFrame(TimeFrameStart, TimeFrameEnd, tbItemExtParams.nAwardTime) then
+      local tbOneAward = self:FormatAward(tbInfo, tbAwardParam)
+      local bCountType = self:IsCountType(tbInfo)
+      if bCountType then
+        local nCountIndex = Player.AwardTypeCountIndex[Player.AwardType[tbOneAward[1]]]
+        tbOneAward[nCountIndex] = math.floor(tbOneAward[nCountIndex] * nRatio)
+      end
+      table.insert(tbAwards, tbOneAward)
+    end
+  end
+  return tbAwards
+end
+
+function Award:funRandGroupAward(tbGroup, tbAwardParam)
+  local tbItemExtParams = tbAwardParam.tbItemExtParams
+  local nRand = MathRandom(self.MaxRandValue)
+  local nSum = 0
+  for _, tbInfo in pairs(tbGroup or {}) do
+    local TimeFrameStart = tbInfo.TimeFrameStart or ""
+    local TimeFrameEnd = tbInfo.TimeFrameEnd or ""
+    if self:CheckTimeFrame(TimeFrameStart, TimeFrameEnd, tbItemExtParams.nAwardTime) then
+      nSum = nSum + tbInfo.RandRate
+      if nRand <= nSum then
+        return tbInfo
+      end
+    end
+  end
+end
+
+function Award:funRandGroupAwardNoMonthCard(tbGroup, tbAwardParam)
+  local tbItemExtParams = tbAwardParam.tbItemExtParams
+  local nExceptValue = 0
+  for _, tbInfo in pairs(tbGroup or {}) do
+    if 1 == tbInfo.IgnoreNoMonthCard then
+      nExceptValue = nExceptValue + tbInfo.RandRate
+    end
+  end
+  local nRand = MathRandom(self.MaxRandValue - nExceptValue)
+  local nSum = 0
+  for _, tbInfo in pairs(tbGroup or {}) do
+    if 1 ~= tbInfo.IgnoreNoMonthCard then
+      local TimeFrameStart = tbInfo.TimeFrameStart or ""
+      local TimeFrameEnd = tbInfo.TimeFrameEnd or ""
+      if self:CheckTimeFrame(TimeFrameStart, TimeFrameEnd, tbItemExtParams.nAwardTime) then
+        nSum = nSum + tbInfo.RandRate
+        if nRand <= nSum then
+          return tbInfo
+        end
+      end
+    end
+  end
+end
+
+function Award:GetAward_Rand(nAwardId, nAwardKey, tbAwardParam)
+  if not self.tbAllAwards[nAwardId].tbRandAwards or not self.tbAllAwards[nAwardId].tbRandAwards[nAwardKey] then
+    return
+  end
+  tbAwardParam = tbAwardParam or {}
+  self:GenerateDefaultAwardParam(tbAwardParam)
+  local bNoRandom = tbAwardParam.bNoRandom
+  local nRatio = tbAwardParam.nRatio
+  local bEnableMonthCardIgnore = tbAwardParam.bEnableMonthCardIgnore
+  local tbAwards = {}
+  local szTimeFrameStart, szTimeFrameEnd
+  local tbItemExtParams = tbAwardParam.tbItemExtParams or {}
+  for _, tbGroup in pairs(self.tbAllAwards[nAwardId].tbRandAwards[nAwardKey]) do
+    if bNoRandom then
+      for _, tbInfo in pairs(tbGroup) do
+        szTimeFrameStart = tbInfo.TimeFrameStart or ""
+        szTimeFrameEnd = tbInfo.TimeFrameEnd or ""
+        if self:CheckTimeFrame(szTimeFrameStart, szTimeFrameEnd, tbItemExtParams.nAwardTime) then
+          local tbOneAward = self:FormatAward(tbInfo, tbAwardParam)
+          local bCountType = self:IsCountType(tbInfo)
+          if bCountType then
+            local nCountIndex = Player.AwardTypeCountIndex[Player.AwardType[tbOneAward[1]]]
+            tbOneAward[nCountIndex] = math.floor(tbOneAward[nCountIndex] * nRatio)
+          end
+          table.insert(tbAwards, tbOneAward)
+        end
+      end
+    else
+      local tbInfo
+      if bEnableMonthCardIgnore then
+        tbInfo = self:funRandGroupAwardNoMonthCard(tbGroup, tbAwardParam)
+      else
+        tbInfo = self:funRandGroupAward(tbGroup, tbAwardParam)
+      end
+      if tbInfo then
+        local tbOneAward = self:FormatAward(tbInfo, tbAwardParam)
+        local bCountType = self:IsCountType(tbInfo)
+        if bCountType then
+          local nCountIndex = Player.AwardTypeCountIndex[Player.AwardType[tbOneAward[1]]]
+          tbOneAward[nCountIndex] = math.floor(tbOneAward[nCountIndex] * nRatio)
+        end
+        table.insert(tbAwards, tbOneAward)
+      end
+    end
+  end
+  return tbAwards
+end
+
+function Award:CheckTimeFrame(szBegin, szEnd, nTimeFrame)
+  local bOpenBegin = true
+  local bOpenEnd = true
+  if "" ~= szBegin then
+    if nTimeFrame then
+      bOpenBegin = nTimeFrame >= Lib:CalcTimeFrameOpenDay(szBegin)
+    else
+      bOpenBegin = GetTimeFrameState(szBegin) > 0
+    end
+  end
+  if "" ~= szEnd then
+    if nTimeFrame then
+      bOpenEnd = nTimeFrame < Lib:CalcTimeFrameOpenDay(szEnd)
+    else
+      bOpenEnd = GetTimeFrameState(szEnd) <= 0
+    end
+  end
+  return bOpenBegin and bOpenEnd
+end
+
+function Award:SendAward(nPlayerId, tbAwards, tbAwardParams)
+  if not MODULE_GAMESERVER then
+    return
+  end
+  self:DynamicAwardTrans(nPlayerId, tbAwards)
+  local pPlayer = KPlayer.GetPlayerObjById(nPlayerId)
+  if not pPlayer then
+    self:__SendUnchangedAwardMailToPlayer(nPlayerId, tbAwards, tbAwardParams, false)
+  elseif pPlayer.GetFreeBagCount() <= 0 then
+    local tbTemp = Lib:CopyTB(tbAwards)
+    self:__SendUnchangedAwardMailToPlayer(nPlayerId, tbTemp, tbAwardParams, true, true)
+    for i, tbInfo in pairs(tbTemp) do
+      if string.lower(tbInfo[1]) == "item" then
+        tbTemp[i] = nil
+      end
+    end
+    self:__SendAwardToPlayer(pPlayer, tbTemp, tbAwardParams)
+  else
+    self:__SendAwardToPlayer(pPlayer, tbAwards, tbAwardParams)
+  end
+end
+
+function Award:__SendUnchangedAwardMailToPlayer(nPlayerId, tbAwards, tbAwardParams, bOnlyItemAward, bIsFullBag)
+  local tbSendAwards = {}
+  for _, tbInfo in pairs(tbAwards) do
+    if bOnlyItemAward then
+      if string.lower(tbInfo[1]) == "item" then
+        table.insert(tbSendAwards, tbInfo)
+      end
+    else
+      table.insert(tbSendAwards, tbInfo)
+    end
+  end
+  if Lib:CountTB(tbSendAwards) <= 0 then
+    return
+  end
+  local szWay = ""
+  if tbAwardParams.szMsg and "" ~= tbAwardParams.szMsg then
+    szWay = tbAwardParams.szMsg
+  elseif 0 ~= tbAwardParams.nLogReason and Env.tbLogWayGameDesc[tbAwardParams.nLogReason] and "" ~= Env.tbLogWayGameDesc[tbAwardParams.nLogReason] then
+    szWay = Env.tbLogWayGameDesc[tbAwardParams.nLogReason]
+  elseif 0 ~= tbAwardParams.nLogReason2 and Env.tbLogWayGameDesc[tbAwardParams.nLogReason2] and "" ~= Env.tbLogWayGameDesc[tbAwardParams.nLogReason2] then
+    szWay = Env.tbLogWayGameDesc[tbAwardParams.nLogReason2]
+  end
+  local szMailContent
+  if true == bIsFullBag then
+    szMailContent = "" ~= szWay and string.format("%s\239\188\136%s\239\188\137", i18n.Get(self.Terms.MailContentByBagFull), i18n.Get(szWay)) or i18n.Get(self.Terms.MailContentByBagFull)
+  else
+    szMailContent = "" ~= szWay and string.format("%s\239\188\136%s\239\188\137", i18n.Get(self.Terms.MailContent), i18n.Get(szWay)) or i18n.Get(self.Terms.MailContent)
+  end
+  tbSendAwards = self:MergetSameTypeAward(tbSendAwards)
+  local tbMail = {
+    To = nPlayerId,
+    Title = true == bIsFullBag and i18n.Get(self.Terms.MailTitleByBagFull) or i18n.Get(self.Terms.MailTitle),
+    Text = szMailContent,
+    From = true == bIsFullBag and i18n.Get(self.Terms.MailFromByBagFull) or i18n.Get(self.Terms.MailFrom),
+    tbAttach = tbSendAwards,
+    nLogReason = tbAwardParams.nLogReason
+  }
+  Mail:SendSystemMail(tbMail)
+  local pPlayer = KPlayer.GetPlayerObjById(nPlayerId)
+  if pPlayer then
+    pPlayer.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\229\183\178\230\187\161\239\188\140\231\137\169\229\147\129\233\128\154\232\191\135\233\130\174\228\187\182\229\143\145\230\148\190\239\188\129"))
+  end
+end
+
+function Award:__SendAwardToPlayer(pPlayer, tbAwards, tbAwardParams)
+  for _, tbInfo in pairs(tbAwards) do
+    local nLogReason = tbAwardParams.nLogReason
+    local nLogReason2 = tbAwardParams.nLogReason2
+    local szMsg = tbAwardParams.szMsg
+    local funAddAward = Player:GetAwardFunc(tbInfo[1])
+    Lib:CallBack({
+      self.__SendAwardMsg,
+      self,
+      pPlayer,
+      tbInfo,
+      tbAwardParams
+    })
+    funAddAward(pPlayer, nLogReason, nLogReason2, szMsg, table.unpack(tbInfo))
+  end
+  if not pPlayer.nOpenGetAwardShowTimer then
+    pPlayer.nOpenGetAwardShowTimer = Timer:Register(1, self.NotifyAwardShow, self, pPlayer.dwID)
+  end
+end
+
+function Award:NotifyAwardShow(dwId)
+  local pPlayer = KPlayer.GetPlayerObjById(dwId)
+  if not pPlayer then
+    return
+  end
+  pPlayer.nOpenGetAwardShowTimer = nil
+  pPlayer.CallClientScript("Ui:OpenGetAwardShow")
+end
+
+function Award:__SendAwardMsg(pPlayer, tbAward, tbAwardParams)
+  local tbLinkInfo
+  local nAwardType = Player.AwardType[tbAward[1]]
+  if nAwardType == Player.award_type_item or nAwardType == Player.award_type_item_Unsafe then
+    tbLinkInfo = {
+      nLinkType = ChatMgr.LinkType.Item,
+      nFaction = pPlayer.nFaction,
+      nTemplateId = tbAward[2],
+      nBodySex = pPlayer.nSex
+    }
+  end
+  local szDesc = self:GetAwardDescCount(pPlayer, tbAward, true)
+  if "" == szDesc then
+    return
+  end
+  if tbAwardParams.szMsg and "" ~= tbAwardParams.szMsg then
+    PushString(szDesc)
+    AppendString("(")
+    AppendString(tostring(tbAwardParams.szMsg))
+    AppendString(")")
+    szDesc = PopString()
+  end
+  if tbAward.bCenterMsg and 1 == tbAward.bCenterMsg then
+    local szMsg = i18n.Get(self.Terms.MsgToPlayer, szDesc)
+    pPlayer.CenterMsg(szMsg)
+  end
+  if tbAward.bSysMsg and 1 == tbAward.bSysMsg then
+    local szMsg = i18n.Get(self.Terms.MsgToPlayer, szDesc)
+    if nAwardType == Player.AwardType.ItemUnsafe and Item.TB_MEDICINE_LIST[tbAward[2]] then
+      szMsg = szDesc
+    end
+    pPlayer.CallClientScript("Ui:ShowHint", szMsg, tbLinkInfo)
+  end
+  if tbAward.bTongMsg and 1 == tbAward.bTongMsg and pPlayer.dwTongId > 0 then
+    local szTongMsg = Lib:IsEmptyStr(tbAward.szTongMsg) and self.Terms.MsgToTong or tbAward.szTongMsg
+    local szMsg = i18n.Get(szTongMsg, pPlayer.szName, szDesc)
+    ChatMgr:SendSystemMsg(ChatMgr.SystemMsgType.Tong, szMsg, pPlayer.dwTongId, tbLinkInfo)
+  end
+  if tbAward.bTeamMsg and 1 == tbAward.bTeamMsg and pPlayer.dwTeamID > 0 then
+    local szTeamMsg = Lib:IsEmptyStr(tbAward.szTeamMsg) and self.Terms.MsgToTeam or tbAward.szTeamMsg
+    local szMsg = i18n.Get(szTeamMsg, pPlayer.szName, szDesc)
+    ChatMgr:SendSystemMsg(ChatMgr.SystemMsgType.Team, szMsg, pPlayer.dwTeamID, tbLinkInfo)
+  end
+  if tbAward.bAwardTips and 1 == tbAward.bAwardTips then
+    pPlayer.CallClientScript("Ui:AddShowAwards", tbAward)
+  end
+  if tbAward.bAwardMsgView and 1 == tbAward.bAwardMsgView then
+    pPlayer.CallClientScript("Ui:OpenWindow", "UIAwardMsg", tbAward)
+  end
+  Lib:CallBack({
+    self.__DealBroadcastMsg,
+    self,
+    pPlayer,
+    tbAward,
+    szDesc,
+    tbLinkInfo
+  })
+end
+
+function Award:__DealBroadcastMsg(pPlayer, tbAward, szDesc, tbLinkInfo)
+  if 1 == tbAward.bServerSystem or tbAward.bServerNotify then
+    local dwTongId = pPlayer.dwTongId
+    local tbTongData = Tong:GetTongById(dwTongId)
+    local szMsg
+    if tbTongData and not Lib:IsEmptyStr(tbAward.szServerTongMsg) then
+      szMsg = i18n.Get(tbAward.szServerTongMsg, tbTongData.szName, pPlayer.szName, szDesc)
+    else
+      szMsg = i18n.Get(tbAward.szServerMsg, pPlayer.szName, szDesc)
+    end
+    if 1 == tbAward.bServerSystem then
+      ChatMgr:SendSystemMsg(ChatMgr.SystemMsgType.System, szMsg, 0, tbLinkInfo)
+    end
+    if 1 == tbAward.bServerNotify and tbAward.nMinNotifyLv and tbAward.nMaxNotifyLv then
+      KPlayer.SendWorldNotify(tbAward.nMinNotifyLv, tbAward.nMaxNotifyLv, szMsg, 0, 1)
+    end
+  end
+  if MODULE_GAMESERVER ~= SERVER_MODE.ZONE_CLIENT then
+    return
+  end
+  if 1 == tbAward.bZoneSystem or 1 == tbAward.bCenterSystem or 1 == tbAward.bZoneNotify or 1 == tbAward.bCenterNotify then
+    local _, _, nSubIndetity = GetServerIdentity()
+    local dwTongId = pPlayer.dwTongId
+    local tbTongData = Tong:GetTongById(dwTongId)
+    local szMsg
+    if tbTongData and not Lib:IsEmptyStr(tbAward.szZCTongMsg) then
+      szMsg = i18n.Get(tbAward.szZCTongMsg, nSubIndetity, tbTongData.szName, pPlayer.szName, szDesc)
+    else
+      szMsg = i18n.Get(tbAward.szZCMsg, nSubIndetity, pPlayer.szName, szDesc)
+    end
+    if 1 == tbAward.bZoneSystem then
+      W2ZCallScript(ZONE_PURPOSE.ZONE, ZONE_MODULE.DEFAULT, "RequestGlobalCommonFunc", "SendWorldSystemMsg", ChatMgr.SystemMsgType.System, szMsg, 0, tbLinkInfo)
+    end
+    if 1 == tbAward.bCenterSystem then
+      W2ZCallScript(ZONE_PURPOSE.CENTER, ZONE_MODULE.DEFAULT, "RequestGlobalCommonFunc", "SendWorldSystemMsg", ChatMgr.SystemMsgType.System, szMsg, 0, tbLinkInfo)
+    end
+    if 1 == tbAward.bZoneNotify and tbAward.nMinNotifyLv and tbAward.nMaxNotifyLv then
+      W2ZCallScript(ZONE_PURPOSE.ZONE, ZONE_MODULE.DEFAULT, "RequestGlobalCommonFunc", "SendWorldNotify", tbAward.nMinNotifyLv, tbAward.nMaxNotifyLv, szMsg, 0, 1)
+    end
+    if 1 == tbAward.bCenterNotify and tbAward.nMinNotifyLv and tbAward.nMaxNotifyLv then
+      W2ZCallScript(ZONE_PURPOSE.CENTER, ZONE_MODULE.DEFAULT, "RequestGlobalCommonFunc", "SendWorldNotify", tbAward.nMinNotifyLv, tbAward.nMaxNotifyLv, szMsg, 0, 1)
+    end
+  end
+end
+
+function Award:GetAwardDescCount(pPlayer, tbAward, bUseLinkItem, bForceShowCount, nMult)
+  local nFaction = pPlayer.nFaction
+  local nFactionSect = pPlayer.nFactionSect
+  local nSex = Player:GetPlayerSex(pPlayer)
+  local nAwardType = Player.AwardType[tbAward[1]]
+  local nCount = tbAward[3] or tbAward[2]
+  local bShowCount = bForceShowCount or nCount > 1
+  nMult = nMult or 1
+  local szDesc = ""
+  if nAwardType == Player.award_type_item or nAwardType == Player.award_type_item_Unsafe or nAwardType == Player.award_type_itemshow then
+    if not Item:CheckAutoRandItem(tbAward[2]) then
+      local szItemName, _, _, nQuality = KItem.GetItemShowInfo(tbAward[2], nFaction, nFactionSect, nSex)
+      if not szItemName then
+        LogErr("KItem.GetItemShowInfo error: ", tbAward[2], debug.traceback())
+      elseif Item.TB_MEDICINE_LIST[tbAward[2]] then
+      else
+        if bUseLinkItem then
+          szItemName = string.format("<%s>", szItemName)
+        end
+        if bShowCount then
+          szDesc = string.format("%s\195\151%d", szItemName, nCount * nMult)
+        else
+          szDesc = szItemName
+        end
+      end
+    end
+  elseif nAwardType == Player.award_type_money or nAwardType == Player.award_type_tongstock then
+    local szName = Currency:GetName(tbAward[1])
+    szDesc = bShowCount and string.format("%s\195\151%d", szName, nCount * nMult) or ""
+  elseif nAwardType == Player.award_type_exp then
+    szDesc = bShowCount and string.format("%s\195\151%d", i18n.EasyGet("\231\187\143\233\170\140"), self:CalcuRealAddExp(pPlayer, nCount * nMult)) or ""
+  elseif nAwardType == Player.award_type_basicExp then
+    nCount = nCount * pPlayer.GetBaseAwardExp() * nMult
+    szDesc = bShowCount and string.format("%s\195\151%d", i18n.EasyGet("\231\187\143\233\170\140"), self:CalcuRealAddExp(pPlayer, nCount)) or ""
+  end
+  return szDesc
+end
+
+function Award:CalcuRealAddExp(pPlayer, nExp)
+  local nMaxLevel, nLowerLevel = GetMaxLevel()
+  local curExp = pPlayer.GetExp()
+  local m_nNextLevelExp = pPlayer.GetNextLevelExp()
+  local nNewExp = nExp + curExp
+  if nMaxLevel <= pPlayer.nLevel and m_nNextLevelExp <= nNewExp then
+    if curExp + nExp / 4 >= 3 * m_nNextLevelExp then
+      nExp = self:CalcuRealAddExpHelper(curExp, nExp, 3 * m_nNextLevelExp, 8, 2 * m_nNextLevelExp, 4)
+    elseif curExp + nExp / 2 >= 2 * m_nNextLevelExp then
+      nExp = self:CalcuRealAddExpHelper(curExp, nExp, 2 * m_nNextLevelExp, 4, 1 * m_nNextLevelExp, 2)
+    else
+      nExp = self:CalcuRealAddExpHelper(curExp, nExp, 1 * m_nNextLevelExp, 2, 0, 1)
+    end
+  elseif nExp > 0 and curExp < m_nNextLevelExp and nLowerLevel > pPlayer.nLevel and pPlayer.nLevel >= Player.nLowerExpAddOpenLevel then
+    local nPercent = Player:GetLevelExpAdditionPercent(nLowerLevel - pPlayer.nLevel)
+    if nPercent > 0 then
+      nExp = nExp + math.floor(nExp * nPercent / 100)
+    end
+  end
+  return nExp
+end
+
+function Award:CalcuRealAddExpHelper(curExp, nCurAddExp, nNextNLevelExp, nDenominator, nNextMLevelExp, nMDenominator)
+  if nNextNLevelExp <= curExp then
+    return math.floor(nCurAddExp / nDenominator)
+  end
+  local nChangeExp = nNextNLevelExp - curExp
+  local nExtResidue = nCurAddExp - nChangeExp * nMDenominator
+  return math.floor(nChangeExp + nExtResidue / nDenominator)
+end
+
+function Award:IsCountType(tbAwardInfo)
+  local nAwardType = Player.AwardType[tbAwardInfo.AwardType]
+  return not Player.NonDataAwardType[nAwardType]
+end
+
+function Award:FormatAward(tbAwardInfo, tbAwardParam)
+  local nCount = 0
+  if tbAwardInfo.Count then
+    nCount = tbAwardInfo.Count
+  elseif tbAwardInfo.CountMin == tbAwardInfo.CountMax then
+    nCount = tbAwardInfo.CountMax
+  else
+    nCount = MathRandom(tbAwardInfo.CountMin, tbAwardInfo.CountMax)
+  end
+  local tbFormatedAward = {}
+  local nAwardType = Player.AwardType[tbAwardInfo.AwardType]
+  if nAwardType == Player.award_type_title_special then
+    tbFormatedAward = {
+      tbAwardInfo.AwardType,
+      tbAwardInfo.AwardSubType,
+      nCount + GetTime()
+    }
+  elseif nAwardType == Player.award_type_item or nAwardType == Player.award_type_item_Unsafe then
+    local tbItemExtParams = Lib:CopyTB(tbAwardParam.tbItemExtParams)
+    if not tbItemExtParams.nItemTimeOut then
+      if type(tbAwardInfo.TimeOut) == "number" and 0 ~= tbAwardInfo.TimeOut then
+        tbItemExtParams.nItemTimeOut = tbAwardInfo.TimeOut + GetTime()
+      end
+      if type(tbAwardInfo.TimeOut) == "string" and tbAwardInfo.TimeOut ~= "" then
+        tbItemExtParams.nItemTimeOut = tbAwardInfo.TimeOut
+      end
+      if not tbItemExtParams.nItemTimeOut then
+        local timeOut = Item:GetItemDefaultItemOut(tbAwardInfo.AwardSubType)
+        if -1 ~= timeOut then
+          tbItemExtParams.nItemTimeOut = timeOut
+        end
+      end
+    end
+    if tbAwardInfo.BindType then
+      tbItemExtParams.nBindType = tbAwardInfo.BindType
+    end
+    tbFormatedAward = {
+      tbAwardInfo.AwardType,
+      tbAwardInfo.AwardSubType,
+      nCount,
+      tbItemExtParams
+    }
+  elseif 2 == Player.AwardTypeCountIndex[nAwardType] then
+    tbFormatedAward = {
+      tbAwardInfo.AwardType,
+      nCount
+    }
+  else
+    tbFormatedAward = {
+      tbAwardInfo.AwardType,
+      tbAwardInfo.AwardSubType,
+      nCount
+    }
+  end
+  tbFormatedAward.bCenterMsg = tbAwardInfo.bCenterMsg
+  tbFormatedAward.bSysMsg = tbAwardInfo.bSysMsg
+  tbFormatedAward.bTongMsg = tbAwardInfo.bTongMsg
+  tbFormatedAward.bTeamMsg = tbAwardInfo.bTeamMsg
+  tbFormatedAward.bAwardTips = tbAwardInfo.bAwardTips
+  tbFormatedAward.bFlyTips = tbAwardInfo.bFlyTips
+  tbFormatedAward.bZoneSystem = tbAwardInfo.bZoneSystem
+  tbFormatedAward.bCenterSystem = tbAwardInfo.bCenterSystem
+  tbFormatedAward.bZoneNotify = tbAwardInfo.bZoneNotify
+  tbFormatedAward.bCenterNotify = tbAwardInfo.bCenterNotify
+  tbFormatedAward.szZCMsg = tbAwardInfo.szZCMsg
+  tbFormatedAward.szZCTongMsg = tbAwardInfo.szZCTongMsg
+  tbFormatedAward.nMinNotifyLv = tbAwardInfo.nMinNotifyLv
+  tbFormatedAward.nMaxNotifyLv = tbAwardInfo.nMaxNotifyLv
+  tbFormatedAward.bServerSystem = tbAwardInfo.bServerSystem
+  tbFormatedAward.bServerNotify = tbAwardInfo.bServerNotify
+  tbFormatedAward.szServerMsg = tbAwardInfo.szServerMsg
+  tbFormatedAward.szServerTongMsg = tbAwardInfo.szServerTongMsg
+  tbFormatedAward.szTongMsg = tbAwardInfo.szTongMsg
+  tbFormatedAward.szTeamMsg = tbAwardInfo.szTeamMsg
+  if tbAwardParam.bRandRate then
+    tbFormatedAward.nRandRate = math.floor(tbAwardInfo.RandRate * 100 / self.MaxRandValue)
+  end
+  return tbFormatedAward
+end
+
+function Award:FormatAward1(tbAward, tbAwardParam)
+  tbAwardParam = tbAwardParam or {}
+  self:GenerateDefaultAwardParam(tbAwardParam)
+  local bFormatedAward = true
+  for _, tbInfo in ipairs(tbAward) do
+    local szType = tbInfo[1]
+    local nAwardType = Player.AwardType[szType]
+    if nAwardType ~= Player.award_type_item and nAwardType ~= Player.award_type_item_Unsafe and nAwardType ~= Player.award_type_title and nAwardType ~= Player.award_type_title_special and nAwardType ~= Player.award_type_partner and 0 ~= tbInfo[2] then
+      bFormatedAward = false
+      break
+    end
+  end
+  if bFormatedAward then
+    return tbAward
+  end
+  local tbFormatedAward = {}
+  for _, tbInfo in ipairs(tbAward) do
+    local szType = tbInfo[1]
+    local nAwardType = Player.AwardType[szType]
+    local tbTemp = {}
+    if nAwardType == Player.award_type_item or nAwardType == Player.award_type_item_Unsafe then
+      tbTemp[1] = szType
+      tbTemp[2] = tbInfo[2]
+      tbTemp[3] = tbInfo[3]
+      tbTemp[4] = tbInfo[4]
+    elseif nAwardType == Player.award_type_add_timetitle or nAwardType == Player.award_type_title or nAwardType == Player.award_type_title_special or nAwardType == Player.award_type_partner then
+      tbTemp[1] = szType
+      tbTemp[2] = tbInfo[2]
+      tbTemp[3] = tbInfo[3]
+    else
+      tbTemp[1] = szType
+      tbTemp[2] = 0
+      tbTemp[3] = tbInfo[2]
+      tbTemp[4] = tbInfo[3]
+    end
+    tbTemp.bCenterMsg = tbInfo.bCenterMsg
+    tbTemp.bSysMsg = tbInfo.bSysMsg
+    tbTemp.bTongMsg = tbInfo.bTongMsg
+    tbTemp.bTeamMsg = tbInfo.bTeamMsg
+    tbTemp.bAwardTips = tbInfo.bAwardTips
+    tbTemp.bFlyTips = tbInfo.bFlyTips
+    table.insert(tbFormatedAward, tbTemp)
+  end
+  tbFormatedAward = self:MergetSameTypeAward(tbFormatedAward)
+  return tbFormatedAward
+end
+
+function Award:GetAwardJson(tbAwards)
+  local tbJson = {}
+  local nItemIdx = 1
+  for i, tbAward in ipairs(tbAwards) do
+    local nAwardType = Player.AwardType[tbAward[1]]
+    if 3 == Player.AwardTypeCountIndex[nAwardType] then
+      tbJson["item" .. nItemIdx] = {
+        id = tbAward[2],
+        num = tbAward[3]
+      }
+      nItemIdx = nItemIdx + 1
+    elseif 2 == Player.AwardTypeCountIndex[nAwardType] then
+      tbJson[tbAward[1]] = {
+        num = tbAward[2]
+      }
+    end
+  end
+  local szJson = Lib:EncodeJson(tbJson)
+  return szJson
+end
+
+function Award:GenerateDefaultAwardParam(tbAwardParam)
+  tbAwardParam.szMsg = tbAwardParam.szMsg or ""
+  tbAwardParam.nRatio = tbAwardParam.nRatio or 1
+  tbAwardParam.nLogReason = tbAwardParam.nLogReason or 0
+  tbAwardParam.nLogReason2 = tbAwardParam.nLogReason2 or 0
+  tbAwardParam.tbItemExtParams = tbAwardParam.tbItemExtParams or {}
+  tbAwardParam.bNoRandom = tbAwardParam.bNoRandom or false
+  tbAwardParam.bNotMerge = tbAwardParam.bNotMerge or false
+  tbAwardParam.bRandRate = tbAwardParam.bRandRate or false
+end
+
+function Award:GetLevelAwardKey(nLevel)
+  return math.floor(nLevel / 10) + 1
+end
+
+function Award:SaveLastAwards(tbAwards)
+  self.tbLastAwards = tbAwards or {}
+end
+
+function Award:FetchLastAwards()
+  local tbRet = Lib:CopyTB(self.tbLastAwards or {})
+  return tbRet
+end
+
+function Award:GetAwardListForMBILog(tbAwards, bRetMap, tbSpMoneyList)
+  local tbMoney = {}
+  local tbItem = {}
+  local nItemIt = 1
+  local tbSpMoneySet = tbSpMoneyList and Lib:ListToSet(tbSpMoneyList) or nil
+  for _, tbInfo in pairs(tbAwards) do
+    local szAwardType = tbInfo[1]
+    local nCntIdx = Player.AwardTypeCountIndex[Player.AwardType[szAwardType]]
+    if Player.AwardType[szAwardType] == Player.award_type_money and (not tbSpMoneySet or tbSpMoneySet[szAwardType]) then
+      if bRetMap then
+        tbMoney[szAwardType] = tbInfo[nCntIdx]
+      else
+        table.insert(tbMoney, szAwardType)
+        table.insert(tbMoney, tbInfo[nCntIdx])
+      end
+    elseif bRetMap then
+      local szKey = "award" .. nItemIt
+      tbItem[szKey] = {}
+      tbItem[szKey].type = szAwardType
+      tbItem[szKey].num = tbInfo[nCntIdx]
+      if 3 == nCntIdx then
+        tbItem[szKey].id = tbInfo[nCntIdx - 1]
+      else
+        tbItem[szKey].id = szAwardType
+      end
+      nItemIt = nItemIt + 1
+    else
+      if 3 == nCntIdx then
+        table.insert(tbItem, tbInfo[nCntIdx - 1])
+      else
+        table.insert(tbItem, szAwardType)
+      end
+      table.insert(tbItem, tbInfo[nCntIdx])
+    end
+  end
+  return tbMoney, tbItem
+end
+
+function Award:GetAllAwardNoRand(nAwardId, nAwardKey, tbAwardParam)
+  tbAwardParam = tbAwardParam or {}
+  tbAwardParam.bNoRandom = true
+  self:GenerateDefaultAwardParam(tbAwardParam)
+  return self:GetAward(nAwardId, nAwardKey, tbAwardParam)
+end
+
+function Award:GetAllAwardNoRandExt(nItemTemplateId, tbItemExtParams)
+  local nAwardId = KItem.GetItemExtParam(nItemTemplateId, 1)
+  local nAwardKey = KItem.GetItemExtParam(nItemTemplateId, 2)
+  if nAwardId <= 0 or nAwardKey <= 0 then
+    LogErr("Award:GetAllAwardNoRandExt Error ", nItemTemplateId, nAwardId, nAwardKey)
+    return
+  end
+  local tbAwardParam = {}
+  tbAwardParam.tbItemExtParams = tbItemExtParams
+  tbAwardParam.bNoRandom = true
+  self:GenerateDefaultAwardParam(tbAwardParam)
+  return Award:GetAllAwardNoRand(nAwardId, nAwardKey, tbAwardParam)
+end
+
+function Award:DropAward(pPlayer, nPosX, nPosY, szMsg, nAwardId, nAwardKey, nLogReason, nLogReason2, bNotMerge, tbItemExtParams)
+  self:SaveLastAwards({})
+  if not nLogReason then
+    LogErr("Award:DropAward warn no logWay", debug.traceback())
+  end
+  if not pPlayer then
+    LogErr("Award:DropAward error no player:", debug.traceback())
+    return
+  end
+  local tbAwardInfo = self:GetAwardIdInfo(nAwardId)
+  if not tbAwardInfo or tbAwardInfo.IsAdd2Auction then
+    LogErr("Award:DropAward error, Kin Award can't send to player. dwId, AwardId, AwardKey = ", pPlayer.dwID, nAwardId, nAwardKey, debug.traceback())
+    return
+  end
+  if Forbid:IsForbidAward(pPlayer) then
+    Forbid:SendForbidAwardNotice(pPlayer)
+    return
+  end
+  local tbAwardParam = {}
+  tbAwardParam.nLogReason = nLogReason
+  tbAwardParam.nLogReason2 = nLogReason2
+  tbAwardParam.bNotMerge = bNotMerge
+  tbAwardParam.tbItemExtParams = tbItemExtParams
+  self:GenerateDefaultAwardParam(tbAwardParam)
+  local tbAwards = self:GetAward(nAwardId, nAwardKey, tbAwardParam)
+  self:SaveLastAwards(tbAwards)
+  if not next(tbAwards) then
+    return
+  end
+  self:SendAward(pPlayer.dwID, tbAwards, tbAwardParam)
+  Log("player add award", pPlayer.szName, pPlayer.dwID, nAwardId, nAwardKey, nLogReason, nLogReason2)
+  pPlayer.CallClientScript("Ui:DropAward", nPosX, nPosY, tbAwards)
+  pPlayer.OnEvent("OnNpcDrop", tbAwards)
+  return true
+end
+
+function Award:GetAwardIdInfo(nAwardId)
+  if not self.tbAllAwards[nAwardId] then
+    return
+  end
+  return self.tbAllAwards[nAwardId].tbBaseInfo
+end
+
+function Award:GetAwardIdName(nAwardId)
+  local tbInfo = self:GetAwardIdInfo(nAwardId)
+  return tbInfo and tbInfo.Name or ""
+end
+
+function Award:CommonSendAward(pPlayer, nAwardId, nAwardKey, nItemTempId, szFromItemName, tbItemExtParams, bEnableMonthCardIgnore)
+  if not nAwardKey or nAwardKey <= 0 then
+    nAwardKey = self:GetLevelAwardKey(pPlayer.nLevel)
+  end
+  tbItemExtParams = tbItemExtParams or {}
+  if not (nAwardId and nAwardKey) or nAwardId <= 0 or nAwardKey <= 0 then
+    LogErr("[Award:CommonSendAward] AwardId or AwardKey not configured", pPlayer.dwID, nAwardId, nAwardKey, nItemTempId, debug.traceback())
+    return
+  end
+  Log("[Award:CommonSendAward] PlayerId, nAwardId, nAwardKey, nItemTempId, szFromItemName, nAwardTime = ", nAwardId, nAwardKey, nItemTempId, szFromItemName, tbItemExtParams.nAwardTime)
+  local tbAwardParam = {}
+  tbAwardParam.szMsg = szFromItemName
+  tbAwardParam.nLogReason = Env.LogWay_RandomItem
+  tbAwardParam.nLogReason2 = nItemTempId or 0
+  tbAwardParam.tbItemExtParams = tbItemExtParams
+  tbAwardParam.bEnableMonthCardIgnore = bEnableMonthCardIgnore
+  self:GenerateDefaultAwardParam(tbAwardParam)
+  local nRet = self:GiveAward(pPlayer.dwID, nAwardId, nAwardKey, tbAwardParam)
+  if not nRet then
+    LogErr("[Award:CommonSendAward] SendRandItemAward failed, PlayerId, nAwardId, nAwardKey, nItemTempId, nAwardTime = ", pPlayer.dwID, nAwardId, nAwardKey, nItemTempId, tbItemExtParams.nAwardTime, debug.traceback())
+  end
+  return nRet and true == nRet and 1 or 0
+end
+
+function Award:SendAutoUseAward(pPlayer, nAwardId, nAwardKey, nItemTempId, szFromItemName, bNotShowTips, bNotShowMsg, bNotShowHint, tbItemExtParams, nLogReason, nLogReason2)
+  local tbAwardParam = {}
+  tbAwardParam.szMsg = szFromItemName
+  tbAwardParam.nLogReason = nLogReason or 0
+  tbAwardParam.nLogReason2 = nItemTempId or 0
+  tbAwardParam.tbItemExtParams = tbItemExtParams
+  self:GenerateDefaultAwardParam(tbAwardParam)
+  local tbAwards = self:GetAward(nAwardId, nAwardKey, tbAwardParam)
+  self:SaveLastAwards(tbAwards)
+  if not next(tbAwards) then
+    return true, tbAwards
+  end
+  for _, tbAward in pairs(tbAwards) do
+    if Player.AwardType[tbAward[1]] == Player.award_type_item then
+      local bAutoUse = Item:CheckAutoRandItem(tbAward[2])
+      if bAutoUse then
+        LogErr("Award:SendAutoUseAward error AutoUse Item create a RandomItem: nAwardId, nAwardKey, nItemTempId = ", nAwardId, nAwardKey, nItemTempId, szFromItemName, debug.traceback())
+        return false
+      end
+    end
+  end
+  self:SendAward(pPlayer.dwID, tbAwards, tbAwardParam)
+  Log("Award:SendAutoUseAward player add award", pPlayer.szName, pPlayer.dwID, nAwardId, nAwardKey, Env.LogWay_RandomItem, nAwardId)
+  return true, tbAwards
+end
+
+function Award:SendHint(pPlayer, tbAwards, szMsg)
+  local tbAwardParam = {}
+  tbAwardParam.szMsg = szMsg
+  for _, tbInfo in pairs(tbAwards) do
+    self:__SendAwardMsg(pPlayer, tbInfo, tbAwardParam)
+  end
+end
+
+function Award:SendUnchangedAwardMailToPlayer(dwId, szTitle, szContent, szFrom, tbAwards, nLogReason, tbParams)
+  if not dwId or dwId <= 0 or not next(tbAwards) then
+    LogErr("Award:SendFixAwardMailToPlayer error. dwId, Awards = ", dwId, Lib:Val2Str(tbAwards), debug.traceback())
+    return
+  end
+  local tbMail = {
+    To = dwId,
+    Title = szTitle or "",
+    Text = szContent or "",
+    From = szFrom or "",
+    tbAttach = tbAwards,
+    nLogReason = nLogReason,
+    tbParams = tbParams
+  }
+  Mail:SendSystemMail(tbMail)
+  return true
+end
+
+local function BasicExpTans(nPlayerId, tbAward)
+  local tbRoleStayInfo = KPlayer.GetRoleStayInfo(nPlayerId)
+  if not tbRoleStayInfo then
+    return
+  end
+  local nBasicExp = PlayerLevelSetting:GetLevelBasicExp(tbRoleStayInfo.nLevel)
+  if not nBasicExp then
+    return
+  end
+  if not tbAward[3] or 0 == tbAward[3] then
+    tbAward[2] = tbAward[2] * nBasicExp
+  else
+    tbAward[3] = tbAward[3] * nBasicExp
+  end
+  tbAward[1] = "Exp"
+end
+
+local tbCheckTypeMap = {BasicExp = BasicExpTans}
+
+function Award:DynamicAwardTrans(nPlayerId, tbAwards)
+  for nIndex, tbAward in ipairs(tbAwards) do
+    if tbCheckTypeMap[tbAward[1]] then
+      tbCheckTypeMap[tbAward[1]](nPlayerId, tbAward)
+    end
+  end
+end
+
+function Award:__LoadFile_AwardList()
+  self.tbAllAwards = {}
+  self.tbAwardsItemList = {}
+  local tbConfig = Lib:LoadTabFileEx(self.FILE_AWARDLIST, "dsss", "", {
+    "AwardId",
+    "FixAward",
+    "RandAward",
+    "Name"
+  })
+  for _, tbInfo in pairs(tbConfig) do
+    local nAwardId = tbInfo.AwardId
+    local szFixAward = tbInfo.FixAward or ""
+    local szRandAward = tbInfo.RandAward or ""
+    assert(not self.tbAllAwards[nAwardId], string.format("awardlist.tab awardId:%s repeat", nAwardId))
+    assert("" ~= szFixAward or "" ~= szRandAward, string.format("awardlist.tab awardId:%s fix and rand award both empty", nAwardId))
+    self.tbAllAwards[nAwardId] = {}
+    self.tbAllAwards[nAwardId].tbBaseInfo = tbInfo
+    if "" ~= szFixAward then
+      self:__LoadFile_FixAward(nAwardId, szFixAward)
+    end
+    if "" ~= szRandAward then
+      self:__LoadFile_RandAward(nAwardId, szRandAward)
+    end
+  end
+  self.tbAllAwards = SetReadOnly(self.tbAllAwards)
+end
+
+function Award:__LoadFile_FixAward(nAwardId, szFileName)
+  do
+    local szFile = string.format("%s/%s", self.FILEDIR_AWARDDETAIL, szFileName)
+    local tbFile = Lib:LoadTabFile(szFile)
+    if not tbFile then
+      Log("Award ", string.format("no File, nAwardId = %s, szFileName = %s", nAwardId, szFileName))
+    end
+    for _, tbInfo in pairs(tbFile) do
+      assert(tbInfo.Count, string.format("no Count field, maybe fix Award and rand Award mistake, nAwardId = %s, szFileName = %s", nAwardId, szFileName))
+      break
+    end
+  end
+  self.tbAllAwards[nAwardId].tbFixAwards = {}
+  local szFile = string.format("%s/%s", self.FILEDIR_AWARDDETAIL, szFileName)
+  local tbConfig = Lib:LoadTabFileEx(szFile, "dsddssddddddsddddddddssddssss", "", {
+    "Key",
+    "AwardType",
+    "AwardSubType",
+    "Count",
+    "TimeFrameStart",
+    "TimeFrameEnd",
+    "bCenterMsg",
+    "bSysMsg",
+    "bTongMsg",
+    "bTeamMsg",
+    "bAwardTips",
+    "bFlyTips",
+    "TimeOut",
+    "BindType",
+    "IgnoreNoMonthCard",
+    "bZoneSystem",
+    "bCenterSystem",
+    "bZoneNotify",
+    "bCenterNotify",
+    "nMinNotifyLv",
+    "nMaxNotifyLv",
+    "szZCMsg",
+    "szZCTongMsg",
+    "bServerSystem",
+    "bServerNotify",
+    "szServerMsg",
+    "szServerTongMsg",
+    "szTongMsg",
+    "szTeamMsg"
+  }, 0, 2, false)
+  if not tbConfig or Lib:CountTB(tbConfig) <= 0 then
+    LogWarn(string.format("empty file:%s, %d", szFile, nAwardId))
+    return
+  end
+  for _, tbInfo in pairs(tbConfig) do
+    local nTimeOut = tonumber(tbInfo.TimeOut)
+    if nTimeOut then
+      tbInfo.TimeOut = nTimeOut
+    end
+    local Key = tbInfo.Key
+    self.tbAllAwards[nAwardId].tbFixAwards[Key] = self.tbAllAwards[nAwardId].tbFixAwards[Key] or {}
+    table.insert(self.tbAllAwards[nAwardId].tbFixAwards[Key], tbInfo)
+    if tbInfo.AwardType == "Item" then
+      if not self.tbAwardsItemList[szFileName] then
+        self.tbAwardsItemList[szFileName] = {}
+      end
+      table.insert(self.tbAwardsItemList[szFileName], tbInfo.AwardSubType)
+    end
+  end
+end
+
+function Award:__LoadFile_RandAward(nAwardId, szFileName)
+  do
+    local szFile = string.format("%s/%s", self.FILEDIR_AWARDDETAIL, szFileName)
+    local tbFile = Lib:LoadTabFile(szFile)
+    if not tbFile then
+      Log("Award ", string.format("no File, nAwardId = %s, szFileName = %s", nAwardId, szFileName))
+    end
+    for _, tbInfo in pairs(tbFile) do
+      assert(tbInfo.Group, string.format("no Group field, maybe fix Award and rand Award mistake, nAwardId = %s, szFileName = %s", nAwardId, szFileName))
+      break
+    end
+  end
+  self.tbAllAwards[nAwardId].tbRandAwards = {}
+  local szFile = string.format("%s/%s", self.FILEDIR_AWARDDETAIL, szFileName)
+  local tbConfig = Lib:LoadTabFileEx(szFile, "ddsddddssddddddsddddddddssddssss", "", {
+    "Key",
+    "Group",
+    "AwardType",
+    "AwardSubType",
+    "CountMin",
+    "CountMax",
+    "RandRate",
+    "TimeFrameStart",
+    "TimeFrameEnd",
+    "bCenterMsg",
+    "bSysMsg",
+    "bTongMsg",
+    "bTeamMsg",
+    "bAwardTips",
+    "bFlyTips",
+    "TimeOut",
+    "BindType",
+    "IgnoreNoMonthCard",
+    "bZoneSystem",
+    "bCenterSystem",
+    "bZoneNotify",
+    "bCenterNotify",
+    "nMinNotifyLv",
+    "nMaxNotifyLv",
+    "szZCMsg",
+    "szZCTongMsg",
+    "bServerSystem",
+    "bServerNotify",
+    "szServerMsg",
+    "szServerTongMsg",
+    "szTongMsg",
+    "szTeamMsg"
+  }, 0, 2, false)
+  if not tbConfig or Lib:CountTB(tbConfig) <= 0 then
+    LogWarn(string.format("empty file:%s, %d", szFile, nAwardId))
+    return
+  end
+  for _, tbInfo in pairs(tbConfig) do
+    local nTimeOut = tonumber(tbInfo.TimeOut)
+    if nTimeOut then
+      tbInfo.TimeOut = nTimeOut
+    end
+    local Key = tbInfo.Key
+    local Group = tbInfo.Group
+    self.tbAllAwards[nAwardId].tbRandAwards[Key] = self.tbAllAwards[nAwardId].tbRandAwards[Key] or {}
+    self.tbAllAwards[nAwardId].tbRandAwards[Key][Group] = self.tbAllAwards[nAwardId].tbRandAwards[Key][Group] or {}
+    table.insert(self.tbAllAwards[nAwardId].tbRandAwards[Key][Group], tbInfo)
+    if tbInfo.AwardType == "Item" then
+      if not self.tbAwardsItemList[szFileName] then
+        self.tbAwardsItemList[szFileName] = {}
+      end
+      table.insert(self.tbAwardsItemList[szFileName], tbInfo.AwardSubType)
+    end
+  end
+end
+
+function Award:LoadFile()
+  self:__LoadFile_AwardList()
+end
+
+function Award:AwardListCheck()
+  local tbAwardsList = {}
+  local tbConfig = Lib:LoadTabFileEx(self.FILE_AWARDLIST, "dsss", "", {
+    "AwardId",
+    "FixAward",
+    "RandAward",
+    "Name"
+  })
+  for _, tbInfo in pairs(tbConfig) do
+    local szFixAward = tbInfo.FixAward or ""
+    local szRandAward = tbInfo.RandAward or ""
+    if "" ~= szFixAward then
+      local szFile = string.format("%s/%s", self.FILEDIR_AWARDDETAIL, szFixAward)
+      local tbCheck = Lib:LoadTabFileEx(szFile, "ssssssddddddssss", "", {
+        "Key",
+        "AwardType",
+        "AwardSubType",
+        "Count",
+        "TimeFrameStart",
+        "TimeFrameEnd",
+        "bZoneSystem",
+        "bCenterSystem",
+        "bZoneNotify",
+        "bCenterNotify",
+        "bServerSystem",
+        "bServerNotify",
+        "szZCMsg",
+        "szZCTongMsg",
+        "szServerMsg",
+        "szServerTongMsg"
+      }, 0, 2, false)
+      for _, tbCheckInfo in pairs(tbCheck) do
+        if not tbAwardsList[szFile] then
+          tbAwardsList[szFile] = {}
+        end
+        table.insert(tbAwardsList[szFile], tbCheckInfo)
+      end
+    end
+    if "" ~= szRandAward then
+      local szFile = string.format("%s/%s", self.FILEDIR_AWARDDETAIL, szRandAward)
+      local tbCheck = Lib:LoadTabFileEx(szFile, "ssssssssddddddssss", "", {
+        "Key",
+        "Group",
+        "AwardType",
+        "AwardSubType",
+        "CountMin",
+        "CountMax",
+        "TimeFrameStart",
+        "TimeFrameEnd",
+        "bZoneSystem",
+        "bCenterSystem",
+        "bZoneNotify",
+        "bCenterNotify",
+        "bServerSystem",
+        "bServerNotify",
+        "szZCMsg",
+        "szZCTongMsg",
+        "szServerMsg",
+        "szServerTongMsg"
+      }, 0, 2, false)
+      for _, tbCheckInfo in pairs(tbCheck) do
+        if not tbAwardsList[szFile] then
+          tbAwardsList[szFile] = {}
+        end
+        table.insert(tbAwardsList[szFile], tbCheckInfo)
+      end
+    end
+  end
+  self:RegisterAwardTypeAndAwardSubType(tbAwardsList)
+  self:RegisterAwardTimeFrameCheck(tbAwardsList)
+  self:RegisterAwardWorldNotifyCheck(tbAwardsList)
+end
+
+function Award:RegisterAwardWorldNotifyCheck(tbAwardsList)
+  Validator:Register(function()
+    for szFileName, tbCheckRows in pairs(tbAwardsList) do
+      for nRow, tbCheckInfo in ipairs(tbCheckRows) do
+        if (1 == tbCheckInfo.bZoneSystem or 1 == tbCheckInfo.bCenterSystem or 1 == tbCheckInfo.bZoneNotify or 1 == tbCheckInfo.bCenterNotify) and (Lib:IsEmptyStr(tbCheckInfo.szZCMsg) or Lib:IsEmptyStr(tbCheckInfo.szZCTongMsg)) then
+          error(string.format("Award config error detected. Tab file name:%s, Row:%d, Key:%s, Group:%s, AwardNotify check failure!", szFileName, nRow + 1, tbCheckInfo.Key, tbCheckInfo.Group))
+          return false
+        end
+        if (1 == tbCheckInfo.bServerSystem or 1 == tbCheckInfo.bServerNotify) and (Lib:IsEmptyStr(tbCheckInfo.szServerMsg) or Lib:IsEmptyStr(tbCheckInfo.szServerTongMsg)) then
+          error(string.format("Award config error detected. Tab file name:%s, Row:%d, Key:%s, Group:%s, AwardNotify check failure!", szFileName, nRow + 1, tbCheckInfo.Key, tbCheckInfo.Group))
+          return false
+        end
+      end
+    end
+    return true
+  end)
+end
+
+function Award:RegisterAwardTimeFrameCheck(tbAwardsList)
+  local szFile = "Setting/timeframe.tab"
+  local tbValidTimeFrame = Lib:LoadTabFileEx(szFile, "s", "", {"Event"})
+  Validator:Register(function()
+    for szFileName, tbCheckRows in pairs(tbAwardsList) do
+      for nRow, tbCheckInfo in ipairs(tbCheckRows) do
+        local bValidStart = self:TimeFrameValidCheck(tbValidTimeFrame, tbCheckInfo.TimeFrameStart)
+        local bValidEnd = self:TimeFrameValidCheck(tbValidTimeFrame, tbCheckInfo.TimeFrameEnd)
+        if not bValidStart or not bValidEnd then
+          if not bValidStart then
+            error(string.format("Award config error detected. Tab file name:%s, Row:%d, Key:%s, Group:%s, TimeFrame \"%s\" is not valid!", szFileName, nRow + 1, tbCheckInfo.Key, tbCheckInfo.Group, tbCheckInfo.TimeFrameStart))
+          end
+          if not bValidEnd then
+            error(string.format("Award config error detected. Tab file name:%s, Row:%d, Key:%s, Group:%s, TimeFrame \"%s\" is not valid!", szFileName, nRow + 1, tbCheckInfo.Key, tbCheckInfo.Group, tbCheckInfo.TimeFrameEnd))
+          end
+          return false
+        end
+      end
+    end
+    return true
+  end)
+end
+
+function Award:TimeFrameValidCheck(tbValidTimeFrame, szTimeFrame)
+  if Lib:IsEmptyStr(szTimeFrame) then
+    return true
+  end
+  local bValid = false
+  for _, tbInfo in ipairs(tbValidTimeFrame) do
+    if szTimeFrame == tbInfo.Event then
+      bValid = true
+      break
+    end
+  end
+  return bValid
+end
+
+function Award:RegisterAwardTypeAndAwardSubType(tbAwardsList)
+  Validator:Register(function()
+    for szFileName, tbCheckRows in pairs(tbAwardsList) do
+      for _, tbCheckInfo in ipairs(tbCheckRows) do
+        if Lib:IsEmptyStr(tbCheckInfo.AwardType) then
+          error("Award config error detected. Tab file name:" .. szFileName .. ", no AwardType, Key: " .. tbCheckInfo.Key)
+          return false
+        end
+        if tbCheckInfo.AwardType == "Item" and Lib:IsEmptyStr(tbCheckInfo.AwardSubType) then
+          error("Award config error detected. Tab file name:" .. szFileName .. ", no AwardSubType, Key: " .. tbCheckInfo.Key)
+          return false
+        end
+      end
+    end
+    return true
+  end)
+end
+
+function Award:AwardListItemCheck()
+  local tbItemFilesInfo = Lib:LoadTabFileEx("Setting/Item/ItemSetting.tab", "s", "FilePath", {"FilePath"})
+  local tbItemId = {}
+  assert(tbItemFilesInfo)
+  for path, emptyValue in pairs(tbItemFilesInfo) do
+    local tbEachFileItemInfo = Lib:LoadTabFileEx(path, "dss", "TemplateId", {
+      "TemplateId",
+      "Name",
+      "Intro"
+    })
+    for _, v in pairs(tbEachFileItemInfo) do
+      if v.TemplateId then
+        tbItemId[v.TemplateId] = 1
+      end
+    end
+  end
+  Validator:Register(function()
+    for k, v in pairs(self.tbAwardsItemList) do
+      for k2, v2 in pairs(v) do
+        if not tbItemId[v2] then
+          error("Award config error detected. Tab file name:" .. k .. ", nonexist item id\239\188\154" .. v2)
+          return false
+        end
+      end
+    end
+    return true
+  end)
+end
+
+function Award:CheckItemStackHelper(tbStackList, tbList, szType, szColumnName, ...)
+  for _, tbInfo in ipairs(tbList) do
+    if tbInfo.AwardType == szType then
+      if not KItem.GetItemBaseProp(tbInfo.AwardSubType) then
+        LogErr("Award:CheckItemStackHelper item is not exist", tbInfo.AwardSubType, tbInfo[szColumnName])
+        return false
+      end
+      tbStackList[tbInfo.AwardSubType] = tbStackList[tbInfo.AwardSubType] or KItem.GetItemBaseProp(tbInfo.AwardSubType).nStackMax
+      if tbStackList[tbInfo.AwardSubType] > 1 and tbInfo[szColumnName] > tbStackList[tbInfo.AwardSubType] then
+        LogErr("Award:CheckItemStackHelper Count is too big", tbInfo.AwardSubType, tbInfo[szColumnName], tbStackList[tbInfo.AwardSubType], ...)
+        return false
+      end
+    end
+  end
+  return true
+end
+
+function Award:CheckItemStack()
+  local szType = Player.AwardType2Name[Player.award_type_item]
+  local tbStackList = {}
+  for nAwardId, tbInfo in pairs(self.tbAllAwards) do
+    for nAwardKey, tbList in pairs(tbInfo.tbFixAwards or {}) do
+      if not self:CheckItemStackHelper(tbStackList, tbList, szType, "Count", nAwardId, nAwardKey) then
+        return false
+      end
+    end
+    for nAwardKey, tbList in pairs(tbInfo.tbRandAwards or {}) do
+      for nGroup, tbGroupList in pairs(tbList) do
+        if not self:CheckItemStackHelper(tbStackList, tbGroupList, szType, "CountMax", nAwardId, nAwardKey, nGroup) then
+          return false
+        end
+      end
+    end
+  end
+  return true
+end
+
+function Award:RegisterAwardCheck()
+  Validator:Register(self.CheckItemStack, self)
+end
+
+Award:LoadFile()
+if EDITOR or MODULE_GAMESERVER and WINDOWS then
+  Award:AwardListCheck()
+  Award:AwardListItemCheck()
+  Award:RegisterAwardCheck()
+end
+
+function Award:GMAwardCheck(nAwardId, nAwardKey, nCheckNum)
+  if not Lib:IsInteger(nCheckNum) or nCheckNum <= 0 then
+    nCheckNum = 10000
+  end
+  local tbAwardsForCheck = {}
+  tbAwardsForCheck = Award:GetAwardWithTimes(nAwardId, nAwardKey, nCheckNum, {bNotMerge = true})
+  for _, tbAward in ipairs(tbAwardsForCheck) do
+    local nIndex = Player.AwardTypeCountIndex[Player.AwardType[tbAward[1]]]
+    tbAward.nCount = tbAward[nIndex]
+  end
+  tbAwardsForCheck = Award:MergetSameTypeAward(tbAwardsForCheck)
+  print(string.format("CheckNum = %d\n", nCheckNum))
+  print(string.format("%-10s\t\t%-10s\t\t%-10s\t\t%-10s\t\t%-10s\t\t%-10s\n", "Index", "ItemId", "GetNum", "AwardNumPer", "AwardSumNum", "Probability"))
+  local nItemId = 0
+  local nAwardNum = 0
+  local nAwardType = 0
+  local nGetNum = 0
+  for nIndex, tbAward in ipairs(tbAwardsForCheck) do
+    nAwardType = Player.AwardType[tbAward[1]]
+    if nAwardType == Player.award_type_item or nAwardType == Player.award_type_item_Unsafe or nAwardType == Player.award_type_itemshow then
+      nItemId = tbAward[2]
+      nAwardNum = tbAward[3]
+    elseif nAwardType == Player.award_type_money or nAwardType == Player.award_type_tongstock or nAwardType == Player.award_type_exp or nAwardType == Player.award_type_basicExp then
+      nItemId = tbAward[1]
+      nAwardNum = tbAward[2]
+    end
+    nGetNum = nAwardNum / tbAward.nCount
+    print(string.format("%-10d\t\t%-10s\t\t%-10s\t\t%-10s\t\t%-10s\t\t%-10.4f%%\n", nIndex, nItemId, nGetNum, tbAward.nCount, nAwardNum, nAwardNum / nCheckNum / tbAward.nCount * 100))
+  end
+end

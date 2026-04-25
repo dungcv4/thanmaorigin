@@ -1,0 +1,492 @@
+Shop = Shop or {}
+Shop.FASHION_PARAM = {
+  FASHIONID = 1,
+  TIMEOUT = 2,
+  GIVEFLAG = 3
+}
+Shop.tbFashionBuyType = {
+  Illegal = 0,
+  SuitWithCoupon = 1,
+  SingleWithCoupon = 2
+}
+Shop.tbCheckFashionBuyType = {
+  [0] = Shop.tbFashionBuyType.Illegal,
+  [1] = Shop.tbFashionBuyType.SuitWithCoupon,
+  [2] = Shop.tbFashionBuyType.SingleWithCoupon
+}
+Shop.tbFashionGoodRightCount = {
+  [Shop.tbFashionBuyType.Illegal] = 0,
+  [Shop.tbFashionBuyType.SingleWithCoupon] = 1,
+  [Shop.tbFashionBuyType.SuitWithCoupon] = 2
+}
+
+function Shop:LoadFashionSingle()
+  local tbSingleItemExcel = Lib:LoadTabFileEx("Setting/Appearance/AppearanceSingle.tab", "dsddsdsdssssdsssddddd", nil, {
+    "nId",
+    "szShopId",
+    "nEnable",
+    "nTemplateId",
+    "szName",
+    "nPrice",
+    "szMoneyType",
+    "nSort",
+    "szSellTimeStart",
+    "szSellTimeEnd",
+    "szNewTimeStart",
+    "szNewTimeEnd",
+    "nDiscount",
+    "szPreferentialTimeStart",
+    "szPreferentialTimeEnd",
+    "szOpenTimeFrame",
+    "nMinLevel",
+    "nShowLevel",
+    "nShowVipLevel",
+    "nRepeat",
+    "nShowType"
+  }, nil, 3, false)
+  local tbFashionShopDict = {}
+  for _, tbWare in ipairs(tbSingleItemExcel) do
+    tbFashionShopDict[tbWare.nId] = tbWare
+  end
+  local tbAllWares = {}
+  for nId, tbWare in pairs(tbFashionShopDict) do
+    local szOpenTime = tbWare.szSellTimeStart
+    local szCloseTime = tbWare.szSellTimeEnd
+    local nBeginTime, nEndTime
+    if not (not szOpenTime or Lib:IsEmptyStr(szOpenTime)) or szCloseTime and not Lib:IsEmptyStr(szCloseTime) then
+      if not Lib:IsEmptyStr(szOpenTime) and Lib:IsEmptyStr(szCloseTime) then
+        nBeginTime = Lib:GetConfigDate2Time(tonumber(szOpenTime))
+      elseif Lib:IsEmptyStr(szOpenTime) and not Lib:IsEmptyStr(szCloseTime) then
+        nBeginTime = GetServerCreateTime()
+        nEndTime = Lib:GetConfigDate2Time(tonumber(szCloseTime))
+      elseif not Lib:IsEmptyStr(szOpenTime) and not Lib:IsEmptyStr(szCloseTime) then
+        nBeginTime = Lib:GetConfigDate2Time(tonumber(szOpenTime))
+        nEndTime = Lib:GetConfigDate2Time(tonumber(szCloseTime))
+      end
+    end
+    tbWare.nBeginTime = nBeginTime
+    tbWare.nEndTime = nEndTime
+    tbWare.tbShopIds = Lib:SplitStr2Num(tbWare.szShopId, "|")
+    tbAllWares[nId] = tbWare
+  end
+  self.tbAllFashionSingleItem = SetReadOnly(tbAllWares)
+  local tbShowWares = {}
+  for _, tbWare in pairs(self.tbAllFashionSingleItem) do
+    if tbWare.szOpenTimeFrame == "" or 1 == GetTimeFrameState(tbWare.szOpenTimeFrame) then
+      tbShowWares[tbWare.nId] = tbWare
+    end
+  end
+  self.tbFashionWares = tbShowWares
+  Validator:Register(self.CheckAppearanceShopItem, self, tbSingleItemExcel)
+end
+
+function Shop:CheckAppearanceShopItem(tbSingleItemExcel)
+  local tbItemRecord = {}
+  for _, tbItem in pairs(tbSingleItemExcel) do
+    if tbItemRecord[tbItem.nId] then
+      LogErr(string.format("load AppearanceShopItem.tab failed, nId %d is duplicate", tbItem.nId))
+      return false
+    end
+    tbItemRecord[tbItem.nId] = true
+  end
+  for _, tbWare in pairs(tbSingleItemExcel) do
+    if not Item:IsExist(tbWare.nTemplateId) then
+      LogErr(string.format("load AppearanceShopItem.tab failed, nTemplateId %d not exist", tbWare.nTemplateId))
+      return false
+    end
+    if tbWare.nBeginTime and tbWare.nEndTime and tbWare.nBeginTime > tbWare.nEndTime then
+      LogErr(string.format("load AppearanceShopItem.tab failed, nId %d nBeginTime %d > nEndTime %d", tbWare.nId, tbWare.nBeginTime, tbWare.nEndTime))
+      return false
+    end
+  end
+  for _, tbWares in pairs(self.tbFashionWares) do
+    if tbWares.nDiscount > 0 and (tbWares.nDiscount >= 100 or tbWares.nDiscount < 10) then
+      LogErr(string.format("load AppearanceShopItem.tab failed, the nDiscount:%s of fashion nId:%d is illegal", tostring(tbWares.nDiscount), tbWares.nId))
+      return false
+    end
+  end
+  return true
+end
+
+function Shop:LoadFashionSuit()
+  self.tbSuitOrderedSetting = Lib:LoadTabFileEx("Setting/Appearance/AppearanceSuit.tab", "dsdssdddssssssd", nil, {
+    "nSuitId",
+    "szSuitName",
+    "nEnable",
+    "szIdGroup",
+    "szShopId",
+    "nSort",
+    "nPrice",
+    "nSuitDiscount",
+    "szMoneyType",
+    "szSuitDesc",
+    "szNewTimeStart",
+    "szNewTimeEnd",
+    "szPreferentialTimeStart",
+    "szPreferentialTimeEnd",
+    "nShowType"
+  }, nil, 3, false)
+  self.tbFashionSuit = {}
+  self.tbFashionShopId2Suit = {}
+  for _, tbSuit in ipairs(self.tbSuitOrderedSetting) do
+    tbSuit.tbGroup = {}
+    tbSuit.tbIdGroups = Lib:SplitStr2Num(tbSuit.szIdGroup, "|")
+    for index, nId in ipairs(tbSuit.tbIdGroups) do
+      tbSuit.tbGroup[index] = self:GetFashionItem(nId)
+    end
+    tbSuit.tbShopIds = Lib:SplitStr2Num(tbSuit.szShopId, "|")
+    for _, nShopId in ipairs(tbSuit.tbShopIds) do
+      if not self.tbFashionShopId2Suit[nShopId] then
+        self.tbFashionShopId2Suit[nShopId] = {}
+      end
+      table.insert(self.tbFashionShopId2Suit[nShopId], tbSuit)
+    end
+    self.tbFashionSuit[tbSuit.nSuitId] = tbSuit
+  end
+  self.tbFashionSuit = SetReadOnly(self.tbFashionSuit)
+  Validator:Register(self.CheckAppearanceSuitCfg, self)
+end
+
+function Shop:CheckAppearanceSuitCfg()
+  local tbRecord = {}
+  for _, tbSuit in pairs(self.tbSuitOrderedSetting) do
+    if tbRecord[tbSuit.nSuitId] then
+      LogErr(string.format("load AppearanceSuit.tab failed, nSuitId %d is duplicate", tbSuit.nSuitId))
+      return false
+    end
+    tbRecord[tbSuit.nSuitId] = true
+  end
+  for _, tbSuit in pairs(self.tbFashionSuit) do
+    if not tbSuit.tbGroup or Lib:IsEmptyTB(tbSuit.tbGroup) then
+      LogErr(string.format("load AppearanceSuit.tab failed, the tbItemGroups %s of suit %d is nil", tbSuit.szIdGroup, tbSuit.nSuitId))
+    end
+  end
+  for _, tbSuit in pairs(self.tbFashionSuit) do
+    if tbSuit.nSuitDiscount > 0 and (tbSuit.nSuitDiscount >= 100 or tbSuit.nSuitDiscount < 10) then
+      LogErr(string.format("load AppearanceSuit.tab failed, the nSuitDiscount:%s of fashion nId:%d is illegal", tostring(tbSuit.nSuitDiscount), tbSuit.nSuitId))
+      return false
+    end
+  end
+  for _, tbSuit in pairs(self.tbFashionSuit) do
+    if not Lib:IsEmptyStr(tbSuit.szNewTimeStart) and not Lib:IsEmptyStr(tbSuit.szNewTimeEnd) then
+      for _, tbItem in ipairs(tbSuit.tbGroup) do
+        if tbItem.szNewTimeStart ~= tbSuit.szNewTimeStart or tbItem.szNewTimeEnd ~= tbSuit.szNewTimeEnd then
+          LogErr(string.format("load AppearanceSuit.tab failed, the new NewTime config of suit %d is not same with item %d", tbSuit.nSuitId, tbItem.nId))
+          return false
+        end
+      end
+    end
+  end
+  return true
+end
+
+function Shop:UpdateFashionShop()
+  if not self.tbAllFashionSingleItem then
+    return
+  end
+  local tbShowWares = {}
+  for _, tbWare in pairs(self.tbAllFashionSingleItem) do
+    if tbWare.szOpenTimeFrame == "" or 1 == GetTimeFrameState(tbWare.szOpenTimeFrame) then
+      tbShowWares[tbWare.nId] = tbWare
+    end
+  end
+  self.tbFashionWares = tbShowWares
+end
+
+function Shop:IsFashionWareCanShow(tbWare)
+  if 1 ~= tbWare.nEnable then
+    return false
+  end
+  local nNow = GetTime()
+  if tbWare.nBeginTime and nNow < tbWare.nBeginTime then
+    return false
+  end
+  if tbWare.nEndTime and nNow > tbWare.nEndTime then
+    return false
+  end
+  return true
+end
+
+function Shop:IsFashionSuitCanShow(nSuitId)
+  local tbSuit = self:GetFashionSuit(nSuitId)
+  if not tbSuit then
+    return false
+  end
+  if 1 ~= tbSuit.nEnable then
+    return false
+  end
+  local tbGroup = self:GetFashionSuitGroup(nSuitId)
+  if tbGroup then
+    for _, tbItem in ipairs(tbGroup) do
+      if not self:IsFashionWareCanShow(tbItem) then
+        return false
+      end
+    end
+  else
+    return false
+  end
+  return true
+end
+
+function Shop:GetFashionItem(nId)
+  return self.tbFashionWares[nId]
+end
+
+function Shop:GetFashionSuit(nSuitId)
+  return self.tbFashionSuit[nSuitId] or {}
+end
+
+function Shop:GetFashionSuitGroup(nSuitId)
+  local tbSuit = self:GetFashionSuit(nSuitId)
+  if tbSuit then
+    return tbSuit.tbGroup
+  end
+end
+
+function Shop:GetFashionSuitBySingleItemId(nId1, nId2)
+  if not nId1 then
+    return
+  end
+  for _, tbSuit in pairs(self.tbFashionSuit) do
+    if Lib:Is_include(nId1, tbSuit.tbIdGroups) and (not nId2 or Lib:Is_include(nId2, tbSuit.tbIdGroups)) then
+      return tbSuit
+    end
+  end
+end
+
+function Shop:GetFashionTemplateExtParam(nItemTemplateID, nParamId)
+  for _, nParam in pairs(Shop.FASHION_PARAM) do
+    if nParam == nParamId then
+      return KItem.GetItemExtParam(nItemTemplateID, nParam)
+    end
+  end
+end
+
+function Shop:CanBuyFashionWareWithCoupon(pPlayer, nFashionId, nCouponTemplateId)
+  if not nFashionId or type(nFashionId) ~= "number" then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  local tbFashion = self:GetFashionItem(nFashionId)
+  if not tbFashion then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  if tbFashion.nShowType and tbFashion.nShowType > 0 then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  if not self:CheckWareAvaliable(tbFashion, pPlayer) then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  if tbFashion.nMinLevel and tbFashion.nMinLevel > pPlayer.nLevel then
+    return false, i18n.Get(Shop.Terms.DoBuyLevel, tbFashion.nMinLevel)
+  end
+  if not FashionCoupon:IsFashionCoupon(nCouponTemplateId) then
+    return false, i18n.EasyGet("\230\138\152\230\137\163\229\136\184\228\184\141\229\173\152\229\156\168")
+  end
+  if not FashionCoupon:CheckHaveEnoughCoupon(pPlayer, nCouponTemplateId, 1) then
+    return false, i18n.EasyGet("\230\138\152\230\137\163\229\136\184\228\184\141\229\173\152\229\156\168")
+  end
+  if not FashionCoupon:CheckBuyFashionCanUseCoupon(pPlayer, nCouponTemplateId, nFashionId) then
+    return false, i18n.EasyGet("\228\184\141\230\187\161\232\182\179\230\138\152\230\137\163\229\136\184\228\189\191\231\148\168\230\157\161\228\187\182")
+  end
+  if not self:IsFashionWareCanShow(tbFashion) then
+    return false, i18n.EasyGet("\229\149\134\229\147\129\229\183\178\231\187\143\229\136\183\230\150\176\239\188\140\232\175\183\233\135\141\232\191\155\231\149\140\233\157\162")
+  end
+  local nDiscount = self:GetFashionItemDiscountPrice(nFashionId)
+  local nPrice = nDiscount > 0 and nDiscount or tbFashion.nPrice
+  nPrice = FashionCoupon:GetDiscountPrice4Coupon(pPlayer, nPrice, nCouponTemplateId)
+  if not self:HasEnoughMoney(pPlayer, tbFashion.szMoneyType, nPrice, 1) then
+    if MODULE_GAMECLIENT then
+      GainCurrency:ReadyForJump(tbFashion.szMoneyType)
+    end
+    local szMoneyName = Currency:GetName(tbFashion.szMoneyType)
+    return false, i18n.Get(Shop.Terms.NotEnoughMoney, szMoneyName)
+  end
+  return true
+end
+
+function Shop:CanBuyFashionWare(pPlayer, nId)
+  if not nId or type(nId) ~= "number" then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  local tbFashion = self:GetFashionItem(nId)
+  if not tbFashion then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  if tbFashion.nShowType and tbFashion.nShowType > 0 then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  if not self:IsFashionWareCanShow(tbFashion) then
+    return false, i18n.EasyGet("\229\149\134\229\147\129\229\183\178\231\187\143\229\136\183\230\150\176\239\188\140\232\175\183\233\135\141\232\191\155\231\149\140\233\157\162")
+  end
+  if not self:CheckWareAvaliable(tbFashion, pPlayer) then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  if tbFashion.nMinLevel and tbFashion.nMinLevel > pPlayer.nLevel then
+    return false, i18n.Get(Shop.Terms.DoBuyLevel, tbFashion.nMinLevel)
+  end
+  local nDiscount = self:GetFashionItemDiscountPrice(nId)
+  local nPrice = nDiscount > 0 and nDiscount or tbFashion.nPrice
+  if not self:HasEnoughMoney(pPlayer, tbFashion.szMoneyType, nPrice, 1) then
+    if MODULE_GAMECLIENT then
+      GainCurrency:ReadyForJump(tbFashion.szMoneyType)
+    end
+    local szMoneyName = Currency:GetName(tbFashion.szMoneyType)
+    return false, i18n.Get(Shop.Terms.NotEnoughMoney, szMoneyName)
+  end
+  return true
+end
+
+function Shop:CanBuyFashionSuitWithCoupon(pPlayer, nSuitId, nCouponTemplateId)
+  if not nSuitId or type(nSuitId) ~= "number" then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  local tbSuit = self:GetFashionSuit(nSuitId)
+  if not (tbSuit and tbSuit.tbGroup) or Lib:IsEmptyTB(tbSuit.tbGroup) then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  if tbSuit.nShowType and tbSuit.nShowType > 0 then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  if not self:IsFashionSuitCanShow(nSuitId) then
+    return false, i18n.EasyGet("\229\149\134\229\147\129\229\183\178\231\187\143\229\136\183\230\150\176\239\188\140\232\175\183\233\135\141\232\191\155\231\149\140\233\157\162")
+  end
+  if not FashionCoupon:IsFashionCoupon(nCouponTemplateId) then
+    return false, i18n.EasyGet("\230\138\152\230\137\163\229\136\184\228\184\141\229\173\152\229\156\168")
+  end
+  if not FashionCoupon:CheckHaveEnoughCoupon(pPlayer, nCouponTemplateId, 1) then
+    return false, i18n.EasyGet("\230\138\152\230\137\163\229\136\184\228\184\141\229\173\152\229\156\168")
+  end
+  if not FashionCoupon:CheckBuySuitCanUseCoupon(pPlayer, nCouponTemplateId, nSuitId) then
+    return false, i18n.EasyGet("\228\184\141\230\187\161\232\182\179\230\138\152\230\137\163\229\136\184\228\189\191\231\148\168\230\157\161\228\187\182")
+  end
+  for _, tbItem in ipairs(tbSuit.tbGroup) do
+    if not self:CheckWareAvaliable(tbItem, pPlayer) or tbSuit.nMinLevel and tbSuit.nMinLevel > pPlayer.nLevel then
+      return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+    end
+  end
+  local nDiscount = self:GetFashionSuitDiscountPrice(nSuitId)
+  local nPrice = nDiscount > 0 and nDiscount or tbSuit.nPrice
+  nPrice = FashionCoupon:GetDiscountPrice4Coupon(pPlayer, nPrice, nCouponTemplateId)
+  if not self:HasEnoughMoney(pPlayer, tbSuit.szMoneyType, nPrice, 1) then
+    if MODULE_GAMECLIENT then
+      GainCurrency:ReadyForJump(tbSuit.szMoneyType)
+    end
+    local szMoneyName = Currency:GetName(tbSuit.szMoneyType)
+    return false, i18n.Get(Shop.Terms.NotEnoughMoney, szMoneyName)
+  end
+  return true
+end
+
+function Shop:CanBuyFashionSuit(pPlayer, nSuitId)
+  if not nSuitId or type(nSuitId) ~= "number" then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  local tbSuit = self:GetFashionSuit(nSuitId)
+  if not tbSuit then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  if tbSuit.nShowType and tbSuit.nShowType > 0 then
+    return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+  end
+  if not self:IsFashionSuitCanShow(nSuitId) then
+    return false, i18n.EasyGet("\229\149\134\229\147\129\229\183\178\231\187\143\229\136\183\230\150\176\239\188\140\232\175\183\233\135\141\232\191\155\231\149\140\233\157\162")
+  end
+  local nDiscount = self:GetFashionSuitDiscountPrice(nSuitId)
+  local nPrice = nDiscount > 0 and nDiscount or tbSuit.nPrice
+  if not self:HasEnoughMoney(pPlayer, tbSuit.szMoneyType, nPrice, 1) then
+    if MODULE_GAMECLIENT then
+      GainCurrency:ReadyForJump(tbSuit.szMoneyType)
+    end
+    local szMoneyName = Currency:GetName(tbSuit.szMoneyType)
+    return false, i18n.Get(Shop.Terms.NotEnoughMoney, szMoneyName)
+  end
+  for _, tbItem in ipairs(tbSuit.tbGroup) do
+    if not self:CheckWareAvaliable(tbItem, pPlayer) or tbSuit.nMinLevel and tbSuit.nMinLevel > pPlayer.nLevel then
+      return false, i18n.Get(Shop.Terms.GoodsNotSellYet)
+    end
+  end
+  return true
+end
+
+function Shop:CheckCanGiveFashion(pPlayer, nAcceptId, nTemplateId, nCount)
+  nCount = nCount or 1
+  if not pPlayer or not nAcceptId then
+    return false, i18n.EasyGet("\230\147\141\228\189\156\229\188\130\229\184\184")
+  end
+  if not nTemplateId or nTemplateId < 0 then
+    return false, i18n.EasyGet("\232\175\183\233\128\137\230\139\169\232\166\129\232\181\160\233\128\129\231\154\132\231\137\169\229\147\129")
+  end
+  local nHaveNum = pPlayer.GetItemCountByTypeInBag(nTemplateId)
+  if nCount <= 0 or nCount > nHaveNum then
+    return false, i18n.EasyGet("\230\139\165\230\156\137\231\154\132\229\164\150\232\167\130\230\149\176\233\135\143\228\184\141\232\182\179")
+  end
+  local bIsFriend = FriendShip:IsFriend(pPlayer.dwID, nAcceptId)
+  if not bIsFriend then
+    return false, i18n.EasyGet("\229\175\185\230\150\185\228\184\141\230\152\175\228\189\160\231\154\132\229\165\189\229\143\139")
+  end
+  local nGiveFlag = self:GetFashionTemplateExtParam(nTemplateId, self.FASHION_PARAM.GIVEFLAG)
+  if not nGiveFlag or nGiveFlag <= 0 then
+    return false, i18n.EasyGet("\230\173\164\229\164\150\232\167\130\230\151\160\230\179\149\232\181\160\233\128\129")
+  end
+  return true
+end
+
+function Shop:HaveEnoughBagCell(pPlayer, nNeed)
+  if nNeed > pPlayer.GetFreeBagCount() then
+    return false, i18n.Get(Shop.Terms.NotEnoughBagCell)
+  end
+  return true, ""
+end
+
+function Shop:RefreshItemDiscountPrice()
+  self.tbDiscountShopItem = {}
+  for nId, tbItem in pairs(self.tbFashionWares) do
+    if 1 == tbItem.nEnable and tbItem.nDiscount > 0 and not Lib:IsEmptyStr(tbItem.szPreferentialTimeStart) and not Lib:IsEmptyStr(tbItem.szPreferentialTimeEnd) then
+      local nNowTime = GetTime()
+      local nEndTime = Lib:ParseNumbericDateToTime(tbItem.szPreferentialTimeEnd)
+      local nStartTime = Lib:ParseNumbericDateToTime(tbItem.szPreferentialTimeStart)
+      if nNowTime < nEndTime and nNowTime > nStartTime then
+        self.tbDiscountShopItem[nId] = math.floor(tbItem.nPrice * tbItem.nDiscount / 100)
+      else
+        self.tbDiscountShopItem[nId] = 0
+      end
+    else
+      self.tbDiscountShopItem[nId] = 0
+    end
+  end
+end
+
+function Shop:RefreshSuitDiscountPrice()
+  self.tbDiscountShopSuit = {}
+  for nSuitId, tbSuit in pairs(self.tbFashionSuit) do
+    if tbSuit.nSuitDiscount > 0 and not Lib:IsEmptyStr(tbSuit.szPreferentialTimeStart) and not Lib:IsEmptyStr(tbSuit.szPreferentialTimeEnd) then
+      local nNowTime = GetTime()
+      local nEndTime = Lib:ParseNumbericDateToTime(tbSuit.szPreferentialTimeEnd)
+      local nStartTime = Lib:ParseNumbericDateToTime(tbSuit.szPreferentialTimeStart)
+      if nNowTime < nEndTime and nNowTime > nStartTime then
+        self.tbDiscountShopSuit[nSuitId] = math.floor(tbSuit.nPrice * tbSuit.nSuitDiscount / 100)
+      else
+        self.tbDiscountShopSuit[nSuitId] = 0
+      end
+    else
+      self.tbDiscountShopSuit[nSuitId] = 0
+    end
+  end
+end
+
+function Shop:GetFashionItemDiscountPrice(nId)
+  if not self.tbDiscountShopItem or Lib:IsEmptyTB(self.tbDiscountShopItem) then
+    self:RefreshItemDiscountPrice()
+  end
+  return self.tbDiscountShopItem[nId] or 0
+end
+
+function Shop:GetFashionSuitDiscountPrice(nSuitId)
+  if not self.tbDiscountShopSuit or Lib:IsEmptyTB(self.tbDiscountShopSuit) then
+    self:RefreshSuitDiscountPrice()
+  end
+  return self.tbDiscountShopSuit[nSuitId] or 0
+end
+
+Shop:LoadFashionSingle()
+Shop:LoadFashionSuit()

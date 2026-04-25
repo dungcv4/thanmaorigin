@@ -1,0 +1,151 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.EMeiFireWork)
+local Protocol = {
+  [tbActivity.Protocol.OnSynData] = "OnSynData",
+  [tbActivity.Protocol.OnLightRedPointResp] = "OnLightRedPointResp"
+}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    me.CenterMsg(i18n.EasyGet("\230\156\141\229\138\161\231\171\175\232\190\147\229\133\165\233\148\153\232\175\175"))
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:OnSynData(nRemainSec, nCheerCount)
+  nRemainSec = math.floor(nRemainSec - 2)
+  if Ui:WindowVisible("UIYanHuaQingDianDisplay") then
+    Ui:GetWindow("UIYanHuaQingDianDisplay"):UpdateExpTimes(nCheerCount * self.tbConfig.nRatePerCheer)
+    Ui:GetWindow("UIYanHuaQingDianDisplay"):CheckIsEnableBtn()
+  else
+    Ui:OpenWindow("UIYanHuaQingDianDisplay", nRemainSec, nCheerCount, self.nId)
+  end
+  self:TryLightRedPoint()
+end
+
+function tbActivity:OnLightRedPointResp(nNeedLight)
+  if 1 == nNeedLight then
+    self:TryLightRedPoint()
+  elseif RedPointMgr:CheckEvent(RedPointMgr.EVENT.EmeiFireWork) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.EmeiFireWork)
+    LocalData:SetRoleNumber("EMeiFireWorkRedPoint", GetTime())
+  end
+end
+
+function tbActivity:TryLightRedPoint()
+  local nLastLightTime = LocalData:GetRoleNumber("EMeiFireWorkRedPoint", 0)
+  if Lib:IsDiffDay(14400, nLastLightTime, GetTime()) and not RedPointMgr:CheckEvent(RedPointMgr.EVENT.EmeiFireWork) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.EmeiFireWork)
+  end
+end
+
+function tbActivity:CheerReq()
+  ActivityMgr:CallServerScriptV2(self.nId, tbActivity.Protocol.OnCheerReq)
+end
+
+function tbActivity:CheckSynData()
+  local nMapId = me.GetWorldPos()
+  if 1 == self.tbConfig.nTongMode then
+    if not (nMapId and self.nId) or me.nMapTemplateId ~= Tong.Def.nMainMapTemplateId or me.nLevel < self.tbConfig.nCheerLevelLimit then
+      if Ui:WindowVisible("UIYanHuaQingDianDisplay") then
+        Ui:CloseWindow("UIYanHuaQingDianDisplay")
+      end
+      return
+    end
+  elseif not (nMapId and self.nId and self.tbConfig.tbMapList[nMapId]) or me.nLevel < self.tbConfig.nCheerLevelLimit then
+    if Ui:WindowVisible("UIYanHuaQingDianDisplay") then
+      Ui:CloseWindow("UIYanHuaQingDianDisplay")
+    end
+    return
+  end
+  local nTodaySec = Lib:GetTodaySec()
+  if not (self.tbConfig.nActivitySecFromZero and self.tbConfig.nActivityLength) or nTodaySec < self.tbConfig.nActivitySecFromZero or nTodaySec > self.tbConfig.nActivitySecFromZero + self.tbConfig.nActivityLength then
+    if Ui:WindowVisible("UIYanHuaQingDianDisplay") then
+      Ui:CloseWindow("UIYanHuaQingDianDisplay")
+    end
+    if RedPointMgr:CheckEvent(RedPointMgr.EVENT.EmeiFireWork) then
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.EmeiFireWork)
+    end
+    return
+  end
+  self:DoSynReq()
+end
+
+function tbActivity:DoSynReq()
+  ActivityMgr:CallServerScriptV2(self.nId, self.Protocol.OnSynDataReq)
+end
+
+function tbActivity:OnClientClose()
+  if RedPointMgr:CheckEvent(RedPointMgr.EVENT.EmeiFireWork) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.EmeiFireWork)
+  end
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_ENTER, tbActivity)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, tbActivity)
+end
+
+function tbActivity:GetRedPointEventId()
+  return {
+    RedPointMgr.EVENT.EmeiFireWork
+  }
+end
+
+function tbActivity:OnOpen()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_ENTER, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_ENTER, self.CheckSynData, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, self.CheckSynData, self)
+end
+
+function tbActivity:DoCommonJump()
+  if self:IsOpen() and self.tbConfig.tbMapList then
+    if me.nLevel < self.tbConfig.nLevel then
+      me.CenterMsg(i18n.EasyGet("\232\175\183\229\133\136\230\143\144\229\141\135\231\173\137\231\186\167\232\135\179{0}\231\186\167", self.tbConfig.nLevel))
+      return
+    end
+    local nMapId, _ = me.GetWorldPos()
+    if 1 == self.tbConfig.nTongMode then
+      Tong:ReqEnterTongMap()
+    elseif nMapId and self.tbConfig.tbMapList[nMapId] then
+      me.CenterMsg(i18n.EasyGet("\229\183\178\229\156\168\230\180\187\229\138\168\229\156\176\229\155\190\228\184\173"))
+    else
+      local nRandMapId
+      local nRand = MathRandom(Lib:GetTableLength(self.tbConfig.tbMapList))
+      local nCount = 1
+      for nMapTmpId, _ in pairs(self.tbConfig.tbMapList) do
+        if nCount == nRand then
+          nRandMapId = nMapTmpId
+          break
+        end
+        nCount = nCount + 1
+      end
+      local tbMapDefaultPosInfo = Map.tbMapListEx[nRandMapId].tbDefaultPos
+      if not tbMapDefaultPosInfo then
+        return
+      end
+      if TeamMgr:IsFollowTeammate() then
+        TeamMgr:StopFollowMember()
+      end
+      if AFK:IsLeadFightRunning() then
+        AFK:Stop()
+      end
+      local nX, nY
+      for _, tbPos in pairs(tbMapDefaultPosInfo) do
+        if tbPos.PosX and tbPos.PosY then
+          nX = tbPos.PosX
+          nY = tbPos.PosY
+          break
+        end
+      end
+      AutoPath:GotoAndCallEx(nRandMapId, nX, nY)
+    end
+    if Ui:WindowVisible("UIWuDuActivity") then
+      local ui = Ui:GetWindow("UIWuDuActivity")
+      if ui then
+        ui:Close()
+      end
+    end
+  else
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+  end
+end

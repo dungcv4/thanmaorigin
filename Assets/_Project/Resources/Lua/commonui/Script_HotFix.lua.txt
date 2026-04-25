@@ -1,0 +1,56 @@
+local function hotfix_ex(cs, field, func)
+  assert(type(field) == "string" and type(func) == "function", "invalid argument: #2 string needed, #3 function needed!")
+  
+  local function func_after(...)
+    xlua.hotfix(cs, field, nil)
+    local ret = {
+      func(...)
+    }
+    xlua.hotfix(cs, field, func_after)
+    return table.unpack(ret)
+  end
+  
+  xlua.hotfix(cs, field, func_after)
+end
+
+xlua.hotfix_ex = hotfix_ex
+local PatchTest1 = {
+  class = CS.Game.UI.UIPanel,
+  func = "Label_SetText",
+  fix = function(self, szKey, szText)
+    local comp = self:GetText(szKey)
+    if not comp then
+      return
+    end
+    comp.text = "a" .. szText
+  end
+}
+local PatchTest2 = {
+  class = CS.UIModule,
+  func = "PlaySound",
+  fix = function(nSoundID)
+    LogErr("nSoundID", nSoundID)
+    CS.UIModule.PlaySound(nSoundID)
+    xlua.private_accessible(CS.QualityModule)
+    LogErr("CS.QualityModule.m_bForceClearMemory", CS.QualityModule.m_bForceClearMemory)
+    CS.QualityModule.m_bForceClearMemory = true
+    LogErr("CS.QualityModule.m_bForceClearMemory", CS.QualityModule.m_bForceClearMemory)
+  end
+}
+Hotfix.PatchList = {}
+
+function Hotfix:Patch(aPatch)
+  Log("Hotfix:Patch ", aPatch.class, aPatch.func)
+  xlua.hotfix_ex(aPatch.class, aPatch.func, aPatch.fix)
+end
+
+function Hotfix:UnPatch(aPatch)
+  xlua.hotfix_ex(aPatch.class, aPatch.func, nil)
+end
+
+function Hotfix:DoPatch()
+  for i = 1, #self.PatchList do
+    local patch = self.PatchList[i]
+    self:Patch(patch)
+  end
+end

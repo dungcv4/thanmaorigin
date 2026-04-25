@@ -1,0 +1,335 @@
+local tbWnd = Ui:CreateWindow("UISelectPortrait")
+local szImgDefaultBalloon = "UI/atlas/chat/img_chatbg_R.png"
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_PROTARIT_UPDATE,
+      self.OnProtaritUpdate
+    },
+    {
+      EventNotify.emNOTIFY_PROTARIT_FRAME_UPDATE,
+      self.OnFrameUpdate
+    },
+    {
+      EventNotify.emNOTIFY_PORTRAIT_FRAME_CHANGE,
+      self.OnFrameUpdate
+    },
+    {
+      EventNotify.emNOTIFY_SPEECH_BALLOON_CHANGE,
+      self.OnBalloonUpdate
+    },
+    {
+      EventNotify.emNOTIFY_PORTRAITUI_UPDATE,
+      self.UpdateInfo
+    },
+    {
+      EventNotify.emNOTIFY_PROTARIT_CHANGE,
+      self.OnProtaritUpdate
+    },
+    {
+      EventNotify.emNOTIFY_CHAT_TITLE_PREFIX_UPDATE,
+      self.OnChatTitlePrefixUpdate
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnPortrait = "node/imgBG/btnList/btnPortrait",
+  btnFrame = "node/imgBG/btnList/btnFrame",
+  btnBalloon = "node/imgBG/btnList/btnPop",
+  btnChatTitlePrefix = "node/imgBG/btnList/btnChatTitle",
+  PortraitPanel = "node/imgBG/Content/Portrait",
+  FramePanel = "node/imgBG/Content/Frame",
+  BalloonPanel = "node/imgBG/Content/Pop",
+  ChatTitlePanel = "node/imgBG/Content/ChatTitle",
+  RightDesc = "node/imgBG/Content/RightDesc",
+  imgPortrait = "node/imgBG/Content/RightDesc/HeadTemplate/imgPortrait",
+  imgPortraitFrame = "node/imgBG/Content/RightDesc/HeadTemplate/imgFrame",
+  imgBalloon = "node/imgBG/Content/RightDesc/Img_ChatPop",
+  txtBalloon = "node/imgBG/Content/RightDesc/Img_ChatPop/Text",
+  txtName = "node/imgBG/Content/RightDesc/txtName",
+  txtDesc = "node/imgBG/Content/RightDesc/Scroll View/Viewport/Content/txtDesc",
+  btnChoose = "node/imgBG/Content/RightDesc/btnOk",
+  txtChoose = "node/imgBG/Content/RightDesc/btnOk/Text",
+  togOwn = "node/imgBG/Content/togOwn",
+  uiTreeRoot = "node/imgBG/L/UITree"
+}
+tbWnd.PANEL_TYPE_PORTRAIT = 1
+tbWnd.PANEL_TYPE_FRAME = 2
+tbWnd.PANEL_TYPE_BALLOON = 3
+tbWnd.PANEL_TYPE_CHAT_TITLE_PREFIX = 4
+tbWnd.PANEL_SETTING = {
+  [tbWnd.PANEL_TYPE_PORTRAIT] = {
+    CLASS = "UISelectPortraitImage",
+    OBJ = tbControls.PortraitPanel,
+    BTN = tbControls.btnPortrait,
+    OpenFunc = function()
+      return true
+    end
+  },
+  [tbWnd.PANEL_TYPE_FRAME] = {
+    CLASS = "UISelectPortraitFrame",
+    OBJ = tbControls.FramePanel,
+    BTN = tbControls.btnFrame,
+    OpenFunc = function()
+      return true
+    end
+  },
+  [tbWnd.PANEL_TYPE_BALLOON] = {
+    CLASS = "UISelectSpeechBalloon",
+    OBJ = tbControls.BalloonPanel,
+    BTN = tbControls.btnBalloon,
+    OpenFunc = function()
+      return true
+    end
+  },
+  [tbWnd.PANEL_TYPE_CHAT_TITLE_PREFIX] = {
+    CLASS = "UISelectChatTitlePrefix",
+    OBJ = tbControls.ChatTitlePanel,
+    BTN = tbControls.btnChatTitlePrefix,
+    OpenFunc = function()
+      return true
+    end
+  }
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnChoose = function(self)
+    self:ReqChange()
+  end,
+  btnClose = function(self)
+    self:Close()
+  end
+}
+tbWnd.tbOnToggleClick = {
+  togOwn = function(self, isOn)
+    Lib:CallBack({
+      self.tbPanelList[self.nCurPanel].Update,
+      self.tbPanelList[self.nCurPanel]
+    })
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbUiTree = Ui:NewTree(self, tbControls.uiTreeRoot, self.TreeBigBtnOnClick, self.TreeSmallBtnOnClick)
+  self:InitTreeData()
+  self:InitPanelList()
+end
+
+function tbWnd:InitPanelList()
+  self.tbPanelList = {}
+  for nType, tbSetting in pairs(self.PANEL_SETTING) do
+    self.tbPanelList[nType] = Ui:CreatePanel(tbSetting.CLASS, tbSetting.OBJ, self)
+  end
+end
+
+function tbWnd:OnOpen(nSelectPanel, ...)
+  for nType, pSubPanel in pairs(self.tbPanelList) do
+    self:SetSubPanelOpen(nType, false)
+  end
+  nSelectPanel = nSelectPanel or self.PANEL_TYPE_PORTRAIT
+  self.tbUiTree:SelectNode(nSelectPanel, nil, true)
+  self:UpdateInfo()
+end
+
+function tbWnd:OnClose()
+  self:SetSubPanelOpen(self.nCurPanel, false)
+  self.nCurPanel = nil
+  self.nCurSmallType = nil
+end
+
+function tbWnd:InitTreeData()
+  local tbBigData, tbSmallData = ChatMgr:GetChatTitlePrefixUiTreeData()
+  self.tbBigData = tbBigData
+  self.tbSmallData = tbSmallData
+  self.tbUiTree:SetData(self.tbBigData, self.tbSmallData)
+end
+
+function tbWnd:OnProtaritUpdate()
+  if self.nCurPanel ~= self.PANEL_TYPE_PORTRAIT then
+    return
+  end
+  self:UpdateCurSubPanel()
+  self:UpdateInfo()
+end
+
+function tbWnd:OnFrameUpdate()
+  if self.nCurPanel ~= self.PANEL_TYPE_FRAME then
+    return
+  end
+  self:UpdateCurSubPanel()
+  self:UpdateInfo()
+end
+
+function tbWnd:OnBalloonUpdate()
+  if self.nCurPanel ~= self.PANEL_TYPE_BALLOON then
+    return
+  end
+  self:UpdateCurSubPanel()
+  self:UpdateInfo()
+end
+
+function tbWnd:OnChatTitlePrefixUpdate()
+  if self.nCurPanel ~= self.PANEL_TYPE_CHAT_TITLE_PREFIX then
+    return
+  end
+  self:UpdateCurSubPanel()
+  self:UpdateInfo()
+end
+
+function tbWnd:UpdateCurSubPanel()
+  if not self.nCurPanel then
+    return
+  end
+  if self.tbPanelList[self.nCurPanel] and self.tbPanelList[self.nCurPanel].Update then
+    self.tbPanelList[self.nCurPanel].Update(self.tbPanelList[self.nCurPanel])
+  end
+end
+
+function tbWnd:UpdateInfo()
+  local nCurPanel = self.nCurPanel
+  self.pPanel:SetActive(self.RightDesc, nCurPanel ~= self.PANEL_TYPE_CHAT_TITLE_PREFIX)
+  if nCurPanel == self.PANEL_TYPE_CHAT_TITLE_PREFIX then
+    self.pPanel:SetActive(tbControls.togOwn, true)
+    return
+  end
+  local tbPanel
+  if nCurPanel then
+    tbPanel = self:GetSubPanel(nCurPanel)
+  end
+  local nPortrait = me.nPortrait
+  local szName = i18n.EasyGet("\231\179\187\231\187\159\229\164\180\229\131\143")
+  local szSource = ""
+  local szChoose = i18n.EasyGet("\228\189\191\231\148\168")
+  if nCurPanel == self.PANEL_TYPE_PORTRAIT and tbPanel then
+    nPortrait = tbPanel:GetCurPortraitId() or nPortrait
+    szSource = i18n.Parse(PlayerPortrait.tbPortraitSetting[nPortrait].szSource)
+    if nPortrait == me.nPortrait then
+      szChoose = i18n.EasyGet("\228\189\191\231\148\168\228\184\173")
+    end
+    self.pPanel:SetActive(tbControls.togOwn, false)
+  end
+  local nPortraitFrame = PlayerPortraitFrame:GetMeCurPortraitFrameId(me)
+  if nCurPanel == self.PANEL_TYPE_FRAME and tbPanel then
+    local tbPortraitFrame = tbPanel:GetCurPortraitFrameInfo()
+    if tbPortraitFrame then
+      nPortraitFrame = tbPortraitFrame.nFrameIndex or nPortraitFrame
+      local tbPortraitFrameSetting = PlayerPortraitFrame.tbPortraitFrameSetting[nPortraitFrame]
+      szName = i18n.Parse(tbPortraitFrameSetting.szName)
+      szSource = i18n.Parse(tbPortraitFrameSetting.szSourceDesc)
+      if PlayerPortraitFrame.tbPortraitData and PlayerPortraitFrame.tbPortraitData[nPortraitFrame] and not PlayerPortraitFrame:IsPermanentPortrait(me, nPortraitFrame, PlayerPortraitFrame.tbPortraitData) then
+        local nLeft = PlayerPortraitFrame.tbPortraitData[nPortraitFrame].nLimitTime - GetTime()
+        if nLeft > 0 then
+          local szLeftTime = i18n.EasyGet("{0}\229\144\142\229\136\176\230\156\159", Lib:TimeDesc2(nLeft))
+          if szLeftTime then
+            szSource = string.format("%s\239\188\140%s", szSource, szLeftTime)
+          end
+        end
+      end
+      if nPortraitFrame == PlayerPortraitFrame:GetMeCurPortraitFrameId(me) then
+        szChoose = i18n.EasyGet("\229\141\184\228\184\139")
+      elseif tbPortraitFrame.bLocked then
+        szChoose = i18n.EasyGet("\230\156\170\230\139\165\230\156\137")
+      end
+    else
+      szName = i18n.EasyGet("\231\179\187\231\187\159\229\164\180\229\131\143\230\161\134")
+      szChoose = i18n.EasyGet("\228\189\191\231\148\168\228\184\173")
+    end
+    self.pPanel:SetActive(tbControls.togOwn, true)
+  end
+  local imgBalloon = szImgDefaultBalloon
+  local szBalloonName = i18n.EasyGet("\233\187\152\232\174\164\232\129\138\229\164\169\230\176\148\230\179\161")
+  local nBalloonId = SpeechBalloon:GetPlayerSpeechBalloonId(me)
+  local tbCurBalloonSetting = SpeechBalloon.tbSetting[nBalloonId]
+  if tbCurBalloonSetting then
+    imgBalloon = "UI/atlas/UIChatBox/" .. tbCurBalloonSetting.Total or imgBalloon
+    szBalloonName = i18n.Parse(tbCurBalloonSetting.szName) or szBalloonName
+  end
+  if nCurPanel == self.PANEL_TYPE_BALLOON and tbPanel then
+    local tbBalloon = tbPanel:GetCurBalloonInfo()
+    if tbBalloon then
+      nBalloonId = tbBalloon.nFrameIndex or nBalloonId
+      local tbSetting = SpeechBalloon.tbSetting[nBalloonId]
+      szName = i18n.Parse(tbSetting.szName)
+      szSource = i18n.Parse(tbSetting.szDesc)
+      szBalloonName = szName
+      imgBalloon = "UI/atlas/UIChatBox/" .. tbSetting.Total
+      if SpeechBalloon.tbData and SpeechBalloon.tbData[nBalloonId] and not SpeechBalloon:IsPermanentSpeechBalloon(me, nBalloonId, SpeechBalloon.tbData) then
+        local nLeft = SpeechBalloon.tbData[nBalloonId].nLimitTime - GetTime()
+        if nLeft > 0 then
+          local szLeftTime = i18n.EasyGet("{0}\229\144\142\229\136\176\230\156\159", Lib:TimeDesc2(nLeft))
+          if szLeftTime then
+            szSource = string.format("%s\239\188\140%s", szSource, szLeftTime)
+          end
+        end
+      end
+      if nBalloonId == SpeechBalloon:GetPlayerSpeechBalloonId(me) then
+        szChoose = i18n.EasyGet("\229\141\184\228\184\139")
+      elseif tbBalloon.bLocked then
+        szChoose = i18n.EasyGet("\230\156\170\230\139\165\230\156\137")
+      end
+    end
+    self.pPanel:SetActive(tbControls.togOwn, true)
+  end
+  self.pPanel:Sprite_SetSprite(tbControls.imgPortrait, PlayerPortrait:GetIcon(nPortrait))
+  PlayerPortraitFrame:SetPortraitFrame(self.pPanel, tbControls.imgPortraitFrame, nPortraitFrame)
+  self.pPanel:Label_SetText(tbControls.txtBalloon, szBalloonName)
+  self.pPanel:Sprite_SetSprite(tbControls.imgBalloon, imgBalloon)
+  self.pPanel:Label_SetText(tbControls.txtName, szName)
+  self.pPanel:Label_SetText(tbControls.txtDesc, szSource)
+  self.pPanel:Label_SetText(tbControls.txtChoose, szChoose)
+end
+
+function tbWnd:ReqChange()
+  local nCurPanel = self.nCurPanel
+  if nCurPanel then
+    local tbPanel = self:GetSubPanel(nCurPanel)
+    if tbPanel.ReqChange then
+      tbPanel:ReqChange()
+    end
+  end
+end
+
+function tbWnd:GetLockedStatus()
+  return self.pPanel:Toggle_GetChecked(tbControls.togOwn)
+end
+
+function tbWnd:GetSubPanel(nPanel)
+  return self.tbPanelList[nPanel]
+end
+
+function tbWnd:SetSubPanelOpen(nPanel, bOpen)
+  if not nPanel then
+    return
+  end
+  local tbPanelSetting = self.PANEL_SETTING[nPanel]
+  self.pPanel:SetActive(tbPanelSetting.OBJ, bOpen)
+  local pCurSubPanel = self.tbPanelList[nPanel]
+  if bOpen then
+    if pCurSubPanel and pCurSubPanel.OnOpen then
+      pCurSubPanel:OnOpen()
+    end
+  elseif pCurSubPanel and pCurSubPanel.OnClose then
+    pCurSubPanel:OnClose()
+  end
+end
+
+function tbWnd:TreeSmallBtnOnClick(tbInfo, nBigIndex)
+  self.nCurSmallType = tbInfo.nSmallType
+  self:UpdateCurSubPanel()
+  self:UpdateInfo()
+end
+
+function tbWnd:TreeBigBtnOnClick(tbInfo)
+  self:SetSubPanelOpen(self.nCurPanel, false)
+  self.nCurPanel = tbInfo.nType
+  self.nCurSmallType = nil
+  self:SetSubPanelOpen(self.nCurPanel, true)
+  self.tbUiTree:AutoSelectSmall(self.nCurPanel)
+end
+
+function tbWnd:GetCurSmallType()
+  return self.nCurSmallType
+end

@@ -1,0 +1,397 @@
+Shop.tbQuickBuySearchType = {
+  [Shop.ShopTypeStr.LimitBuy] = 1,
+  [Shop.ShopTypeStr.Gold] = 1,
+  [Shop.ShopTypeStr.YuanBao] = 1
+}
+Shop.tbClassifySetting = {}
+Shop.tbLimishopType2Ware = {}
+
+function Shop:OnBuyResponse(bSuccess, nWareId, nRequestIndex, nCount)
+  if nRequestIndex then
+    self.nRequestIndex = nRequestIndex
+  end
+  if not nWareId then
+    return
+  end
+  local tbWare = self:GetAWare(nWareId)
+  local nItemId
+  if tbWare then
+    nItemId = tbWare.nItemId
+    if bSuccess then
+      Sdk:OnShopBuySuccess(nWareId, nCount)
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SHOP_BUY_RESULT, bSuccess, nItemId, nCount)
+end
+
+function Shop:OnSyncBuyLimitInfo(tbLimitDayInfo, tbLimitWeekInfo, tbLimitPermanentInfo, tbLimitMonthInfo)
+  self.tbLimitInfo = self.tbLimitInfo or {}
+  self.tbLimitInfo[Shop.LimitType.Day] = tbLimitDayInfo
+  self.tbLimitInfo[Shop.LimitType.Week] = tbLimitWeekInfo
+  self.tbLimitInfo[Shop.LimitType.Month] = tbLimitMonthInfo
+  self.tbLimitInfo[Shop.LimitType.Permanent] = tbLimitPermanentInfo
+  self.nLimitSynced = me.dwID
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_SHOP_WARE)
+end
+
+function Shop:OnUpdateBuyLimit(nLimitType, nId, nCount)
+  if not self.tbLimitInfo[nLimitType] then
+    self.tbLimitInfo[nLimitType] = {}
+  end
+  self.tbLimitInfo[nLimitType][nId] = nCount
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_SHOP_WARE, nId)
+end
+
+function Shop:GetWareAvaliableList(nShopIndex)
+  local tbWareList = {}
+  if nShopIndex == Shop.ShopType2ViewIndex.LimitBuy then
+    tbWareList = self.tbLimitBuyShopWares
+  elseif nShopIndex == Shop.ShopType2ViewIndex.YuanBao then
+    tbWareList = self.tbYuanBaoShopWares
+  elseif nShopIndex == Shop.ShopType2ViewIndex.Gold then
+    tbWareList = self.tbGoldShopWares
+  end
+  local tbRtn = {}
+  for _, v in pairs(tbWareList) do
+    local tbWare = self:GetAWare(v.nWareId)
+    if tbWare and self:CheckWareAvaliable(tbWare, me) then
+      table.insert(tbRtn, v)
+    end
+  end
+  if not Lib:IsEmptyTB(tbRtn) then
+    table.sort(tbRtn, function(a, b)
+      return a.nSort < b.nSort
+    end)
+  end
+  return tbRtn
+end
+
+function Shop:GetAvaliableRemainWareList(nShopIndex, nTemplateId)
+  local tbWareList = self:GetWareAvaliableList(nShopIndex)
+  local tbRtn = {}
+  for _, v in pairs(tbWareList) do
+    local tbWare = self:GetAWare(v.nWareId)
+    if tbWare and tbWare.nItemId == nTemplateId then
+      local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+      if -1 == nRemainCount or nRemainCount > 0 then
+        table.insert(tbRtn, v)
+      end
+    end
+  end
+  return tbRtn
+end
+
+function Shop:GetLimitInfo(pPlayer, nLimitType)
+  self.tbLimitInfo = self.tbLimitInfo or {}
+  return self.tbLimitInfo[nLimitType] or {}
+end
+
+function Shop:OpenShopById(nTemplateId)
+  local szShopType, nId
+  for k, v in pairs(self.tbWares) do
+    if v.nItemId == nTemplateId and Shop:CheckWareAvaliable(v, me) then
+      szShopType = v.szShopType
+      nId = v.nId
+      break
+    end
+  end
+  if szShopType then
+    Ui:OpenWindow("UIShop", Shop.ShopType2ViewIndex[szShopType], nId)
+  else
+    me.CenterMsg(i18n.EasyGet("\229\149\134\229\159\142\228\184\173\230\178\161\230\156\137\232\175\165\231\137\169\229\147\129\239\188\129"))
+  end
+end
+
+function Shop:ChecItemAvaliable(nTemplateId)
+  for k, v in pairs(self.tbWares) do
+    if v.nItemId == nTemplateId and Shop:CheckWareAvaliable(v, me) then
+      return true
+    end
+  end
+  return false
+end
+
+function Shop:OpenShopBuyWidDefault(nTemplateId, nDefaultBuyCount, nWareId)
+  self:OpenShopBuyWid(nTemplateId, true, nil, nil, nil, nil, nDefaultBuyCount, nWareId)
+end
+
+function Shop:OpenShopBuyWid(nTemplateId, bNeedIconTips, szShopType, nRemainCount, bCheckRemain, bNotNeedTip, nDefaultBuyCount, nWareId)
+  local tbCheapestWare = {}
+  local nCurItemId = 0
+  local nKeyId = nTemplateId
+  if nWareId and nWareId > 0 then
+    nKeyId = nWareId
+  end
+  for k, v in pairs(self.tbWares) do
+    nCurItemId = v.nItemId
+    if nWareId and nWareId > 0 then
+      nCurItemId = v.nId
+    end
+    if nCurItemId == nKeyId and Shop:CheckWareAvaliable(v, me) and self.tbQuickBuySearchType[v.szShopType] then
+      local nRemainCountCur = self:GetShopRemainCount(v, me)
+      if 0 ~= nRemainCountCur then
+        if tbCheapestWare[v.szCurrencyType] then
+          local tbLastWare = self.tbWares[tbCheapestWare[v.szCurrencyType].nId]
+          local nRemainCountLast = self:GetShopRemainCount(tbLastWare, me)
+          if 0 ~= nRemainCountCur and 0 ~= nRemainCountLast then
+            local nLastPrice = self:GetPrice(tbLastWare, tbLastWare.szShopType, me)
+            local nCurPrice = self:GetPrice(v, v.szShopType, me)
+            if nLastPrice > nCurPrice then
+              tbCheapestWare[v.szCurrencyType].nId = v.nId
+            end
+          end
+        else
+          tbCheapestWare[v.szCurrencyType] = {
+            nId = v.nId
+          }
+        end
+      end
+    end
+  end
+  local tbWare = tbCheapestWare[Currency.TYPE.YuanBao] and self.tbWares[tbCheapestWare[Currency.TYPE.YuanBao].nId]
+  tbWare = tbWare or tbCheapestWare[Currency.TYPE.Gold] and self.tbWares[tbCheapestWare[Currency.TYPE.Gold].nId]
+  if tbWare then
+    if bCheckRemain then
+      local nRemainCount = self:GetShopRemainCount(tbWare, me)
+      if 0 == nRemainCount then
+        me.CenterMsg(i18n.EasyGet("\232\175\165\231\137\169\229\147\129\229\183\178\231\187\143\232\190\190\229\136\176\232\180\173\228\185\176\228\184\138\233\153\144\239\188\129"))
+        return false
+      else
+        Ui:OpenWindow("UIShopBuy", tbWare, bNeedIconTips, nRemainCount, nil, nil, nDefaultBuyCount)
+        return true
+      end
+    else
+      Ui:OpenWindow("UIShopBuy", tbWare, bNeedIconTips, nRemainCount, nil, nil, nDefaultBuyCount)
+      return true
+    end
+  else
+    if not bNotNeedTip then
+      me.CenterMsg(i18n.EasyGet("\229\149\134\229\159\142\228\184\173\230\178\161\230\156\137\232\175\165\231\137\169\229\147\129\239\188\129"))
+    end
+    return false
+  end
+end
+
+function Shop:OnSyncShopWares(szShopType, tbShopWares, nSyncTemplateId)
+  local tbWares = self.ShopWares[szShopType]
+  if nSyncTemplateId then
+    if self:IsFamilyShop(szShopType) then
+      tbWares[tbShopWares.nLevel][tbShopWares.nPool][nSyncTemplateId] = tbShopWares
+    else
+      tbWares[nSyncTemplateId] = tbShopWares
+    end
+  else
+    for nTemplateId, tbWare in pairs(tbShopWares) do
+      tbWares[nTemplateId] = tbWare
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_SHOP_WARE, nSyncTemplateId)
+end
+
+function Shop:OnSyncFamilyShopData(szShopType, tbWareData)
+  self.tbFamilyShopData[szShopType] = tbWareData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_SHOP_WARE)
+end
+
+function Shop:GetFamilyShopWares(nId)
+  local szShopType = self.tbFamilyShopIdToChar[nId]
+  local tbWares = self.tbFamilyShopData[szShopType] or {}
+  local tbRet = {}
+  for k, v in pairs(tbWares) do
+    local tbWare = Lib:CopyTB1(self:GetFamilyAWare(szShopType, v.nTemplateId))
+    if Lib:IsEmptyStr(tbWare.szTimeFrame) or 1 == GetTimeFrameState(tbWare.szTimeFrame) then
+      tbWare.nRemainCount = v.nCount
+      tbWare.nPrice, tbWare.nDiscount = self:GetPrice(tbWare, szShopType, me)
+      tbWare.nSort = v.nSort
+      table.insert(tbRet, tbWare)
+    end
+  end
+  table.sort(tbRet, function(tbFirst, tbSecond)
+    return tbFirst.nSort < tbSecond.nSort
+  end)
+  return tbRet
+end
+
+function Shop:CanFamilyStoreOneClickBuy()
+  local tbWareList = self:GetFamilyShopWares(Kin.Def.Building_Shop)
+  local nCount = Lib:CountTB(tbWareList)
+  for i = 1, nCount do
+    local tbInfo = tbWareList[i]
+    local nRemainCount = tbInfo.nRemainCount or -1
+    if 0 ~= nRemainCount then
+      return true
+    end
+  end
+  return false
+end
+
+function Shop:GetFaimlyWareRemainClient(szShopType, nTemplateId)
+  if not self.FamilyPool[szShopType] then
+    return 0
+  end
+  local tbWares = self.tbFamilyShopData[szShopType]
+  for _, tbWare in pairs(tbWares) do
+    if tbWare.nTemplateId == nTemplateId then
+      return tbWare.nCount
+    end
+  end
+  Log("ERROR IN GetFaimlyWareRemainClient", szShopType, nTemplateId)
+  return 0
+end
+
+function Shop:CheckGetUnLimitFamilyWare(nBuildingId)
+  local szShopType = Shop.tbFamilyShopIdToChar[nBuildingId]
+  if not self.FamilyPool[szShopType] then
+    local nMyLevel = self:GetBuildingLevel(me, nBuildingId)
+    if not self.tbLocalUpdateWareBuidLevel[nBuildingId] or nMyLevel > self.tbLocalUpdateWareBuidLevel[nBuildingId] then
+      local tbShopData = {}
+      self.tbFamilyShopData[szShopType] = tbShopData
+      local tbWares = self.ShopWares[szShopType]
+      for nLevel, v in pairs(tbWares) do
+        if nLevel <= nMyLevel then
+          for TemplateId, _ in pairs(v) do
+            table.insert(tbShopData, {nTemplateId = TemplateId})
+          end
+        end
+      end
+      self.tbLocalUpdateWareBuidLevel[nBuildingId] = nMyLevel
+    end
+    return true
+  end
+end
+
+function Shop:GetBuildingLevelClient(nBuildingId)
+  local tbBuildingData = Kin:GetBuildingData(nBuildingId)
+  return tbBuildingData and tbBuildingData.nLevel or 1
+end
+
+function Shop:OnLogin(bIsReconnect)
+  self:UpdateShopRedPoint()
+end
+
+function Shop:HandleShopRedPoint()
+  if me.nLevel < 30 then
+    return
+  end
+  local curLoginTime = GetTime()
+  LocalData:SetRoleNumber("ShopRedPoint", curLoginTime)
+  self:UpdateShopRedPoint()
+end
+
+function Shop:UpdateShopRedPoint()
+  if me.nLevel < 30 then
+    return
+  end
+  local curLoginTime = GetTime()
+  local preloginTime = LocalData:GetRoleNumber("ShopRedPoint", Shop.Cfg.DefaultShopRedPointValue)
+  if -1 == preloginTime then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.ShopManaget)
+    return
+  end
+  local timeOffset = 14400
+  local isDiffWeek = Lib:IsDiffWeek(timeOffset, curLoginTime, preloginTime)
+  if true == isDiffWeek then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.ShopManaget)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ShopManaget)
+  end
+end
+
+function Shop:ReLoadWaresData()
+  for _, tbData in pairs(self.tbWares) do
+    if tbData.szOpenTimeStr and tbData.szOpenTimeStr ~= "" then
+      local nTime = Lib:GetConfigDate2Time(tbData.szOpenTimeStr)
+      if nTime and nTime > 0 then
+        tbData.nOpenTimestamp = nTime
+      end
+    end
+    if tbData.szEndTimeStr and "" ~= tbData.szEndTimeStr then
+      local nTime = Lib:GetConfigDate2Time(tbData.szEndTimeStr)
+      if nTime and nTime > 0 then
+        tbData.nEndTimestamp = nTime
+      end
+    end
+  end
+end
+
+function Shop:OnServerZoneTimeUpdate()
+  self:ReLoadWaresData()
+  self:RefreshFashionShopClientTime()
+end
+
+function Shop:LoadClaasifySeetting()
+  local tbSettings = Lib:EasyLoadTabFile("Setting/Shop/LimitShopClassify.tab")
+  for nIndex, tbInfo in pairs(tbSettings) do
+    if not Shop.tbClassifySetting[tbInfo.nBigType] then
+      Shop.tbClassifySetting[tbInfo.nBigType] = {}
+      Shop.tbClassifySetting[tbInfo.nBigType].szName = tbInfo.szBigTypeName
+    end
+    Shop.tbClassifySetting[tbInfo.nBigType].tbSmallInfo = Shop.tbClassifySetting[tbInfo.nBigType].tbSmallInfo or {}
+    Shop.tbClassifySetting[tbInfo.nBigType].tbSmallInfo[tbInfo.nSmallType] = {
+      szName = tbInfo.szSmallTypeName,
+      tbCurrency = Lib:SplitStr(tbInfo.szCurrencyName, "|")
+    }
+    if not Lib:IsEmptyStr(tbInfo.szOpenTimeStr) then
+      Shop.tbClassifySetting[tbInfo.nBigType].tbSmallInfo[tbInfo.nSmallType].nOpenTime = Lib:ParseConfigDateTime(tbInfo.szOpenTimeStr)
+    end
+    if not Lib:IsEmptyStr(tbInfo.szEndTimeStr) then
+      Shop.tbClassifySetting[tbInfo.nBigType].tbSmallInfo[tbInfo.nSmallType].nCloseTime = Lib:ParseConfigDateTime(tbInfo.szEndTimeStr)
+    end
+    if not Lib:IsEmptyStr(tbInfo.szOpenTimeFrame) then
+      Shop.tbClassifySetting[tbInfo.nBigType].tbSmallInfo[tbInfo.nSmallType].szOpenTimeFrame = tbInfo.szOpenTimeFrame
+    end
+    if not Lib:IsEmptyStr(tbInfo.szEndTimeFrame) then
+      Shop.tbClassifySetting[tbInfo.nBigType].tbSmallInfo[tbInfo.nSmallType].szEndTimeFrame = tbInfo.szEndTimeFrame
+    end
+  end
+  for _, v in pairs(self.tbLimitBuyShopWares) do
+    if v.nBigType and 0 ~= v.nBigType and v.nSmallType and 0 ~= v.nSmallType then
+      Shop.tbLimishopType2Ware[v.nBigType] = Shop.tbLimishopType2Ware[v.nBigType] or {}
+      Shop.tbLimishopType2Ware[v.nBigType][v.nSmallType] = Shop.tbLimishopType2Ware[v.nBigType][v.nSmallType] or {}
+      table.insert(Shop.tbLimishopType2Ware[v.nBigType][v.nSmallType], v)
+    end
+  end
+end
+
+Shop:LoadClaasifySeetting()
+
+function Shop:CheckLimitShopIsOpenNewType()
+  local bRet = false
+  local nCurTime = GetTime()
+  for nBigType, tbBigInfo in pairs(Shop.tbClassifySetting) do
+    for nSmallType, tbInfo in pairs(tbBigInfo.tbSmallInfo) do
+      if tbInfo.nOpenTime and tbInfo.nOpenTime > 0 then
+        local nDiffTime = tbInfo.nOpenTime - nCurTime
+        if nDiffTime > 0 and nDiffTime <= 1 then
+          bRet = true
+          break
+        end
+      end
+    end
+  end
+  return bRet
+end
+
+function Shop:LightLimitShopRedPoint()
+  RedPointMgr:LightRedPoint(RedPointMgr.EVENT.LimitShop)
+end
+
+function Shop:OpenLimitShop(nBigType, nSmallType)
+  Ui:OpenWindowWithCallback("UIShop", function(caller, tbWnd)
+    tbWnd:TrySelectNode(nBigType, nSmallType)
+  end, self, Shop.ShopType2ViewIndex.LimitBuy)
+end
+
+function Shop:ClinetInit()
+  self.tbFamilyShopData = {
+    DrugShop = {}
+  }
+  self.tbLocalUpdateWareBuidLevel = {}
+  self.nRequestIndex = 0
+end
+
+Shop:ClinetInit()
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, Shop)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, Shop.UpdateShopRedPoint, Shop)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SERVER_TIME_ZONE_UPDATE, Shop)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SERVER_TIME_ZONE_UPDATE, Shop.OnServerZoneTimeUpdate, Shop)

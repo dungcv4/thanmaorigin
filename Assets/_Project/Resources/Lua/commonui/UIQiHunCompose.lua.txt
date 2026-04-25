@@ -1,0 +1,221 @@
+local tbWnd = Ui:CreateClass("UIQiHunCompose", "UIPanel")
+local QiHun = Item.QiHun
+local tbControls = {
+  itemNew = "itemNew",
+  itemMaybeGetTemplate = "itemGet/Template",
+  btnCompose = "btnCompose",
+  btnRate = "btnRate",
+  txtCostNum = "Cost/txtCostNum",
+  txtGet = "imgGetBg/txtGet",
+  Fail_Effect = "Effect/Fail_Effect",
+  Progress_Effect = "Effect/Progress_Effect",
+  HongYunDangTou_Effect = "Effect/HongYunDangTou_Effect",
+  XiCongTianJiang_Effect = "Effect/XiCongTianJiang_Effect",
+  UIItemGridAwardHeight = "Effect/HongYunDangTou_Effect/ItemAwards/UIItemGrid",
+  txtAwardValueHeight = "Effect/HongYunDangTou_Effect/AwardTips/txtAwardValue",
+  UIItemGridAwardLow = "Effect/XiCongTianJiang_Effect/ItemAwards/UIItemGrid",
+  txtAwardValueLow = "Effect/XiCongTianJiang_Effect/AwardTips/txtAwardValue",
+  Black1 = "Effect/XiCongTianJiang_Effect/Black",
+  Black2 = "Effect/HongYunDangTou_Effect/Black"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnCompose = function(self)
+    local nLevel = self.tbOwner:GetSelectLevel()
+    if not nLevel then
+      me.CenterMsg(i18n.EasyGet("\230\156\170\233\128\137\230\139\169\229\153\168\233\173\130"))
+      return
+    end
+    local bRet, szErr = QiHun:CanCompose(me, nLevel)
+    if not bRet then
+      return me.CenterMsg(szErr)
+    end
+    if self.bIsClicking then
+      return
+    end
+    self.bIsClicking = true
+    self.pPanel:SetActive(tbControls.Progress_Effect, true)
+    Timer:Register(40, function()
+      self.pPanel:SetActive(tbControls.Progress_Effect, false)
+      QiHun:ComposeReq(nLevel)
+      self.bIsClicking = false
+    end)
+  end,
+  btnRate = function(self)
+    self.tbOwner:ShowRate()
+  end,
+  Black2 = function(self)
+    self.pPanel:SetActive(tbControls.HongYunDangTou_Effect)
+  end,
+  Black1 = function(self)
+    self.pPanel:SetActive(tbControls.XiCongTianJiang_Effect)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbGridHeight = Ui:NewExistItemGrid(self, tbControls.UIItemGridAwardHeight)
+  self.tbGridHeight:SetClickEnable(true)
+  self.tbGridLow = Ui:NewExistItemGrid(self, tbControls.UIItemGridAwardLow)
+  self.tbGridLow:SetClickEnable(true)
+  self.tbMaybeGetSV = Ui:NewScrollView(self, tbControls.itemMaybeGetTemplate)
+end
+
+function tbWnd:OnOpen()
+  self.pPanel:SetActive(tbControls.Progress_Effect, false)
+  self:UpdateView()
+end
+
+function tbWnd:OnClose()
+  if self.tbTargetEffect then
+    self.pPanel:DeleteObject(self.tbTargetEffect.szKey)
+    self.tbTargetEffect = nil
+  end
+  if self.tbFailEffect then
+    self.pPanel:DeleteObject(self.tbFailEffect.szKey)
+    self.tbFailEffect = nil
+  end
+end
+
+function tbWnd:UpdateMaybeGetSV()
+  self.tbMaybeGetSV:Reset()
+  local nLevel = self.tbOwner:GetSelectLevel()
+  if not nLevel or not QiHun.tbComposeInfo[nLevel] then
+    return
+  end
+  local tbCfg = QiHun.tbComposeInfo[nLevel]
+  local tbMaybeGet = {}
+  for i = 1, #tbCfg do
+    if tbCfg[i][1] > 0 then
+      local nTemplateId = QiHun.tbLevelInfo[tbCfg[i][1]][1]
+      table.insert(tbMaybeGet, nTemplateId)
+    end
+  end
+  
+  local function fnSetItem(nIndex, tbElement)
+    local tbGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+    tbGrid:SetItemByTemplate(tbMaybeGet[nIndex])
+    tbGrid:SetClickEnable(true)
+  end
+  
+  for i = 1, #tbMaybeGet do
+    self.tbMaybeGetSV:SetElement(i, function(tbElement)
+      fnSetItem(i, tbElement)
+    end)
+  end
+end
+
+function tbWnd:UpdateView()
+  if #self.tbOwner.tbQiHunItem <= 0 or not self.tbOwner.nSelectIndex then
+    self.pPanel:Label_SetText(tbControls.txtGet, "")
+    self.pPanel:Label_SetText(tbControls.txtCostNum, "")
+  else
+    local tbData = self.tbOwner.tbQiHunItem[self.tbOwner.nSelectIndex]
+    local nHad = tbData[2]
+    self.pPanel:Label_SetText(tbControls.txtCostNum, nHad .. "/" .. QiHun.nQiHunComposeNeed)
+  end
+  self:UpdateMaybeGetSV()
+  self:ShowSelectQiHun()
+end
+
+function tbWnd:GetMaxTargetLevel()
+  local tbData = self.tbOwner.tbQiHunItem[self.tbOwner.nSelectIndex]
+  if not tbData then
+    return
+  end
+  local nLevel = QiHun:GetLevelByTemplateId(tbData[1])
+  local tbCfg = QiHun.tbComposeInfo[nLevel]
+  local nTargetLevel = tbCfg[#tbCfg][1]
+  return nTargetLevel
+end
+
+function tbWnd:OnComposeRsp(nOldLevel, nNewLevel)
+  if nNewLevel then
+    local nTemplateId = QiHun.tbLevelInfo[nNewLevel][1]
+    local szName = Item:GetName(nTemplateId, me)
+    local nQuality = Item:GetQuality(nTemplateId)
+    local _, szColor = Item:GetQualityColor(nQuality)
+    if nNewLevel - nOldLevel >= 3 then
+      self.pPanel:SetActive(tbControls.HongYunDangTou_Effect, true)
+      self.tbGridHeight:SetItemByTemplate(nTemplateId)
+      self.pPanel:Label_SetText(tbControls.txtAwardValueHeight, i18n.EasyGet("<color=#{0}>{1}</color>", szColor, szName))
+    else
+      self.pPanel:SetActive(tbControls.XiCongTianJiang_Effect, true)
+      self.tbGridLow:SetItemByTemplate(nTemplateId)
+      self.pPanel:Label_SetText(tbControls.txtAwardValueLow, i18n.EasyGet("<color=#{0}>{1}</color>", szColor, szName))
+    end
+  else
+    self:ShowFailEffect(nOldLevel)
+  end
+  if #self.tbOwner.tbQiHunItem <= 0 or not self.tbOwner.nSelectIndex then
+    self.pPanel:Label_SetText(tbControls.txtCostNum, "")
+  else
+    local tbData = self.tbOwner.tbQiHunItem[self.tbOwner.nSelectIndex]
+    local nHad = tbData[2]
+    self.pPanel:Label_SetText(tbControls.txtCostNum, nHad .. "/" .. QiHun.nQiHunComposeNeed)
+  end
+  self:ShowSelectQiHun()
+end
+
+function tbWnd:OnSelectQiHun()
+  self:UpdateView()
+end
+
+function tbWnd:ShowSelectQiHun()
+  local nLevel = self.tbOwner:GetSelectLevel()
+  if not nLevel then
+    if self.tbTargetEffect then
+      self.pPanel:DeleteObject(self.tbTargetEffect.szKey)
+      self.tbTargetEffect = nil
+    end
+    return
+  end
+  local nTemplateId = QiHun.tbLevelInfo[nLevel][1]
+  local szName = Item:GetName(nTemplateId, me)
+  local nQuality = Item:GetQuality(nTemplateId)
+  local _, szColor = Item:GetQualityColor(nQuality)
+  self.pPanel:Label_SetText(tbControls.txtGet, i18n.EasyGet("<color=#{0}>{1} 1\228\184\170</color>", szColor, szName))
+  local szPath = Ui.tbQiHunPanelShowEffect[nLevel]
+  if szPath then
+    if not self.tbTargetEffect then
+      self.tbTargetEffect = {}
+      self.tbTargetEffect.szPath = szPath
+      self.tbTargetEffect.szKey = self.pPanel:DynamicLoadGameObject(tbControls.itemNew, szPath, "effect")
+      self.pPanel:SetSortingOrder(self.tbTargetEffect.szKey, 1)
+    elseif szPath ~= self.tbTargetEffect.szPath then
+      self.pPanel:DeleteObject(self.tbTargetEffect.szKey)
+      self.tbTargetEffect.szKey = self.pPanel:DynamicLoadGameObject(tbControls.itemNew, szPath, "effect")
+      self.pPanel:SetSortingOrder(self.tbTargetEffect.szKey, 1)
+      self.tbTargetEffect.szPath = szPath
+    end
+    self.pPanel:SetActive(self.tbTargetEffect.szKey, true)
+  end
+end
+
+function tbWnd:ShowFailEffect(nLevel)
+  self.pPanel:SetActive(tbControls.Fail_Effect, true)
+  Timer:Register(Env.GAME_FPS, function()
+    self.pPanel:SetActive(tbControls.Fail_Effect, false)
+  end)
+  local szPath = QiHun.tbFailEffectPath[nLevel]
+  if not szPath then
+    return
+  end
+  if not self.tbFailEffect then
+    self.tbFailEffect = {}
+    self.tbFailEffect.szPath = szPath
+    self.tbFailEffect.szKey = self.pPanel:DynamicLoadGameObject(tbControls.itemNew, szPath, "FailEffect")
+    self.pPanel:SetSortingOrder(self.tbFailEffect.szKey, 2)
+  elseif szPath ~= self.tbFailEffect.szPath then
+    self.pPanel:DeleteObject(self.tbFailEffect.szKey)
+    self.tbFailEffect.szKey = self.pPanel:DynamicLoadGameObject(tbControls.itemNew, szPath, "FailEffect")
+    self.pPanel:SetSortingOrder(self.tbFailEffect.szKey, 2)
+    self.tbFailEffect.szPath = szPath
+  end
+  self.pPanel:SetActive(self.tbFailEffect.szKey, true)
+  Timer:Register(Env.GAME_FPS, function()
+    if self.tbFailEffect then
+      self.pPanel:DeleteObject(self.tbFailEffect.szKey)
+      self.tbFailEffect = nil
+    end
+  end)
+end

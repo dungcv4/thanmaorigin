@@ -1,0 +1,100 @@
+local tbWnd = Ui:CreateClass("UILimitTimeLevelUp", "UIPanel")
+local tbControls = {
+  Template = "Detail/Template",
+  szTemplatePath = "Detail/Element%d/"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {}
+
+function tbWnd:OnClose()
+  if self.Timer then
+    Timer:Close(self.Timer)
+    self.Timer = nil
+  end
+  if self.AwardList:GetCount() <= 0 then
+    return
+  end
+  for i = 1, self.AwardList:GetCount() do
+    local tbElement = self.AwardList:GetElement(i)
+    local pPanel = tbElement.pPanel
+    RedPointMgr:DynamicUnRegist(pPanel, "btnAccept")
+  end
+end
+
+function tbWnd:OnCreate()
+  self.AwardList = Ui:NewScrollView(self, tbControls.Template, nil, false, true)
+end
+
+function tbWnd:OnOpen()
+  self.tbSettings = LimitTimeLevelUp:GetSettngs()
+  self:SetTemplate()
+  if self.Timer then
+    Timer:Close(self.Timer)
+  end
+  LimitTimeLevelUp:CheckRedPoint()
+end
+
+function tbWnd:UpdateView(nIndex)
+  local szTemplatePath = string.format(tbControls.szTemplatePath, nIndex)
+  local bCanGet, bGet = LimitTimeLevelUp:CheckCanGet(me, nIndex)
+  self.pPanel:SetActive(szTemplatePath .. "btnAccept", not bGet)
+  self.pPanel:SetActive(szTemplatePath .. "imgComplete", bGet)
+  self.pPanel:Button_SetEnable(szTemplatePath .. "btnAccept", bCanGet)
+  LimitTimeLevelUp:CheckRedPoint()
+end
+
+function tbWnd:SetTemplate()
+  self.AwardList:Reset()
+  for i = 1, #self.tbSettings do
+    self.AwardList:SetElement(i, function(tbElement)
+      self:UpdateTemplate(i, tbElement, self.tbSettings[i])
+    end)
+  end
+end
+
+function tbWnd:UpdateTemplate(i, tbElement, tbInfo)
+  local pPanel = tbElement.pPanel
+  local szTemplatePath = string.format(tbControls.szTemplatePath, i)
+  local nLevel = tbInfo.nLevel
+  local szDesc = i18n.EasyGet("{0}\231\186\167\229\143\175\233\162\134\229\143\150", nLevel)
+  pPanel:Label_SetText("txtName", szDesc)
+  RedPointMgr:DynamicRegisteRedPoint(pPanel, "btnAccept", {
+    LimitTimeLevelUp.tbIndex2RedPoint[i]
+  })
+  local bCanGet, bGet = LimitTimeLevelUp:CheckCanGet(me, i)
+  self.pPanel:SetActive(szTemplatePath .. "btnAccept", not bGet)
+  self.pPanel:SetActive(szTemplatePath .. "imgComplete", bGet)
+  self.pPanel:Button_SetEnable(szTemplatePath .. "btnAccept", bCanGet)
+  if bCanGet and not bGet then
+    Ui:Button_BindEvent(pPanel, "btnAccept", function()
+      self:OnClickGet(i)
+    end, self)
+  end
+  local tbAward = LimitTimeLevelUp:GetAward(i)
+  if 0 == #tbAward or #tbAward > 2 then
+    LogErr("LimitTimeLevelUp,AwardCfg Error!")
+    return
+  end
+  pPanel:SetActive("Awards/item1", false)
+  pPanel:SetActive("Awards/item2", false)
+  for k = 1, #tbAward do
+    local szPath = string.format("Awards/item%d", k)
+    pPanel:SetActive(szPath, true)
+    local tbAwardInfo = tbAward[k]
+    local ItemGrid = Ui:NewExistItemGrid(self, szTemplatePath .. szPath .. "/UIItemGrid")
+    if "BasicExp" == tbAwardInfo[1] then
+      ItemGrid:SetDigitalItem(tbAwardInfo[1], tbAwardInfo[2])
+      ItemGrid:SetClickEnable(false)
+    elseif "Item" == tbAwardInfo[1] then
+      ItemGrid:SetItemByTemplate(tbAwardInfo[2], tbAwardInfo[3], nil, nil, {bShowTip = true})
+      ItemGrid:SetClickEnable(true)
+    elseif Currency:Valid(tbAwardInfo[1]) then
+      ItemGrid:SetDigitalItem(tbAwardInfo[1], tbAwardInfo[2])
+      ItemGrid:SetClickEnable(true)
+    end
+  end
+end
+
+function tbWnd:OnClickGet(nIndex)
+  LimitTimeLevelUp:RPC_TryGetAward(nIndex)
+end

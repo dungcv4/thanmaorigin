@@ -1,0 +1,122 @@
+Require("CommonScript/ChuanGong/ChuanGongDef.lua")
+Require("CommonScript/Tong/TongDef.lua")
+ChuanGong.tbWrightMap = {}
+ChuanGong.tbWrightMap[Tong.Def.nMainMapTemplateId] = 1
+
+function ChuanGong:CheckTimeFrameAndLevelLimit(nGetLevel, nGetVipLevel, nSendLevel, nSendVipLevel)
+  if 1 ~= GetTimeFrameState("OpenDay2A") then
+    return false, i18n.Get(ChuanGong.tbText.szNotOpenChuanGong)
+  end
+  if nGetLevel < self.nGetMinLevel then
+    return false, i18n.Get(ChuanGong.tbText.szCanNotRecieveUtilLevelAt, self.nGetMinLevel)
+  end
+  if nSendLevel < self.nSendMinLevel then
+    return false, i18n.Get(ChuanGong.tbText.szSenderNeedLevelAt, self.nSendMinLevel)
+  end
+  local nMinusMinLevel = Vip.tbSetting[nGetVipLevel].nChuanGongLevelMinus
+  local nSendMinLevel = Vip.tbSetting[nSendVipLevel].nChuanGongLevelMinus
+  if nMinusMinLevel > nSendMinLevel then
+    nMinusMinLevel = nSendMinLevel
+  end
+  if nMinusMinLevel > nSendLevel - nGetLevel then
+    return false, i18n.Get(ChuanGong.tbText.szLevelDifferenceLessThan, nMinusMinLevel)
+  end
+  return true
+end
+
+ChuanGong.tbRelationToSzName = {
+  [ChuanGong.tbRelationType.Recieve] = "ChuanGongRecieve",
+  [ChuanGong.tbRelationType.Send] = "ChuanGongSend"
+}
+ChuanGong.tbRelationToExtraCountSaveId = {
+  [ChuanGong.tbRelationType.Recieve] = ChuanGong.tbSaveKeyEnum.KEY_ADD_RECIEVE_COUNT,
+  [ChuanGong.tbRelationType.Send] = ChuanGong.tbSaveKeyEnum.KEY_ADD_SEND_COUNT
+}
+ChuanGong.tbRelationToRecordName = {
+  [ChuanGong.tbRelationType.Recieve] = "ChuanGongRecieveRecord",
+  [ChuanGong.tbRelationType.Send] = "ChuanGongSendRecord"
+}
+
+function ChuanGong:GetRemainCount(pPlayer, emRelationType)
+  if not pPlayer then
+    return 0
+  end
+  return DegreeCtrl:GetDegree(pPlayer, self.tbRelationToSzName[emRelationType]) + pPlayer.GetUserValue(ChuanGong.SAVE_GROUP, self.tbRelationToExtraCountSaveId[emRelationType])
+end
+
+function ChuanGong:GetLastSendTime(pPlayer)
+  if not pPlayer then
+    return 0
+  end
+  return pPlayer.GetUserValue(ChuanGong.SAVE_GROUP, ChuanGong.tbSaveKeyEnum.KEY_SEND_TIME)
+end
+
+function ChuanGong:GetTodayRecordTimes(pPlayer, emRelationType)
+  return self.tbRelationToOneDayMaxTimes[emRelationType] - DegreeCtrl:GetDegree(pPlayer, self.tbRelationToRecordName[emRelationType])
+end
+
+function ChuanGong:IsLevelAndTimesSuffice(status, emRelation)
+  local tbRelationToLevelAndTimesSuffice = {
+    [self.tbRelationType.Recieve] = status.bLevelAndTimesSufficeGet,
+    [self.tbRelationType.Send] = status.bLevelAndTimesSufficeSend
+  }
+  return tbRelationToLevelAndTimesSuffice[emRelation]
+end
+
+function ChuanGong:StatusCanChuanGong(status, emRelation)
+  return self:IsLevelAndTimesSuffice(status, emRelation) and self:IsCdSuffice(status, emRelation)
+end
+
+function ChuanGong:StatusCanSendOrGet(status)
+  return self:StatusCanChuanGong(status, self.tbRelationType.Recieve) or self:StatusCanChuanGong(status, self.tbRelationType.Send)
+end
+
+function ChuanGong:IsCdSuffice(status, emRelation)
+  local nSendCD = self.SEND_CD
+  if emRelation == self.tbRelationType.Recieve then
+    nSendCD = ChuanGong:GetSendCD(status.nOtherVipLevel)
+  elseif emRelation == self.tbRelationType.Send then
+    nSendCD = ChuanGong:GetSendCD(status.nMyVipLevel)
+  end
+  return nSendCD <= GetTime() - self:GetNeedJudgeCdLastSendTime(status, emRelation)
+end
+
+function ChuanGong:GetSendCD(nVipLevel)
+  local tbSetting = Vip.tbSetting[nVipLevel]
+  if tbSetting then
+    return tbSetting.nChuanGongCD
+  else
+    return self.SEND_CD
+  end
+end
+
+function ChuanGong:GetNeedJudgeCdLastSendTime(status, emRelation)
+  local tbRelationToLastTime = {
+    [self.tbRelationType.Recieve] = status.nOtherLastSendTime,
+    [self.tbRelationType.Send] = status.nMyLastSendTime
+  }
+  return tbRelationToLastTime[emRelation]
+end
+
+function ChuanGong:CheckStatusFromOtherData(nOtherLevel, nOtherVipLevel, bOtherHaveRecieveTimes, bOtherHaveSendTimes, nOtherLastSendTime)
+  local nMyRecieveCount = self:GetRemainCount(me, self.tbRelationType.Recieve)
+  local nMySendCount = self:GetRemainCount(me, self.tbRelationType.Send)
+  local bGetRet, szGetErr = self:CheckTimeFrameAndLevelLimit(me.nTotalLevel, me.GetVipLevel(), nOtherLevel, nOtherVipLevel)
+  local bSendRet, szSendErr = self:CheckTimeFrameAndLevelLimit(nOtherLevel, nOtherVipLevel, me.nTotalLevel, me.GetVipLevel())
+  local bLevelAndTimesSufficeGet = bGetRet and nMyRecieveCount > 0 and bOtherHaveSendTimes
+  local bLevelAndTimesSufficeSend = bSendRet and nMySendCount > 0 and bOtherHaveRecieveTimes
+  local nMyLastSendTime = self:GetLastSendTime(me)
+  local tbStatus = {
+    bLevelAndTimesSufficeGet = bLevelAndTimesSufficeGet,
+    bLevelAndTimesSufficeSend = bLevelAndTimesSufficeSend,
+    nMyLastSendTime = nMyLastSendTime,
+    nOtherLastSendTime = nOtherLastSendTime,
+    nMyVipLevel = me.GetVipLevel(),
+    nOtherVipLevel = nOtherVipLevel
+  }
+  return tbStatus, szGetErr, szSendErr
+end
+
+function ChuanGong:IsLegelRelation(emRelation)
+  return emRelation == self.tbRelationType.Recieve or emRelation == self.tbRelationType.Send
+end

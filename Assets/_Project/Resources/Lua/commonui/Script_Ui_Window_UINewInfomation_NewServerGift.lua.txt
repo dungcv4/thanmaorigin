@@ -1,0 +1,151 @@
+Require("Script/Activity/OBActivity/NewServerGiftC.lua")
+local tbWnd = Ui:CreateClass("UINewInformation_NewServerGift", "UIPanel")
+tbWnd.szClassName = "UINewInformation_NewServerGift"
+local tbControls = {
+  List = "imgList/List",
+  Template = "imgList/List/Template",
+  txtInfo2 = "ActivityInfo/txtInfo2",
+  imgSoldOut = "imgSoldOut"
+}
+tbWnd.tbControls = tbControls
+tbWnd.nMainTimer = 0
+tbWnd.Def = {ShowGiftTime = 1}
+tbWnd.tbOnClickFuncs = {
+  [1] = function(tbElement, nProductId)
+    tbWnd:OnClickBuy(tbElement, nProductId)
+  end,
+  [2] = function(tbElement, nProductId)
+    tbWnd:OnClickBuy(tbElement, nProductId)
+  end,
+  [3] = function(tbElement, nProductId)
+    tbWnd:OnClickBuy(tbElement, nProductId)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbActivityObj = ActivityMgr:GetInstanceByClassName(ActivityMgr.szNewServerGiftClassName)
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.Template, nil, false, false)
+  if not self.tbActivityObj then
+    return
+  end
+  if not self.tbActivityObj:LoadConfig() then
+    LogErr("UINewActivityGift LoadConfig Error")
+    return
+  end
+  self.tbActivityObj:CheckShowRedPoint()
+end
+
+function tbWnd:CheckOpen()
+  return true
+end
+
+function tbWnd:OnOpen()
+  self.tbActivityObj:OnOpenUnRegisterRedPoint()
+  self.pPanel:Label_SetText("ActivityInfo/txtInfo2", self:TextTimeDesc())
+  self:UpdateShowInfo()
+  self.nMainTimer = Timer:Register(Env.GAME_FPS * 1, function()
+    return self:UpdateShowInfo()
+  end)
+end
+
+function tbWnd:OnClose()
+  if self.nMainTimer then
+    Timer:Close(self.nMainTimer)
+  end
+end
+
+function tbWnd:SetElement(tbElement, nConfigId)
+  local tbConfig = self.tbActivityObj.tbConfig[nConfigId]
+  if not tbConfig then
+    LogErr("UINewInfomation_NewServerGift config not found")
+    return
+  end
+  local nProductId = tbConfig.nProductId
+  local bOpenStatus = self.tbActivityObj:OpenStatusByConfigId(nConfigId)
+  local bIsBuyAlready = self.tbActivityObj:CheckIsBuy(me, nConfigId)
+  local nBeginTime, nEndTime = self.tbActivityObj:GiftTime(nConfigId)
+  tbElement.pPanel:SetActive("imgSoldOut", false)
+  tbElement.pPanel:SetActive("txtTimeRemaining", false)
+  if bOpenStatus == self.tbActivityObj.GiftOpenStatus.Opening then
+    if bIsBuyAlready then
+      tbElement.pPanel:SetActive("imgSoldOut", true)
+      tbElement.pPanel:SetActive("btnBuy", false)
+      tbElement.pPanel:Button_SetEnable("btnBuy", false)
+    else
+      tbElement.pPanel:Label_SetText("btnBuy/TextCost", i18n.EasyGet("{0}", Recharge.tbProductSettings[nProductId].szPriceUnit))
+      tbElement.pPanel:Button_SetEnable("btnBuy", true)
+      local nDays = math.floor((nEndTime - GetTime()) / 86400)
+      local nHours = math.floor((nEndTime - GetTime()) % 86400 / 3600)
+      tbElement.pPanel:Label_SetText("txtTimeRemaining", i18n.EasyGet("{0}\229\164\169{1}\229\176\143\230\151\182\229\144\142\228\184\139\230\158\182", nDays, nHours))
+      tbElement.pPanel:SetActive("txtTimeRemaining", true)
+    end
+  elseif bOpenStatus == self.tbActivityObj.GiftOpenStatus.TimeOut then
+    tbElement.pPanel:Label_SetText("btnBuy/TextCost", i18n.EasyGet("\229\183\178\228\184\139\230\158\182"))
+    tbElement.pPanel:Button_SetEnable("btnBuy", false)
+  elseif bOpenStatus == self.tbActivityObj.GiftOpenStatus.NoOpen then
+    local nDay = math.floor((nBeginTime - GetTime()) / 86400)
+    nDay = nDay + self.Def.ShowGiftTime
+    tbElement.pPanel:Label_SetText("btnBuy/TextCost", i18n.EasyGet("{0}\229\164\169\229\144\142\229\188\128\230\148\190", nDay))
+    tbElement.pPanel:Button_SetEnable("btnBuy", false)
+  else
+    LogErr("UINewInfomation New Activity Gift GetOpenStatus Error")
+  end
+  tbElement.pPanel:Label_SetText("ListTitle/txtGiftBagName", i18n.Parse(tbConfig.sztxt1))
+  tbElement.pPanel:Label_SetText("ListTitle/txtCelebrate", i18n.Parse(Recharge.tbProductSettings[nProductId].szProductName))
+  local tbAwards = Recharge.tbProductSettings[nProductId].tbAwards
+  tbElement.pPanel:Label_SetText("imgZK/txtZK", i18n.GetDiscountText(tbConfig.nShowDiscount))
+  tbElement.pPanel:SetActive("imgZK", true)
+  if not tbAwards then
+    LogErr("NewInfomation NewServerGift not found award item info, nProductId: %d", tbConfig.nProductId)
+  end
+  self:SetItem(tbElement, tbAwards)
+  Ui:Button_BindEvent(tbElement.pPanel, "btnBuy", function(self, nProductId)
+    self:OnClickBuy(tbElement, nProductId)
+  end, self, nProductId)
+end
+
+function tbWnd:SetItem(tbElement, tbAwards)
+  tbElement.tbItemGrid = tbElement.tbItemGrid
+  if not tbElement.tbItemGrid then
+    tbElement.tbItemGrid = Ui:NewExistItemGrid(tbElement, "Item/UIItemGrid")
+  end
+  local tbRef = tbElement.tbItemGrid
+  tbRef:SetGenericItem(tbAwards[1])
+  tbRef:SetClickEnable(true)
+end
+
+function tbWnd:TextTimeDesc()
+  local szTimeDesc = ""
+  local nOpenServerTime = GetServerCreateTime()
+  local tbScheduleConfig = self.tbActivityObj:GetScheduleCfg()
+  local nBegin = Lib:CalcTimeFrameOpenTime(tbScheduleConfig.szBeginTimeFrame, nOpenServerTime) + self.tbActivityObj.Def.HourOfDay
+  local nEnd = Lib:CalcTimeFrameOpenTime(tbScheduleConfig.szCloseTimeFrame, nOpenServerTime)
+  szTimeDesc = Lib:TimeDesc7(nBegin) .. "-" .. Lib:TimeDesc7(nEnd) .. "," .. i18n.EasyGet("\229\133\1779\229\164\169")
+  return szTimeDesc
+end
+
+function tbWnd:UpdateShowInfo()
+  self.tbScrollView:Clear()
+  for nConfigId, tbActivityInfo in pairs(self.tbActivityObj.tbConfig) do
+    if type(tbActivityInfo) == "table" and Lib:IsInteger(tbActivityInfo.nProductId) then
+      self.tbScrollView:SetElement(nConfigId, function(tbElement)
+        self:SetElement(tbElement, nConfigId)
+      end, false)
+    end
+  end
+  return true
+end
+
+function tbWnd:OnClickBuy(tbElement, nProductId)
+  self.tbActivityObj:CreateRechargeOrderReq(nProductId)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_RECHARGE_SUCCESS, function(szGameTradeNo, szChannelProductId, nPaidAmount, nRoleLevel, bIsFirstRecharge)
+    tbWnd:RechargeSuccessEvent(tbElement)
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RECHARGE_SUCCESS, tbWnd)
+  end, tbWnd)
+end
+
+function tbWnd:RechargeSuccessEvent(tbElement)
+  tbElement.pPanel:SetActive("imgSoldOut", true)
+  tbElement.pPanel:SetActive("btnBuy", false)
+  tbElement.pPanel:Button_SetEnable("btnBuy", false)
+end

@@ -1,0 +1,594 @@
+Fashion.tbTimeOutIndexs = {}
+
+function Fashion:OnSyncFashionData(tbData)
+  self:ClearData()
+  self.tbFashionClientData = tbData
+  local tbData = self:GetPlayerFashionData(me)
+  local nCurTime = GetTime()
+  for nFashionId, tbFashionInfo in pairs(tbData.tbFashionHaveList) do
+    if tbFashionInfo.nExpiredTime and tbFashionInfo.nExpiredTime > 0 then
+      if nCurTime >= tbFashionInfo.nExpiredTime then
+        self:NotifyFashionTimeout(nFashionId)
+      else
+        self.tbTimeOutIndexs[nFashionId] = Timer:Register((tbFashionInfo.nExpiredTime - nCurTime) * Env.GAME_FPS, self.NotifyFashionTimeout, self, nFashionId)
+      end
+    elseif tbFashionInfo.szExpiredDate and not Lib:IsEmptyStr(tbFashionInfo.szExpiredDate) then
+      local nEndTime = Lib:ParseDateTime(tbFashionInfo.szExpiredDate)
+      if nCurTime >= nEndTime then
+        self:NotifyFashionTimeout(nFashionId)
+      else
+        self.tbTimeOutIndexs[nFashionId] = Timer:Register((nEndTime - nCurTime) * Env.GAME_FPS, self.NotifyFashionTimeout, self, nFashionId)
+      end
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_FASHION_DATA_CHANGE, true)
+end
+
+function Fashion:OnSyncWearingFashionData()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_FASHION_DATA_CHANGE)
+end
+
+function Fashion:S2CChangeFashionAttr(nPart, nOldFashionId, nFashionId)
+  self:ChangeFashionAttr(me, nPart, nOldFashionId, nFashionId)
+end
+
+function Fashion:OnAddFashion(nFashionId, tbFashionInfo)
+  local tbData = self:GetPlayerFashionData(me)
+  local nCurTime = GetTime()
+  tbData.tbFashionHaveList[nFashionId] = tbFashionInfo
+  if tbFashionInfo.nExpiredTime and tbFashionInfo.nExpiredTime > 0 then
+    if nCurTime >= tbFashionInfo.nExpiredTime then
+      self:NotifyFashionTimeout(nFashionId)
+    else
+      self.tbTimeOutIndexs[nFashionId] = Timer:Register((tbFashionInfo.nExpiredTime - nCurTime) * Env.GAME_FPS, self.NotifyFashionTimeout, self, nFashionId)
+    end
+  elseif tbFashionInfo.szExpiredDate and not Lib:IsEmptyStr(tbFashionInfo.szExpiredDate) then
+    local nEndTime = Lib:ParseDateTime(tbFashionInfo.szExpiredDate)
+    if nCurTime >= nEndTime then
+      self:NotifyFashionTimeout(nFashionId)
+    else
+      self.tbTimeOutIndexs[nFashionId] = Timer:Register((nEndTime - nCurTime) * Env.GAME_FPS, self.NotifyFashionTimeout, self, nFashionId)
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_FASHION_DATA_CHANGE)
+end
+
+function Fashion:OnFashionTimeout(nFashionId)
+  local tbSetting = self:GetFashionSetting(me, nFashionId)
+  if not tbSetting then
+    me.CenterMsg(i18n.EasyGet("\230\173\164\229\164\150\232\163\133\228\184\141\229\173\152\229\156\168"), true)
+    return
+  end
+  local tbData = self:GetPlayerFashionData(me)
+  if not tbData.tbFashionHaveList[nFashionId] then
+    me.CenterMsg(i18n.EasyGet("\228\190\160\229\163\171\230\178\161\230\156\137\232\191\153\228\187\182\229\164\150\232\163\133"), true)
+    return
+  end
+  tbData.tbFashionHaveList[nFashionId] = nil
+  if self.tbTimeOutIndexs[nFashionId] then
+    Timer:Close(self.tbTimeOutIndexs[nFashionId])
+    self.tbTimeOutIndexs[nFashionId] = nil
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_FASHION_DATA_CHANGE)
+  me.CenterMsg(i18n.EasyGet("{0} \229\183\178\232\191\135\230\156\159", i18n.Parse(tbSetting.szName)))
+end
+
+function Fashion:ClearData()
+  for _, nTimerIndex in pairs(self.tbTimeOutIndexs) do
+    Timer:Close(nTimerIndex)
+  end
+  self.tbTimeOutIndexs = {}
+  self.tbFashionClientData = nil
+end
+
+function Fashion:NotifyFashionTimeout(nFashionId)
+  RemoteServer.FashionNotifyTimeout(nFashionId)
+end
+
+function Fashion:WearFashion(nFashionId)
+  local tbSetting = self:GetFashionSetting(me, nFashionId)
+  if not tbSetting then
+    me.CenterMsg(i18n.EasyGet("\230\173\164\229\164\150\232\163\133\228\184\141\229\173\152\229\156\168"), true)
+    return
+  end
+  if not self:GetFashion(me, nFashionId) then
+    me.CenterMsg(i18n.EasyGet("\228\190\160\229\163\171\230\178\161\230\156\137\232\191\153\228\187\182\229\164\150\232\163\133"), true)
+    return
+  end
+  if tbSetting.nLayer == Npc.NpcPartLayerDef.npc_part_layer_effect then
+    local nEffect2FashionId = self.tbPickingFashions[tbSetting.nPart].nFashionId
+    if not nEffect2FashionId then
+      LogErr("Fashion:WearFashion can not find preview fashionId!", tbSetting.nPart, nFashionId)
+      return
+    end
+    if self:GetFashion(me, nEffect2FashionId) then
+      if self:GetWearingFashionIdByPart(tbSetting.nPart) ~= nEffect2FashionId then
+        RemoteServer.RequestWearFashion(nEffect2FashionId)
+      end
+      RemoteServer.RequestWearFashionEffect(nFashionId)
+      return
+    end
+    me.CenterMsg(i18n.EasyGet("\232\161\163\230\169\177\228\184\173\230\154\130\230\151\160\229\143\175\229\140\185\233\133\141\229\164\150\232\167\130\239\188\140\230\151\160\230\179\149\231\169\191\230\136\180"))
+  else
+    RemoteServer.RequestWearFashion(nFashionId)
+  end
+end
+
+function Fashion:TakeOffFashion(nPart)
+  RemoteServer.RequestTakeOffFashion(nPart)
+end
+
+function Fashion:TakeOffEffectFashion(nPart)
+  RemoteServer.RequestTakeOffFashionEffect(nPart)
+end
+
+function Fashion:SetFashionDisable(nDisable)
+  RemoteServer.RequestSetFashionDisable(nDisable)
+end
+
+function Fashion:SetFashionHide(nPart, bHide)
+  local _, tbPartConfig = self:GetPartConfigByPartId(nPart, Npc.NpcPartLayerDef.npc_part_layer_base)
+  if not tbPartConfig or 1 ~= tbPartConfig.nCanHide then
+    return
+  end
+  RemoteServer.SetFeatureHide(nPart, bHide)
+end
+
+function Fashion:GetWearingFashionIdByPart(nPart)
+  return me.GetUserValue(self.SAVE_GROUP, nPart + 1)
+end
+
+function Fashion:GetWearingResIdByPart(nPart)
+  local nFashionId = me.GetUserValue(self.SAVE_GROUP, nPart + 1)
+  if not nFashionId then
+    return
+  end
+  if nFashionId <= 0 then
+    return
+  end
+  local tbSetting = self:GetFashionSetting(me, nFashionId)
+  if not tbSetting then
+    return
+  end
+  return tbSetting.nResId
+end
+
+function Fashion:GetWearingEffectResIdByPart(nPart)
+  local nFashionId = me.GetUserValue(self.FASHION_EFFECT_GROUP, nPart + 1)
+  if not nFashionId or nFashionId < 0 then
+    return 0
+  end
+  local tbSetting = self:GetFashionSetting(me, nFashionId)
+  if not tbSetting then
+    return 0
+  end
+  return tbSetting.nResId or 0
+end
+
+function Fashion:GetHaveFashionByPart(nPart, nLayer)
+  local tbData = self:GetPlayerFashionData(me)
+  local tbResult = {}
+  for nFashionId, tbInfo in pairs(tbData.tbFashionHaveList) do
+    local tbSetting = self:GetFashionSetting(me, nFashionId)
+    if tbSetting and tbSetting.nPart == nPart and tbSetting.nLayer == nLayer then
+      table.insert(tbResult, Lib:CopyTB(tbSetting))
+      setmetatable(tbResult[#tbResult], {__index = tbInfo})
+    end
+  end
+  return tbResult
+end
+
+function Fashion:GetHaveFashionById(nFashionId)
+  local tbData = self:GetPlayerFashionData(me)
+  return tbData.tbFashionHaveList[nFashionId]
+end
+
+function Fashion:GetHaveFashions()
+  local tbData = self:GetPlayerFashionData(me)
+  return tbData.tbFashionHaveList
+end
+
+function Fashion:IsHaveFashionIsEmpty()
+  local tbData = self:GetPlayerFashionData(me)
+  if next(tbData.tbFashionHaveList) then
+    return false
+  end
+  return true
+end
+
+function Fashion:GetFashionPartByIndex(nIndex)
+  local tbPart = self.tbAppearancePart[nIndex]
+  if tbPart then
+    return tbPart.nPartId, tbPart.nLayer
+  end
+  return nil
+end
+
+function Fashion:GetFashionPartConfig()
+  return self.tbAppearancePart
+end
+
+function Fashion:Preview_Init(objResPreview)
+  self.objResPreview = objResPreview
+  self.comResPreview = objResPreview:GetComponent(Ui.UINpcModel)
+  self.comResPreview:Release()
+  self.nCurDir = 0
+  self.tbPickingEffects = {}
+  self.tbPickingFashions = {}
+  self.tbPickingHideFashions = {}
+  for nPart = Npc.NpcResPartsDef.npc_part_body, Npc.NpcResPartsDef.npc_part_wind do
+    self.tbPickingEffects[nPart] = {}
+    self.tbPickingFashions[nPart] = {}
+    local nWearFashionId = self:GetWearingFashionIdByPart(nPart) or 0
+    local bIsHide = self:IsFeatureHide(me, nPart)
+    if bIsHide then
+      local nResId = self:GetWearingResIdByPart(nPart) or self:GetEquipResIdByPart(nPart) or 0
+      self.tbPickingHideFashions[nPart] = {
+        nFashionId = nWearFashionId,
+        nResId = nResId > 0 and nResId or self:GetNpcDefaultFeature(nPart),
+        nEffectFashionId = self:GetWearingEffectFashionIdByPart(me, nPart) or 0,
+        nEffectResId = self:GetEffectResId(nPart, nWearFashionId)
+      }
+      self.tbPickingEffects[nPart].nResId = 0
+      self.tbPickingEffects[nPart].nFashionId = 0
+      self.tbPickingFashions[nPart].nResId = 0
+      self.tbPickingFashions[nPart].nFashionId = 0
+    else
+      self.tbPickingHideFashions[nPart] = {}
+      self.tbPickingFashions[nPart].nFashionId = nWearFashionId
+      local nResId = self:GetWearingResIdByPart(nPart) or 0
+      self.tbPickingFashions[nPart].nResId = nResId > 0 and nResId or self:GetNpcDefaultFeature(nPart)
+      self.tbPickingEffects[nPart].nFashionId = self:GetWearingEffectFashionIdByPart(me, nPart) or 0
+      self.tbPickingEffects[nPart].nResId = self:GetEffectResId(nPart, nWearFashionId)
+    end
+  end
+  if self.bShieldHorse then
+    self:Preview_RefreshPreview()
+  else
+    self:Preview_RefreshPreview_AllPart()
+  end
+end
+
+function Fashion:Preview_Destroy()
+  if not self.comResPreview then
+    return
+  end
+  self.comResPreview:Release()
+  self.comResPreview = nil
+  self.objResPreview = nil
+  self.nCurDir = 0
+  self.tbPickingEffects = {}
+  self.tbPickingFashions = {}
+end
+
+function Fashion:Preview_TurnLeft()
+  self.nCurDir = (self.nCurDir + 1) % 8
+  self.comResPreview:SetDir(math.floor(self.nCurDir))
+end
+
+function Fashion:Preview_TurnRight()
+  self.nCurDir = (self.nCurDir - 1) % 8
+  self.comResPreview:SetDir(math.floor(self.nCurDir))
+end
+
+function Fashion:SetResDir(nDir)
+  self.nCurDir = nDir
+  self.comResPreview:SetDir(math.floor(self.nCurDir))
+end
+
+function Fashion:SwipeModel(nOffset)
+  self.nSwipeOffset = self.nSwipeOffset or 0
+  self.nSwipeOffset = self.nSwipeOffset + nOffset * 0.1
+  local nDir = (self.nCurDir - self.nSwipeOffset) % 8
+  if nDir == self.nCurDir then
+    return
+  end
+  self.nSwipeOffset = 0
+  self.nCurDir = nDir
+  self.comResPreview:SetDir(math.floor(self.nCurDir))
+end
+
+function Fashion:Preview_TryOnAFashion(nPart, nFashionId)
+  local tbSetting, bCanUse = Fashion:GetFashionSetting(me, nFashionId)
+  if not tbSetting or not bCanUse then
+    me.CenterMsg(i18n.EasyGet("\230\173\164\229\164\150\232\163\133\228\184\141\229\143\175\231\148\168"), true)
+    return
+  end
+  if Lib:IsEmptyTB(self.tbPickingHideFashions[nPart]) then
+    self.tbPickingFashions[nPart].nFashionId = nFashionId
+    self.tbPickingFashions[nPart].nResId = tbSetting.nResId
+  else
+    self.tbPickingHideFashions[nPart].nFashionId = nFashionId
+    self.tbPickingHideFashions[nPart].nResId = tbSetting.nResId
+  end
+  local bCanShowBindEffect = false
+  if nPart == Npc.NpcResPartsDef.npc_part_weapon then
+    local nPreviewEffectId = self.tbPickingEffects[nPart] and self.tbPickingEffects[nPart].nFashionId or 0
+    if nPreviewEffectId > 0 then
+      if not Lib:Is_include(nPreviewEffectId, tbSetting.tbFashion2EffectIds) then
+        bCanShowBindEffect = true
+      end
+    else
+      bCanShowBindEffect = true
+    end
+  end
+  if bCanShowBindEffect and tbSetting.nAddEnhanceEffect > 0 then
+    if Lib:IsEmptyTB(self.tbPickingHideFashions[nPart]) then
+      self.tbPickingEffects[nPart].nFashionId = 0
+      self.tbPickingEffects[nPart].nResId = Item.EquipEnhance:GetEffectResId(me, tbSetting.nAddEnhanceEffect)
+    else
+      self.tbPickingHideFashions[nPart].nEffectFashionId = 0
+      self.tbPickingHideFashions[nPart].nEffectResId = Item.EquipEnhance:GetEffectResId(me, tbSetting.nAddEnhanceEffect)
+    end
+  end
+  if self.bShieldHorse then
+    self:Preview_RefreshPreview()
+  else
+    self:Preview_RefreshPreview_AllPart()
+  end
+  return true
+end
+
+function Fashion:PreviewTryOnEffect(nPart, nFashionId)
+  local tbSetting, bCanUse = Fashion:GetFashionSetting(me, nFashionId)
+  if not bCanUse or not tbSetting then
+    me.CenterMsg(i18n.EasyGet("\230\173\164\231\137\185\230\149\136\228\184\141\229\143\175\231\148\168"), true)
+    return
+  end
+  if Lib:IsEmptyTB(self.tbPickingHideFashions[nPart]) then
+    self.tbPickingEffects[nPart].nFashionId = nFashionId
+    self.tbPickingEffects[nPart].nResId = tbSetting.nResId
+  else
+    self.tbPickingHideFashions[nPart].nEffectFashionId = nFashionId
+    self.tbPickingHideFashions[nPart].nEffectResId = tbSetting.nResId
+  end
+  if self.bShieldHorse then
+    self:Preview_RefreshPreview()
+  else
+    self:Preview_RefreshPreview_AllPart()
+  end
+  return true
+end
+
+function Fashion:Preview_RefreshPreview()
+  self.comResPreview:ShowModel(self:GetSex(me), 1, self.bHorse and 0 or self.tbPickingFashions[Npc.NpcResPartsDef.npc_part_body].nResId, self.bHorse and 0 or self.tbPickingFashions[Npc.NpcResPartsDef.npc_part_weapon].nResId, self.bHorse and 0 or self.tbPickingFashions[Npc.NpcResPartsDef.npc_part_mantle].nResId, self.bHorse and self.tbPickingFashions[Npc.NpcResPartsDef.npc_part_horse].nResId or 0, self.bHorse and 0 or self.tbPickingFashions[Npc.NpcResPartsDef.npc_part_head].nResId, self.bHorse and 0 or self.tbPickingFashions[Npc.NpcResPartsDef.npc_part_wind].nResId, self.bHorse and 0 or self.tbPickingEffects[Npc.NpcResPartsDef.npc_part_weapon].nResId, self.bHorse and self.tbPickingEffects[Npc.NpcResPartsDef.npc_part_horse].nResId or 0)
+  self.comResPreview:SetDir(math.floor(self.nCurDir))
+end
+
+function Fashion:Preview_RefreshPreview_AllPart()
+  self.comResPreview:ShowModel(self:GetSex(me), 1, self.tbPickingFashions[Npc.NpcResPartsDef.npc_part_body].nResId, self.tbPickingFashions[Npc.NpcResPartsDef.npc_part_weapon].nResId, self.tbPickingFashions[Npc.NpcResPartsDef.npc_part_mantle].nResId, self.tbPickingFashions[Npc.NpcResPartsDef.npc_part_horse].nResId or 0, self.tbPickingFashions[Npc.NpcResPartsDef.npc_part_head].nResId, self.tbPickingFashions[Npc.NpcResPartsDef.npc_part_wind].nResId, self.tbPickingEffects[Npc.NpcResPartsDef.npc_part_weapon].nResId or 0, self.tbPickingEffects[Npc.NpcResPartsDef.npc_part_horse].nResId or 0)
+  self.comResPreview:SetDir(math.floor(self.nCurDir))
+end
+
+function Fashion:GetEffectResId(nPart, nFashionId)
+  local nEffectResId = 0
+  local tbSetting = self:GetFashionSetting(me, nFashionId)
+  if tbSetting then
+    local nEffectFashionId = self:GetWearingEffectFashionIdByPart(me, nPart) or 0
+    if nEffectFashionId > 0 and Lib:Is_include(nEffectFashionId, tbSetting.tbFashion2EffectIds) then
+      nEffectResId = self:GetWearingEffectResIdByPart(nPart)
+    elseif nPart == Npc.NpcResPartsDef.npc_part_weapon and tbSetting.nAddEnhanceEffect > 0 then
+      nEffectResId = Item.EquipEnhance:GetEffectResId(me, tbSetting.nAddEnhanceEffect)
+    end
+  end
+  return nEffectResId
+end
+
+function Fashion:Preview_GetPreviewList()
+  return self.tbPickingFashions
+end
+
+function Fashion:GetPreviewEffectList()
+  return self.tbPickingEffects
+end
+
+function Fashion:InitFashionGrid(pGrid, tbSetting)
+  pGrid:BackGround_SetActive(true)
+  pGrid:LabelSuffix_SetActive(false)
+  pGrid:CDLabyer_SetActive(false)
+  pGrid:Higher_SetActive(false)
+  pGrid:ItemIcon_SetActive(true)
+  local atlas, sprite = Item:GetIcon(tbSetting.nIconId)
+  pGrid:ItemIcon_SetSprite(sprite)
+  pGrid:BaseColor_SetSpriteByQuality(tbSetting.nQuality)
+end
+
+function Fashion:ResetPartPreview(nPart)
+  if not nPart then
+    return
+  end
+  if not self.tbPickingFashions[nPart] then
+    return
+  end
+  local nFashionId = self:GetWearingFashionIdByPart(nPart)
+  if self.tbPickingFashions[nPart].nFashionId > 0 and self.tbPickingFashions[nPart].nFashionId == nFashionId then
+    return
+  end
+  local nResId = self:GetWearingResIdByPart(nPart) or 0
+  if self:IsFeatureHide(me, nPart) then
+    self.tbPickingFashions[nPart].nResId = 0
+    self.tbPickingFashions[nPart].nFashionId = 0
+    self.tbPickingHideFashions[nPart].nFashionId = nFashionId or 0
+    self.tbPickingHideFashions[nPart].nResId = nResId > 0 and nResId or self:GetNpcDefaultFeature(nPart)
+  else
+    self.tbPickingFashions[nPart].nFashionId = nFashionId or 0
+    self.tbPickingFashions[nPart].nResId = nResId > 0 and nResId or self:GetNpcDefaultFeature(nPart)
+  end
+  if self.bShieldHorse then
+    self:Preview_RefreshPreview()
+  else
+    self:Preview_RefreshPreview_AllPart()
+  end
+end
+
+function Fashion:ResetPartEffectPreview(nPart)
+  if not nPart then
+    return
+  end
+  if not self.tbPickingEffects[nPart] then
+    return
+  end
+  local nEffectFashionId = self:GetWearingEffectFashionIdByPart(me, nPart)
+  if self.tbPickingEffects[nPart].nFashionId > 0 and self.tbPickingEffects[nPart].nFashionId == nEffectFashionId then
+    return
+  end
+  local nFashionId = self.tbPickingFashions[nPart].nFashionId
+  local nResId = self:GetEffectResId(nPart, nFashionId)
+  if self:IsFeatureHide(me, nPart) then
+    self.tbPickingEffects[nPart].nResId = 0
+    self.tbPickingEffects[nPart].nFashionId = 0
+    self.tbPickingHideFashions[nPart].nEffectResId = nResId
+    self.tbPickingHideFashions[nPart].nEffectFashionId = nEffectFashionId or 0
+  else
+    self.tbPickingEffects[nPart].nResId = nResId
+    self.tbPickingEffects[nPart].nFashionId = nEffectFashionId or 0
+  end
+  if self.bShieldHorse then
+    self:Preview_RefreshPreview()
+  else
+    self:Preview_RefreshPreview_AllPart()
+  end
+end
+
+function Fashion:ClearPartEffectPreview(nPart)
+  if not nPart then
+    return
+  end
+  if not self.tbPickingEffects[nPart] then
+    return
+  end
+  self.tbPickingEffects[nPart].nResId = 0
+  self.tbPickingEffects[nPart].nFashionId = 0
+  if self.bShieldHorse then
+    self:Preview_RefreshPreview()
+  else
+    self:Preview_RefreshPreview_AllPart()
+  end
+end
+
+function Fashion:HidePartFashionPreview(nPart, bHide)
+  if not nPart then
+    return
+  end
+  if not self.tbPickingFashions[nPart] then
+    return
+  end
+  if bHide then
+    if not Lib:IsEmptyTB(self.tbPickingHideFashions[nPart]) then
+      return
+    end
+    local tbHideFashionInfo = {
+      nResId = self.tbPickingFashions[nPart].nResId or 0,
+      nFashionId = self.tbPickingFashions[nPart].nFashionId or 0,
+      nEffectResId = self.tbPickingEffects[nPart].nResId or 0,
+      nEffectFashionId = self.tbPickingEffects[nPart].nFashionId or 0
+    }
+    self.tbPickingHideFashions[nPart] = tbHideFashionInfo
+    self.tbPickingEffects[nPart].nResId = 0
+    self.tbPickingEffects[nPart].nFashionId = 0
+    self.tbPickingFashions[nPart].nResId = 0
+    self.tbPickingFashions[nPart].nFashionId = 0
+  else
+    local tbHideFashionInfo = self.tbPickingHideFashions[nPart] or {}
+    if not Lib:IsEmptyTB(tbHideFashionInfo) then
+      self.tbPickingFashions[nPart].nResId = tbHideFashionInfo.nResId
+      self.tbPickingFashions[nPart].nFashionId = tbHideFashionInfo.nFashionId
+      self.tbPickingEffects[nPart].nResId = tbHideFashionInfo.nEffectResId
+      self.tbPickingEffects[nPart].nFashionId = tbHideFashionInfo.nEffectFashionId
+    end
+    self.tbPickingHideFashions[nPart] = {}
+  end
+  if self.bShieldHorse then
+    self:Preview_RefreshPreview()
+  else
+    self:Preview_RefreshPreview_AllPart()
+  end
+end
+
+function Fashion:GetEquipResIdByPart(nPart)
+  local pNpc = me.GetNpc()
+  if not pNpc then
+    return 0
+  end
+  local pMantle = me.GetEquipByPos(Item.EQUIPPOS_MANTLE)
+  if not pMantle then
+    return 0
+  end
+  local _, _, _, _, nResId = KItem.GetItemShowInfo(pMantle.dwTemplateId, me.nFaction, me.nFactionSect, me.nSex)
+  return nResId
+end
+
+function Fashion:IsNeedPopBoxPartShield(nPartId)
+  if nPartId and nPartId >= 0 and self:IsFeatureHide(me, nPartId) then
+    local function pCancelFeatureHideFunc()
+      self:SetFashionHide(nPartId, false)
+      
+      self:HidePartFashionPreview(nPartId, false)
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\173\163\229\164\132\228\186\142\230\140\130\228\187\182/\230\138\171\233\163\142\229\177\143\232\148\189\231\138\182\230\128\129\239\188\140\230\152\175\229\144\166\229\143\150\230\182\136\229\177\143\232\148\189\228\187\165\233\162\132\232\167\136\230\140\130\228\187\182\229\164\150\232\167\130\239\188\159"), {
+      {pCancelFeatureHideFunc},
+      {}
+    }, {
+      i18n.EasyGet("\231\161\174\229\174\154"),
+      i18n.EasyGet("\229\143\150\230\182\136")
+    })
+  end
+end
+
+function Fashion:GetNpcDefaultFeature(nPart)
+  if nPart == Npc.NpcResPartsDef.npc_part_horse then
+    local nCurGrade = Horse:GetHorseGrade(me)
+    local nCurTemplateId = Horse.tbGradeInfoCfg[nCurGrade][8]
+    return Horse:GetModel(me, nCurTemplateId)
+  else
+    return me.GetNpc().GetNpcFeature(nPart)
+  end
+end
+
+function Fashion:CheckCanShowPart(nPartId)
+  if nPartId == Npc.NpcResPartsDef.npc_part_horse then
+    local tbHorseItem = me.GetEquipByPos(Item.EQUIPPOS_HORSE)
+    if not tbHorseItem then
+      return false
+    end
+  end
+  return true
+end
+
+function Fashion:IsMatchEffect(nFashionId, nEffectFashionId)
+  local tbSetting = self:GetFashionSetting(me, nFashionId)
+  if not tbSetting then
+    return false
+  end
+  if not tbSetting.tbFashion2EffectIds or #tbSetting.tbFashion2EffectIds <= 0 then
+    return false
+  end
+  local tbEffectSetting = self:GetFashionSetting(me, nEffectFashionId)
+  if not tbEffectSetting then
+    return false
+  end
+  if not tbEffectSetting.tbEffect2FashionIds or #tbEffectSetting.tbEffect2FashionIds <= 0 then
+    return false
+  end
+  if Lib:Is_include(nEffectFashionId, tbSetting.tbFashion2EffectIds) then
+    return true
+  end
+  return false
+end
+
+function Fashion:GetWearingResIdList()
+  local tbEffectResId = {}
+  local tbFashionResId = {}
+  for nPart = Npc.NpcResPartsDef.npc_part_body, Npc.NpcResPartsDef.npc_res_part_count - 1 do
+    local nResId = self:GetWearingResIdByPart(nPart)
+    if nResId then
+      tbFashionResId[nPart] = nResId
+    else
+      tbFashionResId[nPart] = self:GetNpcDefaultFeature(nPart)
+    end
+    local nEffectResId = self:GetWearingEffectResIdByPart(nPart)
+    tbEffectResId[nPart] = nEffectResId or 0
+  end
+  return tbFashionResId, tbEffectResId
+end

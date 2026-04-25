@@ -1,0 +1,208 @@
+local tbWnd = Ui:CreateWindow("UILeiTaiRoom")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnStart = "node/imgBG/Content/btns/btnStart",
+  btnDisband = "node/imgBG/Content/btns/btnDisband",
+  btnLeave = "node/imgBG/Content/btns/btnLeave",
+  btnReady = "node/imgBG/Content/btns/btnReady",
+  btnCancelReady = "node/imgBG/Content/btns/btnCancelReady",
+  btnRemind = "node/imgBG/Content/btns/btnRemind",
+  btnChallengeList = "node/imgBG/Content/btns/btnChallengeList",
+  txtCloseTimeTitle = "node/imgBG/Content/txtCloseTimeTitle",
+  txtCloseTime = "node/imgBG/Content/txtCloseTimeTitle/txtCloseTime",
+  objHostTemplate = "node/imgBG/Content/ShouLei/list/Template",
+  objChallengerTemplate = "node/imgBG/Content/GongLei/list/Template",
+  objChallengerEmpty = "node/imgBG/Content/GongLei/empty"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnStart = function(self)
+    LeiTai:StartFuBenRequest(LeiTai.tbMyRoom.nRoomId)
+  end,
+  btnDisband = function(self)
+    local function funcDisband()
+      LeiTai:DisbandRoom()
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\232\167\163\230\149\163\230\147\130\229\143\176\239\188\159"), {
+      {funcDisband},
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  end,
+  btnLeave = function(self)
+    local szText = LeiTai.nMySide == LeiTai.tbSide.Host and i18n.EasyGet("\230\152\175\229\144\166\232\175\183\231\166\187\229\175\185\230\150\185\239\188\159") or i18n.EasyGet("\230\152\175\229\144\166\231\166\187\229\188\128\230\147\130\229\143\176\239\188\159")
+    
+    local function funcLeave()
+      LeiTai:ChallengerLeave()
+    end
+    
+    Ui:OpenWindow("UIMessageBox", szText, {
+      {funcLeave},
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  end,
+  btnReady = function(self)
+    LeiTai:ChangeReadyState(true)
+  end,
+  btnCancelReady = function(self)
+    LeiTai:ChangeReadyState(false)
+  end,
+  btnRemind = function(self)
+    LeiTai:RemindReady()
+  end,
+  btnChallengeList = function(self)
+    Ui:OpenWindow("UILeiTaiChallengeList")
+  end
+}
+
+function tbWnd:OnCreate()
+  self.svHost = Ui:NewScrollView(self, self.objHostTemplate, nil, true, true)
+  self.svChallenger = Ui:NewScrollView(self, self.objChallengerTemplate, nil, true, true)
+end
+
+function tbWnd:OnOpen()
+  self:RefreshUI()
+  self:RegistRedPoint()
+end
+
+function tbWnd:OnClose()
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+  end
+  self.nTimer = nil
+  self:UnRegistRedPoint()
+end
+
+function tbWnd:RefreshUI()
+  self.pPanel:SetActive(self.objChallengerEmpty, LeiTai.tbMyRoom and 0 == Lib:CountTB(LeiTai.tbMyRoom.tbChallengerId))
+  self:SetBtns()
+  self:RefreshHostSV()
+  self:RefreshChallengerSV()
+  self:RefreshCountDown()
+end
+
+function tbWnd:RefreshHostSV()
+  self.svHost:Clear()
+  if LeiTai.tbMyRoom then
+    for i, nPlayerId in ipairs(LeiTai.tbMyRoom.tbHostId) do
+      self.svHost:SetElement(i, function(tbElement)
+        local szElementPath = "node/imgBG/Content/ShouLei/list/Element" .. i
+        self:SetPlayerElement(nPlayerId, szElementPath, tbElement)
+      end, false)
+    end
+  end
+end
+
+function tbWnd:RefreshChallengerSV()
+  self.svChallenger:Clear()
+  if LeiTai.tbMyRoom then
+    for i, nPlayerId in ipairs(LeiTai.tbMyRoom.tbChallengerId) do
+      self.svChallenger:SetElement(i, function(tbElement)
+        local szElementPath = "node/imgBG/Content/GongLei/list/Element" .. i
+        self:SetPlayerElement(nPlayerId, szElementPath, tbElement)
+      end, false)
+    end
+  end
+end
+
+function tbWnd:SetPlayerElement(nPlayerId, szElementPath, tbElement)
+  local tbPlayerInfo = LeiTai.tbMyRoom.tbPlayerInfoList[nPlayerId]
+  local bReady = LeiTai.tbMyRoom.tbPlayerReadyState[nPlayerId]
+  self.pPanel:SetActive(szElementPath .. "/stateReady", bReady)
+  self.pPanel:SetActive(szElementPath .. "/stateNotReady", not bReady)
+  self.pPanel:Label_SetText(szElementPath .. "/txtPlayerName", tbPlayerInfo.szName)
+  local bShowLeaderFlag = nPlayerId == LeiTai.tbMyRoom.nHostCaptainId or nPlayerId == LeiTai.tbMyRoom.nChallengerCaptainId
+  self.pPanel:SetActive(szElementPath .. "/txtPlayerName/imgTeamLeaderIcon", bShowLeaderFlag)
+  self.pPanel:Label_SetText(szElementPath .. "/PortraitObj/Level/Text", tbPlayerInfo.nLevel)
+  self.pPanel:Sprite_SetSprite(szElementPath .. "/PortraitObj/imgFactionIcon", Faction:GetIcon(tbPlayerInfo.nFaction))
+  self.pPanel:Sprite_SetSprite(szElementPath .. "/PortraitObj/Portrait/Image", PlayerPortrait:GetIcon(tbPlayerInfo.nPortrait))
+  PlayerPortraitFrame:SetPortraitFrame(self.pPanel, szElementPath .. "/PortraitObj/PortraitFrame", tbPlayerInfo.nPortraitFrame)
+  Ui:Button_BindEvent(self.pPanel, szElementPath .. "/PortraitObj", self.PopUpMenu, self, tbPlayerInfo, tbElement)
+end
+
+function tbWnd:SetBtns()
+  local bIAmHostCaptain = me.dwID == LeiTai.tbMyRoom.nHostCaptainId
+  local bIAmChallengerCaptain = me.dwID == LeiTai.tbMyRoom.nChallengerCaptainId
+  local bMeReady = LeiTai.tbMyRoom.tbPlayerReadyState[me.dwID]
+  local bAllReady = LeiTai:CheckAllReady()
+  local bHasChallenger = 0 ~= Lib:CountTB(LeiTai.tbMyRoom.tbChallengerId)
+  self.pPanel:SetActive(self.btnDisband, bIAmHostCaptain)
+  self.pPanel:SetActive(self.btnLeave, (bIAmHostCaptain or bIAmChallengerCaptain) and bHasChallenger)
+  self.pPanel:SetActive(self.btnChallengeList, bIAmHostCaptain and not bHasChallenger)
+  self.pPanel:SetActive(self.btnRemind, bIAmHostCaptain and bHasChallenger)
+  self.pPanel:SetActive(self.btnStart, bIAmHostCaptain and bAllReady)
+  self.pPanel:SetActive(self.btnReady, not bMeReady and bHasChallenger)
+  self.pPanel:SetActive(self.btnCancelReady, bMeReady)
+  local szBtnLeaveText = bIAmHostCaptain and i18n.EasyGet("\232\175\183\231\166\187\229\175\185\230\150\185") or i18n.EasyGet("\231\166\187\229\188\128\230\147\130\229\143\176")
+  self.pPanel:Label_SetText(self.btnLeave .. "/Text", szBtnLeaveText)
+end
+
+function tbWnd:RefreshCountDown()
+  self.pPanel:SetActive(self.txtCloseTimeTitle, LeiTai.nEndTime)
+  self.pPanel:SetActive(self.txtCloseTime, LeiTai.nEndTime)
+  if not LeiTai.nEndTime then
+    return
+  end
+  if LeiTai.tbMyRoom then
+    local nRoomState = LeiTai.tbMyRoom.nRoomState
+    if nRoomState == LeiTai.tbRoomState.Waiting then
+      self.pPanel:Label_SetText(self.txtCloseTimeTitle, i18n.EasyGet("\230\147\130\229\143\176\229\133\179\233\151\173\229\128\146\232\174\161\230\151\182\239\188\154"))
+    elseif nRoomState == LeiTai.tbRoomState.Ready then
+      self.pPanel:Label_SetText(self.txtCloseTimeTitle, i18n.EasyGet("\229\135\134\229\164\135\229\128\146\232\174\161\230\151\182\239\188\154"))
+    end
+    local nCountDown = LeiTai.nEndTime - GetTime()
+    nCountDown = nCountDown >= 0 and nCountDown or 0
+    local szTime = Lib:TimeDesc2(nCountDown)
+    self.pPanel:Label_SetText(self.txtCloseTime, szTime)
+    if self.nTimer then
+      Timer:Close(self.nTimer)
+    end
+    self.nTimer = Timer:Register(Env.GAME_FPS, function()
+      if not LeiTai.nEndTime then
+        return false
+      end
+      local nCountDown = LeiTai.nEndTime - GetTime()
+      if nCountDown >= 0 then
+        local szTime = Lib:TimeDesc2(nCountDown)
+        self.pPanel:Label_SetText(self.txtCloseTime, szTime)
+        return true
+      end
+      return false
+    end)
+  end
+end
+
+function tbWnd:PopUpMenu(tbPlayerInfo, tbElement)
+  if tbPlayerInfo.dwID == me.dwID then
+    return
+  end
+  local tbData = {
+    dwRoleId = tbPlayerInfo.dwID,
+    szName = tbPlayerInfo.szName,
+    nPortrait = tbPlayerInfo.nPortrait,
+    nFaction = tbPlayerInfo.nFaction,
+    nLevel = tbPlayerInfo.nLevel,
+    dwKinId = tbPlayerInfo.dwKinId,
+    szKinOrTongName = tbPlayerInfo.szKinOrTongName
+  }
+  Ui:OpenWindow("UIRightPopUpMenu", "leiTai", tbData, tbElement, 420, -200)
+end
+
+function tbWnd:RegistRedPoint()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnChallengeList, {
+    RedPointMgr.EVENT.LeiTaiNewCandidate
+  })
+end
+
+function tbWnd:UnRegistRedPoint()
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.btnChallengeList)
+end

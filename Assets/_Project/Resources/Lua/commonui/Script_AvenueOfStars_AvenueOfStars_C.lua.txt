@@ -1,0 +1,201 @@
+AvenueOfStars.nVoteAwardLevel = 0
+
+function AvenueOfStars:GotoOutgameWeb()
+  if me.nLevel < self.MIN_LEVEL then
+    me.CenterMsg(i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179{0}\231\186\167\239\188\140\230\151\160\230\179\149\229\143\130\229\138\160\232\175\165\230\180\187\229\138\168\239\188\129", self.MIN_LEVEL))
+    return false
+  end
+  RemoteServer.OpenAvenueofStarsWeb("Main")
+  return true
+end
+
+function AvenueOfStars:GotoOutgameEnroll()
+  if me.nLevel < self.MIN_LEVEL then
+    me.CenterMsg(i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179{0}\231\186\167\239\188\140\230\151\160\230\179\149\229\143\130\229\138\160\232\175\165\230\180\187\229\138\168\239\188\129", self.MIN_LEVEL))
+    return false
+  end
+  if not self:IsEnrollDate() then
+    me.CenterMsg(i18n.EasyGet("\230\138\165\229\144\141\229\183\178\231\187\147\230\157\159"))
+    return false
+  end
+  RemoteServer.OpenAvenueofStarsWeb("Enroll")
+  return true
+end
+
+function AvenueOfStars:GotoOutgameVote(nTargetID, nTargetServerID)
+  if me.nLevel < self.MIN_LEVEL then
+    me.CenterMsg(i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179{0}\231\186\167\239\188\140\230\151\160\230\179\149\229\143\130\229\138\160\232\175\165\230\180\187\229\138\168\239\188\129", self.MIN_LEVEL))
+    return false
+  end
+  local bVoteOpen, nVotePhase = self:IsVoteDate()
+  if not bVoteOpen then
+    me.CenterMsg(i18n.EasyGet("\230\138\149\231\165\168\229\183\178\231\187\147\230\157\159"))
+    return false
+  end
+  if nVotePhase == self.VOTE_PHASE_LOCAL_SERVER_ONLY and nTargetServerID ~= SERVER_ID then
+    me.CenterMsg(i18n.EasyGet("\230\156\172\233\152\182\230\174\181\229\143\170\232\131\189\228\184\186\230\156\172\230\156\141\233\128\137\230\137\139\230\138\149\231\165\168"))
+    return false
+  end
+  RemoteServer.OpenAvenueofStarsWeb("Vote", nTargetID, nTargetServerID)
+  return true
+end
+
+function AvenueOfStars:OpenWeb(szUrl)
+  if WINDOWS then
+    Ui:GotoWeb(szUrl)
+  else
+    Ui:OpenWindow("UIGeneralWebView", szUrl, 0, 0)
+  end
+end
+
+function AvenueOfStars:QueryVoteLevel_C()
+  if me.nLevel < self.MIN_LEVEL then
+    return false
+  end
+  if not self:IsOpenDate() then
+    return false
+  end
+  RemoteServer.QueryAvenueOfStarsVoteLevel(self.tbVoteLevel)
+  return true
+end
+
+function AvenueOfStars:SyncVoteLevel(tbVoteLevel)
+  for nPhase, nLevel in pairs(tbVoteLevel) do
+    self.tbVoteLevel[nPhase] = nLevel
+  end
+  self:CheckRewardRedPoint()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_AVENUEOFSTARS_SYNC_VOTE_LEVEL)
+end
+
+function AvenueOfStars:GetVoteLevelAward_C(nPhase, nIndex)
+  if me.nLevel < self.MIN_LEVEL then
+    me.CenterMsg(i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179{0}\231\186\167\239\188\140\230\151\160\230\179\149\229\143\130\229\138\160\232\175\165\230\180\187\229\138\168\239\188\129", self.MIN_LEVEL))
+    return false
+  end
+  local bSettleOpen = self:IsUseVoteLevelSettleDate(GetTime(), nPhase)
+  if not bSettleOpen then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\156\170\229\156\168\233\162\134\229\165\150\230\156\159\233\151\180"))
+    return false
+  end
+  local nFlag = me.GetUserValue(self.SAVE_GROUP, self.USE_VOTE_LEVEL_AWARD_FLAG[nPhase])
+  if 0 ~= Lib:LoadBits(nFlag, nIndex - 1, nIndex - 1) then
+    me.CenterMsg(i18n.EasyGet("\229\165\150\229\138\177\229\183\178\233\162\134\229\143\150"))
+    return false
+  end
+  if (self.tbVoteLevel[nPhase] or 0) < self.USE_VOTE_LEVEL_AWARD[nPhase].tbAward[nIndex][1] then
+    me.CenterMsg(i18n.EasyGet("\230\138\149\231\165\168\230\149\176\233\135\143\228\184\141\232\182\179"))
+    return false
+  end
+  RemoteServer.GetAvenueOfStarsVoteLevelAward(nPhase, nIndex)
+  return true
+end
+
+function AvenueOfStars:SendSlogan_C(nItemId)
+  if not self.bOpen then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\229\133\179\233\151\173"))
+    return false
+  end
+  if not Lib:Is_include(nItemId, self.PROPAGATE_ITEM) then
+    return false
+  end
+  if not self:IsOpenDate() then
+    me.CenterMsg(i18n.EasyGet("\228\184\141\229\156\168\230\180\187\229\138\168\230\156\159"))
+    return false
+  end
+  local bVoteOpen, nVotePhase = self:IsVoteDate()
+  if not bVoteOpen or self.PROPAGATE_ITEM[nVotePhase] ~= nItemId then
+    me.CenterMsg(i18n.EasyGet("\228\184\141\229\156\168\230\180\187\229\138\168\230\156\159"))
+    return false
+  end
+  local nChannelType = Tong:HasTong() and ChatMgr.ChannelType.Tong or ChatMgr.ChannelType.Public
+  local szSlogan = i18n.EasyGet("{0}\230\173\163\229\156\168\229\143\130\228\184\142{1}\230\180\187\229\138\168\239\188\140\232\175\183\229\164\167\229\174\182\229\184\174\229\138\169\232\175\132\233\128\137\239\188\129\239\188\129\239\188\129<\230\138\149\231\165\168>", me.szName, i18n.Get(self.ACT_NAME))
+  if not ChatMgr:CheckSendMsg(nChannelType, nil, szSlogan, true) then
+    return false
+  end
+  Ui:CloseWindow("UIItemTips")
+  Ui:OpenWindowWithCallback("UIChat", function(_, tbWnd)
+    tbWnd:OuterSetChatInput("", szSlogan, {
+      nLinkType = ChatMgr.LinkType.LuaCustom,
+      linkParam = {
+        ChatMgr.LinkType.AvenueOfStarsSpeak,
+        me.dwID,
+        SERVER_ID
+      }
+    })
+  end, nil, nChannelType)
+  return true
+end
+
+function AvenueOfStars:ClickSloganLink(tbLinkData)
+  if not self:IsOpenDate() then
+    me.CenterMsg(i18n.EasyGet("\228\184\141\229\156\168\230\180\187\229\138\168\230\156\159"))
+    return
+  end
+  local nTargetID = tbLinkData.nValue
+  local nTargetServerID = tbLinkData.nValue2
+  AvenueOfStars:GotoOutgameVote(nTargetID, nTargetServerID)
+end
+
+function AvenueOfStars:CheckPhaseRedPoint()
+  if me.nLevel < self.MIN_LEVEL then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.AvenueOfStarsPhase)
+    return
+  end
+  local szDate = Lib:OSDate("%Y.%m.%d")
+  if szDate == self.NOTIFY_DATE then
+    if not LocalData:GetRoleBoolean("AvenueOfStars_RedPoint_Notify", false) then
+      LocalData:SetRoleBoolean("AvenueOfStars_RedPoint_Notify", true)
+      RedPointMgr:LightRedPoint(RedPointMgr.EVENT.AvenueOfStarsPhase)
+    end
+  elseif szDate == self.ENROLL_DATE_YMD[1] then
+    if not LocalData:GetRoleBoolean("AvenueOfStars_RedPoint_Enroll", false) then
+      LocalData:SetRoleBoolean("AvenueOfStars_RedPoint_Enroll", true)
+      RedPointMgr:LightRedPoint(RedPointMgr.EVENT.AvenueOfStarsPhase)
+    end
+  else
+    for nPhase, tbDate in pairs(self.VOTE_DATE_YMD) do
+      local szKey = "AvenueOfStars_RedPoint_Phase_" .. nPhase
+      if szDate == tbDate[1] then
+        if not LocalData:GetRoleBoolean(szKey, false) then
+          LocalData:SetRoleBoolean(szKey, true)
+          RedPointMgr:LightRedPoint(RedPointMgr.EVENT.AvenueOfStarsPhase)
+        end
+        break
+      end
+    end
+  end
+end
+
+function AvenueOfStars:CheckRewardRedPoint()
+  if me.nLevel < self.MIN_LEVEL then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.AvenueOfStarsRewardSemi)
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.AvenueOfStarsRewardFinal)
+    return
+  end
+  local tbRedPointList = {
+    [self.PHASE_PRE] = RedPointMgr.EVENT.AvenueOfStarsRewardSemi,
+    [self.PHASE_SEMI] = RedPointMgr.EVENT.AvenueOfStarsRewardFinal
+  }
+  for nPhase, tbAwardSetting in pairs(self.USE_VOTE_LEVEL_AWARD) do
+    local bHasAward = false
+    for nIndex, tbAward in ipairs(tbAwardSetting.tbAward) do
+      local nFlag = me.GetUserValue(self.SAVE_GROUP, self.USE_VOTE_LEVEL_AWARD_FLAG[nPhase])
+      local nVoteLevel = self.tbVoteLevel[nPhase] or 0
+      if 0 == Lib:LoadBits(nFlag, nIndex - 1, nIndex - 1) and nVoteLevel >= tbAward[1] then
+        bHasAward = true
+        break
+      end
+    end
+    if bHasAward then
+      RedPointMgr:LightRedPoint(tbRedPointList[nPhase])
+    else
+      RedPointMgr:FadeRedPoint(tbRedPointList[nPhase])
+    end
+  end
+end
+
+function AvenueOfStars:OnLogin()
+  self.tbVoteLevel = {}
+  self:QueryVoteLevel_C()
+  self:CheckPhaseRedPoint()
+end

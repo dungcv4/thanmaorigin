@@ -1,0 +1,181 @@
+Require("CommonScript/Activity/CelebrationGift/CelebrationGift.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.szCelebrationGift)
+tbActivity.tbProtocol = {
+  [1] = "CreateOrderRsp",
+  [2] = "OnRechargeSuccRsp"
+}
+local nClickCD = 1
+
+function tbActivity:OnOpen()
+  if not self.bRedPointLight then
+    self.bRedPointLight = true
+    self:TryLightRedPoint()
+  end
+  self.nLastClickTime = GetTime()
+end
+
+function tbActivity:OnLogin()
+  self:TryLightRedPoint()
+end
+
+function tbActivity:InitExtraData()
+  self.SaveKey = GetGroupKey(self.tbConfig.szSaveKey)
+end
+
+function tbActivity:OnClose()
+  self:TryFadeRedPoint()
+end
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not self.tbProtocol[nProtocol] then
+    LogErr("[ServerRequest]  ActivityId | Protocol", self.nId, nProtocol)
+    return
+  end
+  self[self.tbProtocol[nProtocol]](self, ...)
+end
+
+function tbActivity:BuyCelebrationGift(pPlayer, nGiftId)
+  if not pPlayer then
+    return
+  end
+  if not nGiftId or nGiftId <= 0 then
+    pPlayer.CenterMsg(i18n.EasyGet("\231\164\188\229\140\133\228\184\141\229\173\152\229\156\168"))
+    return
+  end
+  local tbCfg = self.tbConfig.tbGiftAward[nGiftId]
+  if not tbCfg then
+    return
+  end
+  if self:IsRechargeGift(tbCfg) then
+    return Recharge:RequestCreateRechargeOrder(tbCfg.nProductId)
+  end
+  ActivityMgr:CallServerScriptV2(self.nId, self.tbC2SProtocol.BuyReq, nGiftId)
+end
+
+function tbActivity:CreateOrderRsp(nGiftId)
+  local pPlayer = me
+  if not pPlayer then
+    return
+  end
+  local tbCfg = self.tbConfig.tbGiftAward[nGiftId]
+  if not tbCfg then
+    return
+  end
+  local nProductId = tbCfg.nProductId
+  Recharge:RequestCreateRechargeOrder(nProductId)
+end
+
+function tbActivity:OnRechargeSuccRsp(nGiftId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CELEBRATIONGIFT_RECHARGE_SUCC, nGiftId)
+end
+
+function tbActivity:TryOpenWindow()
+  if self:IsOpen() then
+    if me.nLevel < self.tbConfig.nLevel then
+      me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168{0}\231\186\167\229\188\128\229\144\175", self.tbConfig.nLevel))
+      return
+    else
+      Ui:OpenWindowAsync("UIQingDianLiBao", self:GetId())
+    end
+  else
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+  end
+end
+
+function tbActivity:GetRedPointEventId()
+  return {
+    RedPointMgr.EVENT.XiongWangCelebrationGift
+  }
+end
+
+function tbActivity:GetRedPointFlagKey()
+  return table.concat({
+    "CelebrationGiftFirstOpen_",
+    self.nId,
+    "_",
+    me.dwID or 0
+  })
+end
+
+function tbActivity:TryLightRedPoint()
+  local nCurTime = GetTime()
+  local szKey = self:GetRedPointFlagKey()
+  local bSameDay = Lib:IsSameDay(self.RefreshOffset, nCurTime, Ui.PlayerPrefs.GetInt(szKey))
+  if bSameDay and not self:HaveCanBuyGift() then
+    return
+  end
+  if not bSameDay then
+    Ui.PlayerPrefs.SetInt(szKey, nCurTime)
+  end
+  if not RedPointMgr:CheckEvent(RedPointMgr.EVENT.XiongWangCelebrationGift) and self:IsOpen() then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.XiongWangCelebrationGift)
+  end
+  if not RedPointMgr:CheckEvent(RedPointMgr.EVENT.SummerGift) and self:IsOpen() then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.SummerGift)
+  end
+end
+
+function tbActivity:TryFadeRedPoint()
+  if RedPointMgr:CheckEvent(RedPointMgr.EVENT.XiongWangCelebrationGift) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.XiongWangCelebrationGift)
+  end
+  if RedPointMgr:CheckEvent(RedPointMgr.EVENT.SummerGift) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.SummerGift)
+  end
+end
+
+function tbActivity:LoadSyncData(tbData)
+  self.tbCacheData = tbData
+end
+
+function tbActivity:GetLinkDataHelper(nAwardLinkKey, func)
+  for _, tbInfo in ipairs(self.tbConfig.tbAwardKeyList[nAwardLinkKey] or {}) do
+    if Lib:IsEmptyStr(tbInfo.szTimeFrameStart) then
+      if Lib:IsEmptyStr(tbInfo.szTimeFrameEnd) or Lib:CalcTimeFrameOpenTime(tbInfo.szTimeFrameEnd) > self.nStartTime then
+        return func(tbInfo)
+      end
+    elseif Lib:CalcTimeFrameOpenTime(tbInfo.szTimeFrameStart) <= self.nStartTime and (Lib:IsEmptyStr(tbInfo.szTimeFrameEnd) or Lib:CalcTimeFrameOpenTime(tbInfo.szTimeFrameEnd) > self.nStartTime) then
+      return func(tbInfo)
+    end
+  end
+  local nSize = #self.tbConfig.tbAwardKeyList[nAwardLinkKey]
+  return func(self.tbConfig.tbAwardKeyList[nAwardLinkKey][nSize])
+end
+
+function tbActivity:GetTruthAwardKey(nAwardLinkKey)
+  return self:GetLinkDataHelper(nAwardLinkKey, function(tbInfo)
+    return tbInfo.nWorthCountText
+  end)
+end
+
+function tbActivity:OnCrossDay()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CELEBRATIONGIFT_RECHARGE_SUCC)
+  self:TryLightRedPoint()
+end
+
+function tbActivity:GetName()
+  return self.tbConfig.szName
+end
+
+function tbActivity:IsRechargeGift(tbGiftAward)
+  return Lib:IsEmptyStr(tbGiftAward.szCurrencyType) or tbGiftAward.nPrice <= 0
+end
+
+function tbActivity:GetPriceShow(tbGiftAward)
+  if not Lib:IsEmptyStr(tbGiftAward.szCurrencyType) and tbGiftAward.nPrice > 0 then
+    return tbGiftAward.nPrice > 0
+  end
+end
+
+function tbActivity:HaveCanBuyGift()
+  for nGiftId, tbCfg in pairs(self.tbConfig.tbGiftAward) do
+    local nPurchasedNum = self:GetAlreadyBuyTimesByGiftId(me, nGiftId)
+    if nPurchasedNum < tbCfg.nLimitBuyTimes then
+      local nBeginDay = Lib:GetLocalDay(self.nStartTime - self.RefreshOffset)
+      local nToday = Lib:GetLocalDay(GetTime() - self.RefreshOffset)
+      if nPurchasedNum < nToday - nBeginDay + 1 then
+        return true
+      end
+    end
+  end
+end

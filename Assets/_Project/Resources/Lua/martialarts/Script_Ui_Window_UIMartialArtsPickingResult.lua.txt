@@ -1,0 +1,238 @@
+local tbWnd = Ui:CreateWindow("UIMartialArtsPickingResult")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.UpdateBottomUI
+    }
+  }
+end
+
+local tbControls = {
+  btnBG = "BG",
+  goOneCard = "imgBG/OneCard",
+  txtOneCardName = "imgBG/OneCard/Item/PartnerName/%s/txtName",
+  goTenCard = "imgBG/TenCard",
+  txtTenCardName = "imgBG/TenCard/Item%d/PartnerName/%s/txtName",
+  OneCardGrade = "imgBG/OneCard/Item/PartnerName/%s",
+  TenCardGrade = "imgBG/TenCard/Item%d/PartnerName/%s",
+  imgIconTenPick = "imgBG/bottom/IconTenPick",
+  txtTenPickValue = "imgBG/bottom/IconTenPick/txtTenPickValue",
+  imgIconPick = "imgBG/bottom/IconPick",
+  txtPickValue = "imgBG/bottom/IconPick/txtPickValue",
+  btnPick = "imgBG/bottom/btnPick",
+  btnTenPick = "imgBG/bottom/btnTenPick",
+  NpcOneCardModelPath = "imgBG/OneCard/Item/imgModel",
+  OneCardItemGrid = "imgBG/OneCard/Item/Template/UIItemGrid",
+  NpcTenCardModelPath = "imgBG/TenCard/Item%d/imgModel",
+  TenCardItemGrid = "imgBG/TenCard/Item%d/Template/UIItemGrid",
+  OneCardItem = "imgBG/OneCard/Item",
+  TenCardItem = "imgBG/TenCard/Item%d",
+  OneCardBook = "imgBG/OneCard/Item/Template",
+  TenCardBook = "imgBG/TenCard/Item%d/Template",
+  animTenCardAnimation = "imgBG/TenCard/Item%d",
+  goBottom = "imgBG/bottom",
+  txtTip2 = "imgBG/bottom/txtTip2"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnBG = function(self)
+    if self.bFirstClick then
+      self:ShowAllResult()
+      self.bFirstClick = false
+      return
+    end
+    self:Close()
+    Ui:OpenWindowAsync("UIMartialArts")
+  end,
+  btnPick = function(self)
+    WuXueCardPicker:RequestCardPick("LimitedPick")
+  end,
+  btnTenPick = function(self)
+    if not WuXueCardPicker:CheckCardPickMoney("LimitedTenPick") then
+      return
+    end
+    local nLastTime = LocalData:GetRoleNumber("WuXuePartner_CloseCardPickerNoticeTime", 0)
+    local bIsDiffDay = Lib:IsDiffDay(14400, nLastTime)
+    if not bIsDiffDay then
+      WuXueCardPicker:RequestCardPick("LimitedTenPick")
+    else
+      local function fnCardPick()
+        WuXueCardPicker:RequestCardPick("LimitedTenPick")
+      end
+      
+      Ui:OpenWindowAsync("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\231\161\174\232\174\164\229\141\129\232\191\158\230\139\155\229\139\159\230\173\166\229\173\166\239\188\159"), {
+        {fnCardPick},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      }, "WuXueCardPicker", nil, i18n.EasyGet("\228\187\138\230\151\165\228\184\141\229\134\141\230\143\144\233\134\146"))
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbOneNpcModel = nil
+  self.tbTenNpcModel = {}
+  self.tbOneItemGrid = nil
+  self.tbTenItemGrid = {}
+end
+
+local tbQuality2Grade = {
+  [1] = "SSS",
+  [2] = "SS",
+  [3] = "S",
+  [4] = "A"
+}
+
+function tbWnd:OnOpen(tbItems, szType)
+  local szYuanbaoIconPath = "UI/icon/money/icon_yuanbao.png"
+  for _, szQuality in pairs(tbQuality2Grade) do
+    self.pPanel:SetActive(string.format(tbControls.OneCardGrade, szQuality), false)
+    self.pPanel:SetActive(string.format(tbControls.TenCardGrade, 1, szQuality), false)
+  end
+  self.tbItems = tbItems
+  self.szType = szType
+  self.cardPickType = nil
+  if 1 == Lib:CountTB(tbItems) then
+    for _, szQuality in pairs(tbQuality2Grade) do
+      self.pPanel:SetActive(string.format(tbControls.OneCardGrade, szQuality), false)
+    end
+    local obj = self.pPanel:GetObject(tbControls.NpcOneCardModelPath)
+    self.tbOneNpcModel = obj:GetComponent(Ui.UINpcModel)
+    self.tbOneItemGrid = Ui:NewExistItemGrid(self, tbControls.OneCardItemGrid)
+    self.pPanel:SetActive(tbControls.goOneCard, true)
+    self.pPanel:SetActive(tbControls.goTenCard, false)
+    local value = 2
+    local szPartnerQuailty = tbQuality2Grade[value] or "SSS"
+    for key, value in pairs(tbQuality2Grade) do
+      self.pPanel:SetActive(string.format(tbControls.OneCardGrade, value), false)
+    end
+    self.pPanel:SetActive(tbControls.OneCardBook, false)
+    self.pPanel:SetActive(string.format(tbControls.OneCardGrade, szPartnerQuailty), true)
+    self.pPanel:Label_SetText(string.format(tbControls.txtOneCardName, szPartnerQuailty), i18n.Parse(Item:GetName(tbItems[1].nItemId, me)))
+    self.pPanel:SetActive(tbControls.OneCardItemGrid, true)
+    self.tbOneNpcModel:Release()
+    self.tbOneNpcModel:ShowNpc(1)
+    self.pPanel:SetActive(tbControls.OneCardBook, true)
+    self.tbOneItemGrid:SetItemByTemplate(tbItems[1].nItemId, tbItems[1].nItemNum)
+    self.tbOneItemGrid:SetClickEnable(true)
+  elseif 10 == Lib:CountTB(tbItems) then
+    self.pPanel:SetActive(tbControls.goOneCard, false)
+    self.pPanel:SetActive(tbControls.goTenCard, true)
+    self:StartTimer()
+  end
+  self.cardPickType = "Limited"
+  self.pPanel:SetActive(tbControls.goBottom, true)
+  self.pPanel:Label_SetText(tbControls.txtTip2, "")
+  self.pPanel:Label_SetText(tbControls.txtTenPickValue, WuXueCardPicker.Def.nGoldTenCost)
+  self.pPanel:Label_SetText(tbControls.txtPickValue, WuXueCardPicker.Def.nGoldCost)
+  self.pPanel:Sprite_SetSprite(tbControls.imgIconTenPick, szYuanbaoIconPath)
+  self.pPanel:Sprite_SetSprite(tbControls.imgIconPick, szYuanbaoIconPath)
+  self.nLimitedSSSCount = me.GetUserValue(WuXueCardPicker.Def.CARD_SAVE_GROUP, WuXueCardPicker.Def.SAVE_CALC_SUBSIDY_SSS_COUNT)
+  local nSSSCount = WuXueCardPicker.Def.nCardPickMustSSSCount - self.nLimitedSSSCount
+  self.pPanel:Label_SetText(tbControls.txtTip2, i18n.EasyGet("\229\134\141\230\139\155\229\139\159<color=#C5B505>{0}</color>\230\172\161\229\191\133\229\190\151<color=#C5B505>\231\187\157\229\147\129</color>", nSSSCount))
+end
+
+function tbWnd:UpdateBottomUI()
+end
+
+function tbWnd:OnClose()
+  self.bFirstClick = false
+  self:ReleaseAllNpcModel()
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  self.nIndex = nil
+end
+
+function tbWnd:OnDestroy()
+end
+
+function tbWnd:ReleaseAllNpcModel()
+  if self.tbOneNpcModel ~= nil and self.tbOneNpcModel ~= {} then
+    self.tbOneNpcModel:Release()
+  end
+  for k, v in pairs(self.tbTenNpcModel) do
+    v:Release()
+  end
+end
+
+local nDelayTimeFrame = 5
+
+function tbWnd:StartTimer()
+  for i = 1, 10 do
+    local szActKey = "Item" .. i
+    local szNewKey = self.pPanel:IsObjectExist(string.format(tbControls.TenCardItem, i)) and string.format(tbControls.TenCardItem, i) or self.pPanel:CloneObject("imgBG/TenCard/Item1", szActKey)
+    self.pPanel:SetActive(string.format(tbControls.TenCardItem, i), true)
+    self.pPanel:SetActive(string.format(tbControls.TenCardBook, i), false)
+    self.pPanel:Animator_SetEnable(string.format(tbControls.animTenCardAnimation, i), true)
+    local Animator = self.pPanel:GetAnimator(string.format(tbControls.TenCardItem, i))
+    Animator:Play("cardOuto", 0, 0)
+    local obj = self.pPanel:GetObject(string.format(tbControls.NpcTenCardModelPath, i))
+    local NpcModel = obj:GetComponent(Ui.UINpcModel)
+    table.insert(self.tbTenNpcModel, NpcModel)
+    local grid = Ui:NewExistItemGrid(self, string.format(tbControls.TenCardItemGrid, i))
+    table.insert(self.tbTenItemGrid, grid)
+    for _, szQuality in pairs(tbQuality2Grade) do
+      self.pPanel:SetActive(string.format(tbControls.TenCardGrade, i, szQuality), false)
+    end
+  end
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  self:ShowOneResult(1, self.tbItems[1])
+  self.nIndex = 2
+  self.bFirstClick = true
+  self.nTimer = Timer:Register(nDelayTimeFrame, self.OnTimer, self)
+end
+
+function tbWnd:ShowOneResult(nIndex, tbInfo)
+  self.pPanel:SetActive(string.format(tbControls.TenCardItem, nIndex), true)
+  self.pPanel:Animator_SetEnable(string.format(tbControls.animTenCardAnimation, nIndex), true)
+  local Animator = self.pPanel:GetAnimator(string.format(tbControls.TenCardItem, nIndex))
+  Animator:Play("cardInto", 0, 0)
+  local value = 2
+  local szPartnerQuailty = tbQuality2Grade[value] or "SSS"
+  for _, szTempQuality in pairs(tbQuality2Grade) do
+    self.pPanel:SetActive(string.format(tbControls.TenCardGrade, nIndex, szTempQuality), false)
+  end
+  self.pPanel:SetActive(string.format(tbControls.TenCardGrade, nIndex, szPartnerQuailty), true)
+  self.pPanel:Label_SetText(string.format(tbControls.txtTenCardName, nIndex, szPartnerQuailty), i18n.Parse(Item:GetName(tbInfo.nItemId, me)))
+  self.pPanel:SetActive(string.format(tbControls.TenCardItemGrid, nIndex), true)
+  self.pPanel:SetActive(string.format(tbControls.NpcTenCardModelPath, nIndex), false)
+  self.tbTenNpcModel[nIndex]:Release()
+  self.tbTenNpcModel[nIndex]:ShowNpc(1)
+  self.pPanel:SetActive(string.format(tbControls.TenCardBook, nIndex), true)
+  self.tbTenItemGrid[nIndex]:SetItemByTemplate(tbInfo.nItemId, tbInfo.nItemNum)
+  self.tbTenItemGrid[nIndex]:SetClickEnable(true)
+end
+
+function tbWnd:OnTimer()
+  if self.nIndex > 10 then
+    self.nIndex = 2
+    self.nTimer = nil
+    self.bFirstClick = false
+    return false
+  end
+  self:ShowOneResult(self.nIndex, self.tbItems[self.nIndex])
+  self.nIndex = self.nIndex + 1
+  return true
+end
+
+function tbWnd:ShowAllResult()
+  if not self.nTimer then
+    return
+  end
+  Timer:Close(self.nTimer)
+  if self.nIndex > 10 then
+    return
+  end
+  for i = self.nIndex, 10 do
+    self:ShowOneResult(i, self.tbItems[i])
+  end
+end

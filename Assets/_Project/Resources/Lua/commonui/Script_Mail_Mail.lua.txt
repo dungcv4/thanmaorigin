@@ -1,0 +1,192 @@
+Mail.nNotifyFullMailCount = 180
+Mail.nNotifyTimeOut = 360
+Mail.nMaxMailCount = 40
+
+function Mail:RequestMailData()
+  local nNow = GetTime()
+  if self.nServerNewestMailId == self.nClientNewestMailId or nNow - self.nRequestTime <= 3 then
+    return
+  end
+  local nNeed = math.min(self.nMaxMailCount - #self.tbAllMails, self.nServerNewestMailId - self.nClientNewestMailId)
+  if nNeed <= 0 then
+    return
+  end
+  RemoteServer.RequestMailData(self.nClientNewestMailId, nNeed)
+  self.nRequestTime = nNow
+  self.bRequestFlag = true
+end
+
+function Mail:OnUpdateMailCount(nTotalCount, nUnreadCount, nServerNewestMailId)
+  self.nUnreadCount = nUnreadCount
+  self.nTotalCount = nTotalCount
+  self.nServerNewestMailId = nServerNewestMailId
+  if self.bRequestFlag then
+    self.bRequestFlag = false
+  else
+    EventNotify.OnNotify(EventNotify.emNOTIFY_NOTIFY_NEW_MAIL, true)
+  end
+  if not Mail.bNotFirst then
+    Mail.bNotFirst = true
+    if self.nTotalCount >= self.nNotifyFullMailCount then
+      Ui:SynNotifyMsg({
+        szType = "MailFull",
+        nTimeOut = GetTime() + self.nNotifyTimeOut,
+        dwId = me.dwID
+      })
+    end
+  end
+end
+
+function Mail:OnSyncMailData(tbMails, nSelfLoadIndex)
+  if self.nClientNewestMailId ~= nSelfLoadIndex then
+    return
+  end
+  if Lib:IsEmptyTB(tbMails) then
+    return
+  end
+  for _, tbMail in ipairs(tbMails) do
+    table.insert(self.tbAllMails, tbMail)
+    if tbMail.ID > self.nClientNewestMailId then
+      self.nClientNewestMailId = tbMail.ID
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_MAIL_DATA)
+end
+
+function Mail:OnSyncMailDataSegmentStart()
+  self.tbAllMailsCache = {}
+end
+
+function Mail:OnSyncMailDataSegment(tbMails)
+  for _, tbMail in ipairs(tbMails) do
+    table.insert(self.tbAllMailsCache, tbMail)
+  end
+end
+
+function Mail:OnSyncMailDataSegmentEnd(nSelfLoadIndex)
+  local tbMails = self.tbAllMailsCache
+  self.tbAllMailsCache = {}
+  self:OnSyncMailData(tbMails, nSelfLoadIndex)
+end
+
+function Mail:OnTakeAttach(nMaildId)
+  for nIdx, tbMail in ipairs(self.tbAllMails) do
+    if tbMail.ID == nMaildId then
+      if not tbMail.bNotAutoDelete then
+        table.remove(self.tbAllMails, nIdx)
+      else
+        tbMail.ReadFlag = true
+        tbMail.nHasAttach = -1
+      end
+      local nTimeNow = GetTime()
+      local nNextMailId
+      for nRevIdx = nIdx - 1, 1, -1 do
+        local tbRevMail = self.tbAllMails[nRevIdx]
+        if self:IsAvailableMail(tbRevMail, nTimeNow) then
+          nNextMailId = tbRevMail.ID
+          break
+        end
+      end
+      EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_MAIL_DATA, nMaildId, true, nNextMailId)
+      me.CenterMsg(i18n.EasyGet("\233\162\134\229\143\150\233\153\132\228\187\182\230\136\144\229\138\159"))
+      return
+    end
+  end
+end
+
+function Mail:OnTakeInvalidMail(nMailId)
+  for nIdx, tbMail in ipairs(self.tbAllMails) do
+    if tbMail.ID == nMailId then
+      table.remove(self.tbAllMails, nIdx)
+      local nTimeNow = GetTime()
+      local nNextMailId
+      for nRevIdx = nIdx - 1, 1, -1 do
+        local tbRevMail = self.tbAllMails[nRevIdx]
+        if self:IsAvailableMail(tbRevMail, nTimeNow) then
+          nNextMailId = tbRevMail.ID
+          break
+        end
+      end
+      EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_MAIL_DATA, nMailId, false, nNextMailId)
+      me.CenterMsg(i18n.EasyGet("\229\183\178\232\191\135\230\156\159\231\154\132\233\130\174\228\187\182\239\188\129"))
+      return
+    end
+  end
+end
+
+function Mail:GetMailData()
+  local nTimeNow = GetTime()
+  local tbAllMails = self.tbAllMails
+  local tbReverse = {}
+  for nIdx = #tbAllMails, 1, -1 do
+    local tbMail = tbAllMails[nIdx]
+    if not self:IsAvailableMail(tbMail, nTimeNow) then
+      table.remove(tbAllMails, nIdx)
+    else
+      table.insert(tbReverse, tbMail)
+    end
+  end
+  return tbReverse
+end
+
+function Mail:GetOneMailData(nMailId)
+  local nTimeNow = GetTime()
+  for _, tbMail in pairs(self.tbAllMails) do
+    if nMailId == tbMail.ID and self:IsAvailableMail(tbMail, nTimeNow) then
+      return tbMail
+    end
+  end
+  return nil
+end
+
+function Mail:IsAvailableMail(tbMail, nTimeNow)
+  if not (not tbMail.ReadFlag or tbMail.tbAttach or tbMail.bNotAutoDelete) or nTimeNow >= tbMail.RecyleTime then
+    return false
+  else
+    return true
+  end
+end
+
+function Mail:Delete(tbMailIds)
+  local tbFlag = {}
+  for _, nId in ipairs(tbMailIds) do
+    tbFlag[nId] = true
+  end
+  local tbAllMails = self.tbAllMails
+  for nIdx = #tbAllMails, 1, -1 do
+    if tbFlag[tbAllMails[nIdx].ID] then
+      table.remove(tbAllMails, nIdx)
+    end
+  end
+  self.nTotalCount = #tbAllMails
+end
+
+function Mail:Record(varMailId)
+  if type(varMailId) == "table" then
+    self.nUnreadCount = self.nUnreadCount - #varMailId
+  else
+    self.nUnreadCount = self.nUnreadCount - 1
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_NOTIFY_NEW_MAIL, false)
+end
+
+function Mail:GetUnreadCount()
+  return self.nUnreadCount
+end
+
+function Mail:IsNeedDelete()
+  return self.nUnreadCount > 0 and #self.tbAllMails >= self.nMaxMailCount
+end
+
+function Mail:Clear()
+  self.nUnreadCount = 0
+  self.nTotalCount = 0
+  self.nSelfLoadIndex = 0
+  self.nServerNewestMailId = 0
+  self.nClientNewestMailId = 0
+  self.nRequestTime = 0
+  self.bRequestFlag = false
+  self.tbAllMails = {}
+end
+
+Mail:Clear()

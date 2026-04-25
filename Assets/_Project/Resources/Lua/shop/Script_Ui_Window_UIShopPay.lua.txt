@@ -1,0 +1,455 @@
+local tbWnd = Ui:CreateWindow("UIShopPay")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_VIP_EXP_CHANGE,
+      self.ShowPayItems,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_VIP_LEVEL_CHANGE,
+      self.OnVipLevelChange,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_RECHARGE_SUCCESS,
+      self.ShowPayItems,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnYuanBao = "node/imgBG/Content/btnList/btnYuanBao",
+  btnGold = "node/imgBG/Content/btnList/btnGold",
+  VIP = "node/imgBG/Content/VIP",
+  btnVIP = "node/imgBG/Content/btnList/btnVIP",
+  PayList = "node/imgBG/Content/PayList",
+  btnRefresh = "node/imgBG/Content/PayList/btnRefresh",
+  ElementTemplate = "node/imgBG/Content/PayList/pnlMask/pnlContant/ElementTemplate",
+  txtNextVipNeed = "node/imgBG/Content/VIP/imgTitle/ADTip1/txtTips2",
+  txtNextVipName = "node/imgBG/Content/VIP/imgTitle/ADTip2/txtTips2",
+  imgVipExpBar = "node/imgBG/Content/VIP/imgTitle/imgBarBg/imgbar",
+  txtVipExpBar = "node/imgBG/Content/VIP/imgTitle/imgBarBg/txtBar",
+  btnRecharge = "node/imgBG/Content/VIP/imgTitle/btnRecharge",
+  vipLevelTemplate = "node/imgBG/Content/VIP/Award/VIPLevelList/Mask/LevelList/Template",
+  txtAwardNowTitle = "node/imgBG/Content/VIP/Award/AwardNow/txtAwardNow",
+  AwardTipsNow = "node/imgBG/Content/VIP/Award/AwardNow/AwardNowList/Mask/AwardList/AwardTips",
+  txtAwardNewTitle = "node/imgBG/Content/VIP/Award/AwardNew/txtAwardNew",
+  AwardTipsNew = "node/imgBG/Content/VIP/Award/AwardNew/AwardNowList/Mask/AwardList/AwardTips",
+  txtAwardNewTips = "node/imgBG/Content/VIP/Award/AwardNew/txtAwardNewTips",
+  UIPioneerItemGrid = "node/imgBG/Content/VIP/Award/PioneerBag/item/UIItemGrid",
+  txtPioneerNum = "node/imgBG/Content/VIP/Award/PioneerBag/txtNum",
+  btnGetPioneer = "node/imgBG/Content/VIP/Award/PioneerBag/btnGet",
+  txtVipGiftBagAward = "node/imgBG/Content/VIP/GiftBag/txtAward",
+  tbGiftBagItem = "node/imgBG/Content/VIP/GiftBag/AwardsList/item",
+  txtGiftBagOriginaPrice = "node/imgBG/Content/VIP/GiftBag/OriginalPrice/txtPrice",
+  txtGiftBagNowPrice = "node/imgBG/Content/VIP/GiftBag/PresentPrice/txtPrice",
+  btnGiftBagBuy = "node/imgBG/Content/VIP/GiftBag/btnBuy",
+  PioneerBag = "node/imgBG/Content/VIP/Award/PioneerBag",
+  ADTip1 = "node/imgBG/Content/VIP/imgTitle/ADTip1",
+  ADTip2 = "node/imgBG/Content/VIP/imgTitle/ADTip2",
+  txtPioneerBag = "node/imgBG/Content/VIP/Award/PioneerBag/txtPioneerBag",
+  btnJumpVip = "node/imgBG/Content/PayList/imgTitle/btnVIP",
+  ADTip12 = "node/imgBG/Content/PayList/imgTitle/ADTip1",
+  ADTip22 = "node/imgBG/Content/PayList/imgTitle/ADTip2",
+  txtNextVipNeed2 = "node/imgBG/Content/PayList/imgTitle/ADTip1/txtTips2",
+  txtNextVipName2 = "node/imgBG/Content/PayList/imgTitle/ADTip2/txtTips2",
+  imgVipExpBar2 = "node/imgBG/Content/PayList/imgTitle/imgBarBg/imgbar",
+  txtVipExpBar2 = "node/imgBG/Content/PayList/imgTitle/imgBarBg/txtBar"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnRecharge = function(self)
+    self.tbGoodsKindGroup:Select(1)
+  end,
+  btnJumpVip = function(self)
+    self.tbGoodsKindGroup:Select(3)
+  end,
+  btnGetPioneer = function(self)
+    Vip:CSGetPioneer(self.nSelectVip)
+  end,
+  btnGiftBagBuy = function(self)
+    Vip:SetVipClickState(self.nSelectVip)
+    local szVipName = Vip:GetVipName(self.nSelectVip)
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\231\161\174\232\174\164\232\180\173\228\185\176{0}\231\164\188\229\140\133?", szVipName), {
+      {
+        function()
+          Vip:CSBuyLevelGiftBag(self.nSelectVip)
+        end
+      },
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbGoodsKindGroup = Ui:NewButtonGroup(self, {
+    [1] = tbControls.btnGold,
+    [2] = tbControls.btnYuanBao,
+    [3] = tbControls.btnVIP
+  }, true, function(self, nIndex)
+    self.nSelectedIndex = nIndex
+    self:OnChangePanel(nIndex)
+  end)
+  self.tbPayScrollView = Ui:NewScrollView(self, tbControls.ElementTemplate, function(self, nIndex, tbElement)
+    self:OnPayItemClick(nIndex, tbElement)
+  end, nil, true)
+  self.tbVipNameScrollView = Ui:NewScrollView(self, tbControls.vipLevelTemplate, function(self, nIndex, tbElement)
+    self:OnVipLevelSelect(nIndex, tbElement)
+  end)
+  self.tbVipCurPrivilegeScrollView = Ui:NewScrollView(self, tbControls.AwardTipsNow, nil, nil, true)
+  self.tbVipNextPrivilegeScrollView = Ui:NewScrollView(self, tbControls.AwardTipsNew, nil, nil, true)
+  self.tbPioneerItemGrid = Ui:NewExistItemGrid(self, tbControls.UIPioneerItemGrid)
+  self.tbPioneerItemGrid:SetClickEnable(true)
+  self.tbLevelGiftItemList = Ui:NewItemGridView(self, tbControls.tbGiftBagItem)
+end
+
+function tbWnd:OnOpen(nPanelIndex, nParam1)
+  if not IsPayOpen() then
+    me.CenterMsg(i18n.EasyGet("\229\133\133\229\128\188\230\156\170\229\188\128\230\148\190"))
+    self:Close()
+    return
+  end
+  self.nVipLevel = me.GetVipLevel()
+  self.pPanel:SetActive(tbControls.btnRefresh, false)
+  local nCurMaxLevel = Vip:GetCurTimeframeMaxLevel()
+  self.nShowLevel = Vip.tbVipViewShowMaxLevel[self.nVipLevel]
+  self.nShowLevel = nCurMaxLevel < self.nShowLevel and nCurMaxLevel or self.nShowLevel
+  self.nSelectVip = self.nVipLevel
+  self:UpdateVipNameSV()
+  self:UpdatePioneerGbInfo()
+  Vip:CSGetPioneerHadGetNum(self.nSelectVip)
+  if not nPanelIndex then
+    self.nSelectedIndex = 1
+  else
+    self.nSelectedIndex = nPanelIndex
+  end
+  self.tbGoodsKindGroup:Select(self.nSelectedIndex)
+  local tbId = {}
+  for i = RedPointMgr.EVENT.VipLevelGiftBagBegin, RedPointMgr.EVENT.VipLevelGiftBagEnd do
+    table.insert(tbId, i)
+  end
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnVIP, tbId)
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnGiftBagBuy, {
+    RedPointMgr.EVENT.VipLevelGiftBagCommon
+  })
+  Vip:OnCheckLevelBtnRedPoint(self.nSelectVip)
+  if 3 == self.nSelectedIndex then
+    self.tbVipNameScrollView:ScrollToIndex(self.nSelectVip, true)
+  end
+  Sdk:OnOpenIAPShop()
+end
+
+function tbWnd:OnClose()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnVIP)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnGiftBagBuy)
+  if self.nShowLevel then
+    for i = 0, self.nShowLevel do
+      local tbElement = self.tbVipNameScrollView:GetElement(i)
+      if tbElement then
+        RedPointMgr:DynamicUnRegist(tbElement.pPanel, "Main")
+      end
+    end
+  end
+end
+
+function tbWnd:ShowPayItems()
+  self.tbPayGroup = self:GenarateSellItems()
+  self.tbPayScrollView:Reset()
+  
+  local function fnSetItem(tbElement, nIndex)
+    local data = self.tbPayGroup[nIndex]
+    local pPanel = tbElement.pPanel
+    local nBuyTimes = Recharge:GetProductBuyTimes(me, data.nProductId)
+    local bShowRecommend = nBuyTimes <= 0
+    bShowRecommend = bShowRecommend or Recharge:GetCanDoubleThisTime(me, data, GetTime())
+    pPanel:SetActive("imgMoney", true)
+    local szMoney
+    if 1 == self.nSelectedIndex then
+      szMoney = Currency:GetIcon("Gold")
+    elseif 2 == self.nSelectedIndex then
+      szMoney = Currency:GetIcon("YuanBao")
+    end
+    local _, szIcon
+    local tbProductSetting = Recharge:GetProductSettingById(data.nProductId)
+    if nil ~= tbProductSetting then
+      _, szIcon = Item:GetIcon(tbProductSetting.nIconId)
+    end
+    if nil ~= szIcon then
+      pPanel:Sprite_SetSprite("imgIcon", szIcon)
+    end
+    pPanel:Sprite_SetSprite("imgMoney", szMoney)
+    pPanel:Label_SetText("txtTitle", string.format("%d", data.tbAwards[1][2]))
+    pPanel:SetActive("txtTitle", true)
+    if bShowRecommend and nil ~= data.tbFirstExtraAwards then
+      pPanel:SetActive("imgGiftMark", true)
+      pPanel:Label_SetText("imgGiftMark/txtTip", i18n.EasyGet("\232\181\160\233\128\129"))
+      pPanel:Label_SetText("imgGiftMark/txtValue", data.tbFirstExtraAwards[1][2])
+      pPanel:Sprite_SetSprite("imgGiftMark/imgMoney", szMoney)
+    else
+      pPanel:SetActive("imgGiftMark", false)
+    end
+    local szPriceUnit = Recharge:GetShowPrice(data)
+    pPanel:Label_SetText("txt/txtMoneyNum", szPriceUnit)
+  end
+  
+  for i = 1, #self.tbPayGroup do
+    self.tbPayScrollView:SetElement(i, function(tbElement)
+      fnSetItem(tbElement, i)
+    end)
+  end
+  self:UpdateVipPanel()
+end
+
+function tbWnd:OnPayItemClick(nIndex, tbElement)
+  local tbProductSetting = self.tbPayGroup[nIndex]
+  Log("UIShopPay", tbProductSetting.nProductId)
+  Recharge:RequestCreateRechargeOrder(tbProductSetting.nProductId)
+  Sdk:OnClickIAPItem(tbProductSetting.nProductId, tbProductSetting.szProductName, Recharge:GetShowPrice(tbProductSetting), "VND")
+end
+
+function tbWnd:GenarateSellItems()
+  local tbSettings = {}
+  if 2 == self.nSelectedIndex then
+    tbSettings = Recharge:GetAwardYuanBaoSettings()
+  elseif 1 == self.nSelectedIndex then
+    tbSettings = Recharge:GetAwardGoldSettings()
+  end
+  local tbPayGroup = {}
+  for i, v in ipairs(tbSettings) do
+    if 0 ~= v.nCanRechargeChannels & Recharge.tbCanRechargeChannels.CLIENT then
+      table.insert(tbPayGroup, v)
+    end
+  end
+  return tbPayGroup
+end
+
+function tbWnd:OnChangePanel(nIndex)
+  if 3 == nIndex then
+    self.pPanel:SetActive(tbControls.PayList, false)
+    self.pPanel:SetActive(tbControls.VIP, true)
+    self.tbVipNameScrollView:ScrollToIndex(self.nVipLevel, true)
+    self:UpdateVipPanel()
+  else
+    self.pPanel:SetActive(tbControls.PayList, true)
+    self.pPanel:SetActive(tbControls.VIP, false)
+    self:ShowPayItems()
+  end
+end
+
+function tbWnd:OnVipLevelChange()
+  self.nVipLevel = me.GetVipLevel()
+  local nCurMaxLevel = Vip:GetCurTimeframeMaxLevel()
+  self.nShowLevel = Vip.tbVipViewShowMaxLevel[self.nVipLevel]
+  self.nShowLevel = nCurMaxLevel < self.nShowLevel and nCurMaxLevel or self.nShowLevel
+  self:UpdateVipPanel()
+  self:UpdateVipNameSV()
+end
+
+function tbWnd:UpdateVipNameSV()
+  local function fnSetItem(nIndex, tbElement)
+    local pPanel = tbElement.pPanel
+    
+    local szVipName = Vip:GetVipName(nIndex)
+    pPanel:Label_SetText("txtVIP", szVipName)
+    tbElement.pPanel:SetActive("MarkNow", nIndex == self.nVipLevel)
+    RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, "Main", {
+      RedPointMgr.EVENT.VipLevelGiftBagBegin + nIndex
+    })
+  end
+  
+  self.tbVipNameScrollView:Reset()
+  for i = 0, self.nShowLevel do
+    self.tbVipNameScrollView:SetElement(i, function(tbElement)
+      fnSetItem(i, tbElement)
+    end)
+    Vip:OnCheckVipNameRedPoint(i)
+  end
+end
+
+function tbWnd:GetVipPrivilegeTB(nVipLevel)
+  local tbRet = {}
+  for _, szDesc in pairs(Vip.VipPrivilegeCfg[nVipLevel]) do
+    table.insert(tbRet, i18n.Get(szDesc))
+  end
+  return tbRet
+end
+
+function tbWnd:GetNextVipPrivilegeTB(nVipLevel)
+  local tbRet = {}
+  for _, szDesc in pairs(Vip.NextVipPrivilegeCfg[nVipLevel]) do
+    table.insert(tbRet, i18n.Get(szDesc))
+  end
+  return tbRet
+end
+
+function tbWnd:UpdateVipPrivilegeSV()
+  local tbCurPri = self:GetVipPrivilegeTB(self.nSelectVip)
+  
+  local function fnSetItem(nIndex, tbElement)
+    local pPanel = tbElement.pPanel
+    pPanel:Label_SetText("txtAward", tbCurPri[nIndex])
+    pPanel:SetActive("txtValue", false)
+  end
+  
+  self.tbVipCurPrivilegeScrollView:Reset()
+  for i = 1, #tbCurPri do
+    self.tbVipCurPrivilegeScrollView:SetElement(i, function(tbElement)
+      fnSetItem(i, tbElement)
+    end)
+  end
+end
+
+function tbWnd:UpdateVipNextPrivilegeSV()
+  local nNextLevel = self.nSelectVip + 1
+  if nNextLevel > Vip.nMaxLevel then
+    nNextLevel = Vip.nMaxLevel
+    self.pPanel:Label_SetText(tbControls.txtAwardNewTitle, "")
+    self.pPanel:Label_SetText(tbControls.txtAwardNewTips, "")
+  else
+    local szNextVipName = Vip:GetVipName(nNextLevel)
+    self.pPanel:Label_SetText(tbControls.txtAwardNewTitle, i18n.EasyGet("{0}\230\150\176\229\162\158\229\165\150\229\138\177", szNextVipName))
+    local szDesc = Vip:GetVipOpenTimeframe(nNextLevel)
+    self.pPanel:Label_SetText(tbControls.txtAwardNewTips, szDesc)
+    self.pPanel:SetActive(tbControls.txtAwardNewTips, true)
+  end
+  local tbNextPri = self:GetNextVipPrivilegeTB(nNextLevel)
+  
+  local function fnSetItem(nIndex, tbElement)
+    local pPanel = tbElement.pPanel
+    pPanel:Label_SetText("txtAward", tbNextPri[nIndex])
+    pPanel:SetActive("txtValue", false)
+  end
+  
+  self.tbVipNextPrivilegeScrollView:Reset()
+  for i = 1, #tbNextPri do
+    self.tbVipNextPrivilegeScrollView:SetElement(i, function(tbElement)
+      fnSetItem(i, tbElement)
+    end)
+  end
+end
+
+function tbWnd:OnVipLevelSelect(nIndex, tbElement)
+  local tbLastElement = self.tbVipNameScrollView:GetElement(self.nSelectVip)
+  if tbLastElement then
+  end
+  self.nSelectVip = nIndex
+  Vip:CSGetPioneerHadGetNum(self.nSelectVip)
+  local szVipName = Vip:GetVipName(self.nSelectVip)
+  self.pPanel:Label_SetText(tbControls.txtAwardNowTitle, i18n.EasyGet("{0}\229\165\150\229\138\177", szVipName))
+  self:UpdateVipPrivilegeSV()
+  self:UpdateVipNextPrivilegeSV()
+  self:UpdatePioneerGbInfo()
+  self:UpdateLevelGBInfo()
+  Vip:OnCheckVipNameRedPoint(nIndex)
+  Vip:OnCheckLevelBtnRedPoint(nIndex)
+  self.tbVipCurPrivilegeScrollView:GoTop()
+  self.tbVipNextPrivilegeScrollView:GoTop()
+end
+
+function tbWnd:UpdateVipPanel()
+  local nNextLevel = self.nVipLevel + 1
+  if nNextLevel > self.nShowLevel then
+    nNextLevel = self.nShowLevel
+    self.pPanel:SetActive(tbControls.ADTip1, false)
+    self.pPanel:SetActive(tbControls.ADTip12, false)
+    self.pPanel:SetActive(tbControls.ADTip2, false)
+    self.pPanel:SetActive(tbControls.ADTip22, false)
+  else
+    self.pPanel:SetActive(tbControls.ADTip1, true)
+    self.pPanel:SetActive(tbControls.ADTip12, true)
+    self.pPanel:SetActive(tbControls.ADTip2, true)
+    self.pPanel:SetActive(tbControls.ADTip22, true)
+    local nNextLevelNeedMoney = math.ceil(Vip:GetNextLevelNeedMoney(self.nVipLevel) / Recharge.PRICE_RATE)
+    if nNextLevelNeedMoney > 0 then
+      self.pPanel:Label_SetText(tbControls.txtNextVipNeed, nNextLevelNeedMoney)
+      self.pPanel:Label_SetText(tbControls.txtNextVipNeed2, nNextLevelNeedMoney)
+    end
+    local szNextVipName = Vip:GetVipName(nNextLevel)
+    self.pPanel:Label_SetText(tbControls.txtNextVipName, szNextVipName)
+    self.pPanel:Label_SetText(tbControls.txtNextVipName2, szNextVipName)
+  end
+  local nCurExp = Vip:GetTotoalExp(me)
+  local nNextExp = Vip:GetNextLevelNeedExp(nNextLevel)
+  self.pPanel:Sprite_SetFill(tbControls.imgVipExpBar, nCurExp / nNextExp)
+  self.pPanel:Label_SetText(tbControls.txtVipExpBar, nCurExp .. "/" .. nNextExp)
+  self.pPanel:Sprite_SetFill(tbControls.imgVipExpBar2, nCurExp / nNextExp)
+  self.pPanel:Label_SetText(tbControls.txtVipExpBar2, nCurExp .. "/" .. nNextExp)
+  self:UpdateVipPrivilegeSV()
+  self:UpdateVipNextPrivilegeSV()
+  self:UpdatePioneerGbInfo()
+  self:UpdateLevelGBInfo()
+end
+
+function tbWnd:UpdatePioneerGbInfo()
+  local tbVipSetting = Vip.tbSetting[self.nSelectVip]
+  if Vip:CanShowPioneerGift(me, self.nSelectVip) then
+    self.pPanel:SetActive(tbControls.PioneerBag, true)
+    local bState = Vip:GetPioneerState(me, self.nSelectVip)
+    if bState then
+      self.pPanel:Button_SetText(tbControls.btnGetPioneer, i18n.EasyGet("\229\183\178\233\162\134\229\143\150"), "Text")
+    else
+      self.pPanel:Button_SetText(tbControls.btnGetPioneer, i18n.EasyGet("\233\162\134\229\143\150"), "Text")
+    end
+    local nPioneerGiftId = tbVipSetting.nPioneerGBGiftId
+    self.tbPioneerItemGrid:SetItemByTemplate(nPioneerGiftId)
+    local szName = Item:GetName(nPioneerGiftId, me)
+    self.pPanel:Label_SetText(tbControls.txtPioneerBag, szName)
+  else
+    self.pPanel:SetActive(tbControls.PioneerBag, false)
+  end
+end
+
+function tbWnd:UpdatePioneerRemainNum()
+  local nGetNum = Vip:GetPioneerRemainNum(self.nSelectVip)
+  local nRemainNum = Vip.tbSetting[self.nSelectVip].nPioneerGBCount - nGetNum
+  if nRemainNum < 0 then
+    nRemainNum = 0
+    Log("UpdatePioneerRemainNum error nRemainNum:" .. nRemainNum)
+  end
+  self.pPanel:Label_SetText(tbControls.txtPioneerNum, i18n.EasyGet("\229\137\169\228\189\153\228\184\170\230\149\176 {0}", nRemainNum))
+  if Vip:CanShowPioneerGift(me, self.nSelectVip) then
+    local bState = Vip:GetPioneerState(me, self.nSelectVip)
+    if not bState and nRemainNum > 0 and self.nSelectVip <= me.GetVipLevel() then
+      self.pPanel:Button_SetEnable(tbControls.btnGetPioneer, true)
+    else
+      self.pPanel:Button_SetEnable(tbControls.btnGetPioneer, false)
+    end
+  end
+end
+
+function tbWnd:UpdateLevelGBInfo()
+  local tbVipSetting = Vip.tbSetting[self.nSelectVip]
+  local szVipName = Vip:GetVipName(self.nSelectVip)
+  self.pPanel:Label_SetText(tbControls.txtVipGiftBagAward, i18n.EasyGet("{0}\231\164\188\229\140\133", szVipName))
+  local nAwardId = tbVipSetting.nGiftItemId
+  local nAwardKey = self.nSelectVip
+  local tbAward = Award:GetAward(nAwardId, nAwardKey, {bNoRandom = true})
+  for i = 1, #tbAward do
+    self.tbLevelGiftItemList:SetItem(i, tbAward[i], true)
+  end
+  self.tbLevelGiftItemList:ResetFrom(#tbAward + 1)
+  self.pPanel:Label_SetText(tbControls.txtGiftBagOriginaPrice, tbVipSetting.nGiftShowPrice)
+  self.pPanel:Label_SetText(tbControls.txtGiftBagNowPrice, tbVipSetting.nGiftRealPrice)
+  local bState = Vip:GetLevelGiftBagState(me, self.nSelectVip)
+  if bState then
+    self.pPanel:Button_SetText(tbControls.btnGiftBagBuy, i18n.EasyGet("\229\183\178\232\180\173\228\185\176"), "Text")
+    self.pPanel:Button_SetEnable(tbControls.btnGiftBagBuy, false)
+  else
+    if self.nSelectVip <= self.nVipLevel then
+      self.pPanel:Button_SetEnable(tbControls.btnGiftBagBuy, true)
+    else
+      self.pPanel:Button_SetEnable(tbControls.btnGiftBagBuy, false)
+    end
+    self.pPanel:Button_SetText(tbControls.btnGiftBagBuy, i18n.EasyGet("\232\180\173\228\185\176"), "Text")
+  end
+end

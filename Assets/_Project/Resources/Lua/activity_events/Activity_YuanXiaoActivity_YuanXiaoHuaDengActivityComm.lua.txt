@@ -1,0 +1,200 @@
+Require("CommonScript/Activity/ActivityMgrDef.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.YuanXiaoHuaDeng)
+tbActivity.Protocol = {
+  OnYuanXiaoSyncQuestionId = 1,
+  ReqYuanXiaoAnswerQuestion = 2,
+  ReqYuanXiaoLightRedPoint = 3,
+  ReqYuanXiaoAnswerQuestionBeack = 4,
+  ReqQuestionId = 6,
+  ReqQuestionIdBaeck = 7
+}
+tbActivity.SAVE_YUANXIAOHUADENG_GROUP = GetGroupKey("YuanXiaoHuaDengData")
+tbActivity.SAVE_ANSWER_TIME = 1
+tbActivity.SAVE_ANSWER_RIGHTNUM = 2
+tbActivity.SAVE_ANSWER_NUM = 3
+tbActivity.SAVE_ACTIVITE_STARTTIME = 4
+tbActivity.SAVE_QUESTON_ID = 5
+tbActivity.SAVE_ANSWER_TOTALTIME = 6
+tbActivity.SAVE_ANSWER_RANKNUM = 7
+tbActivity.SAVE_ANSWER_STATE = 8
+tbActivity.tbAnswerState = {UNDERWAY = 1, FINISH = 2}
+
+local function SortFunc(tbNpcInfoDataA, tbNpcInfoDataB)
+  return tbNpcInfoDataA.nNpcIndex < tbNpcInfoDataB.nNpcIndex
+end
+
+function tbActivity:GetQuestonTodayStartTime(pPlayer)
+  return pPlayer.GetUserValue(self.nSaveGroupID, tbActivity.SAVE_ANSWER_TIME)
+end
+
+function tbActivity:GetAnswerRightNum(pPlayer)
+  return pPlayer.GetUserValue(self.nSaveGroupID, tbActivity.SAVE_ANSWER_RIGHTNUM)
+end
+
+function tbActivity:GetAnswerNum(pPlayer)
+  return pPlayer.GetUserValue(self.nSaveGroupID, tbActivity.SAVE_ANSWER_NUM)
+end
+
+function tbActivity:GetQuestonID(pPlayer)
+  return pPlayer.GetUserValue(self.nSaveGroupID, tbActivity.SAVE_QUESTON_ID)
+end
+
+function tbActivity:GetQuestonTotalTime(pPlayer)
+  return pPlayer.GetUserValue(self.nSaveGroupID, tbActivity.SAVE_ANSWER_TOTALTIME)
+end
+
+function tbActivity:GetQuestonRankNum(pPlayer)
+  return pPlayer.GetUserValue(self.nSaveGroupID, tbActivity.SAVE_ANSWER_RANKNUM)
+end
+
+function tbActivity:GetQuestonState(pPlayer)
+  return pPlayer.GetUserValue(self.nSaveGroupID, tbActivity.SAVE_ANSWER_STATE)
+end
+
+function tbActivity:LoadConfig()
+  local szFilePath = "Setting/Activity/YuanXiaoActivity/YuanXiaoHuaDengActivity/YuanXiaoHuaDengActivity.tab"
+  local tbField = {
+    "nConfigId",
+    "nJoinLevel",
+    "nQuestionTime",
+    "nDailyAnswerNum",
+    "szRankType",
+    "nNpcTemplateId",
+    "szScoreTitle"
+  }
+  self.ACTIVITY_CONFIG = Lib:LoadTabFileEx(szFilePath, "ddddsds", "nConfigId", tbField)
+  local szFilePath = "Setting/Activity/YuanXiaoActivity/YuanXiaoHuaDengActivity/YuanXiaoQuestion.tab"
+  local tbField = {
+    "nConfigId",
+    "nId",
+    "szQuestion",
+    "szChoice1",
+    "szChoice2",
+    "szChoice3",
+    "szChoice4"
+  }
+  local tbQuestionCfg = Lib:LoadTabFileEx(szFilePath, "ddsssss", nil, tbField)
+  local tbQuestionTable = {}
+  local tbQuestionIdTable = {}
+  for i, tbQuestionCfgData in ipairs(tbQuestionCfg) do
+    if tbQuestionTable[tbQuestionCfgData.nConfigId] == nil then
+      tbQuestionTable[tbQuestionCfgData.nConfigId] = {}
+    end
+    if tbQuestionIdTable[tbQuestionCfgData.nConfigId] == nil then
+      tbQuestionIdTable[tbQuestionCfgData.nConfigId] = {}
+    end
+    local tbYuanXiaoHuaDengQuestionData = {}
+    tbYuanXiaoHuaDengQuestionData.nId = tbQuestionCfgData.nId
+    tbYuanXiaoHuaDengQuestionData.szQuestion = tbQuestionCfgData.szQuestion
+    tbYuanXiaoHuaDengQuestionData.szChoice1 = tbQuestionCfgData.szChoice1
+    tbYuanXiaoHuaDengQuestionData.szChoice2 = tbQuestionCfgData.szChoice2
+    tbYuanXiaoHuaDengQuestionData.szChoice3 = tbQuestionCfgData.szChoice3
+    tbYuanXiaoHuaDengQuestionData.szChoice4 = tbQuestionCfgData.szChoice4
+    tbQuestionTable[tbQuestionCfgData.nConfigId][tbQuestionCfgData.nId] = tbYuanXiaoHuaDengQuestionData
+    table.insert(tbQuestionIdTable[tbQuestionCfgData.nConfigId], tbQuestionCfgData.nId)
+  end
+  for nConfigId, tbQuestion in pairs(tbQuestionTable) do
+    if self.ACTIVITY_CONFIG[nConfigId] ~= nil then
+      self.ACTIVITY_CONFIG[nConfigId].tbQuestion = tbQuestion
+    end
+  end
+  for nConfigId, tbQuestionIdList in pairs(tbQuestionIdTable) do
+    if self.ACTIVITY_CONFIG[nConfigId] ~= nil then
+      self.ACTIVITY_CONFIG[nConfigId].tbQuestionIdList = tbQuestionIdList
+    end
+  end
+  if MODULE_GAMESERVER then
+    local szFilePath = "ServerSetting/Activity/YuanXiaoActivity/YuanXiaoHuaDengActivity/YuanXiaoAnswer.tab"
+    local tbField = {
+      "nConfigId",
+      "nId",
+      "nAnswerId"
+    }
+    local tbAnswerCfg = Lib:LoadTabFileEx(szFilePath, "ddd", nil, tbField)
+    local tbAnswerTable = {}
+    for i, tbAnswerCfgData in ipairs(tbAnswerCfg) do
+      if tbAnswerTable[tbAnswerCfgData.nConfigId] == nil then
+        tbAnswerTable[tbAnswerCfgData.nConfigId] = {}
+      end
+      tbAnswerTable[tbAnswerCfgData.nConfigId][tbAnswerCfgData.nId] = tbAnswerCfgData
+    end
+    for nConfigId, tbAnswerCfgData in pairs(tbAnswerTable) do
+      if self.ACTIVITY_CONFIG[nConfigId] ~= nil then
+        self.ACTIVITY_CONFIG[nConfigId].tbAnswer = tbAnswerCfgData
+      end
+    end
+  end
+  local szFilePath = "Setting/Activity/YuanXiaoActivity/YuanXiaoHuaDengActivity/YuanXiaoAward.tab"
+  local tbField = {
+    "nConfigId",
+    "nId",
+    "nRightNum",
+    "nAwardId",
+    "nAllCompleteAwardKey"
+  }
+  local tbYuanXiaoAwardCfg = Lib:LoadTabFileEx(szFilePath, "ddddd", nil, tbField)
+  local tbAwardTable = {}
+  for i, tbAnswerCfgData in ipairs(tbYuanXiaoAwardCfg) do
+    if tbAwardTable[tbAnswerCfgData.nConfigId] == nil then
+      tbAwardTable[tbAnswerCfgData.nConfigId] = {}
+    end
+    tbAwardTable[tbAnswerCfgData.nConfigId][tbAnswerCfgData.nId] = tbAnswerCfgData
+  end
+  for nConfigId, tbAwardData in pairs(tbAwardTable) do
+    if self.ACTIVITY_CONFIG[nConfigId] ~= nil then
+      self.ACTIVITY_CONFIG[nConfigId].tbAward = tbAwardData
+    end
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+end
+
+function tbActivity:GetQuestionTime()
+  return self.tbConfig.nQuestionTime
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  self.tbConfig = tbActCfg.Cfg
+  self.tbConfig.szDesc = i18n.Encode(self.tbConfig.szDesc)
+  self.tbConfig.szShowTime = i18n.Encode(self.tbConfig.szShowTime)
+  self.tbConfig.szName = i18n.Encode(self.tbConfig.szName)
+  self.tbConfig.szBtnGoText = i18n.Encode(self.tbConfig.szBtnGoText)
+  self.tbConfig.txtSecondTittle = i18n.Encode(self.tbConfig.txtSecondTittle)
+  self.tbConfig.tbAnswer = {}
+  for _, tbcfg in pairs(tbActCfg.Answer) do
+    self.tbConfig.tbAnswer[tbcfg.nId] = tbcfg
+  end
+  self.tbConfig.tbQuestion = {}
+  self.tbConfig.tbQuestion = {}
+  self.tbConfig.tbQuestionIdList = {}
+  for _, tbcfg in pairs(tbActCfg.Question) do
+    self.tbConfig.tbQuestion[tbcfg.nId] = tbcfg
+    self.tbConfig.tbQuestion[tbcfg.nId].szQuestion = i18n.Encode(tbcfg.szQuestion)
+    self.tbConfig.tbQuestion[tbcfg.nId].szChoice1 = i18n.Encode(tbcfg.szChoice1)
+    self.tbConfig.tbQuestion[tbcfg.nId].szChoice2 = i18n.Encode(tbcfg.szChoice2)
+    self.tbConfig.tbQuestion[tbcfg.nId].szChoice3 = i18n.Encode(tbcfg.szChoice3)
+    self.tbConfig.tbQuestion[tbcfg.nId].szChoice4 = i18n.Encode(tbcfg.szChoice4)
+    table.insert(self.tbConfig.tbQuestionIdList, tbcfg.nId)
+  end
+  self.tbConfig.YuanXiaoAward = {}
+  for _, tbcfg in pairs(tbActCfg.YuanXiaoAward) do
+    self.tbConfig.YuanXiaoAward[tbcfg.nId] = tbcfg
+  end
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+  return true
+end
+
+function tbActivity:CheckConfigValid()
+  local tbConfig = self:GetConfig()
+  if Lib:IsEmptyStr(tbConfig.szLogWay) then
+    LogErr("[YuanXiaoHuaDeng:CheckConfigValid] bad logway! please check it! szLogWay=", tbConfig.szLogWay, self:GetId())
+    return false
+  end
+  return true
+end
+
+function tbActivity:InitExtraData(tbConfig)
+  self.nSaveGroupID = GetGroupKey(self.tbConfig.szSaveKey)
+end

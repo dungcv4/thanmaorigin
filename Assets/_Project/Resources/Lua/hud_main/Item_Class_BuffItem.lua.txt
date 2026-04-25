@@ -1,0 +1,106 @@
+local tbBufffItem = Item:GetClass("BuffItem")
+
+function tbBufffItem:OnClientUse(pItem)
+  Ui:OpenWindow("UIByProductUse", pItem.dwTemplateId)
+  return 0
+end
+
+local tbExtParam = {
+  BUFFID = 1,
+  BUFFTIME = 3,
+  ExchangeID = 4
+}
+
+function tbBufffItem:OnUseManyByTemplated(dwTemplateId, nCount, nLevel)
+  if not LifeSkill.tbOther[nLevel] then
+    LogErr("LifeSkillOther.Tab not include Level:", nLevel)
+    return
+  end
+  local nHave = me.GetItemCountByTypeInBag(dwTemplateId)
+  local nCost = LifeSkill.tbOther[nLevel].nCost
+  if nHave < nCost then
+    me.CenterMsg(i18n.EasyGet("\233\129\147\229\133\183\228\184\141\232\182\179"))
+    return
+  end
+  if nCount ~= nCost then
+    Log("BuffItem OnUseManyByTemplated fail ", me.dwID, dwTemplateId, nCount, nLevel)
+    return 0
+  end
+  local szOpenTimeframe = LifeSkill.tbOther[nLevel].szOpenTime
+  if szOpenTimeframe and 0 == GetTimeFrameState(szOpenTimeframe) then
+    return
+  end
+  local nBuffId = KItem.GetItemExtParam(dwTemplateId, tbExtParam.BUFFID)
+  local nBuffTime = KItem.GetItemExtParam(dwTemplateId, tbExtParam.BUFFTIME)
+  if nCount > 0 then
+    local tbInfo = Item:GetItemBaseProp(dwTemplateId)
+    me.AddSkillState(nBuffId, nLevel, FightSkill.STATE_TIME_TYPE.state_time_truetime, nBuffTime + GetTime())
+    me.CenterMsg(i18n.EasyGet("{0}\228\189\191\231\148\168\230\136\144\229\138\159!", i18n.Parse(tbInfo.szName)))
+    Lib:TrackEvent(me.dwID, Env.track_banshengwu_use, dwTemplateId, nCount, nLevel)
+    return nCount
+  else
+    LogErr(string.format("Use BuffItem Failed!ID:%d", dwTemplateId))
+    return 0
+  end
+end
+
+function tbBufffItem:GetUseSetting(nItemTemplateId, nItemId)
+  if not nItemId or not KItem.GetItemObj(nItemId) then
+    return
+  end
+  local tbSetting = {}
+  tbSetting.szFirstName = i18n.EasyGet("\228\189\191\231\148\168")
+  
+  function tbSetting.fnFirst()
+    Item:ClientUseItem(nItemId)
+    if me.GetItemCountInBags(nItemTemplateId) > 1 then
+      return
+    end
+    Ui:CloseWindow("UIItemTips")
+  end
+  
+  tbSetting.szSecondName = i18n.EasyGet("\229\133\145\230\141\162")
+  
+  function tbSetting.fnSecond()
+    local nExchangeId = KItem.GetItemExtParam(nItemTemplateId, tbExtParam.ExchangeID)
+    Ui:OpenWindow("UISelectAwards", nItemId, nExchangeId, "ExchangeItem", self.OnExchangeItem, self)
+  end
+  
+  return tbSetting
+end
+
+function tbBufffItem:OnExchangeItem(nParamId, nItemId, nTemplateId, nSelectNum, tbIndexList)
+  local tbExchangeList = Item.ExchangeItem:GetExchangeItemList(nParamId, nTemplateId)
+  if not next(tbExchangeList) then
+    return
+  end
+  local nAwardIndex = next(tbIndexList)
+  if not tbExchangeList[nAwardIndex] then
+    return
+  end
+  local tbOrgInfo = tbExchangeList[nAwardIndex][1][1]
+  local tbTargetInfo = tbExchangeList[nAwardIndex][1][2]
+  local nId = tbExchangeList[nAwardIndex][2]
+  local nCostNum = tbOrgInfo[3] * nSelectNum
+  local szCostName = i18n.Parse(KItem.GetItemShowInfo(tbOrgInfo[2]))
+  local nTargetNum = tbTargetInfo[3] * nSelectNum
+  local szTargetName = i18n.Parse(KItem.GetItemShowInfo(tbTargetInfo[2]))
+  
+  local function fnArgee()
+    RemoteServer.ExchangeItem(nParamId, nItemId, nSelectNum, tbIndexList, nId)
+    Ui:CloseWindow("UIItemTips")
+    Ui:CloseWindow("UISelectAwards")
+  end
+  
+  local function fnCancel()
+    return
+  end
+  
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\133\145\230\141\162<color=#54AB4D>{0}\228\184\170{1}</color>\233\156\128\232\166\129\230\137\163\233\153\164<color=#54AB4D>{2}\228\184\170{3}</color>\239\188\140\230\152\175\229\144\166\231\161\174\232\174\164\229\133\145\230\141\162\239\188\159", nTargetNum, szTargetName, nCostNum, szCostName), {
+    {fnArgee},
+    {fnCancel}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end

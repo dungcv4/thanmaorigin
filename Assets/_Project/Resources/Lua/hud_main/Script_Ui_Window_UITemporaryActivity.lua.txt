@@ -1,0 +1,223 @@
+local tbWnd = Ui:CreateWindow("UITemporaryActivity")
+
+function tbWnd:NotifyEvents()
+  return {}
+end
+
+local tbControls = {
+  btnClose = "node/imgBg/btnClose",
+  Detail = "node/imgBg/Content/TimeLimit/Detail",
+  ActivityDetailTemp = "node/imgBg/Content/TimeLimit/Detail/ActivityDetailTemp",
+  txtTitle = "node/imgBg/txtTitle",
+  txtTimeTips = "node/imgBg/Content/TimeLimit/txtTips",
+  wndJumpTo = "wndJumpTo",
+  btnMapTemplate = "wndJumpTo/imgBG/List/Viewport/Content/Template",
+  timeWaring = "wndJumpTo/imgBG/List/timeWaring",
+  timeTips = "wndJumpTo/imgBG/List/timeTips"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbStepsItemScrollView = Ui:NewScrollView(self, tbControls.ActivityDetailTemp)
+  self.tbMapScrollView = Ui:NewSuperListView(self, tbControls.btnMapTemplate, self.SetMapInfoList, nil, self.OnClickGoToMap)
+  self:SetClickEmptyCallback(tbControls.wndJumpTo)
+end
+
+function tbWnd:OnOpen(nID)
+  self.pInstance = ActivityMgr:GetInstanceById(nID)
+  if not self.pInstance then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    self:Close()
+    return
+  end
+  self.tbUICfg = self.pInstance:GetUITemporarayCfg()
+  if self.tbUICfg then
+    self:UpdateView(self.tbUICfg)
+  else
+    self:Close()
+    return
+  end
+  self.tbMapScrollView:SetFuncSetItem(self.SetMapInfoList)
+  self:RegRedPoint(self.pInstance)
+  self.pPanel:SetActive(tbControls.wndJumpTo, false)
+end
+
+function tbWnd:OnClose()
+  self:UnregRedPoint()
+end
+
+function tbWnd:OnClickEmptyClose()
+  self.pPanel:SetActive(tbControls.wndJumpTo, false)
+end
+
+tbWnd.tbBtnFunc = {
+  OpenWindow = function(self, szParam1, szParam2)
+    local nActivityID = tonumber(szParam2)
+    Ui:OpenWindow(szParam1, nActivityID)
+  end,
+  Close = function(self, szParam1, szParam2)
+    self.Close(self)
+  end,
+  GotoNPC = function(self, szParam1, szParam2)
+    local nMapId = tonumber(szParam1)
+    local nNPCId = tonumber(szParam2)
+    if not nMapId or not nNPCId then
+      Log("UITemporaryActivity GotoNPC param nil", nMapId, nNPCId)
+      return
+    end
+    ActivityMgr:GotoNpc(nNPCId, nMapId)
+    self.Close(self)
+  end,
+  Common = function(self, szParam1, szParam2)
+    local nActivityID = tonumber(szParam1)
+    local pInstance = ActivityMgr:GetInstanceById(nActivityID)
+    if pInstance then
+      if pInstance.DoCommonJump then
+        pInstance:DoCommonJump(szParam2)
+      else
+        Log("nActivity DoCommonJump not exist", nActivityID)
+        return
+      end
+    else
+      me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+      return
+    end
+  end,
+  OpenMapList = function(self, szParam1, szParam2, szParam3)
+    local pInstance = ActivityMgr:GetInstanceById(tonumber(szParam1))
+    if pInstance and pInstance:IsOpen() then
+      if pInstance.tbConfig.tbJumpMapLoc then
+        self.tbMapLocInfo = pInstance.tbConfig.tbJumpMapLoc[tonumber(szParam2)] or {}
+      else
+        self.tbMapLocInfo = nil
+        return
+      end
+      self.pPanel:SetActive(tbControls.timeTips, false)
+      if szParam3 and pInstance.tbMapDataGenFunc[szParam3] then
+        pInstance.tbMapDataGenFunc[szParam3](self.tbMapLocInfo)
+      elseif tonumber(szParam3) then
+        local pLinkActInstance = ActivityMgr:GetInstanceById(tonumber(szParam3))
+        if pLinkActInstance and pLinkActInstance:IsOpen() and pLinkActInstance.bIsActive then
+          self.pPanel:SetActive(tbControls.timeWaring, false)
+        else
+          self.pPanel:SetActive(tbControls.timeWaring, true)
+        end
+      end
+      self.UpdateMapListView(self)
+    else
+      me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+      return
+    end
+  end
+}
+
+function tbWnd:UpdateMapListView()
+  if not self.tbMapScrollView then
+    return
+  end
+  self.tbMapScrollView:SetAllElement(self.tbMapLocInfo)
+  self.pPanel:SetActive(tbControls.wndJumpTo, true)
+end
+
+function tbWnd:SetMapInfoList(tbElement, tbInfo, nIndex)
+  PushString(Map:GetMapName(tbInfo.nMapTemplateId))
+  if tbInfo.szExtraText and not Lib:IsEmptyStr(tbInfo.szExtraText) then
+    AppendString("(")
+    AppendString(tbInfo.szExtraText)
+    AppendString(")")
+  end
+  tbElement.pPanel:Label_SetText("txtMapName", PopString())
+end
+
+function tbWnd:OnClickGoToMap(tbElement, tbInfo, nIndex)
+  ActivityMgr:GotoDynamicNpc(tbInfo.nMapTemplateId, tbInfo.nLocX, tbInfo.nLocY, function()
+  end)
+  self:Close()
+end
+
+function tbWnd:UpdateView(tbUICfg)
+  self.pPanel:Label_SetText(tbControls.txtTitle, i18n.Parse(tbUICfg.szUIName))
+  self.pPanel:Label_SetText(tbControls.txtTimeTips, i18n.Parse(tbUICfg.szShowTime))
+  local tbStepInfo = tbUICfg.tbStepInfo
+  if tbStepInfo then
+    self.tbStepsItemScrollView:Reset()
+    for i, curStepInfo in ipairs(tbStepInfo) do
+      self.tbStepsItemScrollView:SetElement(i, function(tbElement)
+        local pPanel = tbElement.pPanel
+        pPanel:Sprite_SetSprite("imgCircular", curStepInfo.szImg)
+        pPanel:Label_SetText("txtAcitivityName", i18n.Parse(curStepInfo.szName))
+        pPanel:Label_SetText("txtAcitivityDetail", i18n.Parse(curStepInfo.szDesc))
+        pPanel:Label_SetText("imgCircular/txtNum", i)
+        if curStepInfo.szBtnName ~= "" then
+          pPanel:SetActive("btnGo", true)
+          pPanel:Button_SetText("btnGo", i18n.Parse(curStepInfo.szBtnName), "Text")
+          pPanel:Button_BindEvent("btnGo", function()
+            local funOnClick = self.tbBtnFunc[curStepInfo.szCallBack]
+            if funOnClick then
+              funOnClick(self, curStepInfo.szParam1, curStepInfo.szParam2, curStepInfo.szParam3)
+            else
+              Log("szCallBack nil", curStepInfo.szBtnName)
+            end
+          end)
+        else
+          pPanel:SetActive("btnGo", false)
+        end
+        self:RegRedPoint(pPanel, "btnGo", curStepInfo.nLinkActivityID)
+        self.nStepNum = i
+      end)
+    end
+  end
+end
+
+function tbWnd:RegRedPoint(pPanel, szBtnPath, nRedPointActivityID)
+  if not nRedPointActivityID then
+    return
+  end
+  local pLinkAcvitity = ActivityMgr:GetInstanceById(nRedPointActivityID)
+  if not pLinkAcvitity then
+    return
+  end
+  if not pLinkAcvitity.GetRedPointEventId then
+    return
+  end
+  local activityRedPoint = pLinkAcvitity:GetRedPointEventId()
+  RedPointMgr:DynamicRegisteRedPoint(pPanel, szBtnPath, activityRedPoint)
+end
+
+function tbWnd:UnregRedPoint()
+  if not self.nStepNum then
+    return
+  end
+  for i = 1, self.nStepNum do
+    local pPanel = self.tbStepsItemScrollView:GetElement(i).pPanel
+    RedPointMgr:DynamicUnRegist(pPanel, "btnGo")
+  end
+end
+
+function tbWnd:OpenBag()
+end
+
+function tbWnd:OnClickStep(nStep)
+  if not self.tbUICfg then
+    return
+  end
+  local tbStepInfo = self.tbUICfg.tbStepInfo
+  if not tbStepInfo then
+    return
+  end
+  for i, tbInfo in ipairs(tbStepInfo) do
+    if i == nStep and not Lib:IsEmptyStr(tbInfo.szBtnName) then
+      local funOnClick = self.tbBtnFunc[tbInfo.szCallBack]
+      if funOnClick then
+        funOnClick(self, tbInfo.szParam1, tbInfo.szParam2, tbInfo.szParam3)
+      else
+        Log("szCallBack nil", tbInfo.szBtnName)
+      end
+    end
+  end
+end

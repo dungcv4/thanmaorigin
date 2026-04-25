@@ -1,0 +1,268 @@
+GlobalDomainBattle.IS_SYS_OPEN = true
+
+function GlobalDomainBattle:CanClaim(pPlayer, nMapTid, bFromSys, bZone)
+  if not MODULE_GAMESERVER then
+    return true
+  end
+  if not self.IS_SYS_OPEN then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  local nLegionId = 0
+  if bZone then
+    local tbLegion = Legion:GetLegionByMemberId(pPlayer)
+    if not tbLegion then
+      return false, i18n.EasyGet("\230\178\161\230\156\137\229\138\160\229\133\165\229\134\155\229\155\162")
+    end
+    nLegionId = tbLegion.nLegionId
+  else
+    nLegionId = pPlayer.dwLegionId
+  end
+  if 0 == nLegionId then
+    return false, i18n.EasyGet("\230\178\161\230\156\137\229\138\160\229\133\165\229\134\155\229\155\162")
+  end
+  if MODULE_GAMESERVER then
+    local tbMember
+    if bZone then
+      tbMember = Legion:GetMemberData(pPlayer)
+    else
+      tbMember = Legion:GetMemberData(pPlayer.dwID)
+    end
+    if not tbMember or not Legion.Def.Career_Authority[tbMember.nCareer][Legion.Def.Authority_ClaimDomain] then
+      return false, i18n.EasyGet("\228\187\133\229\134\155\229\155\162\233\149\191/\229\137\175\229\134\155\229\155\162\233\149\191\229\143\175\228\187\165\229\174\163\230\136\152")
+    end
+  elseif not Legion:CheckMyAuthority(Legion.Def.Authority_ClaimDomain) then
+    return false, i18n.EasyGet("\228\187\133\229\134\155\229\155\162\233\149\191/\229\137\175\229\134\155\229\155\162\233\149\191\229\143\175\228\187\165\229\174\163\230\136\152")
+  end
+  if not bFromSys and MODULE_GAMESERVER and not self:IsClaimPhase() then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\228\184\141\229\156\168\229\174\163\230\136\152\233\152\182\230\174\181")
+  end
+  if not self.MAP_FIGHT[nMapTid] then
+    return false, i18n.EasyGet("\232\175\165\229\140\186\229\159\159\228\184\141\229\143\175\229\174\163\230\136\152")
+  end
+  if 1 ~= self.MAP_FIGHT[nMapTid].OPEN_CLAIM then
+    return false, i18n.EasyGet("\232\175\165\229\140\186\229\159\159\230\154\130\230\156\170\229\188\128\230\148\190")
+  end
+  if 0 ~= #self:GetDomain(nLegionId) then
+    return false, i18n.EasyGet("\229\183\178\230\156\137\233\162\134\229\156\159\239\188\140\230\151\160\233\156\128\229\174\163\230\136\152")
+  end
+  if nMapTid == self:GetTarget(nLegionId) then
+    return false, i18n.EasyGet("\229\183\178\229\175\185\229\133\182\229\174\163\230\136\152")
+  end
+  local bAvailable = false
+  if self.MAP_FIGHT[nMapTid].STAR_LV <= self.CLAIM_COND.STAR_LV_LIMIT then
+    bAvailable = true
+  end
+  if not bAvailable then
+    return false, i18n.EasyGet("\229\143\170\232\131\189\229\174\163\230\136\152{0}\230\152\159\233\162\134\229\156\159", self.CLAIM_COND.STAR_LV_LIMIT)
+  end
+  return true
+end
+
+function GlobalDomainBattle:CanAttend(pPlayer, nMapTid)
+  if not self.IS_SYS_OPEN then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  if MODULE_GAMESERVER and self.nGameState ~= self.GAME_STATE.FIGHT then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\228\184\141\229\156\168\228\186\137\229\164\186\233\152\182\230\174\181")
+  end
+  if not self.MAP_FIGHT[nMapTid] then
+    return false, i18n.EasyGet("\232\175\165\229\140\186\229\159\159\232\183\157\231\166\187\232\191\135\232\191\156\239\188\140\230\151\160\230\179\149\229\136\176\232\190\190")
+  end
+  if pPlayer.nMapTemplateId == nMapTid then
+    return false, i18n.EasyGet("\228\189\160\229\183\178\231\187\143\229\156\168\232\175\165\229\140\186\229\159\159")
+  end
+  local nLegionId = pPlayer.dwLegionId
+  if 0 == nLegionId then
+    return false, i18n.EasyGet("\233\156\128\232\166\129\229\138\160\229\133\165\229\134\155\229\155\162")
+  end
+  return self:CanReachMap(nLegionId, nMapTid)
+end
+
+function GlobalDomainBattle:CanReachMap(nLegionId, nMapTid)
+  local tbDomainList = self:GetDomain(nLegionId)
+  if 0 == #tbDomainList then
+    local nTarget = self:GetTarget(nLegionId)
+    if not nTarget then
+      return false, i18n.EasyGet("\229\134\155\229\155\162\230\178\161\230\156\137\233\162\134\229\156\159\239\188\140\228\184\148\230\156\170\229\174\163\230\136\152\239\188\140\230\151\160\230\179\149\232\191\155\229\133\165")
+    end
+    local bLink = false
+    if nTarget == nMapTid then
+      bLink = true
+    end
+    if not bLink and self.MAP_FIGHT_EXT_LINK[nTarget] and Lib:Is_include(nMapTid, self.MAP_FIGHT_EXT_LINK[nTarget].LINK) then
+      local tbLastDomainList = self:GetLastDomain(nLegionId)
+      for _, nLastMapTid in pairs(tbLastDomainList) do
+        if self.MAP_FIGHT[nLastMapTid].STAR_LV >= self.MAP_FIGHT_EXT_LINK[nTarget].MERCY_STAR_LV_REQ then
+          bLink = true
+          break
+        end
+      end
+    end
+    if not bLink and self.MAP_FIGHT[nTarget] and Lib:Is_include(nMapTid, self.MAP_FIGHT[nTarget].LINK) then
+      bLink = true
+    end
+    if not bLink then
+      return false, i18n.EasyGet("\229\134\155\229\155\162\230\178\161\230\156\137\233\162\134\229\156\159\239\188\140\229\143\170\232\131\189\232\191\155\229\133\165\229\174\163\230\136\152\229\143\138\229\133\182\231\155\184\233\130\187\229\156\176\229\155\190")
+    end
+  elseif not self:CheckOccupier(nMapTid, nLegionId) then
+    local bLink = false
+    for _, nSomeMapTid in pairs(tbDomainList) do
+      if Lib:Is_include(nMapTid, self.MAP_FIGHT[nSomeMapTid].LINK) then
+        bLink = true
+        break
+      end
+    end
+    if not bLink then
+      for _, nSomeMapTid in pairs(tbDomainList) do
+        if self.MAP_FIGHT_EXT_LINK[nSomeMapTid] and Lib:Is_include(nMapTid, self.MAP_FIGHT_EXT_LINK[nSomeMapTid].LINK) and 1 == GetTimeFrameState(self.MAP_FIGHT_EXT_LINK[nSomeMapTid].TIMEFRAME_REQ) then
+          bLink = true
+          break
+        end
+      end
+    end
+    if not bLink then
+      return false, i18n.EasyGet("\232\175\165\229\140\186\229\159\159\232\183\157\231\166\187\232\191\135\232\191\156\239\188\140\230\151\160\230\179\149\229\136\176\232\190\190")
+    end
+    if 1 == self.MAP_FIGHT[nMapTid].STAR_LV then
+      return false, i18n.EasyGet("\230\151\160\230\179\149\232\191\155\230\148\187{0}\230\152\159\229\156\176\229\155\190", self.MAP_FIGHT[nMapTid].STAR_LV)
+    end
+  end
+  return true
+end
+
+function GlobalDomainBattle:GetDomain(nLegionId)
+  local tbMapList = {}
+  for nWarZoneType, tbOccupyList in pairs(self.tbOccupyList) do
+    for nSomeMapTid, nSomeTongId in pairs(tbOccupyList) do
+      if nSomeTongId == nLegionId then
+        table.insert(tbMapList, nSomeMapTid)
+      end
+    end
+  end
+  return tbMapList
+end
+
+function GlobalDomainBattle:GetLastDomain(nLegionId)
+  local tbMapList = {}
+  for nWarZoneType, tbLastOccupyList in pairs(self.tbLastOccupyList) do
+    for nSomeMapTid, nSomeTongId in pairs(tbLastOccupyList) do
+      if nSomeTongId == nLegionId then
+        table.insert(tbMapList, nSomeMapTid)
+      end
+    end
+  end
+  return tbMapList
+end
+
+function GlobalDomainBattle:GetOccupier(nMapTid, nWarZoneType)
+  if not self.tbOccupyList[nWarZoneType] then
+    return
+  end
+  return self.tbOccupyList[nWarZoneType][nMapTid]
+end
+
+function GlobalDomainBattle:CheckOccupier(nMapTid, nLegionId)
+  if not MODULE_GAMESERVER then
+    return true
+  end
+  for nWarZoneType, tbSetting in pairs(self.LEGION_SETTING.WARZONE_TYPE) do
+    if self.tbOccupyList[nWarZoneType] and self.tbOccupyList[nWarZoneType][nMapTid] == nLegionId then
+      return true
+    end
+  end
+  return false
+end
+
+function GlobalDomainBattle:GetTarget(nLegionId)
+  return self.tbClaimList[nLegionId]
+end
+
+function GlobalDomainBattle:GetClaimer(nMapTid)
+  local tbTongList = {}
+  for nSomeTongId, nSomeMapTid in pairs(self.tbClaimList) do
+    if nSomeMapTid == nMapTid then
+      table.insert(tbTongList, nSomeTongId)
+    end
+  end
+  return tbTongList
+end
+
+function GlobalDomainBattle:IsClaimPhase()
+  return self.nGameState == self.GAME_STATE.CLAIM, -1
+end
+
+function GlobalDomainBattle:GetClaimState()
+  if self.nGameState == self.GAME_STATE.CLAIM then
+    return true, 1
+  elseif self.nGameState == self.GAME_STATE.PREPARE then
+    return true, -1
+  end
+end
+
+function GlobalDomainBattle:IsPreparePhase()
+  return self.nGameState == self.GAME_STATE.PREPARE
+end
+
+function GlobalDomainBattle:IsGamePhase()
+  return self.nGameState == self.GAME_STATE.FIGHT or self.nGameState == self.GAME_STATE.PREPARE
+end
+
+function GlobalDomainBattle:IsFightPhase()
+  return self.nGameState == self.GAME_STATE.FIGHT
+end
+
+function GlobalDomainBattle:IsBattlePhase()
+  local tbEvent = self.MISSION_FIGHT.EVENT[self.nEvent]
+  return self.nGameState == self.GAME_STATE.FIGHT and tbEvent and tbEvent.EVENT == "OnEndBattle"
+end
+
+function GlobalDomainBattle:IsGameMap(nMapTid)
+  return nil ~= self.MAP_FIGHT[nMapTid]
+end
+
+function GlobalDomainBattle:IsMeetTimeFrame()
+  return self.bMeetTimeFrame
+end
+
+function GlobalDomainBattle:DuringSeason()
+  return self.bMeetTimeFrame or self.tbLastOccupyList and 0 ~= #self.tbLastOccupyList
+end
+
+function GlobalDomainBattle:IsLegionOfficialMaintain()
+  local bResult = self.tbLastOccupyList and 0 ~= #self.tbLastOccupyList
+  if bResult then
+    Log("LegionOfficialHotFix", "IsLegionOfficialMaintain", "Yes")
+  else
+    Log("LegionOfficialHotFix", "IsLegionOfficialMaintain", "No")
+  end
+  return self.tbLastOccupyList and 0 ~= #self.tbLastOccupyList
+end
+
+function GlobalDomainBattle:IsOpenGlobalDomainAuction()
+  return self.tbLastOccupyList and 0 ~= #self.tbLastOccupyList
+end
+
+function GlobalDomainBattle:IsOpenDay()
+  return self.bOpenToday
+end
+
+function GlobalDomainBattle:CanSendToFront(pPlayer, nFrontIdx)
+  if not self.IS_SYS_OPEN then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  if MODULE_GAMESERVER and self.nGameState ~= self.GAME_STATE.FIGHT then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\228\184\141\229\156\168\228\186\137\229\164\186\233\152\182\230\174\181")
+  end
+  local nMapTid = pPlayer.nMapTemplateId
+  if not self.MAP_FIGHT[nMapTid] then
+    return false, i18n.EasyGet("\232\175\165\229\140\186\229\159\159\232\183\157\231\166\187\232\191\135\232\191\156\239\188\140\230\151\160\230\179\149\229\136\176\232\190\190")
+  end
+  if not self.MAP_FIGHT[nMapTid].POS.FRONT or not self.MAP_FIGHT[nMapTid].POS.FRONT[nFrontIdx] then
+    return false, i18n.EasyGet("\232\175\165\229\140\186\229\159\159\232\183\157\231\166\187\232\191\135\232\191\156\239\188\140\230\151\160\230\179\149\229\136\176\232\190\190")
+  end
+  return true
+end
+
+function GlobalDomainBattle:CheckJoinTimeFrame()
+  return 1 == GetTimeFrameState(self.ATTEND_COND.CHECK_JOIN_TIME_TIMEFRAME)
+end

@@ -1,0 +1,118 @@
+local tbWnd = Ui:CreateClass("UISelectPortraitImage", "UIPanel")
+local tbControls = {
+  PortraitTemplate = "panelPortrait/maskLayer/paneBG/PortraitTemplate"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {}
+local tbIndex2PortaintID = {}
+local tbPortaintID2Index = {}
+
+function tbWnd:OnCreate()
+  self.nCurIndex = 0
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.PortraitTemplate, function(self, nIndex, tbElement)
+    self:OnSelectPortrait(nIndex)
+  end, true, true)
+end
+
+function tbWnd:OnOpen()
+  RemoteServer.PortraitCmd("SynData")
+end
+
+function tbWnd:Update()
+  self:InitAllPortrait()
+end
+
+function tbWnd:OnClose()
+  if self.nCurIndex and 0 ~= self.nCurIndex then
+    local pCurPanel = self.tbScrollView:GetElement(self.nCurIndex).pPanel
+    pCurPanel:SetActive("imgSelected", false)
+  end
+  self.nCurIndex = nil
+  self.tbRedPointIndex = {}
+  self.tbScrollView:Clear()
+end
+
+function tbWnd:OnSelectPortrait(nIndex)
+  local pPanel = self.tbScrollView:GetElement(nIndex).pPanel
+  if self.nCurIndex and 0 ~= self.nCurIndex then
+    local pCurPanel = self.tbScrollView:GetElement(self.nCurIndex).pPanel
+    pCurPanel:SetActive("imgSelected", false)
+  end
+  pPanel:SetActive("imgSelected", true)
+  self.nCurIndex = nIndex
+  pPanel:SetActive("imgRedPoint", false)
+  PlayerPortrait.tbRedPointIndex[tbIndex2PortaintID[nIndex]] = nil
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PORTRAITUI_UPDATE)
+end
+
+function tbWnd:InitAllPortrait()
+  self.tbScrollView:Reset()
+  local tbLimit = {}
+  local tbResult = {}
+  for i = 1, #PlayerPortrait.tbPortraitSetting do
+    local tbPortrait = PlayerPortrait.tbPortraitSetting[i]
+    local bShow = true
+    if not PlayerPortrait:IsNeedSex(i, me.nSex) or not PlayerPortrait:IsNeedFaction(i, me.nFaction) then
+      bShow = false
+    end
+    if 0 ~= tbPortrait.nSaveIdx and not PlayerPortrait:CheckIsInValidTime(me, tbPortrait.nId, PlayerPortrait.tbPortraitData) then
+      bShow = false
+    end
+    if bShow then
+      if not tbPortrait.nSaveIdx or 0 == tbPortrait.nSaveIdx then
+        table.insert(tbResult, i)
+      else
+        table.insert(tbLimit, i)
+      end
+    end
+  end
+  table.sort(tbLimit, function(a1, a2)
+    local tbData1 = PlayerPortrait.tbPortraitData[PlayerPortrait:GetSaveIdx(a1)]
+    local tbData2 = PlayerPortrait.tbPortraitData[PlayerPortrait:GetSaveIdx(a2)]
+    local bUp = false
+    if tbData1.nGetTime < tbData2.nGetTime then
+      bUp = true
+    end
+    return bUp
+  end)
+  for index, nId in ipairs(tbLimit) do
+    table.insert(tbResult, nId)
+  end
+  tbIndex2PortaintID = tbResult
+  self:_SetElement(tbResult)
+end
+
+function tbWnd:_SetElement(tbShowList)
+  for index, value in ipairs(tbShowList) do
+    self.tbScrollView:SetElement(index, function(tbElement)
+      local tbPortrait = PlayerPortrait.tbPortraitSetting[value]
+      local pPanel = tbElement.pPanel
+      pPanel:Sprite_SetSprite("imgPortrait", tbPortrait.szIcon)
+      if tbPortrait.nId == me.nPortrait then
+        self.nCurIndex = index
+        pPanel:SetActive("imgSelected", true)
+        local szDesc = i18n.Parse(tbPortrait.szSource)
+        local szLeftTime
+        if 0 ~= tbPortrait.nSaveIdx and not PlayerPortrait:IsPermanentPortrait(me, value, PlayerPortrait.tbPortraitData) then
+          local nLeft = PlayerPortrait.tbPortraitData[tbPortrait.nSaveIdx].nLimitTime - PlayerPortrait.tbPortraitData[tbPortrait.nSaveIdx].nGetTime
+          szLeftTime = i18n.EasyGet("{0}\229\144\142\229\136\176\230\156\159", Lib:TimeDesc12(nLeft))
+        end
+        if szLeftTime then
+          szDesc = i18n.EasyGet("{0}\239\188\140{1}", szDesc, szLeftTime)
+        end
+      end
+      pPanel:SetActive("imgRedPoint", false)
+      if PlayerPortrait.tbRedPointIndex[value] then
+        pPanel:SetActive("imgRedPoint", true)
+      end
+    end)
+  end
+end
+
+function tbWnd:ReqChange()
+  PlayerPortrait:ChangePortrait(tbIndex2PortaintID[self.nCurIndex])
+end
+
+function tbWnd:GetCurPortraitId()
+  return tbIndex2PortaintID[self.nCurIndex]
+end

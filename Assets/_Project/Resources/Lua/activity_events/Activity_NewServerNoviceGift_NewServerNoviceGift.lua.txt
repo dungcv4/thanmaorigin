@@ -1,0 +1,193 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+ActivityMgr.szNewServerNoviceGiftName = "NewServerNoviceGift"
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.szNewServerNoviceGiftName)
+tbActivity.bLoadConfig = false
+ActivityMgr.NewServerNoviceGift = {
+  Protocol = {GetAward = 1}
+}
+local Protocol = {
+  [ActivityMgr.NewServerNoviceGift.Protocol.GetAward] = "GetAward"
+}
+
+function tbActivity:ClientRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    me.CenterMsg(i18n.EasyGet("\229\174\162\230\136\183\231\171\175\232\190\147\229\133\165\233\148\153\232\175\175"))
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return true
+  end
+  local szAwardFilePath = "Setting/Activity/NewServerNoviceGift/NewServerNoviceGiftAward.tab"
+  self.ACTIVITY_AWARD = Lib:EasyLoadTabFile(szAwardFilePath, {"nConfigId", "nDays"})
+  if not self.ACTIVITY_AWARD then
+    LogErr(szAwardFilePath .. " not find")
+    return false
+  end
+  local szFilePath = "Setting/Activity/NewServerNoviceGift/NewServerNoviceGift.tab"
+  self.ACTIVITY_CONFIG = Lib:EasyLoadTabFile(szFilePath, {"nConfigId"})
+  if not self.ACTIVITY_CONFIG then
+    LogErr(szFilePath .. " not find")
+    return false
+  end
+  self.bLoadConfig = true
+  return true
+end
+
+function tbActivity:OnInit(tbActivityConfig)
+  local bLoadConfigSuccess = self:LoadConfig()
+  self:OnModify(tbActivityConfig)
+  return bLoadConfigSuccess
+end
+
+function tbActivity:OnOpen()
+  if MODULE_GAMESERVER then
+    self:SyncAllModify()
+    self.nOnLevelUpEventId = PlayerEvent:RegisterGlobal(PlayerEvent.EventType.OnLevelUp, self.OnLevelUp, self)
+  end
+end
+
+function tbActivity:OnClose()
+  if MODULE_GAMESERVER and self.nOnLevelUpEventId then
+    PlayerEvent:UnRegisterGlobal(PlayerEvent.EventType.OnLevelUp, self.nOnTopLevelUpEventId)
+    self.nOnLevelUpEventId = nil
+  end
+end
+
+function tbActivity:OnModify(tbScheduleCfg)
+  self:LoadConfig()
+  self:InitMetaData(tbScheduleCfg)
+  self.nId = tbScheduleCfg.nId
+  self.nStartTime = tbScheduleCfg.nStartTime
+  self.nEndTime = tbScheduleCfg.nEndTime
+  self.nConfigId = tbScheduleCfg.nConfigId
+  self.tbConfig = self.ACTIVITY_CONFIG[tbScheduleCfg.nConfigId]
+  self.tbAward = self.ACTIVITY_AWARD[tbScheduleCfg.nConfigId]
+  self.SaveKey = GetGroupKey(self.tbConfig.szSaveKey)
+  if MODULE_GAMESERVER then
+    self:SyncAllModify()
+  end
+end
+
+function tbActivity:SyncAllModify()
+  local tbPlayers = KPlayer.GetAllPlayer()
+  for _, pPlayer in pairs(tbPlayers) do
+    self:SyncPlayerData(pPlayer)
+  end
+end
+
+function tbActivity:SyncPlayerData(pPlayer)
+  pPlayer.CallClientScript("ActivityMgr:OnSyncActivityData", {
+    {
+      self:GetScheduleCfg()
+    }
+  })
+end
+
+function tbActivity:OnDailyEvent(pPlayer)
+  if not self:IsOpen() then
+    return false
+  end
+  if 0 == pPlayer.GetUserValue(self.SaveKey, self.tbConfig.nSaveCanJoin) then
+    if 1 ~= GetTimeFrameState(self.tbConfig.szCreteTimeFrame) then
+      pPlayer.SetUserValue(self.SaveKey, self.tbConfig.nSaveCanJoin, 1)
+      pPlayer.SetUserValue(self.SaveKey, self.tbConfig.nSaveLoginDays, 1)
+    end
+  else
+    local nLoginDays = pPlayer.GetUserValue(self.SaveKey, self.tbConfig.nSaveLoginDays)
+    if nLoginDays < #self.tbAward then
+      pPlayer.SetUserValue(self.SaveKey, self.tbConfig.nSaveLoginDays, nLoginDays + 1)
+      ActivityMgr:CallClientScript(pPlayer, self.nId, "UpdateRedPoint")
+    end
+  end
+end
+
+function tbActivity:CheckCanJoin(pPlayer)
+  if 0 == pPlayer.GetUserValue(self.SaveKey, self.tbConfig.nSaveCanJoin) then
+    return false
+  end
+  local tbInfo = self.tbAward[#self.tbAward]
+  local nReceived = pPlayer.GetUserValue(self.SaveKey, tbInfo.nSaveID)
+  if 1 == nReceived then
+    return false
+  end
+  return true
+end
+
+function tbActivity:GetAward(nDay)
+  if not nDay or type(nDay) ~= "number" then
+    LogErr("[NewServerNoviceGift:GetAward] nDay is illegal: ", nDay)
+    return
+  elseif not self.tbAward then
+    LogErr("[NewServerNoviceGift:GetAward] tbAward is nil")
+    return
+  elseif not self.tbAward[nDay] then
+    LogErr("[NewServerNoviceGift:GetAward] cannot find config by nDay: ", nDay)
+    return
+  end
+  if not self:IsOpen() then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\229\183\178\231\187\147\230\157\159"))
+    return false
+  end
+  local nLoginDays = me.GetUserValue(self.SaveKey, self.tbConfig.nSaveLoginDays)
+  if nDay > nLoginDays then
+    me.CenterMsg(i18n.EasyGet("\230\156\170\232\190\190\229\136\176\233\162\134\229\143\150\230\157\161\228\187\182"))
+    return
+  end
+  local tbInfo = self.tbAward[nDay]
+  local nReceived = me.GetUserValue(self.SaveKey, tbInfo.nSaveID)
+  if 1 == nReceived then
+    me.CenterMsg(i18n.EasyGet("\229\183\178\233\162\134\229\143\150\232\175\165\229\165\150\229\138\177"))
+    return
+  end
+  me.SetUserValue(self.SaveKey, tbInfo.nSaveID, 1)
+  Award:GiveAward(me.dwID, tbInfo.nAwardId, tbInfo.nAwardKey, {
+    nLogReason = Env[self.tbConfig.szLogWay]
+  })
+  ActivityMgr:CallClientScript(me, self.nId, "UpdateView")
+  ActivityMgr:CallClientScript(me, self.nId, "UpdateRedPoint")
+end
+
+function tbActivity:ServerRequest(szFuncName, ...)
+  if not self[szFuncName] then
+    return
+  end
+  self[szFuncName](self, ...)
+end
+
+function tbActivity:CheckHaveAwards(pPlayer)
+  if not self:IsOpen() then
+    return false
+  end
+  local nLoginDays = pPlayer.GetUserValue(self.SaveKey, self.tbConfig.nSaveLoginDays)
+  for nDay, tbInfo in ipairs(self.tbAward) do
+    if nDay <= nLoginDays and 0 == pPlayer.GetUserValue(self.SaveKey, tbInfo.nSaveID) then
+      return true
+    end
+  end
+  return false
+end
+
+function tbActivity:OnLevelUp()
+  if me.nLevel == self.tbConfig.nOpenWindowLevel and self:CheckCanJoin(me) then
+    ActivityMgr:CallClientScript(me, self.nId, "UpdateRedPoint")
+  end
+end
+
+function ActivityMgr:GetNewServerNoviceGiftInstance()
+  for _, pInstance in pairs(ActivityMgr.tbInstance) do
+    if pInstance.szClassName == ActivityMgr.szNewServerNoviceGiftName and pInstance:IsOpen() then
+      return pInstance
+    end
+  end
+end
+
+function tbActivity:OnLogin(pPlayer)
+  if not self:IsOpen() then
+    return
+  end
+  ActivityMgr:SyncActivityDataToClient(pPlayer, self)
+end

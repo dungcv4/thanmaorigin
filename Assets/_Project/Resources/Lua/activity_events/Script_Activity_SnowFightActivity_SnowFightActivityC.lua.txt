@@ -1,0 +1,172 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.SnowFightActivity)
+
+function tbActivity:OnClose()
+  if RedPointMgr.EVENT[self.tbConfig.szRedPointEvent] then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT[self.tbConfig.szRedPointEvent])
+  end
+end
+
+local Protocol = {
+  [tbActivity.Protocol.SyncOpenStatusResp] = "OnSyncOpenStatusResp"
+}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    LogErr("AchieveAwardC: ServerRequest failed, invalid Protocol = ", nProtocol)
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:ReqSignUp()
+  local bRet, nErrCode = self:CheckCanSign(me)
+  if not bRet and nErrCode ~= self.ErrCode.SignUp.NoJoinCount then
+    if nErrCode == self.ErrCode.SignUp.NotOpenTime then
+      me.CenterMsg(i18n.EasyGet("\230\156\170\229\156\168\230\138\165\229\144\141\230\151\182\233\151\180\229\134\133"))
+    elseif nErrCode == self.ErrCode.SignUp.NoTicket then
+      me.CenterMsg(i18n.EasyGet("\229\175\185\228\184\141\232\181\183\239\188\140\230\130\168\230\178\161\230\156\137{0}", Item:GetName(self.tbConfig.nTicketItemId, me)))
+    elseif nErrCode == self.ErrCode.SignUp.NotEnoughLevel then
+      me.CenterMsg(i18n.EasyGet("\229\175\185\228\184\141\232\181\183\239\188\140\230\130\168\231\154\132\231\173\137\231\186\167\228\184\141\232\182\179{0}", self.tbConfig.nJoinLevel))
+    end
+    return
+  else
+    local function fnEnter()
+      local szText1 = i18n.EasyGet("\230\152\175\229\144\166\230\182\136\232\128\1511\230\172\161\229\143\130\228\184\142\230\172\161\230\149\176\229\143\130\229\138\160\230\175\148\232\181\155\239\188\159")
+      
+      local szText2 = i18n.EasyGet("\229\137\169\228\189\153\229\143\175\229\143\130\228\184\142\230\172\161\230\149\176\239\188\154{0}", me.GetUserValue(SnowFight.SaveKey, SnowFight.SaveID.nRemainJoinCount))
+      local szText3 = i18n.EasyGet("\229\143\175\228\189\191\231\148\168{0}\229\162\158\229\138\160\229\143\130\228\184\142\230\172\161\230\149\176", Item:GetName(self.tbConfig.nSpecialTicketItemId, me))
+      local nUseSpecialTicketToday = me.GetUserValue(SnowFight.SaveKey, SnowFight.SaveID.nUseSpecialTicketCountToday)
+      
+      local function funcOK(tbSelf)
+        if TeamMgr:HasTeam() then
+          tbSelf:IfPlayerIsInTeam()
+        elseif nErrCode == self.ErrCode.SignUp.NoJoinCount then
+          local nHasSpecialTicket = me.GetItemCountInBags(tbSelf.tbConfig.nSpecialTicketItemId)
+          if nHasSpecialTicket > 0 then
+            if false then
+              me.CenterMsg(i18n.EasyGet("\230\130\168\228\187\138\230\151\165\229\183\178\230\178\161\230\156\137\229\143\130\229\138\160\230\175\148\232\181\155\231\154\132\230\172\161\230\149\176"))
+            else
+              local function fnConfirm()
+                local nCount, tbItemList = me.GetItemCountByTypeInBag(tbSelf.tbConfig.nSpecialTicketItemId)
+                
+                if nCount <= 0 then
+                  me.CenterMsg(i18n.EasyGet("\230\130\168\232\191\152\230\178\161\230\156\137{0}", Item:GetName(self.tbConfig.nSpecialTicketItemId, me)))
+                  return
+                else
+                  local _, pItem = next(tbItemList)
+                  if pItem then
+                    RemoteServer.UseItem(pItem.dwId)
+                  end
+                end
+              end
+              
+              local function fnBack()
+              end
+              
+              Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\189\147\229\137\141\230\178\161\230\156\137\229\143\130\229\138\160\230\175\148\232\181\155\230\172\161\230\149\176\239\188\140\230\152\175\229\144\166\228\189\191\231\148\168{0}\229\162\158\229\138\160\230\172\161\230\149\176\239\188\159", Item:GetName(self.tbConfig.nSpecialTicketItemId, me)), {
+                {fnConfirm},
+                {fnBack}
+              }, {
+                i18n.szOk,
+                i18n.szCancel
+              })
+            end
+          else
+            me.CenterMsg(i18n.EasyGet("\230\130\168\228\187\138\230\151\165\229\183\178\230\178\161\230\156\137\229\143\130\229\138\160\230\175\148\232\181\155\231\154\132\230\172\161\230\149\176"))
+          end
+        else
+          ActivityMgr:CallServerScriptV2(self.nId, self.Protocol.ReqSignUp)
+        end
+      end
+      
+      local function funcCancel(tbSelf)
+      end
+      
+      local function funcGo(tbSelf)
+        local tbSpecialTicketWare = Shop:GetAWare2(Shop.ShopTypeStr.LimitBuy, tbSelf.tbConfig.nSpecialTicketItemId)
+        if tbSpecialTicketWare then
+          local nRemainCount = Shop:GetShopRemainCount(tbSpecialTicketWare, me)
+          if nRemainCount > 0 or -1 == nRemainCount then
+            Ui:OpenWindow("UIShopBuy", tbSpecialTicketWare, true, nRemainCount)
+          else
+            me.CenterMsg(i18n.EasyGet("\230\130\168\228\187\138\230\151\165\229\183\178\232\180\173\228\185\176\232\191\135{0}", Item:GetName(self.tbConfig.nSpecialTicketItemId, me)))
+          end
+        end
+      end
+      
+      if 0 == self.tbConfig.nTicketItemId then
+        local tbData = {
+          szDegreeName = "SnowFight",
+          tbUpdateFn = {
+            self.GetPrepareInfo,
+            self
+          },
+          tbSignUpFn = {funcOK, self},
+          szTittle = i18n.Parse(i18n.Get(self.tbConfig.szSignTitleDesc)),
+          szStatus = i18n.EasyGet("\230\175\148\232\181\155\230\138\165\229\144\141\228\184\173"),
+          szDesc = i18n.Parse(i18n.Get(self.tbConfig.szSignUpTimeDesc)),
+          nLeftTimes = math.max(self.tbConfig.nAddJoinCountPerDay, self:GetRemainJoinCount(me)),
+          nCanUseCount = self:GetRemainJoinCount(me)
+        }
+        Ui:OpenWindow("UIBattleEntrance_Common", tbData)
+        EventNotify.OnNotify(EventNotify.emNOTIFY_UI_BATTLEENTRANCE_COMMON_UPDATE, nil, SnowFight.nJoinPlayerNum or 0, SnowFight.nSignUpTimer or 0)
+        return
+      end
+      Ui:OpenWindow("UIMessageBoxItem", self.tbConfig.nTicketItemId, 1, szText1, szText2, szText3, {
+        {funcOK, self},
+        {funcCancel, self}
+      }, i18n.EasyGet("\229\137\141\229\190\128\232\142\183\229\143\150\233\129\147\229\133\183"), {funcGo, self})
+    end
+    
+    local bRet, szErr = ActivityCheck:CheckCanEnterActivityEx(me, nil, fnEnter, false, true, true, nil, {}, false)
+    if not bRet then
+      me.CenterMsg(szErr)
+      return
+    else
+      fnEnter()
+    end
+  end
+end
+
+function tbActivity:IfPlayerIsInTeam()
+  local function funcOK()
+    TeamMgr:Quite()
+    
+    me.CenterMsg(i18n.EasyGet("\229\183\178\233\128\128\229\135\186\231\187\132\233\152\159"))
+    self:ReqSignUp()
+  end
+  
+  local function funcCancel()
+  end
+  
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\231\187\132\233\152\159\231\138\182\230\128\129\228\184\141\232\131\189\230\138\165\229\144\141\239\188\140\230\152\175\229\144\166\233\128\128\229\135\186\233\152\159\228\188\141\239\188\159"), {
+    {funcOK},
+    {funcCancel}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function tbActivity:DoCommonJump()
+  if RedPointMgr.EVENT[self.tbConfig.szRedPointEvent] then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT[self.tbConfig.szRedPointEvent])
+  end
+  self:GetPrepareInfo()
+  self:ReqSignUp()
+end
+
+function tbActivity:OnSyncOpenStatusResp(bOpen)
+  self.bOpen = bOpen
+  if RedPointMgr.EVENT[self.tbConfig.szRedPointEvent] then
+    if self.bOpen then
+      RedPointMgr:LightRedPoint(RedPointMgr.EVENT[self.tbConfig.szRedPointEvent])
+    else
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT[self.tbConfig.szRedPointEvent])
+    end
+  end
+end
+
+function tbActivity:GetPrepareInfo()
+  ActivityMgr:CallServerScriptV2(self.nId, self.Protocol.SyncUpDateInfo)
+end

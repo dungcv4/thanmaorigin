@@ -1,0 +1,215 @@
+local tbWnd = Ui:CreateWindow("UIActivity_Gang")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnCompetition = "node/imgBG/btnCompetition",
+  btnGameRule = "node/imgBG/btnGameRule",
+  btnReward = "node/imgBG/btnReward",
+  btnCheer = "node/imgBG/btnCheer",
+  btnGang = "node/imgBG/btnGang",
+  btnRule = "node/imgBG/btnRule ",
+  btnPoints = "node/imgBG/btnPoints",
+  btnQualification = "node/imgBG/btnQualification",
+  liveCell = "node/imgBG/liveCell",
+  btnLive = "node/imgBG/liveCell/btnLive",
+  btnLiveReward = "node/imgBG/liveCell/btnLiveReward",
+  txtRewardCountdown = "node/imgBG/liveCell/txtRewardCountdown",
+  UIItemGrid = "node/imgBG/liveCell/liveReward/UIItemGrid",
+  img_Have = "node/imgBG/liveCell/img_Have",
+  txtTime = "node/imgBG/sloganCell/txtTime",
+  btnProcess = "node/imgBG/processCell/btnProcess",
+  txtProcessTitle = "node/imgBG/processCell/txtProcessTitle",
+  txtProcess = "node/imgBG/processCell/txtProcess",
+  txtProcessTime = "node/imgBG/processCell/txtProcessTime",
+  btnStatus = "node/imgBG/processCell/btnStatus",
+  RewardTemplate = "node/imgBG/rewardCell/RewardScrollView/Viewport/Content/RewardTemplate"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnRule = function(self)
+  end,
+  btnLive = function()
+    if GetTime() < Lib:GetConfigDate2Time(FirstTong.TimeCfg.nFinalsStart) then
+      me.CenterMsg(i18n.EasyGet("\231\155\180\230\146\173\230\154\130\230\156\170\229\188\128\229\144\175"))
+      return
+    end
+    if Sdk:GetOsType() == Sdk.eOSType_Windows then
+      Ui:GotoWeb(FirstTong.Cfg.WEB_SITE_WINDOWS)
+    else
+      Ui:OpenWindow("UITransparentWebView", FirstTong.Cfg.WEB_SITE, 0, 0)
+    end
+  end,
+  btnLiveReward = function()
+    if GetTime() < Lib:GetConfigDate2Time(FirstTong.TimeCfg.nFinalsStart) then
+      me.CenterMsg(i18n.EasyGet("\231\155\180\230\146\173\230\154\130\230\156\170\229\188\128\229\144\175"))
+      return
+    end
+    FirstTong:SendProtocolGetUIAward()
+  end,
+  btnCheer = function()
+    Ui:OpenWindow("UIActivity_Gangcheer")
+  end,
+  btnGang = function()
+    Ui:OpenWindow("UIGangFight")
+  end,
+  btnCompetition = function()
+    if FirstTong:CheckInPreTime() then
+      ActivityMgr:GotoNpc(FirstTong.JiJieCfg.nNpcId, FirstTong.JiJieCfg.nNpcMapId)
+    elseif FirstTong:CheckInFinalsTime() then
+      FirstTong:RequestAttend()
+    end
+  end,
+  btnGameRule = function()
+    FirstTong:OpenRuleUI(1)
+  end,
+  btnReward = function()
+    FirstTong:OpenRuleUI(2)
+  end,
+  btnProcess = function()
+    FirstTong:OpenScheduleUI(true)
+  end,
+  btnStatus = function()
+    FirstTong:OpenScheduleUI(false)
+  end,
+  btnPoints = function()
+    Ui:OpenWindow("UIReward_Newyear", FirstTong.PointsAward)
+  end,
+  btnQualification = function()
+    FirstTong:RequestSyncQualification()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.pItemGrid = Ui:NewExistItemGrid(self, self.UIItemGrid)
+  self.pPanel:SetActive(tbControls.RewardTemplate .. "/txtItemName", false)
+  self.tbReAwardScrollView = Ui:NewItemGridScrollView(self, tbControls.RewardTemplate, 1, 1)
+end
+
+function tbWnd:OnOpen()
+  self:UpdateUITimeAward()
+  self:UpdateButton()
+  self:UpdateStage()
+  self:UpdateReAward()
+  self.pPanel:SetActive(tbControls.btnRule, false)
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnGang, {
+    RedPointMgr.EVENT.FirstTongContract
+  })
+end
+
+function tbWnd:OnClose()
+  if self.nRemainTimer ~= nil then
+    Timer:Close(self.nRemainTimer)
+    self.nRemainTimer = nil
+  end
+end
+
+function tbWnd:UpdateUITimeAward()
+  if not OnOffController:Check(OnOffController.KEY.FirstTongLive) then
+    self.pPanel:SetActive(tbControls.liveCell, false)
+    return
+  end
+  self.pPanel:SetActive(tbControls.liveCell, true)
+  local tbAwards = Award:GetAward(FirstTong.UILiveAwardCfg.nAwardId, FirstTong.UILiveAwardCfg.nAwardKey, {})
+  self.pItemGrid:SetGenericItem(tbAwards[1])
+  self.pItemGrid:SetClickEnable(true)
+  if GetTime() < Lib:GetConfigDate2Time(FirstTong.TimeCfg.nFinalsStart) then
+    self.pPanel:SetActive(tbControls.img_Have, false)
+    self.pPanel:SetActive(tbControls.btnLiveReward, false)
+    self.pPanel:SetActive(tbControls.txtRewardCountdown, false)
+    return
+  end
+  local nGotAward = me.GetUserValue(FirstTong.SAVE_GROUP, FirstTong.SAVE_UI_AWARD)
+  local nOpenUITime = me.GetUserValue(FirstTong.SAVE_GROUP, FirstTong.SAVE_OPEN_UI_TIME)
+  if 1 == nGotAward then
+    self.pPanel:SetActive(tbControls.img_Have, true)
+    self.pPanel:SetActive(tbControls.btnLiveReward, false)
+    self.pPanel:SetActive(tbControls.txtRewardCountdown, false)
+  else
+    self.pPanel:SetActive(tbControls.img_Have, false)
+    self.pPanel:SetActive(tbControls.txtRewardCountdown, true)
+    if 0 == nOpenUITime then
+      FirstTong:SendProtocolFirstOpenUI()
+      self.pPanel:Label_SetText(tbControls.txtRewardCountdown, Lib:TimeDesc2(FirstTong.UILiveAwardCfg.nAwardTime))
+    elseif GetTime() - nOpenUITime >= FirstTong.UILiveAwardCfg.nAwardTime then
+      self.pPanel:SetActive(tbControls.btnLiveReward, true)
+      self.pPanel:Label_SetText(tbControls.txtRewardCountdown, Lib:TimeDesc2(0))
+    else
+      self.pPanel:SetActive(tbControls.btnLiveReward, false)
+      if self.nRemainTimer then
+        Timer:Close(self.nRemainTimer)
+      end
+      self.pPanel:Label_SetText(tbControls.txtRewardCountdown, Lib:TimeDesc2(FirstTong.UILiveAwardCfg.nAwardTime - (GetTime() - nOpenUITime)))
+      self.nRemainTimer = Timer:Register(Env.GAME_FPS, self.UpdateUITimeAward, self)
+    end
+  end
+end
+
+function tbWnd:UpdateButton()
+  if FirstTong:CheckInPreTime() then
+    self.pPanel:Button_SetText(tbControls.btnCompetition, i18n.EasyGet("\229\137\141\229\190\128\228\184\138\228\186\164"), "Text")
+  else
+    self.pPanel:Button_SetText(tbControls.btnCompetition, i18n.EasyGet("\229\143\130\229\138\160\230\175\148\232\181\155"), "Text")
+  end
+  if GetTime() < Lib:GetConfigDate2Time(FirstTong.TimeCfg.nFinalsStart) then
+    self.pPanel:Button_SetEnable(tbControls.btnCheer, false)
+    self.pPanel:Button_SetEnable(tbControls.btnQualification, false)
+  else
+    self.pPanel:Button_SetEnable(tbControls.btnCheer, true)
+    self.pPanel:Button_SetEnable(tbControls.btnQualification, Tong:IsMaster())
+  end
+  local nTodayDate = tonumber(os.date("%Y%m%d", GetTime()))
+  if FirstTong.ContractDateCfg[nTodayDate] then
+    self.pPanel:Button_SetEnable(tbControls.btnGang, true)
+  else
+    self.pPanel:Button_SetEnable(tbControls.btnGang, false)
+  end
+end
+
+function tbWnd:UpdateStage()
+  local nStartTime = Lib:GetConfigDate2Time(FirstTong.TimeCfg.nJiJieStart)
+  local nEndTime = Lib:GetConfigDate2Time(FirstTong.TimeCfg.nFinalsEnd)
+  self.pPanel:Label_SetText(tbControls.txtTime, string.format("%s-%s", Lib:TimeDesc10(nStartTime), Lib:TimeDesc10(nEndTime)))
+  local nTime = GetTime()
+  local nPreStartTime = Lib:GetConfigDate2Time(FirstTong.TimeCfg.nJiJieStart)
+  local nPreEndTime = Lib:GetConfigDate2Time(FirstTong.TimeCfg.nJiJieEnd)
+  local nFinalStartTime = Lib:GetConfigDate2Time(FirstTong.TimeCfg.nFinalsStart)
+  local nFinalEndTime = Lib:GetConfigDate2Time(FirstTong.TimeCfg.nFinalsEnd)
+  if not FirstTong:IsSysOpen() then
+    self.pPanel:Label_SetText(tbControls.txtProcessTitle, "")
+    self.pPanel:Label_SetText(tbControls.txtProcess, i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    self.pPanel:Label_SetText(tbControls.txtProcessTime, "")
+  elseif nTime < nPreStartTime then
+    self.pPanel:Label_SetText(tbControls.txtProcessTitle, i18n.EasyGet("\228\184\139\228\184\128\233\152\182\230\174\181"))
+    self.pPanel:Label_SetText(tbControls.txtProcess, i18n.EasyGet("\233\162\132\233\128\137\232\181\155"))
+    self:UpdateProcessTime(nPreStartTime, nPreEndTime)
+  elseif nTime < nPreEndTime then
+    self.pPanel:Label_SetText(tbControls.txtProcessTitle, i18n.EasyGet("\230\173\163\229\156\168\232\191\155\232\161\140"))
+    self.pPanel:Label_SetText(tbControls.txtProcess, i18n.EasyGet("\233\162\132\233\128\137\232\181\155"))
+    self:UpdateProcessTime(nPreStartTime, nPreEndTime)
+  elseif nTime < nFinalStartTime then
+    self.pPanel:Label_SetText(tbControls.txtProcessTitle, i18n.EasyGet("\228\184\139\228\184\128\233\152\182\230\174\181"))
+    self.pPanel:Label_SetText(tbControls.txtProcess, i18n.EasyGet("\229\134\179\232\181\155"))
+    self:UpdateProcessTime(nFinalStartTime, nFinalEndTime)
+  elseif nTime < nFinalEndTime then
+    self.pPanel:Label_SetText(tbControls.txtProcessTitle, i18n.EasyGet("\230\173\163\229\156\168\232\191\155\232\161\140"))
+    self.pPanel:Label_SetText(tbControls.txtProcess, i18n.EasyGet("\229\134\179\232\181\155"))
+    self:UpdateProcessTime(nFinalStartTime, nFinalEndTime)
+  end
+end
+
+function tbWnd:UpdateProcessTime(nStartTime, nEndTime)
+  local szStartTime = os.date("%m/%d", nStartTime)
+  local szEndTime = os.date("%m/%d", nEndTime)
+  if nStartTime < nEndTime then
+    self.pPanel:Label_SetText(tbControls.txtProcessTime, string.format("%s-%s", szStartTime, szEndTime))
+  else
+    self.pPanel:Label_SetText(tbControls.txtProcessTime, szStartTime)
+  end
+end
+
+function tbWnd:UpdateReAward()
+  local tbAwards = Award:GetAward(FirstTong.UIShowAwardCfg.nAwardId, FirstTong.UIShowAwardCfg.nAwardKey)
+  self.tbReAwardScrollView:UpdateGenericItem(tbAwards, true)
+end

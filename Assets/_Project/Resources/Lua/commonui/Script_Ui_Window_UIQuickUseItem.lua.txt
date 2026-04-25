@@ -1,0 +1,122 @@
+local tbWnd = Ui:CreateWindow("UIQuickUseItem")
+tbWnd.tbControls = {
+  btnUse = "imgBG/btnUse",
+  ItemGrid = "imgBG/Item/ItemGrid",
+  btnClose = "imgBG/btnClose"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnUse = function(self)
+    self:OnClickMainButton()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.itemGrid = Ui:NewExistItemGrid(self, self.ItemGrid)
+end
+
+function tbWnd:OnOpen(nItemId, szBtnName, fnSetItemGrid, fnOnMainButton)
+  self.tbItemIdQueue = UniqueList:new()
+  local tbItem = {
+    nItemId = nItemId,
+    fnSetItemGrid = fnSetItemGrid,
+    fnOnMainButton = fnOnMainButton,
+    szBtnName = szBtnName
+  }
+  UniqueList:pushFront(self.tbItemIdQueue, tbItem, nItemId)
+  self.szBtnName = szBtnName
+  self:Update(nItemId, szBtnName, fnSetItemGrid, fnOnMainButton)
+end
+
+function tbWnd:Update(nItemId, szBtnName, fnSetItemGrid, fnOnMainButton)
+  if UniqueList:IsQueueOnlyKey(self.tbItemIdQueue, nItemId) then
+    local tbItem = {
+      nItemId = nItemId,
+      fnSetItemGrid = fnSetItemGrid,
+      fnOnMainButton = fnOnMainButton,
+      szBtnName = szBtnName or i18n.EasyGet("\228\189\191\231\148\168")
+    }
+    UniqueList:pushFront(self.tbItemIdQueue, tbItem, nItemId)
+  end
+  local tbItemInfo = UniqueList:GetFront(self.tbItemIdQueue)
+  if not tbItemInfo then
+    Timer:Register(1, Ui.CloseWindow, Ui, "UIQuickUseItem")
+    return
+  end
+  local pItem = KItem.GetItemObj(tbItemInfo.nItemId)
+  if not pItem or pItem.nCount <= 0 then
+    Timer:Register(1, Ui.CloseWindow, Ui, "UIQuickUseItem")
+    return
+  end
+  self.szBtnName = tbItemInfo.szBtnName
+  self.pPanel:Button_SetText(self.btnUse, i18n.Parse(self.szBtnName), "Text")
+  if fnSetItemGrid then
+    fnSetItemGrid(self.itemGrid)
+  else
+    local nItemCount = me.GetItemCountByTypeInBag(pItem.dwTemplateId)
+    self.itemGrid:SetItemByTemplate(pItem.dwTemplateId, nItemCount, nil, nil, {bShowTip = true})
+    self.itemGrid:SetClickEnable(true)
+  end
+end
+
+function tbWnd:OnClose()
+  self.tbItemIdQueue = nil
+  self.szBtnName = i18n.EasyGet("\228\189\191\231\148\168")
+end
+
+function tbWnd:GetItemId()
+  if UniqueList:IsEmpty(self.tbItemIdQueue) then
+    return 0
+  end
+  local param = UniqueList:GetFront(self.tbItemIdQueue)
+  if not param then
+    return 0
+  end
+  return param.ItemId
+end
+
+function tbWnd:TryClose(nItemId)
+  if UniqueList:IsEmpty(self.tbItemIdQueue) then
+    self:Close()
+    return
+  end
+  local tbItemInfo = UniqueList:GetFront(self.tbItemIdQueue)
+  if not tbItemInfo then
+    self:Close()
+    return
+  end
+  if tbItemInfo and nItemId == tbItemInfo.nItemId then
+    UniqueList:popFront(self.tbItemIdQueue)
+    tbItemInfo = UniqueList:GetFront(self.tbItemIdQueue)
+    if not tbItemInfo then
+      self:Close()
+      return
+    end
+    local nLoopNum = UniqueList:Count(self.tbItemIdQueue)
+    for i = 1, nLoopNum do
+      local pItem = KItem.GetItemObj(tbItemInfo.nItemId or -1)
+      if not pItem or pItem.nCount <= 0 then
+        UniqueList:popFront(self.tbItemIdQueue)
+        tbItemInfo = UniqueList:GetFront(self.tbItemIdQueue)
+        if not tbItemInfo then
+          self:Close()
+          return
+        end
+      else
+        self:Update(tbItemInfo.nItemId, tbItemInfo.szBtnName, tbItemInfo.fnSetItemGrid, tbItemInfo.fnOnMainButton)
+        break
+      end
+    end
+  end
+end
+
+function tbWnd:OnClickMainButton()
+  local tbItemInfo = UniqueList:GetFront(self.tbItemIdQueue)
+  if tbItemInfo and tbItemInfo.fnOnMainButton then
+    tbItemInfo.fnOnMainButton(self)
+  elseif tbItemInfo then
+    Item:OnQuickUseItem(tbItemInfo.nItemId)
+  end
+end

@@ -1,0 +1,120 @@
+Arena.nSaveGroup = GetGroupKey("Arena")
+Arena.NORMAL_MAX_BUY_TIMES = 1
+Arena.nChallengeTimesId = 2
+Arena.nChallengeRecordTime = 3
+Arena.nBuyDegreeId = 4
+Arena.nBuyDegreeRecordTime = 5
+Arena.nMaxRank = 6
+Arena.nMaxCanReciveAwardLoginOutTime = 2
+
+function Arena:GetRankLevelByPos(nPos)
+  if not nPos or 0 == nPos then
+    return #Arena.Cfg.tbRankLevel
+  end
+  for i = 1, #self.Cfg.tbRankLevel do
+    if nPos <= self.Cfg.tbRankLevel[i] then
+      return i
+    end
+  end
+end
+
+function Arena:GetNpcIdByRankPostion(nPos)
+  local nLevel = self:GetRankLevelByPos(nPos)
+  return self.Cfg.tbRankLevel2NpcId[nLevel]
+end
+
+function Arena:GetChallengeRange(nPos)
+  if nPos and nPos > 0 and nPos < self.Cfg.nChallengeListSize + 1 then
+    return 1, self.Cfg.nChallengeListSize + 1
+  end
+  local nLevel = self:GetRankLevelByPos(nPos)
+  local nRange = self.Cfg.tbRankLevel2Range[nLevel]
+  local nBegin, nEnd
+  if nPos and nPos > 0 then
+    nEnd = nPos - 1
+  else
+    nEnd = Arena.Cfg.nRankCount
+  end
+  nBegin = nEnd - (nRange - 1)
+  nBegin = nBegin > 0 and nBegin or 1
+  return nBegin, nEnd
+end
+
+function Arena:GetBuyDegreeCost(pPlayer)
+  local nIndex = self:GetMaxBuyCount(pPlayer) - DegreeCtrl:GetDegree(pPlayer, "ArenaBuyTimes") + 1
+  return self.Cfg.tbBuyDegreeCostYuanBao[nIndex]
+end
+
+function Arena:CheckAndEnter(pPlayer, fnEnter)
+  if pPlayer.nLevel < Arena.Cfg.nLevelLimit then
+    pPlayer.CenterMsg(i18n.Get(self.Cfg.tbText.szLevelNotEnough, Arena.Cfg.nLevelLimit))
+    return false
+  end
+  if DegreeCtrl:GetDegree(pPlayer, "Arena") <= 0 then
+    return false
+  end
+  local bRet, szErr = ActivityCheck:CheckCanEnterActivityEx(pPlayer, nil, fnEnter, false, true, true, nil, nil, false)
+  if not bRet and szErr then
+    pPlayer.CenterMsg(szErr)
+  end
+  return bRet
+end
+
+function Arena:GetMaxBuyCount(pPlayer)
+  return self.NORMAL_MAX_BUY_TIMES + Vip.tbSetting[pPlayer.GetVipLevel()].nExtArenaNum
+end
+
+function Arena:LoadSetting()
+  self.tbArenaRankAwardCfg = Lib:LoadTabFileEx("Setting/Arena/ArenaRankAwardCfg.tab", "ddddsd", "nRankStage", {
+    "nRankStage",
+    "nMinRank",
+    "nMaxRank",
+    "nAwardId",
+    "szTitle",
+    "nAwardLinkKey"
+  })
+  self.tbArenaAiCfg = Lib:LoadTabFileEx("Setting/Arena/ArenaAiCfg.tab", "ddds", "nAiIndex", {
+    "nAiIndex",
+    "nMinLv",
+    "nMaxLv",
+    "szAiPath"
+  })
+  local szFilePath = "Setting/Arena/AwardLink.tab"
+  local tbAwardLink = Lib:LoadTabFileEx(szFilePath, "dssdd", nil, {
+    "nAwardLinkKey",
+    "szTimeFrameStart",
+    "szTimeFrameEnd",
+    "nAwardKey",
+    "nShowAwardKey"
+  })
+  self.tbAwardLink = {}
+  for _, tbInfo in ipairs(tbAwardLink or {}) do
+    self.tbAwardLink[tbInfo.nAwardLinkKey] = self.tbAwardLink[tbInfo.nAwardLinkKey] or {}
+    table.insert(self.tbAwardLink[tbInfo.nAwardLinkKey], tbInfo)
+  end
+  local nFirstTime, nSecondTime
+  for _, tbList in pairs(self.tbAwardLink) do
+    table.sort(tbList, function(tbFirst, tbSecond)
+      nFirstTime = Lib:IsEmptyStr(tbFirst.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbFirst.szTimeFrameStart)
+      nSecondTime = Lib:IsEmptyStr(tbSecond.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbSecond.szTimeFrameStart)
+      return nFirstTime > nSecondTime
+    end)
+  end
+  self.tbAwardLink = SetReadOnly(self.tbAwardLink)
+  for _, tbInfo in ipairs(self.tbArenaRankAwardCfg) do
+    assert(self.tbAwardLink[tbInfo.nAwardLinkKey], "Arena:LoadSetting fail, nAwardLinkKey is not exist", tbInfo.nRankStage, tbInfo.nAwardLinkKey)
+  end
+end
+
+Arena:LoadSetting()
+
+function Arena:GetAwardKeyByLinkKey(nAwardLinkKey, bShow)
+  local nAwardKey
+  for _, tbInfo in ipairs(self.tbAwardLink[nAwardLinkKey] or {}) do
+    if (Lib:IsEmptyStr(tbInfo.szTimeFrameStart) or 1 == GetTimeFrameState(tbInfo.szTimeFrameStart)) and (Lib:IsEmptyStr(tbInfo.szTimeFrameEnd) or 0 == GetTimeFrameState(tbInfo.szTimeFrameEnd)) then
+      nAwardKey = bShow and tbInfo.nShowAwardKey or tbInfo.nAwardKey
+      break
+    end
+  end
+  return nAwardKey
+end

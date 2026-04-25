@@ -1,0 +1,87 @@
+local tbWnd = Ui:CreateClass("UIActivityMainBase", "UIPanel")
+tbWnd.nMaxShowAward = 5
+
+function tbWnd:OnCreate()
+  self.tbMainActivityScrollView = Ui:NewScrollView(self, self.Template)
+end
+
+function tbWnd:OnOpen(nEntranceIndex, _, szWindowName)
+  self.nEntranceIndex = nEntranceIndex or self.nEntranceIndex
+  self.szWindowName = szWindowName or self.szWindowName
+  if self.nEntranceIndex then
+    self:UpdateInfo(self.nEntranceIndex, _, szWindowName)
+  end
+end
+
+function tbWnd:UpdateInfo(nEntranceIndex, _, szWindowName)
+  self.szWindowName = szWindowName
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(nEntranceIndex)
+  local szShowTime = ActivityMgr.EntranceSchedule:GetSmallTitle(nEntranceIndex)
+  self.pPanel:Label_SetText(self.szTitle, ActivityMgr.EntranceSchedule:GetTitle(nEntranceIndex))
+  self.pPanel:Label_SetText(self.szTime, ActivityMgr.EntranceSchedule:GetSmallTitle(nEntranceIndex))
+  local nEndTime = Lib:GetConfigDate2Time(ActivityMgr.EntranceScheduleCfg[nEntranceIndex].szEndTime)
+  if nEndTime > GetTime() then
+    local nDiff = nEndTime - GetTime()
+    local szTime = i18n.EasyGet("<color=#1FFB24>{0}</color> {1}\229\144\142\231\187\147\230\157\159", szShowTime, Lib:TimeDesc2(nDiff))
+    self.pPanel:Label_SetText(self.szTime, szTime)
+  end
+  self:UpdateActivityList(nEntranceIndex)
+  self.pPanel:SetActive(self.btnHelp, false)
+end
+
+function tbWnd:UpdateActivityList(nEntranceIndex)
+  self.tbMainActivityScrollView:Clear()
+  for index, tbInfo in ipairs(self.tbActivityList) do
+    self.tbMainActivityScrollView:SetElement(index, function(tbElement)
+      tbElement.pPanel:Label_SetText(self.tbTemplateElement.txtActivityName, tbInfo.szName)
+      tbElement.pPanel:Label_SetText(self.tbTemplateElement.txtTimes, tbInfo.szShowTime)
+      tbElement.pPanel:Label_SetText(self.tbTemplateElement.txtInfo, tbInfo.szOutsideDesc or tbInfo.szDesc)
+      local tbConfig = ActivityMgr:GetConfigById(tbInfo.nId)
+      local bOpen = false
+      local bEnd = false
+      local nStartTime = tonumber(tbConfig.nStartTime)
+      local nEndTime = tonumber(tbConfig.nEndTime)
+      if nStartTime < GetTime() then
+        bOpen = true
+      end
+      if nEndTime < GetTime() then
+        bEnd = true
+      end
+      tbElement.pPanel:SetActive(self.tbTemplateElement.btnGo, bOpen and not bEnd)
+      tbElement.pPanel:SetActive(self.tbTemplateElement.img_Finish, bEnd)
+      tbElement.pPanel:SetActive(self.tbTemplateElement.txtUnOpened, not bOpen)
+      Ui:Button_BindEvent(tbElement.pPanel, self.tbTemplateElement.btnGo, self.OnClickJoinBtn, self, ActivityMgr.tbJumpFunc.OpenWindow, tbInfo.nId, self.szWindowName, nEntranceIndex, tbInfo.nId)
+      for nIndex = 1, self.nMaxShowAward do
+        local szTemplated = string.format(self.tbTemplateElement.ItemTemplate, nIndex)
+        local szGrid = string.format(self.tbTemplateElement.GridTemplate, nIndex)
+        if tbInfo.tbAward[nIndex] then
+          local tbGrid = Ui:NewExistItemGrid(tbElement, szGrid)
+          tbGrid:SetGenericItem(tbInfo.tbAward[nIndex])
+          tbGrid:SetClickEnable(true)
+        else
+          tbElement.pPanel:SetActive(szTemplated, false)
+        end
+      end
+      local tbRedPointIdList = {}
+      if tbInfo.tbRedPointEventId and 0 ~= #tbInfo.tbRedPointEventId then
+        Lib:MergeTable(tbRedPointIdList, tbInfo.tbRedPointEventId)
+      end
+      local tbExtraData = ActivityMgr.EntranceSchedule:GetExtraData(self.nEntranceIndex, tbInfo.nIndex)
+      if tbExtraData.szRedPoint then
+        Lib:MergeTable(tbRedPointIdList, ActivityMgr:GenRedPointEventIdList(Lib:SplitStr(tbExtraData.szRedPoint, "|")))
+      end
+      if next(tbRedPointIdList) then
+        RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, self.tbTemplateElement.btnGo, tbRedPointIdList)
+      end
+    end)
+  end
+  self.tbMainActivityScrollView:PlayItemGridAnimation()
+end
+
+function tbWnd:OnClickJoinBtn(func, ...)
+  func(...)
+end
+
+function tbWnd:OnClose()
+  self.tbMainActivityScrollView:Clear()
+end

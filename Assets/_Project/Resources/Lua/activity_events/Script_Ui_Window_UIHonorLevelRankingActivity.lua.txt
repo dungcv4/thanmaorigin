@@ -1,0 +1,182 @@
+local tbWnd = Ui:CreateClass("UIHonorLevelRankingActivity", "UIPanel")
+local tbControls = {
+  txtSubTitle = "txtInfo3",
+  txtCountdown = "txtInfo4",
+  txtRank = "txtPlayerInfo/txtPlayerInfo1",
+  txtNotRanked = "txtPlayerInfo/txtPlayerInfo1/txtPlayerInfo2",
+  Template = "imgList/List/Template",
+  UIItemGrid = "Reward/Item%d/UIItemGrid"
+}
+tbWnd.tbControls = tbControls
+tbWnd.nMaxAwardCount = 1
+local nMinuteTime = 60
+
+function tbWnd:OnCreate()
+  self.tbRankingScrollView = Ui:NewScrollView(self, tbControls.Template)
+end
+
+function tbWnd:OnOpen()
+  self.tbActivity = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.HonorLevelRankingActivity)
+  if not self.tbActivity or not self.tbActivity:IsOpen() then
+    self:Close()
+    return
+  end
+  self.tbActivity:RankingListReq()
+  self.tbActivity:TryFadeRedPoint()
+  self.nActivityFinishTime = self.tbActivity:GetFinishTime()
+  if not self.nActivityFinishTime or self.nActivityFinishTime <= 0 then
+    self.tbActivity:FinishTimeReq()
+    LogWarn("UIHonorLevelRankingActivity:OnOpen get nActivityFinishTime is nil")
+  else
+    self:RefreshHonorLevelFinishTime()
+  end
+  Event:RegisterEvent(Event.emEVENT_HONORLEVEL_FINISHTIME_REFRESH, self, "RefreshHonorLevelFinishTime")
+  Event:RegisterEvent(Event.emEVENT_HONORLEVEL_RANKINGLIST_REFRESH, self, "RefreshHonorLevelRankingList")
+end
+
+function tbWnd:OnClose()
+  if self.nCountDownTimer then
+    Timer:Close(self.nCountDownTimer)
+  end
+  self.tbRankingScrollView:Clear()
+  Event:UnRegisterEvent(Event.emEVENT_HONORLEVEL_FINISHTIME_REFRESH, self)
+  Event:UnRegisterEvent(Event.emEVENT_HONORLEVEL_RANKINGLIST_REFRESH, self)
+end
+
+function tbWnd:RegisterTimer()
+  if self.nCountDownTimer then
+    Timer:Close(self.nCountDownTimer)
+  end
+  self.nCountDownTime = self.nActivityFinishTime - GetTime()
+  local nShowTime = math.max(self.nCountDownTime, nMinuteTime)
+  local szCountDown = i18n.EasyGet("\230\180\187\229\138\168\229\128\146\232\174\161\230\151\182\239\188\154<color=#138446>{0}</color>", Lib:TimeDesc5(nShowTime))
+  self.pPanel:Label_SetText(tbControls.txtCountdown, szCountDown)
+  self.nCountDownTimer = Timer:Register(Env.GAME_FPS * nMinuteTime, self.OnTimer, self)
+end
+
+function tbWnd:OnTimer()
+  local nNow = GetTime()
+  if nNow >= self.nActivityFinishTime or self.nCountDownTime <= 0 then
+    self:RefreshRankingList()
+    self.pPanel:Label_SetText(tbControls.txtCountdown, i18n.EasyGet("\230\180\187\229\138\168\229\183\178\231\187\147\230\157\159"))
+    return false
+  end
+  self.nCountDownTime = self.nCountDownTime - nMinuteTime
+  local nShowTime = math.max(self.nCountDownTime, nMinuteTime)
+  local szCountDown = i18n.EasyGet("\230\180\187\229\138\168\229\128\146\232\174\161\230\151\182\239\188\154<color=#138446>{0}</color>", Lib:TimeDesc5(nShowTime))
+  self.pPanel:Label_SetText(tbControls.txtCountdown, szCountDown)
+  return true
+end
+
+function tbWnd:RefreshHonorLevelFinishTime()
+  local nActivityFinishTime = self.tbActivity:GetFinishTime()
+  if not nActivityFinishTime then
+    LogErr("UIHonorLevelRankingActivity:RefreshHonorLevelFinishTime error.", nActivityFinishTime)
+    return
+  end
+  if not self.nActivityFinishTime then
+    self.nActivityFinishTime = nActivityFinishTime
+  end
+  self:RefreshTitle()
+end
+
+function tbWnd:RefreshTitle()
+  local nCurTime = GetTime()
+  if nCurTime < self.nActivityFinishTime then
+    self:RegisterTimer()
+  elseif nCurTime >= self.nActivityFinishTime then
+    self.pPanel:Label_SetText(tbControls.txtCountdown, i18n.EasyGet("\230\180\187\229\138\168\229\183\178\231\187\147\230\157\159"))
+  end
+  local nHonorLevel = HonorLevel:GetCurTimeframeMaxLevel()
+  local szHonorLevelName = HonorLevel:GetHonorName(nHonorLevel)
+  local szFinishTime = tostring(Lib:OSDate("%Y-%m-%d", self.nActivityFinishTime))
+  local szSubTitle = i18n.EasyGet("<color=#138446>{0}</color>\229\137\141\232\190\190\229\136\176<color=#138446>{1}</color>\231\154\132\228\190\160\229\163\171\229\176\134\232\142\183\229\190\151\228\184\176\229\142\154\231\154\132\229\165\150\229\138\177", szFinishTime, i18n.Parse(szHonorLevelName))
+  self.pPanel:Label_SetText(tbControls.txtSubTitle, szSubTitle)
+end
+
+function tbWnd:RefreshHonorLevelRankingList()
+  self:RefreshPlayerRank()
+  self:RefreshRankingList()
+end
+
+function tbWnd:RefreshPlayerRank()
+  local tbRankingList = self.tbActivity:GetRankingList()
+  for nRank, nInfo in ipairs(tbRankingList) do
+    if nInfo.dwUnitID == me.dwID then
+      self.pPanel:Label_SetText(tbControls.txtNotRanked, "")
+      self.pPanel:Label_SetText(tbControls.txtRank, i18n.EasyGet("\231\172\172{0}\229\144\141", nRank))
+      return
+    end
+  end
+  self.pPanel:Label_SetText(tbControls.txtRank, "")
+  self.pPanel:Label_SetText(tbControls.txtNotRanked, i18n.EasyGet("\230\156\170\228\184\138\230\166\156"))
+end
+
+function tbWnd:RefreshRankingList()
+  local tbRankingList = self.tbActivity:GetRankingList()
+  local nRankingCount = self.tbActivity:GetRankCount()
+  self.tbRankingScrollView:Reset()
+  for nRanking = 1, nRankingCount do
+    self.tbRankingScrollView:SetElement(nRanking, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtRank", nRanking)
+      self:ShowAwardList(tbElement, nRanking)
+      self:ShowRankingInfo(pPanel, tbRankingList[nRanking])
+    end)
+  end
+end
+
+function tbWnd:ShowAwardList(tbElement, nRanking)
+  if self.nActivityFinishTime <= GetTime() then
+    for nIndex = 1, self.nMaxAwardCount do
+      tbElement.pPanel:SetActive("Reward/Item" .. nIndex, false)
+    end
+    return
+  end
+  local tbAwardInfo = self.tbActivity:GetAwardInfo(nRanking)
+  if tbAwardInfo then
+    for nIndex = 1, self.nMaxAwardCount do
+      if tbAwardInfo[nIndex] then
+        local tbGrid = Ui:NewExistItemGrid(tbElement, string.format(tbControls.UIItemGrid, nIndex))
+        tbGrid:SetGenericItem(tbAwardInfo[nIndex])
+        tbGrid:SetClickEnable(true)
+        tbElement.pPanel:SetActive("Reward/Item" .. nIndex, true)
+      else
+        tbElement.pPanel:SetActive("Reward/Item" .. nIndex, false)
+      end
+    end
+  else
+    LogErr("UIHonorLevelRankingActivity. RefreshRankingList GetAwardInfo by rank:", nRanking, "is nil, honorLevel:", HonorLevel:GetCurTimeframeMaxLevel())
+  end
+end
+
+function tbWnd:ShowRankingInfo(pPanel, tbInfo)
+  if tbInfo then
+    pPanel:Label_SetText("txtPlayerName", tbInfo.szName)
+    if tbInfo.szTongName and not Lib:IsEmptyStr(tbInfo.szTongName) then
+      pPanel:Label_SetText("txtTongName", i18n.EasyGet(tbInfo.szTongName))
+    else
+      pPanel:Label_SetText("txtTongName", "-")
+    end
+    local obj = pPanel:GetObject("HonorTitle")
+    local nHonorStarLevel = tbInfo.nHonorStarLevel
+    local pHonorTitle = obj:GetComponent(Ui.UIHonorTitle)
+    local szHonorName, szHonorColor = HonorLevel:GetHonorNameByStarLevel(nHonorStarLevel, false)
+    pHonorTitle:SetHonorTitle(i18n.Parse(szHonorName), szHonorColor)
+    Ui:Button_BindEvent(pPanel, "btnTemplate", function()
+      if tbInfo.dwUnitID == me.dwID then
+        return
+      end
+      if tbInfo.szTongName then
+        tbInfo.szKinOrTongName = tbInfo.szTongName
+      elseif tbInfo.szKinName then
+        tbInfo.szKinOrTongName = tbInfo.szKinName
+      end
+      Ui:OpenWindow("UIRightPopUpMenu", "roleselectFromUI", tbInfo, self, 450, -160)
+    end)
+  else
+    pPanel:Label_SetText("txtTongName", "-")
+    pPanel:Label_SetText("HonorTitle/Text", "-")
+    pPanel:Label_SetText("txtPlayerName", i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+  end
+end

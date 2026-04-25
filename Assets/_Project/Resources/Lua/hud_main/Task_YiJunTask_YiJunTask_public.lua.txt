@@ -1,0 +1,216 @@
+Require("CommonScript/lib.lua")
+YiJunTask.szActivePointKey = "YiJunTask"
+YiJunTask.LevelLimit = 16
+YiJunTask.REFRESHTIME = 14400
+YiJunTask.DAILY_TASKNUM = 10
+YiJunTask.nTaskNpcTemplate = 5
+YiJunTask.nTaskNpcMapTemplate = 1
+YiJunTask.nKinSalaryCount1 = 2
+YiJunTask.nKinSalaryCount2 = 6
+YiJunTask.CFG_TASK = {}
+YiJunTask.CFG_DETAIL = {}
+YiJunTask.tbLogic_Default = YiJunTask.tbLogic_Default or {}
+local tbLogic_Default = YiJunTask.tbLogic_Default
+
+function tbLogic_Default:ParseCfg(tbInfo)
+end
+
+if MODULE_GAMESERVER then
+  function tbLogic_Default:DoAction_Server(pPlayer, tbInfo)
+  end
+  
+  function tbLogic_Default:IsDialogNpc(nNpcTemplateId, tbInfo)
+    return false
+  end
+  
+  function tbLogic_Default:IsKillTarget(nNpcTemplateId, tbInfo)
+    return false
+  end
+else
+  function tbLogic_Default:GetTarget(tbInfo)
+    return ""
+  end
+  
+  function tbLogic_Default:DoAction_Client(pPlayer, tbInfo)
+  end
+end
+YiJunTask.tbLogic_KillNpc = YiJunTask.tbLogic_KillNpc or Lib:NewClass(YiJunTask.tbLogic_Default)
+local tbLogic_KillNpc = YiJunTask.tbLogic_KillNpc
+
+function tbLogic_KillNpc:ParseCfg(tbInfo)
+  local tbTemp = {}
+  tbTemp.nTaskId = tbInfo.nTaskId
+  tbTemp.nStep = tbInfo.nStep
+  tbTemp.szAction = tbInfo.szAction
+  tbTemp.nMapTemplateId = tonumber(tbInfo.nMapTemplateId)
+  tbTemp.nNpcTemplateId = tonumber(tbInfo.nNpcTemplateId)
+  tbTemp.nCount = tonumber(tbInfo.nCount)
+  YiJunTask.CFG_DETAIL[tbTemp.nTaskId] = YiJunTask.CFG_DETAIL[tbTemp.nTaskId] or {}
+  YiJunTask.CFG_DETAIL[tbTemp.nTaskId][tbTemp.nStep] = SetReadOnly(tbTemp)
+end
+
+YiJunTask.tbLogic_GiveItem = YiJunTask.tbLogic_GiveItem or Lib:NewClass(YiJunTask.tbLogic_Default)
+local tbLogic_GiveItem = YiJunTask.tbLogic_GiveItem
+
+function tbLogic_GiveItem:ParseCfg(tbInfo)
+  local tbTemp = {}
+  tbTemp.nTaskId = tbInfo.nTaskId
+  tbTemp.nStep = tbInfo.nStep
+  tbTemp.szAction = tbInfo.szAction
+  tbTemp.nItemTemplateId = tonumber(tbInfo.nItemTemplateId)
+  tbTemp.nCount = tonumber(tbInfo.nCount)
+  tbTemp.nGetMapTemplateId = tonumber(tbInfo.nGetMapTemplateId)
+  tbTemp.nGetNpcTemplateId = tonumber(tbInfo.nGetNpcTemplateId)
+  YiJunTask.CFG_DETAIL[tbTemp.nTaskId] = YiJunTask.CFG_DETAIL[tbTemp.nTaskId] or {}
+  YiJunTask.CFG_DETAIL[tbTemp.nTaskId][tbTemp.nStep] = SetReadOnly(tbTemp)
+end
+
+YiJunTask.tbAllActionLogic = {
+  killlnpc = YiJunTask.tbLogic_KillNpc,
+  giveitem = YiJunTask.tbLogic_GiveItem
+}
+
+function YiJunTask:GetLogic(szAction)
+  return self.tbAllActionLogic[szAction]
+end
+
+function YiJunTask:GetTaskStepNum(nTaskId)
+  if not YiJunTask.CFG_DETAIL[nTaskId] then
+    return 0
+  end
+  return Lib:CountTB(YiJunTask.CFG_DETAIL[nTaskId])
+end
+
+function YiJunTask:GetTaskCfg(nTaskId, nStep)
+  if not YiJunTask.CFG_DETAIL[nTaskId] or not YiJunTask.CFG_DETAIL[nTaskId][nStep] then
+    return
+  end
+  return self.CFG_DETAIL[nTaskId][nStep]
+end
+
+function YiJunTask:ParseCfg(tbInfo)
+  local szAction = tbInfo.szAction
+  local tbLogic = self:GetLogic(szAction)
+  tbLogic:ParseCfg(tbInfo)
+end
+
+function YiJunTask:DoAction(pPlayer, tbInfo)
+  local szAction = tbInfo.szAction
+  local tbLogic = self:GetLogic(szAction)
+  if MODULE_GAMESERVER then
+    tbLogic:DoAction_Server(pPlayer, tbInfo)
+  else
+    tbLogic:DoAction_Client(pPlayer, tbInfo)
+  end
+end
+
+function YiJunTask:IsFinishStartTask(pPlayer)
+  if MODULE_GAMESERVER then
+    local tbTaskData = self:GetTaskData(pPlayer)
+    tbTaskData.bFinishStartTask = tbTaskData.bFinishStartTask or 0
+    return 1 == tbTaskData.bFinishStartTask
+  else
+    self.tbTaskData.bFinishStartTask = self.tbTaskData.bFinishStartTask or 0
+    return 1 == self.tbTaskData.bFinishStartTask
+  end
+end
+
+function YiJunTask:IsTimeFrameOpen()
+  return true
+end
+
+function YiJunTask:QueryNeedItem(pPlayer)
+  local tbTaskData = MODULE_GAMESERVER and self:GetTaskData(pPlayer) or self.tbTaskData
+  local nCurTaskId = tbTaskData.nCurTaskId
+  local nCurStep = tbTaskData.nCurStep
+  local tbInfo = self:GetTaskCfg(nCurTaskId, nCurStep)
+  if tbInfo and tbInfo.szAction == "giveitem" then
+    return tbInfo.nItemTemplateId
+  end
+  return 0
+end
+
+function YiJunTask:GetTaskType(nTaskId)
+  local tbCfg = self.CFG_TASK[nTaskId]
+  return tbCfg and tbCfg.szType or ""
+end
+
+function YiJunTask:__LoadFile_Task()
+  self.CFG_TASK = Lib:LoadTabFileEx("Setting/Task/YiJunTask.tab", "dsddd", "nTaskId", {
+    "nTaskId",
+    "szType",
+    "nWeight",
+    "nLevelMin",
+    "nLevelMax"
+  })
+end
+
+function YiJunTask:__LoadFile_Item()
+  local tbConfigs = Lib:LoadTabFileEx("Setting/Task/YiJunTask_GiveItem.tab", "ddsdddd", "nTaskId", {
+    "nTaskId",
+    "nStep",
+    "szAction",
+    "nItemTemplateId",
+    "nCount",
+    "nGetMapTemplateId",
+    "nGetNpcTemplateId"
+  })
+  for _, tbInfo in pairs(tbConfigs) do
+    self:ParseCfg(tbInfo)
+  end
+end
+
+function YiJunTask:__LoadFile_KillNpc()
+  local tbConfigs = Lib:LoadTabFileEx("Setting/Task/YiJunTask_KillNpc.tab", "ddsddd", "nTaskId", {
+    "nTaskId",
+    "nStep",
+    "szAction",
+    "nMapTemplateId",
+    "nNpcTemplateId",
+    "nCount"
+  })
+  for _, tbInfo in pairs(tbConfigs) do
+    self:ParseCfg(tbInfo)
+  end
+end
+
+function YiJunTask:__LoadSetting()
+  local tbYiJunTaskAwardSetting = Lib:LoadTabFileEx("Setting/Task/YiJunTask_Award.tab", "dssssssssss", nil, {
+    "nLevel",
+    "szAward1",
+    "szAward2",
+    "szAward3",
+    "szAward4",
+    "szAward5",
+    "szAward6",
+    "szAward7",
+    "szAward8",
+    "szAward9",
+    "szAward10"
+  })
+  YiJunTask.tbAwardSetting = {}
+  for k, v in pairs(tbYiJunTaskAwardSetting) do
+    YiJunTask.tbAwardSetting[v.nLevel] = YiJunTask.tbAwardSetting[v.nLevel] or {}
+    YiJunTask.tbAwardSetting[v.nLevel] = {
+      v.szAward1,
+      v.szAward2,
+      v.szAward3,
+      v.szAward4,
+      v.szAward5,
+      v.szAward6,
+      v.szAward7,
+      v.szAward8,
+      v.szAward9,
+      v.szAward10
+    }
+  end
+end
+
+function YiJunTask:LoadFile()
+  self:__LoadFile_Task()
+  self:__LoadFile_Item()
+  self:__LoadFile_KillNpc()
+  self:__LoadSetting()
+end
+
+YiJunTask:LoadFile()

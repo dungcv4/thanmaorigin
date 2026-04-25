@@ -1,0 +1,164 @@
+Require("CommonScript/Dungeon/Barracks/HaiLingWangMu/HaiLingWangMuCfg.lua")
+HaiLingWangMu.EndStateDef = {
+  NotEnd = 1,
+  SuccessEnd = 2,
+  FailEnd = 3
+}
+HaiLingWangMu.NpcDef = {
+  EnterMap = "EnterMap",
+  Trap = "Trap",
+  WYZQ = "wanyanzongqin",
+  ZZ = "zhuzi",
+  WYBP = "wanyanbupo",
+  GYS = "guangyingshi",
+  WYZB = "wanyanzongbi",
+  YMQ = "youmingquan",
+  WYL = "wanyanliang",
+  MONSTER = "monster",
+  HLJG = "honglianjiguan",
+  GYTrap = "guangyingTrap"
+}
+HaiLingWangMu.tbClass = HaiLingWangMu.tbClass or {}
+
+function HaiLingWangMu:LoadMainMapConfig()
+  self.tbNpcSetting = self.tbNpcSetting or {}
+  self.tbAutoPosSetting = self.tbAutoPosSetting or {}
+  local tbTempNpcSetting = {}
+  local tbTempAutoSetting = {}
+  local tbTmpNpcMap = {}
+  local tbTmpAutoMap = {}
+  for _, tbInfo in ipairs(self.Cfg.tbStage) do
+    local szNpcSettingFile = Map:GetMapPosFile(tbInfo.nTemplateID, "phasenpc_info.txt")
+    local tbSetting = Lib:LoadTabFileEx(szNpcSettingFile, "ddddsd", nil, {
+      "NpcTemplateId",
+      "PosX",
+      "PosY",
+      "nPhase",
+      "szType",
+      "bEnd"
+    }, nil, nil, false)
+    if not tbSetting then
+      LogErr("[HaiLingWangMu::LoadConfig] load failed!", szNpcSettingFile)
+      return
+    end
+    local szAutoPosSettingFile = Map:GetMapPosFile(tbInfo.nTemplateID, "auto_pos.txt")
+    local tbAutoPosCfg = Lib:LoadTabFileEx(szAutoPosSettingFile, "ddd", nil, {
+      "nPhase",
+      "PosX",
+      "PosY"
+    }, nil, nil, false)
+    if tbAutoPosCfg and not tbTmpAutoMap[szAutoPosSettingFile] then
+      for _, tbValue in pairs(tbAutoPosCfg) do
+        tbTempAutoSetting[tbValue.nPhase] = tbTempAutoSetting[tbValue.nPhase] or {}
+        table.insert(tbTempAutoSetting[tbValue.nPhase], tbValue)
+      end
+    end
+    tbTmpAutoMap[szAutoPosSettingFile] = 1
+    if not tbTmpNpcMap[szNpcSettingFile] then
+      for _, tbValue in pairs(tbSetting) do
+        tbTempNpcSetting[tbValue.nPhase] = tbTempNpcSetting[tbValue.nPhase] or {}
+        tbTempNpcSetting[tbValue.nPhase][tbValue.szType] = tbTempNpcSetting[tbValue.nPhase][tbValue.szType] or {}
+        table.insert(tbTempNpcSetting[tbValue.nPhase][tbValue.szType], tbValue)
+      end
+    end
+    tbTmpNpcMap[szNpcSettingFile] = 1
+  end
+  self.tbTrapMap = {}
+  for index, tbValue in ipairs(self.Cfg.tbTrap) do
+    if self.tbTrapMap[tbValue.szTrap] then
+      LogErr("[HaiLingWangMu::LoadConfig] load szTrap failed!", tbValue.szTrap)
+      return
+    end
+    self.tbTrapMap[tbValue.szTrap] = {
+      nPosX = tbValue.nPosX,
+      nPosY = tbValue.nPosY
+    }
+  end
+  self.tbNpcSetting = tbTempNpcSetting
+  self.tbAutoPosSetting = tbTempAutoSetting
+  self.tbNpcSetting = SetReadOnly(self.tbNpcSetting)
+  self.tbAutoPosSetting = SetReadOnly(self.tbAutoPosSetting)
+end
+
+function HaiLingWangMu:IsOpen()
+  return self.IS_SYS_OPEN
+end
+
+function HaiLingWangMu:CheckCanShow()
+  local bEnoughLevel = me.nLevel >= HaiLingWangMu.Cfg.nLimitLevel
+  local szOpenTimeFrame = HaiLingWangMu.Cfg.szOpenTimeFrame
+  local szCloseTimeFrame = HaiLingWangMu.Cfg.szCloseTimeFrame
+  local bIsOpen = true
+  if szOpenTimeFrame and "" ~= szOpenTimeFrame then
+    bIsOpen = 1 == GetTimeFrameState(szOpenTimeFrame)
+  end
+  local bNotClose = true
+  if szCloseTimeFrame and "" ~= szCloseTimeFrame then
+    bNotClose = 1 ~= GetTimeFrameState(szCloseTimeFrame)
+  end
+  return bEnoughLevel and bIsOpen and bNotClose
+end
+
+HaiLingWangMu:LoadMainMapConfig()
+
+function HaiLingWangMu:CreateClass(szNewClass, szBaseClass)
+  if szBaseClass and self.tbClass[szBaseClass] then
+    self.tbClass[szNewClass] = Lib:NewClass(self.tbClass[szBaseClass])
+  else
+    self.tbClass[szNewClass] = {}
+  end
+  local tbClassInst = self.tbClass[szNewClass]
+  return tbClassInst
+end
+
+function HaiLingWangMu:GetFBClass(szClassName)
+  if self.tbClass[szClassName] then
+    return self.tbClass[szClassName]
+  else
+    LogErr("[CrossTimeRoom]tbClass Not Exsit!", szClassName)
+  end
+end
+
+function HaiLingWangMu:CheckMemberEnter(tbMembers)
+  if self.GMOpen then
+    return true
+  end
+  if not tbMembers then
+    return false
+  end
+  for index, value in ipairs(tbMembers) do
+    local dwPlayerId = MODULE_GAMESERVER and value or value.nPlayerID
+    local pMember = KPlayer.GetPlayerObjById(dwPlayerId)
+    if pMember then
+      if pMember.nLevel < HaiLingWangMu.Cfg.nLimitLevel then
+        local szMsg = i18n.Get(CrossTimeRoom.Msg.ERR_LEVELLIMIT_MEMBER, pMember.szName, CrossTimeRoom.Def.nOpenLevel)
+        return false, szMsg
+      end
+      if self.tbPlayerState[pMember.dwID] then
+        local szMsg = i18n.Get(CrossTimeRoom.Msg.ERR_REQUESTREPEAT, pMember.szName)
+        return false, szMsg
+      end
+      local bRet, szErr = ActivityCheck:CheckCanEnterActivityEx(pMember, nil, nil, false, false, true, nil, nil, false)
+      if not bRet then
+        return false, i18n.EasyGet("\233\152\159\229\145\152{0}", pMember.szName) .. szErr
+      end
+    end
+  end
+  return true
+end
+
+HaiLingWangMu.Cfg.tbProcessTime = {
+  480,
+  600,
+  720,
+  780,
+  840
+}
+HaiLingWangMu.Cfg.tbIntegral = {
+  100,
+  90,
+  80,
+  70,
+  60,
+  50
+}

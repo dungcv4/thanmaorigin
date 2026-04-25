@@ -1,0 +1,110 @@
+local tbWnd = Ui:CreateWindow("UIFestival_SignInBase")
+tbWnd.nMaxShowAward = 4
+tbWnd.tbOnClick = {
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.szHelpKey)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbListView = Ui:NewScrollView(self, self.szListTemplate)
+end
+
+function tbWnd:OnOpen(nEntranceIndex, nIndex)
+  self:RegistNotify()
+  self.nEntranceIndex = nEntranceIndex or self.nEntranceIndex
+  if self.nEntranceIndex then
+    self:UpdateInfo(self.nEntranceIndex, nIndex)
+  end
+end
+
+function tbWnd:UpdateInfo(nEntranceIndex, nIndex)
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(nEntranceIndex)
+  local tbInfo = self.tbActivityList[nIndex]
+  if not tbInfo then
+    return
+  end
+  self.nIndex = nIndex
+  self:LoadActivityData()
+  self.szHelpKey = tbInfo.szHelpKey
+  local szTime = string.format("<color=#1FFB24>%s</color>", tbInfo.szShowTime)
+  local nStartTime = self.pInstance:GetStartTime()
+  local nEndTime = self.pInstance:GetEndTime()
+  if nStartTime < GetTime() then
+    local nDiff = nEndTime - GetTime()
+    szTime = i18n.EasyGet("<color=#1FFB24>{0}</color> {1}\229\144\142\231\187\147\230\157\159", tbInfo.szShowTime, Lib:TimeDesc2(nDiff))
+  end
+  if nEndTime < GetTime() then
+    szTime = i18n.EasyGet("<color=#1FFB24>{0}</color> \229\183\178\231\187\147\230\157\159", tbInfo.szShowTime)
+  end
+  self.pPanel:Label_SetText(self.szTime, szTime)
+  self:UpdateListView()
+end
+
+function tbWnd:RegistNotify()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_UPDATE_DAILY_AWARD_WND, self.UpdateListView, self)
+end
+
+function tbWnd:UnRegistNotify()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_UPDATE_DAILY_AWARD_WND, self)
+end
+
+function tbWnd:UpdateListView()
+  self.tbListView:Reset()
+  self.tbListInfo = self.pInstance:GetAwardInfo(true)
+  for i = 1, #self.tbListInfo do
+    self.tbListView:SetElement(i, function(tbElement)
+      self:UpdateListElement(tbElement, self.tbListInfo[i])
+    end, true)
+  end
+end
+
+function tbWnd:UpdateListElement(tbElement, tbAwardInfo)
+  local pPanel = tbElement.pPanel
+  pPanel:Label_SetText(self.tbTemplateElement.txtDay, tbAwardInfo.szTitle)
+  pPanel:SetActive(self.tbTemplateElement.btnGet, false)
+  pPanel:SetActive(self.tbTemplateElement.btnBuLing, false)
+  pPanel:SetActive(self.tbTemplateElement.imgComplete, false)
+  pPanel:SetActive(self.tbTemplateElement.btnLock, false)
+  local bOpen = self.pInstance.nStartTime < GetTime()
+  if not bOpen then
+    pPanel:SetActive(self.tbTemplateElement.btnLock, true)
+  elseif tbAwardInfo.nGetStatus == self.pInstance.AwardStatus.HasGet then
+    pPanel:SetActive(self.tbTemplateElement.imgComplete, true)
+  elseif tbAwardInfo.bCanGetAsSignAward then
+    pPanel:SetActive(self.tbTemplateElement.btnGet, true)
+    RedPointMgr:DynamicRegisteRedPoint(pPanel, self.tbTemplateElement.btnGet, {
+      RedPointMgr.EVENT.DailyAwardSignIn
+    })
+    Ui:Button_BindEvent(pPanel, self.tbTemplateElement.btnGet, function()
+      self.pInstance:ReqGetDailyAward(tbAwardInfo.nIndex, self.pInstance.GetType.SignIn)
+      if RedPointMgr:CheckEvent(RedPointMgr.EVENT.DailyAwardSignIn) then
+        RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.DailyAwardSignIn)
+      end
+    end)
+  elseif tbAwardInfo.bCanGetAsReSignAward then
+    pPanel:SetActive(self.tbTemplateElement.btnBuLing, true)
+    Ui:Button_BindEvent(pPanel, self.tbTemplateElement.btnBuLing, function()
+      self.pInstance:ReqGetDailyAward(tbAwardInfo.nIndex, self.pInstance.GetType.ReSign)
+    end)
+  else
+    pPanel:SetActive(self.tbTemplateElement.btnLock, true)
+  end
+  for nIndex = 1, self.nMaxShowAward do
+    local szTemplated = string.format(self.tbTemplateElement.GridTemplated, nIndex)
+    local tbGrid = Ui:NewExistItemGrid(tbElement, szTemplated)
+    tbGrid:SetGenericItem(tbAwardInfo.tbAwards[nIndex])
+    tbGrid:SetClickEnable(true)
+  end
+  tbElement.pPanel:Sprite_SetSprite(self.tbTemplateElement.imgCostIcon, Currency:GetIcon(Currency.TYPE.YuanBao))
+  tbElement.pPanel:Label_SetText(self.tbTemplateElement.txtCost, self.pInstance.tbConfig.nRewardCost)
+end
+
+function tbWnd:LoadActivityData()
+  self.pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.DailyAward)
+end
+
+function tbWnd:OnClose()
+  self:UnRegistNotify()
+  self.tbListView:Reset()
+end

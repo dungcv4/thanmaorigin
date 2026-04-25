@@ -1,0 +1,245 @@
+function ChatMgr:SetChatTitlePrefixEnable(bEnable)
+  if self.bEnableChatTitlePrefix == bEnable then
+    return
+  end
+  self.bEnableChatTitlePrefix = bEnable
+end
+
+function ChatMgr:SyncSetChatTitlePrefixEnableRsp(bEnable)
+  self:SetChatTitlePrefixEnable(bEnable)
+end
+
+function ChatMgr:SyncChatTitlePrefixPlayerDataReq()
+  RemoteServer.RequestChatTitlePrefix("C2S_SyncAllChatTitlePrefixPlayerData")
+end
+
+function ChatMgr:ReqUseChatTitlePrefix(nTemplateId, nShowInHud)
+  RemoteServer.RequestChatTitlePrefix("C2S_UseChatTitlePrefix", nTemplateId, nShowInHud)
+end
+
+function ChatMgr:ReqUnuseChatTitlePrefix()
+  RemoteServer.RequestChatTitlePrefix("C2S_UnuseChatTitlePrefix")
+end
+
+function ChatMgr:OnSyncStaticChatTitlePrefixData(tbPlayerChatTitlePrefix, nNewTemplateId)
+  self.tbPlayerChatTitlePrefix = tbPlayerChatTitlePrefix
+  if nNewTemplateId then
+    self.tbChatTitlePrefixRedPointIndex = self.tbChatTitlePrefixRedPointIndex or {}
+    self.tbChatTitlePrefixRedPointIndex[nNewTemplateId] = true
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.NewChatTitlePrefix)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_TITLE_PREFIX_UPDATE)
+end
+
+function ChatMgr:OnSyncAllChatTitlePrefixData(tbPlayerChatTitlePrefix, tbPlayerNormalChatTitlePrefix)
+  self.tbPlayerChatTitlePrefix = tbPlayerChatTitlePrefix
+  self.tbPlayerNormalChatTitlePrefix = tbPlayerNormalChatTitlePrefix
+  if 0 ~= self:GetCurChatTitlePrefixTempId(me) then
+    self:StartChatTitlePrefixTimer()
+  end
+  self.tbChatTitlePrefixRedPointIndex = self.tbChatTitlePrefixRedPointIndex or {}
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_TITLE_PREFIX_UPDATE)
+end
+
+function ChatMgr:OnUseChatTitlePrefix()
+  self:StartChatTitlePrefixTimer()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_TITLE_PREFIX_UPDATE)
+end
+
+function ChatMgr:OnUnuseChatTitlePrefix()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_TITLE_PREFIX_UPDATE)
+end
+
+function ChatMgr:RemoveChatTitlePrefixRedPoint(nTemplateId)
+  if self.tbChatTitlePrefixRedPointIndex then
+    self.tbChatTitlePrefixRedPointIndex[nTemplateId] = nil
+  end
+  if not self.tbChatTitlePrefixRedPointIndex or Lib:IsEmptyTB(self.tbChatTitlePrefixRedPointIndex) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.NewChatTitlePrefix)
+  end
+end
+
+function ChatMgr:GetChatTitlePrefixRedPointState(nTemplateId)
+  if self.tbChatTitlePrefixRedPointIndex and self.tbChatTitlePrefixRedPointIndex[nTemplateId] then
+    return true
+  end
+  return false
+end
+
+function ChatMgr:CheckHaveChatTitlePrefix(pPlayer, nTemplateId)
+  local szType = self:GetChatTitlePrefixType(nTemplateId)
+  if "Static" == szType then
+    if self.tbPlayerChatTitlePrefix and self.tbPlayerChatTitlePrefix[nTemplateId] then
+      if 0 == self.tbPlayerChatTitlePrefix[nTemplateId].nLimitTime then
+        return true
+      elseif self.tbPlayerChatTitlePrefix[nTemplateId].nLimitTime >= GetTime() then
+        return true
+      end
+    end
+  elseif "Normal" == szType and self.tbPlayerNormalChatTitlePrefix and self.tbPlayerNormalChatTitlePrefix[nTemplateId] then
+    return true
+  end
+  return false
+end
+
+function ChatMgr:GetChatTitlePrefixLeftTime(nTemplateId)
+  if self.tbPlayerChatTitlePrefix and self.tbPlayerChatTitlePrefix[nTemplateId] then
+    if 0 == self.tbPlayerChatTitlePrefix[nTemplateId].nLimitTime then
+      return -1
+    end
+    local nLeftTime = self.tbPlayerChatTitlePrefix[nTemplateId].nLimitTime - GetTime()
+    return Lib:IIF(nLeftTime >= 0, nLeftTime, 0)
+  end
+  return 0
+end
+
+function ChatMgr:LoadChatTitlePrefixUiTreeData()
+  self.tbChatTitlePrefixUiTreeData = {}
+  local tbConfig = Lib:LoadTabFileEx("Setting/Chat/ChatTitlePrefixUiTree.tab", "ddsss", nil, {
+    "nType",
+    "nSubType",
+    "szName",
+    "tbszRedPoint",
+    "szChatTitlePrefixType"
+  }, nil, nil, false)
+  for _, tbCfg in ipairs(tbConfig) do
+    self.tbChatTitlePrefixUiTreeData[tbCfg.nType] = self.tbChatTitlePrefixUiTreeData[tbCfg.nType] or {}
+    local tbRedPoint
+    if tbCfg.tbszRedPoint and not Lib:IsEmptyStr(tbCfg.tbszRedPoint) then
+      local tbszRedPoint = Lib:SplitStr(tbCfg.tbszRedPoint, "|")
+      tbRedPoint = {}
+      for _, szRedPoint in ipairs(tbszRedPoint) do
+        table.insert(tbRedPoint, RedPointMgr.EVENT[szRedPoint])
+      end
+    end
+    if 0 == tbCfg.nSubType then
+      self.tbChatTitlePrefixUiTreeData[tbCfg.nType].szName = tbCfg.szName
+      if tbRedPoint then
+        self.tbChatTitlePrefixUiTreeData[tbCfg.nType].tbRedPoint = tbRedPoint
+      end
+    else
+      self.tbChatTitlePrefixUiTreeData[tbCfg.nType].tbSubType = self.tbChatTitlePrefixUiTreeData[tbCfg.nType].tbSubType or {}
+      self.tbChatTitlePrefixUiTreeData[tbCfg.nType].tbSubType[tbCfg.nSubType] = {
+        szName = tbCfg.szName
+      }
+      if tbRedPoint then
+        self.tbChatTitlePrefixUiTreeData[tbCfg.nType].tbSubType[tbCfg.nSubType].tbRedPoint = tbRedPoint
+      end
+    end
+    if tbCfg.szChatTitlePrefixType and not Lib:IsEmptyStr(tbCfg.szChatTitlePrefixType) then
+      self.tbTreeSmallType2ChatTitlePrefixType = self.tbTreeSmallType2ChatTitlePrefixType or {}
+      self.tbTreeSmallType2ChatTitlePrefixType[tbCfg.nSubType] = tbCfg.szChatTitlePrefixType
+    end
+  end
+  self.tbChatTitlePrefixUiTreeData = SetReadOnly(self.tbChatTitlePrefixUiTreeData)
+end
+
+function ChatMgr:GetChatTitlePrefixTypeByTreeSmallType(nSmallType)
+  return self.tbTreeSmallType2ChatTitlePrefixType[nSmallType]
+end
+
+function ChatMgr:GetChatTitlePrefixUiTreeData()
+  local tbBigData = {}
+  local tbSmallData = {}
+  for nBigType, tbData in ipairs(self.tbChatTitlePrefixUiTreeData) do
+    local tbBig = {
+      nType = nBigType,
+      szText = i18n.Parse(tbData.szName),
+      tbInfo = {nType = nBigType},
+      tbRedPoint = tbData.tbRedPoint
+    }
+    table.insert(tbBigData, tbBig)
+    if tbData.tbSubType then
+      for nSmall, tbSubData in ipairs(tbData.tbSubType) do
+        local tbSmall = {
+          bSubMenu = true,
+          nType = nBigType,
+          szText = i18n.Parse(tbSubData.szName),
+          tbInfo = {nType = nBigType, nSmallType = nSmall},
+          tbRedPoint = tbSubData.tbRedPoint
+        }
+        table.insert(tbSmallData, tbSmall)
+      end
+    end
+  end
+  return tbBigData, tbSmallData
+end
+
+function ChatMgr:GetChatPrefixNameWithColor(nChatPrefixId)
+  local szName = self:GetNamePrefix(nChatPrefixId)
+  local nColor = self:GetNamePrefixColor(nChatPrefixId)
+  if szName and nColor then
+    return string.format("<color=#%s>[%s]</color>", Ui.tbColor:GetColorHexBySettingId(nColor), i18n.Parse(szName))
+  elseif szName then
+    return string.format("[%s]", i18n.Parse(szName))
+  end
+end
+
+function ChatMgr:OnPlayerLoginChatTitlePrefix()
+  self:SyncChatTitlePrefixPlayerDataReq()
+end
+
+function ChatMgr:CloseChatTitlePrefixTimer()
+  if self.nChatTitlePrefixTimer then
+    Timer:Close(self.nChatTitlePrefixTimer)
+    self.nChatTitlePrefixTimer = nil
+  end
+end
+
+function ChatMgr:StartChatTitlePrefixTimer()
+  self:CloseChatTitlePrefixTimer()
+  self.nChatTitlePrefixTimer = Timer:Register(Env.GAME_FPS, function()
+    return self:CheckChatTitlePrefixTimeOut()
+  end)
+end
+
+function ChatMgr:CheckChatTitlePrefixTimeOut()
+  if 0 == me.dwID then
+    return false
+  end
+  if not self.tbPlayerChatTitlePrefix then
+    return false
+  end
+  local nCurTemplateId = self:GetCurChatTitlePrefixTempId(me)
+  if 0 == nCurTemplateId then
+    return false
+  end
+  if self.tbPlayerChatTitlePrefix[nCurTemplateId].nLimitTime < GetTime() then
+    RemoteServer.RequestChatTitlePrefix("C2S_ClientReqChatTitlePrefixTimeOut")
+    return false
+  else
+    return true
+  end
+end
+
+function ChatMgr:GetKinCareerNameWithColor(szCareer)
+  local nCareer = Kin.Def[szCareer]
+  if nCareer and ChatFacadeSetting.KinIdentFmt[nCareer] then
+    return string.format(ChatFacadeSetting.KinIdentFmt[nCareer], i18n.Parse(Kin.Def.Career_Name[nCareer]))
+  end
+end
+
+function ChatMgr:GetTongCareerNameWithColor(szCareer)
+  local nCareer = Tong.Def[szCareer]
+  if nCareer and ChatFacadeSetting.TongIdentFmt[nCareer] then
+    return string.format(ChatFacadeSetting.TongIdentFmt[nCareer], i18n.Parse(Tong.Def.CareerName[nCareer]))
+  end
+end
+
+ChatMgr.tbGetNormalChatTitlePrefixNameWithColorFunc = {
+  [ChatMgr.tbNormalChatTitlePrefixType.ChatPrefix] = ChatMgr.GetChatPrefixNameWithColor,
+  [ChatMgr.tbNormalChatTitlePrefixType.KinCareer] = ChatMgr.GetKinCareerNameWithColor,
+  [ChatMgr.tbNormalChatTitlePrefixType.TongCareer] = ChatMgr.GetTongCareerNameWithColor
+}
+
+function ChatMgr:GetNormalChatTitlePrefixNameWithColor(szType, ...)
+  if not self.tbNormalChatTitlePrefixType[szType] then
+    return
+  end
+  local funcGetColorName = self.tbGetNormalChatTitlePrefixNameWithColorFunc[self.tbNormalChatTitlePrefixType[szType]]
+  if funcGetColorName then
+    return funcGetColorName(self, ...)
+  end
+end
+
+ChatMgr:LoadChatTitlePrefixUiTreeData()

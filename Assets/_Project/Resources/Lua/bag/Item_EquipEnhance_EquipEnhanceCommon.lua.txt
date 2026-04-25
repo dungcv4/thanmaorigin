@@ -1,0 +1,540 @@
+Require("CommonScript/Item/EquipEnhance/EquipEnhanceCfg.lua")
+local EquipEnhance = Item.EquipEnhance
+EquipEnhance.SAVE_ENHANCE_GROUP = GetGroupKey("EquipEnhance")
+EquipEnhance.LEVEL_OFFSET = 21
+EquipEnhance.NOT_SHOW_TIP = 100
+EquipEnhance.nMaxLevel = 16
+EquipEnhance.IS_SYS_OPEN = true
+EquipEnhance.RATE_BASE = 10000
+EquipEnhance.MONEY_TYPE = "Coin"
+EquipEnhance.ITEM_CLASS = "XuanJing"
+EquipEnhance.POS_2_DEGREE = {
+  [Item.EQUIPPOS_HELM] = "HelmEnhance",
+  [Item.EQUIPPOS_ARMOR] = "ArmorEnhance",
+  [Item.EQUIPPOS_BELT] = "BeltEnhance",
+  [Item.EQUIPPOS_CUFF] = "CuffEnhance",
+  [Item.EQUIPPOS_BOOTS] = "BootsEnhance",
+  [Item.EQUIPPOS_WEAPON] = "WeaponEnhance",
+  [Item.EQUIPPOS_NECKLACE] = "NecklaceEnhance",
+  [Item.EQUIPPOS_RING] = "RingEnhance",
+  [Item.EQUIPPOS_PENDANT] = "PendantEnhance",
+  [Item.EQUIPPOS_AMULET] = "AmuletEnhance"
+}
+EquipEnhance.tbLimitEnhancePercent = {
+  [8] = {0, 66},
+  [9] = {0, 66},
+  [10] = {0, 66},
+  [11] = {0, 66},
+  [12] = {0, 66},
+  [13] = {0, 66},
+  [14] = {0, 66},
+  [15] = {0, 66}
+}
+
+function EquipEnhance:GetEquipEnhanceLevel(pPlayer, nPos)
+  if nPos < Item.EQUIPPOS_HELM or nPos > Item.EQUIPPOS_AMULET then
+    return 0
+  end
+  return pPlayer.GetUserValue(self.SAVE_ENHANCE_GROUP, self.LEVEL_OFFSET + nPos)
+end
+
+function EquipEnhance:CheckIsOpen()
+  return self.IS_SYS_OPEN
+end
+
+function EquipEnhance:GetEquipMaxEnhanceLevel(nEquipLevel)
+  local nRet = 1
+  for nLv, tbInfo in ipairs(self.ENHANCE_LV) do
+    if nEquipLevel >= tbInfo.LV_REQ then
+      nRet = nLv
+    else
+      break
+    end
+  end
+  return nRet
+end
+
+function EquipEnhance:CanEnhanceWithReminderWindow(pPlayer, nPos, tbItemList)
+  local bRet, szErrMsg, param = EquipEnhance:CanEnhance(pPlayer, nPos, tbItemList)
+  if bRet then
+    return bRet
+  elseif szErrMsg and szErrMsg == i18n.EasyGet("{0}\228\184\141\232\182\179", Currency:GetName(self.MONEY_TYPE)) then
+    GainCurrency:ReadyForJump(self.MONEY_TYPE)
+    return bRet
+  else
+    return bRet, szErrMsg
+  end
+end
+
+function EquipEnhance:CanEnhance(pPlayer, nPos, tbItemList)
+  if not self.IS_SYS_OPEN then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  local pEquip = pPlayer.GetEquipByPos(nPos)
+  if not pEquip then
+    return false, i18n.EasyGet("\232\163\133\229\164\135\228\184\141\229\173\152\229\156\168")
+  end
+  if not self.ENHANCE_XUANJING_VAL[nPos] then
+    return false, i18n.EasyGet("\232\175\165\232\163\133\229\164\135\228\184\141\229\143\175\229\188\186\229\140\150")
+  end
+  if DegreeCtrl:GetDegree(pPlayer, self.POS_2_DEGREE[nPos]) <= 0 then
+    return false, i18n.EasyGet("\232\175\165\233\131\168\228\189\141\229\189\147\229\164\169\229\188\186\229\140\150\230\172\161\230\149\176\229\183\178\231\148\168\229\174\140")
+  end
+  local tbItemMap = {}
+  for _, nLv in ipairs(tbItemList) do
+    if not self.XUANJING_ITEM[nLv] then
+      return false, i18n.EasyGet("\231\142\132\230\153\182\228\184\141\229\173\152\229\156\168")
+    end
+    tbItemMap[nLv] = (tbItemMap[nLv] or 0) + 1
+  end
+  for nLv, nNum in pairs(tbItemMap) do
+    if nNum > pPlayer.GetItemCountInBags(self.XUANJING_ITEM[nLv]) then
+      return false, i18n.EasyGet("\231\142\132\230\153\182\230\149\176\233\135\143\228\184\141\232\182\179")
+    end
+  end
+  if 0 == #tbItemList then
+    return false, i18n.EasyGet("\231\142\132\230\153\182\230\149\176\233\135\143\228\184\141\232\182\179")
+  end
+  if #tbItemList > self.ENHANCE_NUM_LIMIT then
+    return false, i18n.EasyGet("\231\142\132\230\153\182\230\149\176\233\135\143\232\182\133\229\135\186\233\153\144\229\136\182")
+  end
+  local nOrgLv = self:GetEquipEnhanceLevel(pPlayer, pEquip.nEquipPos)
+  local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(pPlayer, pEquip.nEquipPos)
+  if nOrgLv >= self:GetEnhanceLvLimit(pEquip, nLianHuaLevel) then
+    return false, pPlayer.CenterMsg(i18n.EasyGet("\229\183\178\232\190\190\229\188\186\229\140\150\228\184\138\233\153\144"))
+  end
+  local nUseVal, nReqVal, nNewLv, nPercent = self:CalcEnhanceRate(nPos, nOrgLv, tbItemList, pEquip, pPlayer)
+  if not nNewLv or pEquip.nLevel < self.ENHANCE_LV[nNewLv].LV_REQ or 1 ~= GetTimeFrameState(self.ENHANCE_LV[nNewLv].TIMEFRAME_REQ) then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\229\188\186\229\140\150\228\184\138\233\153\144")
+  end
+  local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(pPlayer, pEquip.nEquipPos)
+  if nNewLv > self:GetEnhanceLvLimit(pEquip, nLianHuaLevel) then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\229\188\186\229\140\150\228\184\138\233\153\144")
+  end
+  if self.tbLimitEnhancePercent[nOrgLv] then
+    if nPercent < self.tbLimitEnhancePercent[nOrgLv][1] then
+      return false, i18n.EasyGet("\230\138\149\229\133\165\231\142\132\230\153\182\232\191\135\229\176\145\239\188\140\230\151\160\230\179\149\229\176\157\232\175\149\229\188\186\229\140\150")
+    elseif nPercent > self.tbLimitEnhancePercent[nOrgLv][2] and nPercent < 100 then
+      return false, i18n.EasyGet("\229\188\186\229\140\150\233\163\142\233\153\169\232\191\135\233\171\152\239\188\140\232\175\183\229\136\176100%\229\134\141\229\176\157\232\175\149\229\188\186\229\140\150")
+    end
+  end
+  local nCost = math.floor(nReqVal * self.ENHANCE_COST_XUANJING_TO_COIN / self.RATE_BASE)
+  if nCost > pPlayer.GetMoney(self.MONEY_TYPE) then
+    return false, i18n.EasyGet("{0}\228\184\141\232\182\179", Currency:GetName(self.MONEY_TYPE))
+  end
+  return true
+end
+
+function EquipEnhance:CalcEnhanceRate(nPos, nEnhanceLv, tbItemList, pEquip, pPlayer)
+  local nUseVal = 0
+  for _, nLv in ipairs(tbItemList) do
+    nUseVal = nUseVal + KItem.GetBaseValue(self.XUANJING_ITEM[nLv])
+  end
+  for nLv = nEnhanceLv + 1, #self.ENHANCE_XUANJING_VAL[nPos] do
+    local nReqVal = 0
+    for nCount = nEnhanceLv + 1, nLv do
+      nReqVal = nReqVal + self.ENHANCE_XUANJING_VAL[nPos][nCount]
+    end
+    local nPercent = math.floor(nUseVal / nReqVal * 100)
+    if nPercent <= 100 then
+      return nUseVal, nReqVal, nLv, nPercent
+    end
+    local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(pPlayer, pEquip.nEquipPos)
+    if not self.ENHANCE_XUANJING_VAL[nPos][nLv + 1] or nLv + 1 > self:GetEnhanceLvLimit(pEquip, nLianHuaLevel) then
+      return nUseVal, nReqVal, nLv, nPercent
+    end
+    local nNextReqVal = nReqVal + self.ENHANCE_XUANJING_VAL[nPos][nLv + 1]
+    local nNextPercent = math.floor(nUseVal / nNextReqVal * 100)
+    if nNextPercent <= 100 then
+      return nUseVal, nReqVal, nLv, nPercent
+    end
+  end
+  return nUseVal
+end
+
+function EquipEnhance:CalcEnhanceCost(pPlayer, pEquip, nCurEnhanceLv)
+  local nPos = pEquip.nEquipPos
+  local nTgtEnhanceLv = nCurEnhanceLv + 1
+  if not self.ENHANCE_XUANJING_VAL[nPos][nTgtEnhanceLv] then
+    return
+  end
+  local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(pPlayer, pEquip.nEquipPos)
+  if 1 ~= GetTimeFrameState(self.ENHANCE_LV[nTgtEnhanceLv].TIMEFRAME_REQ) or nTgtEnhanceLv > self:GetEnhanceLvLimit(pEquip, nLianHuaLevel) then
+    return
+  end
+  local nReqVal = self.ENHANCE_XUANJING_VAL[nPos][nTgtEnhanceLv]
+  local nReqMoney = math.floor(nReqVal * self.ENHANCE_COST_XUANJING_TO_COIN / self.RATE_BASE)
+  return nReqVal, nReqMoney
+end
+
+function EquipEnhance:CanComposeWithReminderWindow(pPlayer, tbItemList)
+  local bRet, szErrMsg = EquipEnhance:CanCompose(pPlayer, tbItemList)
+  if bRet then
+    return bRet
+  elseif szErrMsg == i18n.EasyGet("{0}\228\184\141\232\182\179", Currency:GetName(self.MONEY_TYPE)) then
+    GainCurrency:ReadyForJump(self.MONEY_TYPE)
+    return bRet
+  else
+    return bRet, szErrMsg
+  end
+end
+
+function EquipEnhance:CanCompose(pPlayer, tbItemList)
+  if not self.IS_SYS_OPEN then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  local nTotalNum = 0
+  for nLv, nNum in pairs(tbItemList) do
+    if not self.XUANJING_ITEM[nLv] or nLv > self.COMPOSE_LV_LIMIT then
+      return false, i18n.EasyGet("\232\175\165\231\142\132\230\153\182\228\184\141\229\143\175\229\144\136\230\136\144")
+    end
+    if nNum <= 0 or nNum > pPlayer.GetItemCountInBags(self.XUANJING_ITEM[nLv]) then
+      return false, i18n.EasyGet("\231\142\132\230\153\182\230\149\176\233\135\143\228\184\141\232\182\179")
+    end
+    nTotalNum = nTotalNum + nNum
+  end
+  if nTotalNum <= 1 then
+    return false, i18n.EasyGet("\231\142\132\230\153\182\230\151\160\233\156\128\229\144\136\230\136\144")
+  end
+  if nTotalNum > self.COMPOSE_NUM_LIMIT then
+    return false, i18n.EasyGet("\231\142\132\230\153\182\230\149\176\233\135\143\232\182\133\229\135\186\233\153\144\229\136\182")
+  end
+  local nUseVal, varLv = self:CalcComposeLv(tbItemList)
+  local nCost = math.floor(nUseVal * self.COMPOSE_COST_XUANJING_TO_COIN / self.RATE_BASE)
+  if nCost > pPlayer.GetMoney(self.MONEY_TYPE) then
+    return false, i18n.EasyGet("{0}\228\184\141\232\182\179", Currency:GetName(self.MONEY_TYPE))
+  end
+  if not varLv then
+    return false, i18n.EasyGet("\229\144\136\230\136\144\231\173\137\231\186\167\233\148\153\232\175\175")
+  end
+  return true
+end
+
+function EquipEnhance:CalcComposeLv(tbItemList)
+  local nUseVal = 0
+  for nLv, nNum in pairs(tbItemList) do
+    nUseVal = nUseVal + KItem.GetBaseValue(self.XUANJING_ITEM[nLv]) * nNum
+  end
+  local tbValList = {}
+  for nLv, nItemTid in ipairs(self.XUANJING_ITEM) do
+    tbValList[nLv] = KItem.GetBaseValue(nItemTid)
+  end
+  local nMaxLv = #tbValList
+  if nUseVal >= tbValList[nMaxLv] then
+    return nUseVal, nMaxLv
+  end
+  for nLv, nVal in ipairs(tbValList) do
+    if nVal == nUseVal then
+      return nUseVal, nLv
+    end
+  end
+  for nLv = 1, nMaxLv - 1 do
+    if nUseVal > tbValList[nLv] and nUseVal < tbValList[nLv + 1] then
+      local nPercent = math.floor((nUseVal - tbValList[nLv]) / (tbValList[nLv + 1] - tbValList[nLv]) * 100)
+      if 0 == nPercent then
+        return nUseVal, nLv
+      end
+      return nUseVal, {
+        tbLv = {
+          nLv,
+          nLv + 1
+        },
+        tbPercent = {
+          100 - nPercent,
+          nPercent
+        }
+      }
+    end
+  end
+  return nUseVal, nil
+end
+
+function EquipEnhance:CanSplit(pPlayer, nItemId, nNum)
+  if not self.IS_SYS_OPEN then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  local pItem = pPlayer.GetItemInAllSpace(nItemId)
+  if not pItem then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\228\184\141\229\173\152\229\156\168")
+  end
+  if pItem.szClass ~= self.ITEM_CLASS then
+    return false, i18n.EasyGet("\229\143\170\232\131\189\230\148\190\229\133\165\231\142\132\230\153\182")
+  end
+  if pItem.nLevel < self.SPLIT_LV_REQ then
+    return false, i18n.EasyGet("\232\175\165\231\142\132\230\153\182\228\184\141\229\143\175\230\139\134\232\167\163")
+  end
+  if nNum <= 0 or nNum > pItem.nCount then
+    return false, i18n.EasyGet("\231\142\132\230\153\182\230\149\176\233\135\143\228\184\141\232\182\179")
+  end
+  local tbItemList = self:CalcSplitLv(pItem.nLevel, nNum)
+  if 0 == #tbItemList then
+    return false, i18n.EasyGet("\232\175\165\231\142\132\230\153\182\228\184\141\229\143\175\230\139\134\232\167\163")
+  end
+  return true
+end
+
+function EquipEnhance:CalcSplitLv(nLv, nNum)
+  local tbItemList = {}
+  local nLeftVal = KItem.GetBaseValue(self.XUANJING_ITEM[nLv]) * nNum
+  for nId = nLv - 1, 1, -1 do
+    local nVal = KItem.GetBaseValue(self.XUANJING_ITEM[nId])
+    if nLeftVal >= nVal then
+      local nCount = math.floor(nLeftVal / nVal)
+      table.insert(tbItemList, {nId, nCount})
+      nLeftVal = nLeftVal - nVal * nCount
+      if nLeftVal <= 0 then
+        break
+      end
+    end
+  end
+  return tbItemList
+end
+
+function EquipEnhance:CalcSplitLvByVal(nLeftVal)
+  local tbItemList = {}
+  for nId = #self.XUANJING_ITEM, 1, -1 do
+    local nVal = KItem.GetBaseValue(self.XUANJING_ITEM[nId])
+    if nLeftVal >= nVal then
+      local nCount = math.floor(nLeftVal / nVal)
+      table.insert(tbItemList, {nId, nCount})
+      nLeftVal = nLeftVal - nVal * nCount
+      if nLeftVal <= 0 then
+        break
+      end
+    end
+  end
+  return tbItemList
+end
+
+function EquipEnhance:CalcPeelLv(nPos, nLv)
+  local nUseVal = 0
+  for nId = 1, nLv do
+    nUseVal = nUseVal + self.ENHANCE_XUANJING_VAL[nPos][nId]
+  end
+  nUseVal = math.floor(nUseVal * self.PEEL_REFUND_RATE / self.RATE_BASE)
+  local tbItemList = {}
+  local nLeftVal = nUseVal
+  for nId = #self.XUANJING_ITEM, 1, -1 do
+    local nVal = KItem.GetBaseValue(self.XUANJING_ITEM[nId])
+    if nLeftVal >= nVal then
+      local nCount = math.floor(nLeftVal / nVal)
+      table.insert(tbItemList, {nId, nCount})
+      nLeftVal = nLeftVal - nVal * nCount
+      if nLeftVal <= 0 then
+        break
+      end
+    end
+  end
+  return nUseVal, tbItemList
+end
+
+function EquipEnhance:ApplyAttrib(pNpc, pEquip, nLv, nPlayerId)
+  if pEquip.nEquipPos < Item.EQUIPPOS_HELM or pEquip.nEquipPos > Item.EQUIPPOS_AMULET then
+    return
+  end
+  local tbBaseAttrList = pEquip.GetBaseAttrib()
+  local tbEnhanceAttrVal = self.ENHANCE_ATTR_VAL[pEquip.nEquipPos]
+  if tbEnhanceAttrVal then
+    for nId, tbBaseAttr in ipairs(tbBaseAttrList) do
+      if 1 == tbBaseAttr.bActive then
+        local tbVal = tbEnhanceAttrVal[nLv] and tbEnhanceAttrVal[nLv][nId] or nil
+        if tbVal then
+          pNpc.ApplyMagicAttrib(tbBaseAttr.szName, table.unpack(tbVal))
+          if nPlayerId then
+            AttributeHelp:LogAttrApply(nPlayerId, "EquipEnhance", tbBaseAttr.szName, table.unpack(tbVal))
+          end
+        end
+      end
+    end
+  end
+  local tbSuitAttrVal = self.SUIT_ATTR_VAL[pEquip.nEquipPos]
+  local nSeries = pEquip.GetSeries()
+  if tbSuitAttrVal then
+    for nId, nReqLv in ipairs(self.SUIT_ATTR_REQ) do
+      if nLv >= nReqLv then
+        local tbAttr = tbSuitAttrVal[nId]
+        if tbAttr then
+          local szMagic = tbAttr[1]
+          szMagic = self.ATTR_CONVERT[szMagic] and self.ATTR_CONVERT[szMagic][nSeries] or szMagic
+          pNpc.ApplyMagicAttrib(szMagic, table.unpack(tbAttr, 2))
+          if nPlayerId then
+            AttributeHelp:LogAttrApply(nPlayerId, "EquipEnhance", szMagic, table.unpack(tbAttr, 2))
+          end
+        end
+      end
+    end
+  end
+end
+
+function EquipEnhance:RemoveAttrib(pPlayer, pEquip, nLv, nPlayerId)
+  if pEquip.nEquipPos < Item.EQUIPPOS_HELM or pEquip.nEquipPos > Item.EQUIPPOS_AMULET then
+    return
+  end
+  nLv = nLv or self:GetEquipEnhanceLevel(pPlayer, pEquip.nEquipPos)
+  local tbBaseAttrList = pEquip.GetBaseAttrib()
+  local tbEnhanceAttrVal = self.ENHANCE_ATTR_VAL[pEquip.nEquipPos]
+  if tbEnhanceAttrVal then
+    for nId, tbBaseAttr in ipairs(tbBaseAttrList) do
+      if 1 == tbBaseAttr.bActive then
+        local tbVal = tbEnhanceAttrVal[nLv] and tbEnhanceAttrVal[nLv][nId] or nil
+        if tbVal then
+          pPlayer.RemoveMagicAttrib(tbBaseAttr.szName, table.unpack(tbVal))
+          if nPlayerId then
+            AttributeHelp:LogAttrRemove(nPlayerId, "EquipEnhance", tbBaseAttr.szName, table.unpack(tbVal))
+          end
+        end
+      end
+    end
+  end
+  local tbSuitAttrVal = self.SUIT_ATTR_VAL[pEquip.nEquipPos]
+  local nSeries = pEquip.GetSeries()
+  if tbSuitAttrVal then
+    for nId, nReqLv in ipairs(self.SUIT_ATTR_REQ) do
+      if nLv >= nReqLv then
+        local tbAttr = tbSuitAttrVal[nId]
+        if tbAttr then
+          local szMagic = tbAttr[1]
+          szMagic = self.ATTR_CONVERT[szMagic] and self.ATTR_CONVERT[szMagic][nSeries] or szMagic
+          pPlayer.RemoveMagicAttrib(szMagic, table.unpack(tbAttr, 2))
+          if nPlayerId then
+            AttributeHelp:LogAttrRemove(nPlayerId, "EquipEnhance", szMagic, table.unpack(tbAttr, 2))
+          end
+        end
+      end
+    end
+  end
+end
+
+function EquipEnhance:RefreshAttrib(pPlayer, nPos, nOrgLv, nNewLv)
+  local pEquip = pPlayer.GetEquipByPos(nPos)
+  if not pEquip then
+    return
+  end
+  if pPlayer.IsMaskPlayerAttr() then
+    return
+  end
+  self:RemoveAttrib(pPlayer, pEquip, nOrgLv, pPlayer.dwID)
+  self:ApplyAttrib(pPlayer.GetNpc(), pEquip, nNewLv, pPlayer.dwID)
+end
+
+function EquipEnhance:GetEnhanceLvLimit(varEquip, nLianHuaLevel)
+  local nMaxEnhanceLvBySys = 14
+  if varEquip then
+    local nEquipLv
+    if type(varEquip) == "userdata" then
+      nEquipLv = varEquip.nLevel
+    else
+      nEquipLv = Item:GetItemBaseProp(varEquip).nLevel
+    end
+    if nLianHuaLevel > 0 then
+      nMaxEnhanceLvBySys = self.nMaxLevel
+    end
+    local nMaxEnhanceLv = self:GetEquipMaxEnhanceLevel(nEquipLv)
+    return math.min(nMaxEnhanceLv, nMaxEnhanceLvBySys)
+  else
+    return nMaxEnhanceLvBySys
+  end
+end
+
+function EquipEnhance:GetAttrib(pEquip, nLv)
+  local nPos = pEquip.nEquipPos
+  if nPos < Item.EQUIPPOS_HELM or nPos > Item.EQUIPPOS_AMULET then
+    return
+  end
+  return self.ENHANCE_ATTR_VAL[nPos] and self.ENHANCE_ATTR_VAL[nPos][nLv] or nil
+end
+
+function EquipEnhance:GetSuitAttrib(varEquip, nEnhanceLv, nLianHuaLevel, nSeries)
+  local nPos
+  if type(varEquip) == "userdata" then
+    nPos = varEquip.nEquipPos
+  else
+    nPos = KItem.GetEquipPos(varEquip)
+    nEnhanceLv = 0
+    nLianHuaLevel = 0
+  end
+  if nPos < Item.EQUIPPOS_HELM or nPos > Item.EQUIPPOS_AMULET then
+    return
+  end
+  if not self.SUIT_ATTR_VAL[nPos] then
+    return
+  end
+  local nMaxEnhanceLv = self:GetEnhanceLvLimit(varEquip, nLianHuaLevel)
+  local tbResult = {}
+  for nId, nReqEnhanceLv in ipairs(self.SUIT_ATTR_REQ) do
+    if nReqEnhanceLv <= nMaxEnhanceLv then
+      local tbAttr = self.SUIT_ATTR_VAL[nPos][nId]
+      if tbAttr then
+        local szMagic = tbAttr[1]
+        szMagic = self.ATTR_CONVERT[szMagic] and self.ATTR_CONVERT[szMagic][nSeries] or szMagic
+        table.insert(tbResult, {
+          nReqLv = nReqEnhanceLv,
+          tbAttr = {
+            szMagic,
+            table.unpack(tbAttr, 2)
+          },
+          bActive = nReqEnhanceLv <= nEnhanceLv
+        })
+      end
+    end
+  end
+  return tbResult
+end
+
+function EquipEnhance:GetEffectResId(pPlayer, nEnhanceLevel)
+  local nShowType = 0
+  for _, tbSetting in ipairs(self.WEAPON_EFFECT) do
+    if nEnhanceLevel >= tbSetting.LV_REQ then
+      nShowType = tbSetting.SHOW_TYPE
+    end
+  end
+  return Item:GetEquipEffectResId(pPlayer, nShowType)
+end
+
+function EquipEnhance:GetXuanJingCountInBag(pPlayer, nLevel)
+  local nNum = pPlayer.GetItemCountInBags(self.XUANJING_ITEM[nLevel])
+  return nNum
+end
+
+function EquipEnhance:GetAllLevelXuanJingCountInBag(pPlayer)
+  local tbList = {}
+  for nLevel, nItemId in ipairs(self.XUANJING_ITEM) do
+    tbList[nLevel] = pPlayer.GetItemCountInBags(nItemId)
+  end
+  return tbList
+end
+
+function EquipEnhance:LoadFightPowerSetting()
+  self.tbEquipEnhanceSetting = {}
+  for nPos, tbList in pairs(Item.EquipEnhance.ENHANCE_XUANJING_VAL) do
+    local nTotalVal = 0
+    local nTotalFightPower = 0
+    self.tbEquipEnhanceSetting[nPos] = {}
+    self.tbEquipEnhanceSetting[nPos][0] = 0
+    for nLevel, nVal in pairs(tbList) do
+      nTotalVal = nTotalVal + nVal
+      nTotalFightPower = math.ceil(nTotalVal / FightPower.Cfg.nXuanJingValue2Power)
+      self.tbEquipEnhanceSetting[nPos][nLevel] = nLevel <= nTotalFightPower and nTotalFightPower or nLevel
+    end
+  end
+end
+
+function EquipEnhance:CalcFightPower(pPlayer, szType)
+  local nEquipEnhanceFightPower = 0
+  for nPos = Item.EQUIPPOS_HELM, Item.EQUIPPOS_AMULET do
+    nEquipEnhanceFightPower = nEquipEnhanceFightPower + self:GetEquipEnhancePower(pPlayer, nPos)
+  end
+  return nEquipEnhanceFightPower
+end
+
+function EquipEnhance:GetEquipEnhancePower(pPlayer, nPos)
+  if not nPos or not self.tbEquipEnhanceSetting[nPos] then
+    return 0
+  end
+  local nEnhanceLv = self:GetEquipEnhanceLevel(pPlayer, nPos)
+  return self.tbEquipEnhanceSetting[nPos][nEnhanceLv]
+end
+
+FightPower:RegisterFPSystemModule({
+  "EquipEnhance"
+}, EquipEnhance)

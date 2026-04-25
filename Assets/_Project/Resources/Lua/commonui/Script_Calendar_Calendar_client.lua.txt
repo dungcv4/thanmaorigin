@@ -1,0 +1,1087 @@
+Require("Script/Notification.lua")
+Calendar.MONDAY = 1
+Calendar.SUNDAY = 7
+Calendar.MAX_ACTIVITY_JIEDUAN = 4
+Calendar.REFRESH_TIME = 14400
+Calendar.REFRESH_TIME_DESC = "4:00"
+Calendar.DAILY = 1
+Calendar.TIMELIMIT = 2
+Calendar.tbAlwaysShowJoinBtn = {23, 37}
+
+function Calendar:_LoadTimeSettingProcess(tbScheduleSetting, tbTimeGroupSetting)
+  local tbTimeGroupSettingOut = {}
+  local tbActProgressOut = {}
+  for _, tbInfo in pairs(tbTimeGroupSetting) do
+    tbTimeGroupSettingOut[tbInfo.TimeGroup] = tbTimeGroupSettingOut[tbInfo.TimeGroup] or {}
+    local tbStartList = tbScheduleSetting[tbInfo.Start]
+    local tbEndList = tbScheduleSetting[tbInfo.End]
+    if tbStartList and tbEndList then
+      for i = 1, 15 do
+        if tbStartList["Time" .. i] ~= "" and tbEndList["Time" .. i] ~= "" then
+          local nStartSec = Lib:ParseTodayTime(tbStartList["Time" .. i])
+          local nEndSec = Lib:ParseTodayTime(tbEndList["Time" .. i])
+          table.insert(tbTimeGroupSettingOut[tbInfo.TimeGroup], {
+            nStartSec,
+            nEndSec,
+            tbStartList.WeekFlag,
+            tbStartList.TimeFrame,
+            tbStartList.CloseTimeFrame
+          })
+        end
+      end
+    else
+      for j = 1, Calendar.MAX_ACTIVITY_JIEDUAN do
+        local szStart = tbInfo.Start .. j
+        local szEnd = tbInfo.End .. j
+        tbStartList = tbScheduleSetting[szStart]
+        tbEndList = tbScheduleSetting[szEnd]
+        if tbStartList and tbEndList then
+          for i = 1, 15 do
+            if tbStartList["Time" .. i] ~= "" and tbEndList["Time" .. i] ~= "" then
+              local nStartSec = Lib:ParseTodayTime(tbStartList["Time" .. i])
+              local nEndSec = Lib:ParseTodayTime(tbEndList["Time" .. i])
+              table.insert(tbTimeGroupSettingOut[tbInfo.TimeGroup], {
+                nStartSec,
+                nEndSec,
+                tbStartList.WeekFlag,
+                tbStartList.TimeFrame,
+                tbStartList.CloseTimeFrame
+              })
+            end
+          end
+          tbActProgressOut[tbInfo.TimeGroup] = tbActProgressOut[tbInfo.TimeGroup] or {}
+          table.insert(tbActProgressOut[tbInfo.TimeGroup], {
+            tbStartList.TimeFrame,
+            tbStartList.CloseTimeFrame
+          })
+        end
+      end
+    end
+  end
+  return tbTimeGroupSettingOut, tbActProgressOut
+end
+
+function Calendar:LoadSetting()
+  local tbRewardSetting = Lib:LoadTabFile("Setting/Calendar/ActivityReward.tab", {
+    nId = 1,
+    nLevelMin = 1,
+    nLevelMax = 1
+  }, nil, false)
+  assert(tbRewardSetting, "[Calendar LoadSetting ActivityReward.tab] Error")
+  self.tbRewardSetting = {}
+  for _, tbInfo in pairs(tbRewardSetting) do
+    tbInfo.tbAwardInfo = Lib:GetAwardFromString(tbInfo.tbAwardInfo)
+    self.tbRewardSetting[tbInfo.nId] = self.tbRewardSetting[tbInfo.nId] or {}
+    table.insert(self.tbRewardSetting[tbInfo.nId], tbInfo)
+  end
+  local tbCalendarSetting = Lib:LoadTabFile("Setting/Calendar/Calendar.tab", {
+    nId = 1,
+    nActivityRewardId = 0,
+    nLevelMin = 1,
+    nLevelMax = 1,
+    nSort = 1,
+    nStarLevel = 1,
+    nTimeGroup = 1,
+    bWeek = 1,
+    nCloseWindow = 1,
+    nBeginMonthDay = 1,
+    nEndMonthDay = 1,
+    nHideUIInPreview = 1,
+    nHideUIInWeek = 1,
+    nIsShowInDailyPanel = 0
+  }, nil, false)
+  assert(tbCalendarSetting, "[Calendar LoadSetting Calendar.tab] Error")
+  self.tbCalendarSetting = {}
+  self.tbActivityCalendarSetting = {}
+  for _, tbInfo in ipairs(tbCalendarSetting) do
+    tbInfo.bWeek = 1 == tbInfo.bWeek
+    tbInfo.bIgnoreFrame = tbInfo.szShowFrame and not Lib:IsEmptyStr(tbInfo.szShowFrame)
+    tbInfo.nDefaultSort = tbInfo.nSort
+    tbInfo.bCloseWindow = 1 == tbInfo.nCloseWindow
+    tbInfo.nLevelMax = tbInfo.nLevelMax > 0 and tbInfo.nLevelMax or 99999
+    tbInfo.bMonthLimit = tbInfo.nBeginMonthDay > 0 or tbInfo.nEndMonthDay > 0
+    tbInfo.bIsShowInDailyPanel = 0 ~= tbInfo.nIsShowInDailyPanel
+    self.tbCalendarSetting[tbInfo.nId] = tbInfo
+    self.tbActivityCalendarSetting[tbInfo.szKey] = tbInfo
+  end
+  self.tbRewardSetting = SetReadOnly(self.tbRewardSetting)
+  self.tbActivityCalendarSetting = SetReadOnly(self.tbActivityCalendarSetting)
+end
+
+function Calendar:LoadTimeSetting()
+  self.tbTimeGroupSetting = {}
+  self.tbActProgress = {}
+  local tbKey = {
+    "Name",
+    "WeekFlag",
+    "TimeFrame",
+    "CloseTimeFrame"
+  }
+  local szKey = "ssss"
+  for i = 1, 15 do
+    table.insert(tbKey, "Time" .. i)
+    szKey = szKey .. "s"
+  end
+  local tbScheduleSetting = Lib:LoadTabFileEx("Setting/ScheduleTask.tab", szKey, "Name", tbKey)
+  local tbTimeGroupSetting = Lib:LoadTabFileEx("Setting/Calendar/ActivityTimeGroup.tab", "dss", nil, {
+    "TimeGroup",
+    "Start",
+    "End"
+  })
+  self.tbTimeGroupSetting, self.tbActProgress = self:_LoadTimeSettingProcess(tbScheduleSetting, tbTimeGroupSetting)
+  self.tbCalendarSetting = SetReadOnly(self.tbCalendarSetting)
+  self.tbTimeGroupSetting = SetReadOnly(self.tbTimeGroupSetting)
+  self.tbActProgress = SetReadOnly(self.tbActProgress)
+end
+
+function Calendar:GetTimeGroupSetting(nTimeGroup, nOpenTime)
+  local tbCurrentSetting = {}
+  local nNowServerTime = nOpenTime or GetTime()
+  local tbSetting = self.tbTimeGroupSetting[nTimeGroup]
+  local tbWeekStyle = {}
+  for _, tbInfo in ipairs(tbSetting) do
+    local szOpenKey = tbInfo[4]
+    local szEndKey = tbInfo[5]
+    local szWeekFlag = tbInfo[3]
+    local bAfterOpenTime = Lib:IsEmptyStr(szOpenKey) or nNowServerTime >= Lib:CalcTimeFrameOpenTime(szOpenKey)
+    local bBeforeEndTime = Lib:IsEmptyStr(szEndKey) or nNowServerTime < Lib:CalcTimeFrameOpenTime(szEndKey)
+    if bAfterOpenTime and bBeforeEndTime then
+      table.insert(tbCurrentSetting, tbInfo)
+      tbWeekStyle[szWeekFlag] = true
+    end
+  end
+  return tbCurrentSetting, tbWeekStyle
+end
+
+function Calendar:CheckActProgress(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  local nTimeGroup = tbSetting.nTimeGroup
+  local tbActProgress = self.tbActProgress[nTimeGroup]
+  local nResult = 0
+  if not tbActProgress then
+    return nResult, false
+  end
+  local nNowServerTime = GetTime()
+  for nIndex, tbProgress in ipairs(tbActProgress) do
+    local szOpenKey = tbProgress[1]
+    local szEndKey = tbProgress[2]
+    if not Lib:IsEmptyStr(szOpenKey) and not Lib:IsEmptyStr(szEndKey) then
+      local nOpenTime = Lib:CalcTimeFrameOpenTime(szOpenKey)
+      local nEndTime = Lib:CalcTimeFrameOpenTime(szEndKey)
+      if nNowServerTime >= nOpenTime and nNowServerTime < nEndTime then
+        nResult = nIndex
+        break
+      end
+    elseif not Lib:IsEmptyStr(szOpenKey) and Lib:IsEmptyStr(szEndKey) then
+      local nOpenTime = Lib:CalcTimeFrameOpenTime(szOpenKey)
+      if nNowServerTime >= nOpenTime then
+        nResult = nIndex
+        break
+      end
+    elseif Lib:IsEmptyStr(szOpenKey) and not Lib:IsEmptyStr(szEndKey) then
+      local nEndTime = Lib:CalcTimeFrameOpenTime(szEndKey)
+      if nNowServerTime < nEndTime then
+        nResult = nIndex
+        break
+      end
+    else
+      break
+    end
+  end
+  return nResult, true
+end
+
+function Calendar:LoadTipSetting()
+  local tbKey = {
+    "Key",
+    "HelpKey",
+    "Type",
+    "Desc"
+  }
+  local szKey = "ssss"
+  for i = 1, Calendar.MAX_ACTIVITY_JIEDUAN do
+    table.insert(tbKey, "PreviewFrame" .. i)
+    table.insert(tbKey, "PreviewTime" .. i)
+    szKey = szKey .. "ss"
+  end
+  for i = 1, Calendar.MAX_ACTIVITY_JIEDUAN do
+    table.insert(tbKey, "TimeFrame" .. i)
+    table.insert(tbKey, "TimeDes" .. i .. "_1")
+    table.insert(tbKey, "TimeDes" .. i .. "_2")
+    szKey = szKey .. "sss"
+  end
+  self.tbActivityTip = Lib:LoadTabFileEx("Setting/Calendar/ActivityTip.tab", szKey, "Key", tbKey)
+  assert(self.tbActivityTip, "[Calendar LoadTipSetting] Error TabFile Not Found")
+end
+
+function Calendar:LoadCalendarShowSetting()
+  local tbCalendarShowSetting = Lib:EasyLoadTabFile("Setting/Calendar/CalendarShow.tab", {
+    "szTimeString",
+    "nWeekDay",
+    "nActivityId"
+  })
+  assert(tbCalendarShowSetting, "[Calendar LoadSetting CalendarShow.tab] Error")
+  local tbCalendarTime = {}
+  for szTimeString, tbWeekData in Lib:PairsByKeys(tbCalendarShowSetting, function(a, b)
+    return Lib:ParseTodayTime(a) < Lib:ParseTodayTime(b)
+  end) do
+    table.insert(tbCalendarTime, szTimeString)
+  end
+  self.tbCalendarShowSetting = tbCalendarShowSetting
+  self.tbCalendarTime = tbCalendarTime
+end
+
+Calendar:LoadSetting()
+Calendar:LoadTimeSetting()
+Calendar:LoadTipSetting()
+Calendar:LoadCalendarShowSetting()
+
+function Calendar:GetActivityTipTimeDesc(szKey)
+  local szRet1 = ""
+  local szRet2 = ""
+  local tbTipConf = self.tbActivityTip[szKey]
+  if not tbTipConf then
+    return szRet1, szRet2
+  end
+  local tbTemp = {}
+  for j = 2, Calendar.MAX_ACTIVITY_JIEDUAN do
+    local szTimeFrame = "TimeFrame" .. j
+    local szTimeDesc1 = "TimeDes" .. j .. "_1"
+    local szTimeDesc2 = "TimeDes" .. j .. "_2"
+    local szFrame = tbTipConf[szTimeFrame]
+    if szFrame and not Lib:IsEmptyStr(szFrame) then
+      tbTemp[szFrame] = {
+        tbTipConf[szTimeDesc1],
+        tbTipConf[szTimeDesc2]
+      }
+    end
+  end
+  if Lib:IsEmptyTB(tbTemp) then
+    szRet1 = tbTipConf.TimeDes1_1
+    szRet2 = tbTipConf.TimeDes1_2
+  else
+    local currentTimeFrame = Lib:GetMaxTimeFrame(tbTemp)
+    if "" ~= currentTimeFrame then
+      szRet1, szRet2 = table.unpack(tbTemp[currentTimeFrame])
+    else
+      szRet1 = tbTipConf.TimeDes1_1
+      szRet2 = tbTipConf.TimeDes1_2
+    end
+  end
+  return szRet1, szRet2
+end
+
+function Calendar:GetSysNotiyTable()
+  local tbLimitFunc = {
+    NeedKin = function()
+      return 0 ~= me.dwKinId
+    end,
+    NeedTong = function()
+      return 0 ~= me.dwTongId
+    end,
+    MultiPvP = function()
+      return MultiPvP:IsCalendarShow(GetTime())
+    end,
+    OpenTieFuCheng = function()
+      return 0 ~= me.dwTongId and TieFuCheng:IsMeetTimeFrame()
+    end,
+    OpenKinLevel = function()
+      return 0 ~= me.dwKinId and TieFuCheng:IsCloseThisWeek()
+    end,
+    OpenGlobalDomainBattle = function()
+      return GlobalDomainBattle:IsMeetTimeFrame()
+    end
+  }
+  local tbMySysNotify = LocalData:GetRoleTable(Notification.UserInfoKey, {})
+  if not self.tbSysNotiyFile then
+    self.tbSysNotiyFile = Lib:LoadTabFileEx("Setting/Calendar/SysNotify.tab", "sdsssdsddd", nil, {
+      "StringKey",
+      "LevelMin",
+      "TimeFrameOpen",
+      "LimitFunc",
+      "Name",
+      "TimeGroup",
+      "Message",
+      "BeforSec",
+      "DefaultSel",
+      "IsSubSel"
+    })
+  end
+  local bNeedSave = false
+  local tbSysNotiy = {}
+  local nMyLevel = 0
+  if me then
+    nMyLevel = me.nLevel
+  end
+  self.tbSysNotiyFile = self.tbSysNotiyFile or {}
+  for i, v in ipairs(self.tbSysNotiyFile) do
+    if self:GetActInfoByKey(v.StringKey) then
+      if tbMySysNotify[v.StringKey] == nil then
+        tbMySysNotify[v.StringKey] = {
+          bLineSel = 1 == v.DefaultSel,
+          tbSubSel = {}
+        }
+        bNeedSave = true
+      end
+      if nMyLevel >= v.LevelMin and (v.TimeFrameOpen == "" or 1 == GetTimeFrameState(v.TimeFrameOpen)) and (v.LimitFunc == "" or tbLimitFunc[v.LimitFunc]()) and 0 ~= v.TimeGroup then
+        local tbTimeGroup = Calendar:GetTimeGroupSetting(v.TimeGroup)
+        assert(tbTimeGroup, i)
+        if not Lib:IsEmptyTB(tbTimeGroup) then
+          local tbNotiTimes = {}
+          local bFirstInitSubSel = false
+          local nSubSelCount = 0
+          Lib:Tree(tbMySysNotify[v.StringKey].tbSubSel)
+          if not tbMySysNotify[v.StringKey].tbSubSel or 0 == #tbMySysNotify[v.StringKey].tbSubSel then
+            bFirstInitSubSel = true
+          else
+            nSubSelCount = #tbMySysNotify[v.StringKey].tbSubSel
+          end
+          for i2, v2 in ipairs(tbTimeGroup) do
+            table.insert(tbNotiTimes, {
+              nShowSec = v2[1] - v.BeforSec,
+              szWeekFlag = v2[3]
+            })
+            if 1 == v.IsSubSel then
+              tbMySysNotify[v.StringKey].tbSubSel = tbMySysNotify[v.StringKey].tbSubSel or {}
+              if bFirstInitSubSel then
+                tbMySysNotify[v.StringKey].tbSubSel[i2] = v.DefaultSel
+              elseif i2 > nSubSelCount then
+                tbMySysNotify[v.StringKey].tbSubSel[i2] = v.DefaultSel
+              end
+              bNeedSave = true
+            end
+          end
+          local nActivityId
+          for _, value in pairs(self.tbCalendarSetting) do
+            if value.nTimeGroup == v.TimeGroup then
+              nActivityId = value.nId
+              break
+            end
+          end
+          table.insert(tbSysNotiy, {
+            szKey = v.StringKey,
+            nId = i,
+            szName = v.Name,
+            tbTimeGroup = tbNotiTimes,
+            szMsg = v.Message,
+            BeforSec = v.BeforSec,
+            nActivityId = nActivityId,
+            nTimeGroup = v.TimeGroup,
+            nIsSubSel = v.IsSubSel
+          })
+        end
+      end
+    else
+      LogErr("Setting/Calendar/SysNotify.tab Error, Can not find activity:", v.StringKey)
+    end
+  end
+  if bNeedSave then
+    LocalData:SetRoleTable(Notification.UserInfoKey, tbMySysNotify)
+  end
+  tbSysNotiy = SetReadOnly(tbSysNotiy)
+  self.tbSysNotiy = tbSysNotiy
+  return tbSysNotiy
+end
+
+function Calendar:GetPreviewInfo()
+  local tbPreViewInfo = {}
+  local nCreateTime = GetServerCreateTime()
+  local nCurOpenServerDay = Lib:GetLocalDay(nCreateTime)
+  local nToday = Lib:GetLocalDay(GetTime() - self.REFRESH_TIME)
+  local nOpenedDay = nToday - Lib:GetLocalDay(nCreateTime) + 1
+  local nNextOpenLevelSeverDay = 1
+  for i, v in ipairs(self.tbOpenLevelTimeFrame) do
+    local nOpenDay = v.OpenDay + nCurOpenServerDay - 1
+    if nToday < nOpenDay then
+      nNextOpenLevelSeverDay = nOpenDay
+      tbPreViewInfo.nNextMaxLevel = v.NewMaxLevel
+      tbPreViewInfo.nNextMaxZongShiLevel = v.NewMaxZongShiLevel
+      break
+    else
+      tbPreViewInfo.nCurMaxLevel = v.NewMaxLevel
+      tbPreViewInfo.nCurMaxZongShiLevel = v.NewMaxZongShiLevel
+    end
+  end
+  tbPreViewInfo.nCurMaxLevel = tbPreViewInfo.nCurMaxLevel or 0
+  tbPreViewInfo.nCurMaxZongShiLevel = tbPreViewInfo.nCurMaxZongShiLevel or 0
+  tbPreViewInfo.nNextOpenDay = nNextOpenLevelSeverDay
+  tbPreViewInfo.nWillOpenDay = nNextOpenLevelSeverDay - nToday
+  tbPreViewInfo.nOpenedDay = nOpenedDay
+  return tbPreViewInfo
+end
+
+function Calendar:GetWorldLevel()
+  local tbPreViewInfo = self:GetPreviewInfo()
+  return tbPreViewInfo.nCurMaxLevel + tbPreViewInfo.nCurMaxZongShiLevel
+end
+
+function Calendar:GetDailyActivity()
+  local tbList = {
+    {},
+    {},
+    {}
+  }
+  local nNow = GetTime()
+  local nSortStageOne, nSortStageTwo = 10000, 100000
+  for nId, tbSettingInfo in pairs(self.tbCalendarSetting) do
+    local tbInfo = Lib:CopyTB(tbSettingInfo)
+    local bAvailable = false
+    local nIndex = 0
+    if me.nLevel >= tbInfo.nLevelMin and me.nLevel <= tbInfo.nLevelMax and CanaryRelease:IsCalendarActive(nId) then
+      local szOpenTime = tbInfo.szTimeFrameOpen
+      local szCloseTime = tbInfo.szTimeFrameClose
+      if (Lib:IsEmptyStr(szOpenTime) or 1 == GetTimeFrameState(szOpenTime)) and (Lib:IsEmptyStr(szCloseTime) or 1 ~= GetTimeFrameState(szCloseTime)) and (Lib:IsEmptyStr(tbInfo.szStartTime) or nNow >= Lib:ParseDateTime(tbInfo.szStartTime)) and (Lib:IsEmptyStr(tbInfo.szEndTime) or nNow < Lib:ParseDateTime(tbInfo.szEndTime)) then
+        if self:IsDailyTimeLimit(nId) then
+          local tbTodayOpenTime = self:GetTodayOpenTime(nId)
+          if tbTodayOpenTime and next(tbTodayOpenTime) and self:CheckLimitActivityOpen(nId) and Calendar:IsQualified(nId) then
+            local tbTime = self:GetTodayNextOpenTime(nId)
+            if tbTime then
+              if self:IsActivityInOpenState(tbInfo.szKey) then
+                tbInfo.nSort = tbInfo.nDefaultSort
+              else
+                tbInfo.nSort = tbTime[1] + tbInfo.nDefaultSort
+              end
+            else
+              tbInfo.nSort = tbInfo.nDefaultSort + (self:PutTail(nId) and nSortStageTwo or nSortStageOne)
+            end
+            nIndex = 2
+            bAvailable = true
+          end
+        else
+          local nSort = self:IsComplete(nId) and nSortStageOne or 0
+          tbInfo.nSort = tbInfo.nDefaultSort + nSort
+          nIndex = 1
+          bAvailable = true
+        end
+        if tbSettingInfo.bIsShowInDailyPanel and bAvailable then
+          table.insert(tbList[nIndex], tbInfo)
+        end
+        if self:GetActValueInfo(nId) > 0 and bAvailable then
+          local tbActInfo = Lib:CopyTB(tbInfo)
+          local szKey = self:GetActivityStringKey(nId)
+          local tbSetting = ActivePoint:GetActSetting(szKey)
+          local nSort = ActivePoint:CheckFinish(me, tbSetting.SaveKey) and nSortStageOne or 0
+          tbActInfo.nSort = tbActInfo.nDefaultSort + nSort
+          table.insert(tbList[3], tbActInfo)
+        end
+      end
+    end
+  end
+  for _, tbInfo in ipairs(tbList) do
+    table.sort(tbInfo, function(a1, a2)
+      return a1.nSort < a2.nSort
+    end)
+  end
+  return tbList
+end
+
+function Calendar:IsInActivityRange(szStartTime, szEndTime)
+  local nNow = GetTime()
+  if not Lib:IsEmptyStr(szStartTime) and nNow < Lib:ParseDateTime(szStartTime) then
+    return false
+  end
+  if not Lib:IsEmptyStr(szEndTime) and nNow >= Lib:ParseDateTime(szEndTime) then
+    return false
+  end
+  return true
+end
+
+function Calendar:GetPreviewActivity()
+  local tbList = {}
+  local nToday = Lib:GetLocalDay()
+  local nNextOpenLevelSeverDay = self:GetPreviewInfo().nNextOpenDay
+  for nId, tbInfo in pairs(self.tbCalendarSetting) do
+    local bShow = false
+    local szOpenTime = tbInfo.szTimeFrameOpen
+    local szCloseTime = tbInfo.szTimeFrameClose
+    local nHideUIInPreview = tbInfo.nHideUIInPreview
+    local bClose = not Lib:IsEmptyStr(szCloseTime) and 1 == GetTimeFrameState(szCloseTime)
+    local bCanaryActive = CanaryRelease:IsCalendarActive(nId)
+    if 1 ~= nHideUIInPreview and not bClose and bCanaryActive and self:IsInActivityRange(tbInfo.szStartTime, tbInfo.szEndTime) then
+      if Lib:IsEmptyStr(szOpenTime) or 1 == GetTimeFrameState(szOpenTime) then
+        if tbInfo.nLevelMin > me.nLevel and tbInfo.nLevelMin - me.nLevel <= 10 or self:GetTimeActivityCanShow(tbInfo.nId, szOpenTime) then
+          tbInfo.nSort = tbInfo.nLevelMin
+          bShow = true
+        end
+      else
+        local nOpenServerTime = Lib:CalcTimeFrameOpenTime(szOpenTime)
+        local nOpenServerDay = Lib:GetLocalDay(nOpenServerTime)
+        local nNextMaxLevel = tbInfo.nNextMaxLevel
+        if nNextOpenLevelSeverDay >= nOpenServerDay and nil ~= nNextMaxLevel or nil == nNextMaxLevel and (tbInfo.nLevelMin > me.nLevel and tbInfo.nLevelMin - me.nLevel <= 10 or me.nLevel >= tbInfo.nLevelMin) then
+          tbInfo.nSort = nOpenServerDay - nToday + 100
+          bShow = true
+        end
+      end
+    end
+    if bShow then
+      table.insert(tbList, tbInfo)
+    end
+  end
+  table.sort(tbList, function(a1, a2)
+    return a1.nSort < a2.nSort
+  end)
+  return tbList
+end
+
+function Calendar:GetTimeActivityCanShow(nId, szOpenTime)
+  local bCanShow = false
+  local tbInfo = Calendar:GetActInfo(nId)
+  if not tbInfo then
+    return bCanShow
+  end
+  if not (tbInfo.nLevelMin > me.nLevel) or not (tbInfo.nLevelMin - me.nLevel <= 10) then
+    return bCanShow
+  end
+  local nProgress, bMultActPro = Calendar:CheckActProgress(nId)
+  if nProgress > 1 and bMultActPro then
+    return bCanShow, nNextActTime
+  end
+  local nNextActTime = 0
+  if Calendar:IsDailyTimeLimit(nId) then
+    local nOpenServerTime = 0
+    if Lib:IsEmptyStr(szOpenTime) then
+      nOpenServerTime = GetServerCreateTime()
+    else
+      nOpenServerTime = Lib:CalcTimeFrameOpenTime(szOpenTime)
+    end
+    nNextActTime = self:GetActNextOpenTimeBeforeUnLock(nId, nOpenServerTime)
+  end
+  if (Lib:IsEmptyStr(szOpenTime) or 1 == GetTimeFrameState(szOpenTime)) and Calendar:IsDailyTimeLimit(nId) then
+    local nNowTime = GetTime()
+    if nNextActTime and nNextActTime > 0 then
+      bCanShow = nNextActTime > nNowTime
+    end
+  end
+  return bCanShow, nNextActTime
+end
+
+function Calendar:GetActNextOpenTimeBeforeUnLock(nActivityID, nOpenServerTime)
+  local nTodayWeekDay = Lib:GetLocalWeekDay(nOpenServerTime)
+  local nWeekDay = nTodayWeekDay
+  local nSec = Lib:GetTodaySec(nOpenServerTime)
+  for i = 1, 7 do
+    local nDay = (nTodayWeekDay + (i - 1)) % 7
+    nWeekDay = 0 == nDay and 7 or nDay
+    local tbOpenTime = self:GetWeekDayNextOpenTime(nActivityID, nWeekDay, 1 == i and nSec or 0, nOpenServerTime)
+    if tbOpenTime then
+      local nOpenTime = nOpenServerTime
+      if 1 == i then
+        nOpenTime = nOpenServerTime + (tbOpenTime[1] - nSec)
+      elseif 2 == i then
+        nOpenTime = nOpenServerTime + 86400 - nSec + tbOpenTime[1]
+      elseif i > 2 then
+        nOpenTime = nOpenServerTime + 86400 - nSec + (i - 2) * 24 * 3600 + tbOpenTime[1]
+      end
+      return nOpenTime
+    end
+  end
+end
+
+function Calendar:GetWeekDayOpenTime(nActivityID, nWeekDay, nOpenTime)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  local nTimeGroup = tbSetting.nTimeGroup
+  local tbTimeSetting = Calendar:GetTimeGroupSetting(nTimeGroup, nOpenTime)
+  local tbTime = {}
+  for _, tbInfo in ipairs(tbTimeSetting) do
+    local szWeek = tbInfo[3]
+    if self:DayIsInWeekDay(szWeek, nWeekDay) then
+      table.insert(tbTime, tbInfo)
+    end
+  end
+  return tbTime
+end
+
+function Calendar:GetWeekDayNextOpenTime(nActivityID, nWeekDay, nSec, nOpenTime)
+  local tbTodayOpenTime = self:GetWeekDayOpenTime(nActivityID, nWeekDay, nOpenTime)
+  if not next(tbTodayOpenTime) then
+    return
+  end
+  table.sort(tbTodayOpenTime, function(a1, a2)
+    return a1[1] < a2[1]
+  end)
+  local szKey = Calendar:GetActivityStringKey(nActivityID)
+  for _, tbInfo in ipairs(tbTodayOpenTime) do
+    if nSec >= tbInfo[1] and nSec <= tbInfo[2] and self:IsActivityInOpenState(szKey) or nSec < tbInfo[1] then
+      return {
+        tbInfo[1],
+        tbInfo[2]
+      }
+    end
+  end
+end
+
+function Calendar:DayIsInWeekDay(szWeekFrom, nWeekDay)
+  local nRet = string.find(szWeekFrom, tostring(nWeekDay))
+  return nil ~= nRet
+end
+
+function Calendar:IsTimeLimitOpening()
+  local tbActs = Calendar:GetDailyActivity()
+  local tbTimeActsList = tbActs[Calendar.TIMELIMIT]
+  for _, v in pairs(tbTimeActsList) do
+    if Calendar:IsActivityInOpenState(v.szKey) then
+      return true
+    end
+  end
+  return false
+end
+
+function Calendar:GetActivityDetail(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  if not tbSetting then
+    return
+  end
+  local tbInfo = self.tbActivityTip[tbSetting.szKey]
+  if not tbInfo then
+    return
+  end
+  return tbSetting.szKey, tbInfo.Type, tbInfo.Desc, tbInfo.HelpKey, tbInfo.PreviewTime
+end
+
+function Calendar:GetActInfo(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  if not tbSetting then
+    return
+  end
+  return tbSetting
+end
+
+function Calendar:GetActValueInfo(nActivityID)
+  local nActiveValue = 0
+  local szKey = Calendar:GetActivityStringKey(nActivityID)
+  if szKey then
+    local nLevel = me.nLevel
+    if nLevel then
+      local tbSetting = ActivePoint:GetActSetting(szKey)
+      if tbSetting then
+        nActiveValue = tbSetting.nCount
+      end
+    end
+  end
+  return nActiveValue
+end
+
+function Calendar:GetTodayOpenTime(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  local nTimeGroup = tbSetting.nTimeGroup
+  local tbTimeSetting = Calendar:GetTimeGroupSetting(nTimeGroup)
+  local tbTime = {}
+  for _, tbInfo in ipairs(tbTimeSetting) do
+    local szWeek = tbInfo[3]
+    if self:InWeekDay(szWeek) then
+      table.insert(tbTime, tbInfo)
+    end
+  end
+  return tbTime
+end
+
+function Calendar:CheckLimitActivityOpen(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  local szKey = tbSetting.szKey
+  local pFunc = self.tbLimitActivityCheckOpen[szKey]
+  if pFunc then
+    return pFunc()
+  end
+  return true
+end
+
+function Calendar:GetTodayNextOpenTime(nActivityID)
+  local tbTodayOpenTime = self:GetTodayOpenTime(nActivityID)
+  if not next(tbTodayOpenTime) then
+    return
+  end
+  table.sort(tbTodayOpenTime, function(a1, a2)
+    return a1[1] < a2[1]
+  end)
+  local nSec = Lib:GetTodaySec()
+  local szKey = Calendar:GetActivityStringKey(nActivityID)
+  for _, tbInfo in ipairs(tbTodayOpenTime) do
+    if nSec >= tbInfo[1] and nSec <= tbInfo[2] and self:IsActivityInOpenState(szKey) or nSec < tbInfo[1] then
+      return {
+        tbInfo[1],
+        tbInfo[2]
+      }
+    end
+  end
+end
+
+function Calendar:GetWeekOpenDay(nId)
+  local tbSetting = self.tbCalendarSetting[nId]
+  if not tbSetting.bWeek then
+    return
+  end
+  local tbOpenTime, tbWeeks = Calendar:GetTimeGroupSetting(tbSetting.nTimeGroup)
+  if not tbOpenTime then
+    LogErr("Calendar.tb configuration Error, is a week activity but not has nTimeGroup, id:", nId)
+  end
+  local tbOpenDay = {}
+  for szWeekFlag, _ in pairs(tbWeeks) do
+    local szWeek = szWeekFlag
+    for i = Calendar.MONDAY, Calendar.SUNDAY do
+      if string.find(szWeek, tostring(i)) then
+        table.insert(tbOpenDay, {nDay = i})
+      end
+    end
+  end
+  
+  local function fnCmp(a, b)
+    return a.nDay < b.nDay
+  end
+  
+  table.sort(tbOpenDay, fnCmp)
+  return tbOpenDay
+end
+
+function Calendar:IsActivityOpen(nActivityID)
+  if not CanaryRelease:IsCalendarActive(nActivityID) then
+    return false
+  end
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  if not Lib:IsEmptyStr(tbSetting.szTimeFrameOpen) then
+    return 1 == GetTimeFrameState(tbSetting.szTimeFrameOpen)
+  end
+  local nTimeGroup = tbSetting.nTimeGroup
+  if 0 == nTimeGroup then
+    return true
+  end
+  local tbTimeSetting = Calendar:GetTimeGroupSetting(nTimeGroup)
+  if not tbTimeSetting then
+    return true
+  end
+  local nCurTime = Lib:GetTodaySec()
+  for k, v in pairs(tbTimeSetting) do
+    local nTimeStart = v[1]
+    local nTimeEnd = v[2]
+    local szWeek = v[3]
+    if self:InWeekDay(szWeek) and nCurTime > nTimeStart and (not nTimeEnd or nCurTime < nTimeEnd) then
+      return true
+    end
+  end
+  return false
+end
+
+function Calendar:InWeekDay(szWeekFrom)
+  local nWeekDay = Lib:GetLocalWeekDay(GetTime())
+  local nRet = string.find(szWeekFrom, tostring(nWeekDay))
+  return nil ~= nRet
+end
+
+function Calendar:GetCountFuncInfo(tbSetting)
+  local szFunction = tbSetting.szJoinCountFunc
+  if Lib:IsEmptyStr(szFunction) then
+    return
+  end
+  local nCount, nMaxCount = Lib:StringCallBack(szFunction, me)
+  if not nCount then
+    return
+  end
+  return type(nCount) == "string" and nCount or string.format("%d/%d", nCount, nMaxCount), nCount, nMaxCount
+end
+
+function Calendar:GetDegreeInfo(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  if not tbSetting then
+    Log("[Calendar GetDegreeInfo Error] Not Found Setting", nActivityID)
+    return i18n.EasyGet("\230\151\160\233\153\144\229\136\182")
+  end
+  local szInfo = self:GetCountFuncInfo(tbSetting)
+  if szInfo then
+    return szInfo
+  end
+  local szDegree = tbSetting.szJoinCount
+  if "" == szDegree then
+    return i18n.EasyGet("\230\151\160\233\153\144\229\136\182")
+  elseif self.tbDegreeInfo[szDegree] then
+    return self.tbDegreeInfo[szDegree]()
+  else
+    return self.tbDegreeInfo.Default(szDegree)
+  end
+end
+
+function Calendar:GetActiveDegreeInfo(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  if not tbSetting then
+    Log("[Calendar GetActiveDegreeInfo Error] Not Found Setting", nActivityID)
+    return i18n.EasyGet("\230\151\160\233\153\144\229\136\182")
+  end
+  local szInfo = self:GetCountFuncInfo(tbSetting)
+  if szInfo then
+    return szInfo
+  end
+  local szDegree = tbSetting.szJoinCount
+  if self.tbActiveDegreeInfo[szDegree] then
+    return self.tbActiveDegreeInfo[szDegree]()
+  else
+    return self.tbActiveDegreeInfo.Default(szDegree)
+  end
+end
+
+function Calendar:GetDegreeState(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  if not tbSetting then
+    Log("[Calendar GetDegreeInfo Error] Not Found Setting", nActivityID)
+    return true
+  end
+  local szDegree = tbSetting.szJoinCount
+  if "" == szDegree and "" == tbSetting.szJoinCountFunc then
+    return true
+  else
+    local nMax = 0
+    local nDegree = 0
+    if "" == szDegree then
+      local szInfo, nCount, nMaxCount = self:GetCountFuncInfo(tbSetting)
+      if type(nCount) == "string" then
+        return true
+      end
+      if szInfo then
+        nDegree = nCount
+        nMax = nMaxCount
+      end
+    else
+      nMax = DegreeCtrl:GetMaxDegree(szDegree, me)
+      nDegree = DegreeCtrl:GetDegree(me, szDegree)
+    end
+    if tbSetting.szKey == "HeroChallenge" then
+      local nCurFloor = HeroChallenge:GetPlayerChallengeFloor(me)
+      return math.max(0, nDegree) ~= nMax or 0 ~= nCurFloor
+    end
+    if tbSetting.szKey == "PunishTask" then
+      return math.max(0, nDegree) ~= nMax
+    end
+    return math.max(0, nDegree) <= 0
+  end
+end
+
+function Calendar:IsDailyTimeLimit(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  return 0 ~= tbSetting.nTimeGroup
+end
+
+function Calendar:GetActivityStringKey(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  if not tbSetting then
+    error("fsefesfsef" .. nActivityID)
+  end
+  return tbSetting.szKey
+end
+
+function Calendar:GetActivityId(szKey)
+  for nId, tbInfo in pairs(self.tbCalendarSetting) do
+    if tbInfo.szKey == szKey then
+      return nId
+    end
+  end
+  Log("Calendar:GetActivityId, not found, szKey:", szKey)
+end
+
+function Calendar:GetActivityLevelMin(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  return tbSetting.nLevelMin
+end
+
+function Calendar:GetActivityJoinFunName(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  if not tbSetting then
+    return
+  end
+  return tbSetting.szFuncName, tbSetting.szParams
+end
+
+function Calendar:GetActivityAwardID(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  if not tbSetting then
+    return 0
+  end
+  return tbSetting.nActivityRewardId
+end
+
+function Calendar:GetActivityReward(nActivityID)
+  local nAwardId = self:GetActivityAwardID(nActivityID)
+  if 0 == nAwardId then
+    return {}
+  end
+  return self:GetReward(nAwardId)
+end
+
+function Calendar:GetReward(nAwardId)
+  local tbSetting = self.tbRewardSetting[nAwardId] or {}
+  local tbAward = {}
+  local nMyLevel = me.nLevel
+  
+  local function fnIsInTime(szTimeBegin, szTimeEnd)
+    return "" == szTimeBegin and "" == szTimeEnd or "" == szTimeBegin and 1 ~= GetTimeFrameState(szTimeEnd) or "" == szTimeEnd and 1 == GetTimeFrameState(szTimeBegin) or 1 == GetTimeFrameState(szTimeBegin) and 1 ~= GetTimeFrameState(szTimeEnd)
+  end
+  
+  for _, tbInfo in pairs(tbSetting) do
+    if fnIsInTime(tbInfo.szTimeBegin, tbInfo.szTimeEnd) then
+      local tbSingle = table.unpack(tbInfo.tbAwardInfo)
+      if tbSingle then
+        table.insert(tbAward, table.unpack(tbInfo.tbAwardInfo))
+      end
+    end
+  end
+  return tbAward
+end
+
+function Calendar:IsComplete(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  if not tbSetting then
+    return false
+  end
+  local fnCheck = self.tbCheckComplete[tbSetting.szKey]
+  if fnCheck then
+    return fnCheck(tbSetting.szJoinCount)
+  end
+end
+
+function Calendar:PutTail(nActivityID)
+  if self:IsComplete(nActivityID) then
+    return true
+  end
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  if not tbSetting then
+    LogErr("")
+    return false
+  end
+  if self:IsDailyTimeLimit(nActivityID) then
+    if self:IsActivityInOpenState(tbSetting.szKey) then
+      return false
+    end
+    local tbTimeSetting = Calendar:GetTimeGroupSetting(tbSetting.nTimeGroup)
+    if not tbTimeSetting or not next(tbTimeSetting) then
+      return false
+    end
+    local nCurTime = Lib:GetTodaySec()
+    local bTemp
+    for nId, tbTimeInfo in ipairs(tbTimeSetting) do
+      if self:InWeekDay(tbTimeInfo[3]) then
+        bTemp = true
+        local nEndTime = tbTimeInfo[2]
+        if nCurTime < nEndTime then
+          bTemp = false
+          return false
+        end
+      end
+    end
+    if nil ~= bTemp then
+      return true
+    end
+    if tbSetting.bWeek then
+      return false
+    end
+    return true
+  end
+  return false
+end
+
+function Calendar:CheckActInMonthDay(nId)
+  local tbSetting = self.tbCalendarSetting[nId]
+  if not tbSetting then
+    return false
+  end
+  if not tbSetting.bMonthLimit then
+    return true
+  end
+  local nBeginMonthDay = tbSetting.nBeginMonthDay
+  local nEndMonthDay = tbSetting.nEndMonthDay
+  local nNowMonthDay = Lib:GetLocalMonthDay()
+  local bIn = true
+  if nBeginMonthDay > 0 and nBeginMonthDay > nNowMonthDay or nEndMonthDay > 0 and nEndMonthDay < nNowMonthDay then
+    bIn = false
+  end
+  return bIn, nBeginMonthDay, nEndMonthDay
+end
+
+function Calendar:OnSyncActivityState(tbState)
+  self.tbActivityState = tbState
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ONACTIVITY_STATE_CHANGE)
+end
+
+function Calendar:OnActivityStateChange(szKey, nState)
+  self.tbActivityState = self.tbActivityState or {}
+  self.tbActivityState[szKey] = nState
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ONACTIVITY_STATE_CHANGE, szKey, nState)
+end
+
+function Calendar:IsActivityInOpenState(szKey)
+  self.tbActivityState = self.tbActivityState or {}
+  return 1 == self.tbActivityState[szKey]
+end
+
+function Calendar:GetActTabType(nActId)
+  local tbSetting = Calendar:GetActInfo(nActId)
+  if not tbSetting then
+    return Calendar.DAILY
+  end
+  if Calendar:IsDailyTimeLimit(nActId) then
+    return Calendar.TIMELIMIT
+  end
+  return Calendar.DAILY
+end
+
+function Calendar:OpenCalendarToActId(nActId)
+  local tbSetting = Calendar:GetActInfo(nActId)
+  if not tbSetting then
+    return
+  end
+  if self:IsDailyTimeLimit(nActId) then
+    local tbTodayOpenTime = self:GetTodayOpenTime(nActId)
+    if not (tbTodayOpenTime and next(tbTodayOpenTime)) or not self:CheckLimitActivityOpen(nActId) then
+      me.CenterMsg(i18n.EasyGet("\228\187\138\230\151\165\230\173\164\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+      return
+    end
+  end
+  local nTabType = Calendar:GetActTabType(nActId)
+  local bOpen = Ui:WindowVisible("UIActivity")
+  if not bOpen then
+    Ui:OpenWindow("UIActivity", nTabType, nActId)
+  else
+    local pCalendar = Ui:GetWindow("UIActivity")
+    pCalendar:OnOpen(nTabType, nActId)
+  end
+end
+
+function Calendar:GetActInfoByKey(szKey)
+  return szKey and self.tbActivityCalendarSetting[szKey]
+end
+
+function Calendar:IsQualified(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  if not tbSetting then
+    return false
+  end
+  local fnQualified = self.tbCheckQualified[tbSetting.szKey]
+  if fnQualified then
+    return fnQualified(tbSetting.szJoinCount)
+  end
+  return true
+end
+
+function Calendar:GetRedPointEvent(nActivityID)
+  local tbSetting = self.tbCalendarSetting[nActivityID]
+  if not tbSetting then
+    Log("[Calendar GetRedPointEvent Error] Not Found Setting", nActivityID)
+    return i18n.EasyGet("\230\151\160\233\153\144\229\136\182")
+  end
+  local szRedPointEvent = tbSetting.szRedPointEvent
+  if not szRedPointEvent then
+    return
+  end
+  return Calendar.szRedPointEvent[szRedPointEvent]
+end
+
+Calendar.szRedPointEvent = {
+  JiangHuZhuJiu = {
+    RedPointMgr.EVENT.RedPoint_JiangHuZhuJiu_Award1,
+    RedPointMgr.EVENT.RedPoint_JiangHuZhuJiu_Award2,
+    RedPointMgr.EVENT.RedPoint_JiangHuZhuJiu_Award3,
+    RedPointMgr.EVENT.RedPoint_JiangHuZhuJiu_Award4
+  }
+}
+
+function Calendar:OnLogout()
+  self.tbActivityState = {}
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Calendar)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Calendar.OnLogout, Calendar)

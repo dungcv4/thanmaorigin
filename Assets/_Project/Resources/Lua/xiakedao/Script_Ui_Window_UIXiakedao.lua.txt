@@ -1,0 +1,325 @@
+local tbWnd = Ui:CreateWindow("UIXiakedao")
+local tbControls = {
+  Left = "node/imgBG/Content/Left",
+  Template = "node/imgBG/Content/Right/Scroll View/Viewport/Content/Template",
+  btnClose = "node/UIBg2/panel/btnClose",
+  AwardTemplate = "node/imgBG/Content/Right/Scroll View/Viewport/Content/Template/Scroll View/Viewport/Content/Template",
+  txtHelp = "node/imgBG/Content/Right/txtHelp",
+  txtNum = "node/imgBG/Content/Right/txtNum",
+  BtnTemplate = "node/imgBG/Content/Left/Scroll View/Viewport/Content/Template",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  btnOpenBossRemind = "node/imgBG/btnRemind",
+  txtTitle = "node/imgBG/txtTitle"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("XiaKeDaoHelp")
+  end,
+  btnOpenBossRemind = function()
+    Ui:OpenWindow("UIXiakedao_RemindTip")
+  end
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self.tbBossList = Ui:NewScrollView(self, tbControls.Template, nil)
+  self.tbButtonList = Ui:NewScrollView(self, tbControls.BtnTemplate, self.onClickTreeBigBtn)
+end
+
+local tbDifficulty = {
+  [1] = {
+    szName = function()
+      return i18n.EasyGet("\231\174\128\229\141\149")
+    end,
+    imagPath = "ContGreen"
+  },
+  [2] = {
+    szName = function()
+      return i18n.EasyGet("\230\153\174\233\128\154")
+    end,
+    imagPath = "ContBlue"
+  },
+  [3] = {
+    szName = function()
+      return i18n.EasyGet("\229\155\176\233\154\190")
+    end,
+    imagPath = "ContPurple"
+  },
+  [4] = {
+    szName = function()
+      return i18n.EasyGet("\230\158\129\233\154\190")
+    end,
+    imagPath = "ContGolden"
+  },
+  [5] = {
+    szName = function()
+      return i18n.EasyGet("\230\183\177\230\184\138")
+    end,
+    imagPath = "ContOrange"
+  }
+}
+
+function tbWnd:OnOpen()
+  if Lib:IsEmptyTB(XiaKeDao.tbBossShowInfoList) then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return 0
+  end
+  self.nBossTimer = {}
+  self.tbItemListGroup = {}
+  self.tbDifficultyIndex = {}
+  self:UpdateButtonGroup()
+  self.nDifficultyIndex = self.tbDifficultyIndex[1] or 1
+  self.tbButtonList:SelectElement(self.nDifficultyIndex)
+  local nVipLevel = me.GetVipLevel()
+  self.pPanel:SetActive(self.btnOpenBossRemind, false)
+end
+
+function tbWnd:UpdateButtonGroup()
+  local tbBossInfo = {
+    {
+      szTitle = function()
+        return i18n.EasyGet("\229\136\157\231\186\167")
+      end,
+      tbInfo = {bInZone = false, nIndex = 1}
+    }
+  }
+  if XiaKeDao:IsOpenZone() then
+    tbBossInfo = {
+      [1] = {
+        szTitle = function()
+          return i18n.EasyGet("\231\174\128\229\141\149")
+        end,
+        tbInfo = {bInZone = true, nIndex = 1}
+      },
+      [2] = {
+        szTitle = function()
+          return i18n.EasyGet("\230\153\174\233\128\154")
+        end,
+        tbInfo = {bInZone = true, nIndex = 2}
+      },
+      [3] = {
+        szTitle = function()
+          return i18n.EasyGet("\229\155\176\233\154\190")
+        end,
+        tbInfo = {bInZone = true, nIndex = 3}
+      },
+      [4] = {
+        szTitle = function()
+          return i18n.EasyGet("\230\158\129\233\154\190")
+        end,
+        tbInfo = {bInZone = true, nIndex = 4}
+      },
+      [5] = {
+        szTitle = function()
+          return i18n.EasyGet("\230\183\177\230\184\138")
+        end,
+        tbInfo = {bInZone = true, nIndex = 5}
+      }
+    }
+    self.pPanel:Label_SetText(tbControls.txtTitle, i18n.EasyGet("\232\183\168\230\156\141\228\190\160\229\174\162\229\178\155"))
+  else
+    self.pPanel:Label_SetText(tbControls.txtTitle, i18n.EasyGet("\228\190\160\229\174\162\229\178\155"))
+  end
+  self.tbButtonList:Reset()
+  if not XiaKeDao:IsOpenZone() then
+    for nIndex, tbInfo in ipairs(tbBossInfo) do
+      self.tbButtonList:SetElement(nIndex, function(tbElement)
+        local pPanel = tbElement.pPanel
+        pPanel:Label_SetText("Text", tbInfo.szTitle())
+        pPanel:SetActive("ImgSign", tbInfo.tbInfo.bInZone)
+      end)
+    end
+    return
+  end
+  local tbAllTBossSetting = XiaKeDao:GetTimeFrameMapList()
+  if not tbAllTBossSetting then
+    return
+  end
+  local tbDifficultySet = {}
+  for _, tbBossInfo in ipairs(tbAllTBossSetting) do
+    if not tbDifficultySet[tbBossInfo.nDifficulty] then
+      tbDifficultySet[tbBossInfo.nDifficulty] = 1
+      table.insert(self.tbDifficultyIndex, tbBossInfo.nDifficulty)
+    end
+  end
+  table.sort(self.tbDifficultyIndex, function(nDifficulty1, nDifficulty2)
+    return nDifficulty2 < nDifficulty1
+  end)
+  for _, nDifficulty in ipairs(self.tbDifficultyIndex) do
+    self.tbButtonList:SetElement(nDifficulty, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("Text", tbBossInfo[nDifficulty].szTitle())
+      pPanel:SetActive("ImgSign", tbBossInfo[nDifficulty].tbInfo.bInZone)
+    end)
+  end
+end
+
+function tbWnd:onClickTreeBigBtn(nIndex)
+  self.nDifficultyIndex = nIndex
+  self:UpdateBossInfo()
+end
+
+function tbWnd:UpdateBossInfo()
+  local tbAllTBossSetting = XiaKeDao:GetTimeFrameMapList(self.nDifficultyIndex)
+  if not tbAllTBossSetting then
+    return
+  end
+  self.pPanel:Label_SetText(tbControls.txtHelp, i18n.EasyGet("\229\138\169\230\136\152\230\172\161\230\149\176\239\188\154{0}/{1}", DegreeCtrl:GetDegree(me, "XiaKeDaoAssistNum"), XiaKeDao.Cfg.nAssistCnt))
+  self.pPanel:Label_SetText(tbControls.txtNum, i18n.EasyGet("\230\140\145\230\136\152\230\172\161\230\149\176\239\188\154{0}/{1}", DegreeCtrl:GetDegree(me, "XiaKeDaoJoinNum"), XiaKeDao.Cfg.nChallengeCnt))
+  self.tbBossList:Clear()
+  for _, tbItemList in pairs(self.tbItemListGroup) do
+    tbItemList:Clear()
+  end
+  if self.nBossTimer[self.nDifficultyIndex] then
+    Timer:Close(self.nBossTimer[self.nDifficultyIndex])
+  end
+  local bCanJoin = DegreeCtrl:GetDegree(me, "XiaKeDaoJoinNum") > 0
+  self.tbItemListGroup = {}
+  local nHideCnt = -1
+  for index, tbBossInfo in ipairs(tbAllTBossSetting) do
+    if tbBossInfo.nPlayerOpenLevel and tbBossInfo.nPlayerOpenLevel > 0 and me.nTotalLevel < tbBossInfo.nPlayerOpenLevel then
+      nHideCnt = nHideCnt + 1
+    else
+      break
+    end
+  end
+  local nPanelIndex = 0
+  for nIndex, tbBossInfo in ipairs(tbAllTBossSetting) do
+    if nHideCnt > 0 then
+      nHideCnt = nHideCnt - 1
+    else
+      nPanelIndex = nPanelIndex + 1
+      self.tbBossList:SetElement(nPanelIndex, function(tbElement)
+        local pPanel = tbElement.pPanel
+        local szBossName = KNpc.GetNameByTemplateId(tbBossInfo.nBossId)
+        for index, tbValue in ipairs(tbDifficulty) do
+          if index == tbBossInfo.nDifficulty then
+            pPanel:SetActive(tbValue.imagPath, true)
+            pPanel:Label_SetText(tbValue.imagPath .. "/txtName", tbValue.szName())
+          else
+            pPanel:SetActive(tbValue.imagPath, false)
+          end
+        end
+        local tbAward = Award:GetAward(tbBossInfo.nShowAwardId, tbBossInfo.nShowAwardKey) or {}
+        local tbItemList = Ui:NewItemGridView(self, tbElement.szKey .. "/Scroll View/Viewport/Content/Template")
+        self.tbItemListGroup[nIndex] = tbItemList
+        local tbAwardIcon = XiaKeDao.tbAwardIcon[tbBossInfo.nDifficulty]
+        for j = 1, #tbAward do
+          tbItemList:SetItem(j, tbAward[j], true)
+          local szPath = tbItemList:GetItemKey(j)
+          if tbAwardIcon then
+            for _, tbIconInfo in ipairs(tbAwardIcon) do
+              if "Item" == tbAward[j][1] and tbAward[j][2] == tbIconInfo.nItemId then
+                self.pPanel:SetActive(szPath .. "/imgProbabilityTips", true)
+                Timer:Register(2, function()
+                  self.pPanel:Sprite_SetSprite(szPath .. "/imgProbabilityTips", tbIconInfo.szIconPath)
+                end)
+                self.pPanel:Label_SetText(szPath .. "/imgProbabilityTips/Text", i18n.Get(tbIconInfo.szText))
+              end
+            end
+          end
+        end
+        pPanel:Label_SetText("txtMasterName", i18n.EasyGet("{0}", i18n.Parse(szBossName)))
+        pPanel:Label_SetText("txtLV", i18n.EasyGet("\239\188\136{0}\231\186\167\239\188\137", tbBossInfo.nBossLevel))
+      end)
+    end
+  end
+  self:UpdateBossTimer()
+  self.nBossTimer[self.nDifficultyIndex] = Timer:Register(Env.GAME_FPS, function()
+    return self:UpdateBossTimer()
+  end)
+end
+
+function tbWnd:UpdateBossTimer()
+  local bOpenTimer = false
+  local tbAllTBossSetting = XiaKeDao:GetTimeFrameMapList(self.nDifficultyIndex)
+  if not tbAllTBossSetting then
+    return
+  end
+  local nHideCnt = -1
+  for index, tbBossInfo in ipairs(tbAllTBossSetting) do
+    if tbBossInfo.nPlayerOpenLevel and tbBossInfo.nPlayerOpenLevel > 0 and me.nTotalLevel < tbBossInfo.nPlayerOpenLevel then
+      nHideCnt = nHideCnt + 1
+    else
+      break
+    end
+  end
+  local tbBossRefreshTimeList = XiaKeDao:GetBossInfoList()
+  local nPanelIndex = 0
+  local nLeaveCD = XiaKeDao:GetLeaveCD()
+  local bCanJoin = DegreeCtrl:GetDegree(me, "XiaKeDaoJoinNum") > 0
+  local nHonorLevel = HonorLevel:SplitStarLevel(HonorLevel:GetStarLevel(me))
+  for nIndex, tbBossInfo in ipairs(tbAllTBossSetting) do
+    if nHideCnt > 0 then
+      nHideCnt = nHideCnt - 1
+    else
+      nPanelIndex = nPanelIndex + 1
+      self.tbBossList:SetElement(nPanelIndex, function(tbElement)
+        local pPanel = tbElement.pPanel
+        local nRefreshTime = tbBossRefreshTimeList[tbBossInfo.nIndex].nRefreshTime
+        local nSec = nRefreshTime - GetTime()
+        if nRefreshTime and nRefreshTime > 0 and nSec > 0 then
+          pPanel:SetActive("btnGo", false)
+          pPanel:SetActive("txtState", true)
+          pPanel:SetActive("txtTime", true)
+          local szTimeText = Lib:TimeDesc3(nSec)
+          pPanel:Label_SetText("txtTime", szTimeText)
+          pPanel:SetActive("txtInfo", false)
+          bOpenTimer = true
+        else
+          pPanel:SetActive("btnGo", true)
+          pPanel:SetActive("txtState", false)
+          pPanel:SetActive("txtTime", false)
+          if bCanJoin and 0 == nHideCnt then
+            nHideCnt = nHideCnt - 1
+            pPanel:SetActive("imgFinish", true)
+            pPanel:SetActive("txtInfo", true)
+            pPanel:Label_SetText("txtInfo", i18n.EasyGet("\232\190\190\229\136\176{0}\231\186\167\230\150\185\229\143\175\230\140\145\230\136\152", tbBossInfo.nPlayerOpenLevel))
+          elseif tbBossInfo.nRealHonorLevelLimit and tbBossInfo.nRealHonorLevelLimit > 0 and tbBossInfo.nRealHonorLevelLimit > nHonorLevel then
+            pPanel:SetActive("imgFinish", true)
+            pPanel:SetActive("txtInfo", true)
+            local szName, szHonorColor = HonorLevel:GetHonorName(tbBossInfo.nRealHonorLevelLimit)
+            pPanel:Label_SetText("txtInfo", i18n.EasyGet("\229\164\180\232\161\148\232\190\190\229\136\176{0}\232\167\163\233\148\129", i18n.Parse(szName)))
+          elseif nLeaveCD and nLeaveCD > GetTime() then
+            pPanel:SetActive("txtInfo", true)
+            local nSec = nLeaveCD - GetTime()
+            pPanel:Label_SetText("txtInfo", i18n.EasyGet("{0}\231\167\146\228\185\139\229\144\142\229\143\175\232\191\155\229\133\165", nSec))
+            bOpenTimer = true
+          else
+            pPanel:SetActive("txtInfo", false)
+          end
+          if XiaKeDao:CanChallenge(me, tbBossInfo.nIndex) then
+            pPanel:Button_SetEnable("btnGo", true)
+            Ui:Button_BindEvent(pPanel, "btnGo", self.OnGoBtnClick, self, tbBossInfo.nIndex)
+          else
+            pPanel:Button_SetEnable("btnGo", false)
+          end
+        end
+      end)
+    end
+  end
+  return bOpenTimer
+end
+
+function tbWnd:OnGoBtnClick(nIndex)
+  XiaKeDao:ReqApplyEnterMap(nIndex)
+end
+
+function tbWnd:OnClose()
+  self.tbBossList:Clear()
+  for index, nTimerId in pairs(self.nBossTimer) do
+    Timer:Close(nTimerId)
+  end
+  for index, tbItemList in pairs(self.tbItemListGroup or {}) do
+    tbItemList:Clear()
+  end
+end
+
+function tbWnd:CheckGuide()
+  if 0 == me.GetUserValue(XiaKeDao.szSaveKey, 6) and 1 == me.GetUserValue(XiaKeDao.szSaveKey, 5) then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_XIAKEDAO_BOSS_GUIDE, true)
+  end
+end

@@ -1,0 +1,357 @@
+MultiFactionFight.PreMap = MultiFactionFight.PreMap or {}
+local PreMap = MultiFactionFight.PreMap
+MultiFactionFight.RaceMap = MultiFactionFight.RaceMap or {}
+local RaceMap = MultiFactionFight.RaceMap
+MultiFactionFight.nSynRankDataCD = 5
+MultiFactionFight.tbRankDataCache = {}
+MultiFactionFight.tbMyData = {}
+
+function MultiFactionFight:RegisterFubenUIChecker()
+  FubenUIController:RegisterChecker({
+    MultiFactionFight.Cfg.nPreMapTemplate
+  }, PreMap)
+  FubenUIController:RegisterChecker({
+    MultiFactionFight.Cfg.nRaceMapTemplate
+  }, RaceMap)
+end
+
+MultiFactionFight:RegisterFubenUIChecker()
+
+function MultiFactionFight:TrySignUp()
+  RemoteServer.RequestMultiFactionFight("OnC2WTryGetInfo")
+end
+
+function MultiFactionFight:ShowActivityTips()
+  Ui:OpenWindow("UIActivity", Calendar.TIMELIMIT, Calendar:GetActivityId("MultiFactionFight"))
+end
+
+function MultiFactionFight:OnNotifyCanGetWinnerInfo(nTimeOut)
+  local tbMsgData = {
+    szType = "MultiFactionFightResult",
+    nTimeOut = nTimeOut
+  }
+  Ui:SynNotifyMsg(tbMsgData)
+  self:SetCanGetWinnerInfo(true)
+end
+
+function MultiFactionFight:SetCanGetWinnerInfo(bCanGetWinnerInfo)
+  self.bCanGetWinnerInfo = bCanGetWinnerInfo
+end
+
+function MultiFactionFight:IsCanShowNewInfomation()
+  return self.bCanGetWinnerInfo
+end
+
+function MultiFactionFight:OnRequestNewInfomationInfo()
+  RemoteServer.RequestMultiFactionFight("OnC2WGetWinnerDeciderPlayer")
+end
+
+function MultiFactionFight:OnGetWinnerDeciderPlayer(nWinnerFaction, tbDeciderWinnerPlayer)
+  if Ui:WindowVisible("UINewInformation") then
+    Ui:GetWindow("UINewInformation"):UpdateMultiFactionFightPanel(nWinnerFaction, tbDeciderWinnerPlayer)
+  end
+end
+
+function MultiFactionFight:OpenRankUI()
+  if Ui:WindowVisible("UIWarsituation") then
+    Ui:CloseWindow("UIWarsituation")
+  end
+  local tbInfo = {}
+  local tbFactionTitle = {
+    i18n.EasyGet("\230\142\146\229\144\141"),
+    i18n.EasyGet("\233\151\168\230\180\190\229\144\141"),
+    nil,
+    i18n.EasyGet("\231\167\175\229\136\134"),
+    i18n.EasyGet("\233\151\168\230\180\190")
+  }
+  local tbMyFactionTitle = {
+    i18n.EasyGet("\233\151\168\230\180\190\230\142\146\229\144\141"),
+    i18n.EasyGet("\233\151\168\230\180\190\231\167\175\229\136\134")
+  }
+  local tbPlayerTitle = {
+    i18n.EasyGet("\230\142\146\229\144\141"),
+    i18n.EasyGet("\229\144\141\229\173\151"),
+    i18n.EasyGet("\229\135\187\232\180\165"),
+    i18n.EasyGet("\231\167\175\229\136\134"),
+    i18n.EasyGet("\233\151\168\230\180\190")
+  }
+  local tbMyDataTitle = {
+    i18n.EasyGet("\230\136\145\231\154\132\230\142\146\229\144\141"),
+    i18n.EasyGet("\230\136\145\231\154\132\231\167\175\229\136\134"),
+    i18n.EasyGet("\230\136\145\231\154\132\229\135\187\230\157\128")
+  }
+  tbInfo.tbBigData = {
+    {
+      nType = "FactionRank",
+      szText = i18n.EasyGet("\233\151\168\230\180\190"),
+      tbInfo = {
+        tbTitle = tbFactionTitle,
+        tbMyTitle = tbMyFactionTitle,
+        szMode = "Faction",
+        szKey = "FactionRank"
+      }
+    },
+    {
+      nType = "PlayerRank",
+      szText = i18n.EasyGet("\228\184\170\228\186\186\230\142\146\229\144\141"),
+      tbInfo = {
+        tbTitle = tbPlayerTitle,
+        tbMyTitle = tbMyDataTitle,
+        szMode = "Player",
+        bHaveSmall = true,
+        szKey = "PlayerRank"
+      }
+    }
+  }
+  tbInfo.tbSmallData = {
+    {
+      nType = "PlayerRank",
+      szText = i18n.EasyGet("\229\133\168\233\131\168\233\151\168\230\180\190"),
+      tbInfo = {
+        szMode = "Player",
+        szKey = "PlayerRank_All"
+      }
+    }
+  }
+  for i = 1, Lib:CountTB(Faction.Define) do
+    table.insert(tbInfo.tbSmallData, {
+      nType = "PlayerRank",
+      szText = Faction:GetName(i),
+      tbInfo = {
+        szMode = "Player",
+        szKey = "PlayerRank_" .. tostring(i)
+      }
+    })
+  end
+  tbInfo.tbRequestDataFn = {
+    self.TryGetRankData,
+    self
+  }
+  tbInfo.nNumsPerPage = MultiFactionFight.nPerPagDataNums
+  Ui:OpenWindow("UIWarsituation", tbInfo)
+end
+
+function MultiFactionFight:TryGetRankData(szKey, nPage, bRequest)
+  local nNow = GetTime()
+  self.nLastRequestTime = self.nLastRequestTime or 0
+  local bNeedRequest = false
+  if nNow - self.nLastRequestTime > self.nSynRankDataCD then
+    bNeedRequest = true
+    self.nLastRequestTime = nNow
+  end
+  if not self.tbRankDataCache[szKey] or not self.tbRankDataCache[szKey][nPage] then
+    bNeedRequest = true
+    self.tbRankDataCache[szKey] = self.tbRankDataCache[szKey] or {}
+    self.tbRankDataCache[szKey][nPage] = {}
+  end
+  bNeedRequest = bNeedRequest and bRequest
+  if bNeedRequest then
+    self:RequestRankData(szKey, nPage)
+  end
+  return self.tbRankDataCache[szKey][nPage], self.tbMyData[szKey]
+end
+
+function MultiFactionFight:RequestRankData(szKey, nPage)
+  if self.nRequestTimer then
+    Timer:Close(self.nRequestTimer)
+    self.nRequestTimer = nil
+  end
+  self.nRequestTimer = Timer:Register(Env.GAME_FPS / 2, self.RequestRankData_Helper, self, szKey, nPage)
+end
+
+function MultiFactionFight:RequestRankData_Helper(szKey, nPage)
+  if Ui.bInZone then
+    RemoteServer.RequestZMultiFactionFight("OnC2ZGetRankData", szKey, nPage)
+  else
+    RemoteServer.RequestMultiFactionFight("OnC2WGetRankData", szKey, nPage)
+  end
+end
+
+function MultiFactionFight:OnSynRankData(szKey, nPage, tbRankData, tbMyData)
+  local tbTemp = {}
+  tbTemp.nMaxNum = tbRankData.nMaxNum
+  if "FactionRank" == szKey then
+    for nIndex, tbInfo in ipairs(tbRankData) do
+      tbTemp[nIndex] = {}
+      tbTemp[nIndex].nScore = tbInfo.nSortKey1
+      tbTemp[nIndex].nFaction = tbInfo.nSortKey2
+    end
+  else
+    for nIndex, tbInfo in ipairs(tbRankData) do
+      tbTemp[nIndex] = {}
+      tbTemp[nIndex].nScore = tbInfo.nSortKey1
+      tbTemp[nIndex].nKillNums = tbInfo.nSortKey2
+      tbTemp[nIndex].dwPlayerId = tbInfo.nSortKey3
+      tbTemp[nIndex].nFaction = tbInfo.nFaction
+      tbTemp[nIndex].szName = string.format("S%d-%s", tbInfo.nServerId, tbInfo.szName)
+    end
+  end
+  self.tbRankDataCache[szKey] = self.tbRankDataCache[szKey] or {}
+  self.tbRankDataCache[szKey][nPage] = tbTemp
+  self.tbMyData[szKey] = tbMyData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UI_WARSITUATION_UPDATE, szKey, nPage)
+end
+
+function MultiFactionFight:OnLogout()
+  MultiFactionFight.tbRankDataCache = {}
+  MultiFactionFight.tbMyData = {}
+end
+
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, MultiFactionFight.OnLogout, MultiFactionFight)
+
+function PreMap:SetCanExit(bExit)
+  self.IsCanExit = bExit
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function PreMap:IsNeedExitFubenButton()
+  return self.IsCanExit
+end
+
+function PreMap:OnFubenMapLoaded()
+  self:SetCanExit(true)
+  FubenUIController:OpenDefaultFuBenUI()
+end
+
+function PreMap:ShowPreMapUI(nTime)
+  self.nCacheTime = nTime
+  local tbTime = {
+    [1] = nTime,
+    [2] = i18n.EasyGet("\232\183\157\231\166\187\230\180\187\229\138\168\229\188\128\229\144\175\239\188\154%s")
+  }
+  local tbContent = {
+    [1] = i18n.Get(MultiFactionFight.Cfg.Text.szPreDesc)
+  }
+  FubenUIController:ShowDefaultInfo({tbTime}, tbContent)
+end
+
+RaceMap.IsCanExit = true
+
+function RaceMap:SetCanExit(bExit)
+  self.IsCanExit = bExit
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function RaceMap:IsNeedExitFubenButton()
+  return self.IsCanExit
+end
+
+function RaceMap:OnFubenMapLoaded()
+  FubenUIController:OpenDefaultFuBenUI()
+end
+
+function RaceMap:OnEnterMap()
+  AFK:Stop()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function RaceMap:IsNeedFuncScoreButton()
+  return true, {
+    MultiFactionFight.OpenRankUI,
+    MultiFactionFight
+  }
+end
+
+function RaceMap:ShowRaceMapUI(nGameState, szState, nTime, nMyScore, nRankInFaction, nFactionScore, nFactionRank, tbBuffPos)
+  local tbTime = {}
+  local tbContent = {}
+  if nGameState == MultiFactionFight.GAME_STATE.QUALIFIER then
+    tbTime, tbContent = self:GetQualifierUI(szState, nTime, nMyScore, nRankInFaction)
+  end
+  if nGameState == MultiFactionFight.GAME_STATE.DECIDER then
+    tbTime, tbContent = self:GetDeciderUI(szState, nTime, nMyScore, nFactionScore, nFactionRank)
+  end
+  FubenUIController:ShowDefaultInfo({tbTime}, tbContent)
+  if tbBuffPos then
+    self:OnGetBuffPos(tbBuffPos)
+  end
+end
+
+RaceMap.tbState2QualifierTitle = {
+  Prepare = function()
+    return i18n.EasyGet("\232\183\157\231\166\187\233\162\132\232\181\155\231\172\172\228\184\128\233\152\182\230\174\181\229\188\128\229\144\175\239\188\154%s")
+  end,
+  Start = function()
+    return i18n.EasyGet("\232\183\157\231\166\187\233\162\132\232\181\155\231\172\172\228\184\128\233\152\182\230\174\181\231\187\147\230\157\159\239\188\154%s")
+  end,
+  Mid = function()
+    return i18n.EasyGet("\232\183\157\231\166\187\233\162\132\232\181\155\231\187\147\230\157\159\239\188\154%s")
+  end,
+  End = function()
+    return i18n.EasyGet("\232\183\157\231\166\187\229\156\186\229\156\176\229\133\179\233\151\173\239\188\154%s")
+  end
+}
+RaceMap.tbState2DeciderTitle = {
+  Prepare = function()
+    return i18n.EasyGet("\232\183\157\231\166\187\229\134\179\232\181\155\229\188\128\229\144\175\239\188\154%s")
+  end,
+  Start = function()
+    return i18n.EasyGet("\232\183\157\231\166\187\229\134\179\232\181\155\231\187\147\230\157\159\239\188\154%s")
+  end,
+  End = function()
+    return i18n.EasyGet("\232\183\157\231\166\187\229\156\186\229\156\176\229\133\179\233\151\173\239\188\154%s")
+  end
+}
+
+function RaceMap:GetQualifierUI(szState, nTime, nMyScore, nRankInFaction)
+  local tbTime = {
+    [1] = nTime,
+    [2] = self.tbState2QualifierTitle[szState]()
+  }
+  local tbContent = {}
+  if "Prepare" == szState then
+    tbContent[1] = i18n.Get(MultiFactionFight.Cfg.Text.szQulifier1StartDesc)
+  elseif "Start" == szState then
+    tbContent[1] = i18n.Get(MultiFactionFight.Cfg.Text.szQulifier1StartDesc)
+    tbContent[2] = i18n.EasyGet("\228\184\170\228\186\186\231\167\175\229\136\134\239\188\154{0}", nMyScore)
+    tbContent[3] = i18n.EasyGet("\233\151\168\230\180\190\229\134\133\230\142\146\229\144\141\239\188\154{0}", nRankInFaction)
+  elseif "Mid" == szState then
+    tbContent[1] = i18n.Get(MultiFactionFight.Cfg.Text.szQulifierStartDesc)
+    tbContent[2] = i18n.EasyGet("\228\184\170\228\186\186\231\167\175\229\136\134\239\188\154{0}", nMyScore)
+    tbContent[3] = i18n.EasyGet("\233\151\168\230\180\190\229\134\133\230\142\146\229\144\141\239\188\154{0}", nRankInFaction)
+  elseif "End" == szState then
+    tbContent[1] = i18n.Get(MultiFactionFight.Cfg.Text.szQualifierEndDesc)
+    tbContent[2] = i18n.EasyGet("\228\184\170\228\186\186\231\167\175\229\136\134\239\188\154{0}", nMyScore)
+    tbContent[3] = i18n.EasyGet("\233\151\168\230\180\190\229\134\133\230\142\146\229\144\141\239\188\154{0}", nRankInFaction)
+  end
+  return tbTime, tbContent
+end
+
+function RaceMap:GetDeciderUI(szState, nTime, nMyScore, nFactionScore, nFactionRank)
+  local tbTime = {
+    [1] = nTime,
+    [2] = self.tbState2DeciderTitle[szState]()
+  }
+  local tbContent = {}
+  if "Prepare" == szState then
+    tbContent[1] = i18n.Get(MultiFactionFight.Cfg.Text.szDeciderStartDesc)
+  elseif "Start" == szState then
+    tbContent[1] = i18n.Get(MultiFactionFight.Cfg.Text.szDeciderStartDesc)
+    tbContent[2] = i18n.EasyGet("\228\184\170\228\186\186\231\167\175\229\136\134\239\188\154{0}", nMyScore)
+    tbContent[3] = i18n.EasyGet("\233\151\168\230\180\190\231\167\175\229\136\134\239\188\154{0}", nFactionScore)
+    tbContent[4] = i18n.EasyGet("\233\151\168\230\180\190\230\142\146\229\144\141\239\188\154{0}", nFactionRank)
+  elseif "End" == szState then
+    tbContent[1] = i18n.Get(MultiFactionFight.Cfg.Text.szDeciderEndDesc)
+    tbContent[2] = i18n.EasyGet("\228\184\170\228\186\186\231\167\175\229\136\134\239\188\154{0}", nMyScore)
+    tbContent[3] = i18n.EasyGet("\233\151\168\230\180\190\231\167\175\229\136\134\239\188\154{0}", nFactionScore)
+    tbContent[4] = i18n.EasyGet("\233\151\168\230\180\190\230\142\146\229\144\141\239\188\154{0}", nFactionRank)
+  end
+  return tbTime, tbContent
+end
+
+function RaceMap:OnGetBuffPos(tbBuffPos)
+  local tbPoint = {}
+  for nIndex in pairs(tbBuffPos) do
+    local nX = tonumber(MultiFactionFight.tbRandBuffPos[nIndex].PosX)
+    local nY = tonumber(MultiFactionFight.tbRandBuffPos[nIndex].PosY)
+    local tbInfo = {
+      szType = "Wenzi",
+      nPosX = nX,
+      nPosY = nY,
+      szName = i18n.EasyGet("\231\167\175\229\136\134\229\174\157\231\174\177"),
+      szTextColor = Ui.tbColor:GetColorHexByDefineName("White")
+    }
+    table.insert(tbPoint, tbInfo)
+  end
+  Map:SyncDynMapPoint(MultiFactionFight.Cfg.nRaceMapTemplate, tbPoint, GetTime() + MultiFactionFight.Cfg.nRefreshBuffInterval + 1)
+end

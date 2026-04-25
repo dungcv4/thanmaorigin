@@ -1,0 +1,156 @@
+local tbWnd = Ui:CreateClass("UIMidAutumnActivity", "UICommonActWndBase")
+local tbControls = {
+  btnClose = "node/imgBg/btnClose",
+  txtTitle = "node/imgBg/Title/txtTitle",
+  txtSmallTitle = "node/imgBg/txtSmallTitle",
+  btnTemplate = "node/imgBg/btnList/Viewport/Content/btnTemplate",
+  wndActivityiTips = "wndActivityiTips",
+  ActivityInfo = "wndActivityiTips/imgBg/ActivityInfo",
+  btnJoin = "wndActivityiTips/imgBg/btnJoin",
+  ItemTemplate = "wndActivityiTips/imgBg/ActivityInfo/AwardList/Viewport/Content/ItemTemplate",
+  MapTemplate = "wndJumpTo/imgBG/List/Viewport/Content/Template",
+  txtMapWndTitle = "wndJumpTo/imgBG/txtTitle",
+  txtZhongqiujie = "node/imgBg/btnZhongqiujie/txtTongxin",
+  btnZhongqiujie = "node/imgBg/btnZhongqiujie",
+  AwardTemplate = "wndExtraAwardDetail/imgBg/GetAwards/AwardList/Viewport/Content/ItemTemplate",
+  wndExtraAwardDetail = "wndExtraAwardDetail",
+  wndJumpTo = "wndJumpTo"
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_UPDATE_EXTRA_AWARD,
+      self.DealExtraAward,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MAP_ENTER,
+      self.CloseByDefault,
+      self
+    }
+  }
+end
+
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseByDefault()
+  end,
+  btnZhongqiujie = function(self)
+    if not self.pPanel:IsActive(tbControls.wndExtraAwardDetail) then
+      self:DealExtraAward()
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbBtnScrollView = Ui:NewScrollView(self, self.btnTemplate, self.OnClickActivityHelper, nil, false)
+  self.tbShowAwardScrollView = Ui:NewItemGridScrollView(self, self.ItemTemplate, 1, 1)
+  self:SetClickEmptyCallback(self.wndActivityiTips)
+  self.pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.AchieveAward)
+  self.tbExtraAwardScrollView = Ui:NewScrollView(self, tbControls.AwardTemplate)
+  self:SetClickEmptyCallback(tbControls.wndExtraAwardDetail)
+  self.pMapListScorllView = Ui:NewScrollView(self, tbControls.MapTemplate, function(_, nIndex, tbElement)
+    self:OnClickArrowBtn(tbElement.nMapId)
+  end, false, false)
+end
+
+function tbWnd:OnClickEmptyClose()
+  if self.nCurActivityId then
+    self:OnClickActivity(self.nCurActivityId)
+  end
+  self.pPanel:SetActive(self.wndActivityiTips, false)
+  self.pPanel:SetActive(tbControls.wndExtraAwardDetail, false)
+  self.pPanel:SetActive(tbControls.wndJumpTo, false)
+end
+
+function tbWnd:OnOpen(...)
+  local tbParent = Ui:GetClass(self.__Parent)
+  tbParent.OnOpen(self, ...)
+  self.pPanel:SetActive(tbControls.wndExtraAwardDetail, false)
+  self.pPanel:SetActive(tbControls.wndJumpTo, false)
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnZhongqiujie, {
+    RedPointMgr.EVENT.MidAutumnExtraAward
+  })
+end
+
+function tbWnd:DealExtraAward()
+  if not self.pInstance then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return
+  end
+  local tbAllExtraAward = self.pInstance:GetExtraAwardList()
+  self.tbExtraAwardScrollView:Clear()
+  for nIndex, tbInfo in ipairs(tbAllExtraAward) do
+    self.tbExtraAwardScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("AwardTips/txtAwardTip1", i18n.Parse(tbInfo.szInfo))
+      local tbItemGrid = tbElement.tbItemGrid
+      if not tbItemGrid then
+        tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbItemGrid:SetClickEnable(true)
+        tbElement.tbItemGrid = tbItemGrid
+      end
+      local szShowCurCount = ""
+      if tbInfo.nFinishCount < tbInfo.nNeedCount then
+        szShowCurCount = string.format("<color=#b60000>%s</color>", tbInfo.nFinishCount)
+      else
+        szShowCurCount = string.format("<color=#54ab4d>%s</color>", tbInfo.nFinishCount)
+      end
+      pPanel:Label_SetText("AwardTips/txtAwardTip2", i18n.EasyGet("{0}/{1}", szShowCurCount, tbInfo.nNeedCount))
+      tbItemGrid:SetGenericItem(tbInfo.tbAward[1])
+      pPanel:SetActive("btnGet", not tbInfo.bHasAward)
+      pPanel:SetActive("MarkRecieved", tbInfo.bHasAward)
+      Ui:Button_BindEvent(pPanel, "btnGet", self.OnGetExtraAward, self, tbInfo.nAchieveId)
+      pPanel:Button_SetEnable("btnGet", tbInfo.bSuccess and not tbInfo.bHasAward)
+    end)
+  end
+  self.pPanel:SetActive(tbControls.wndExtraAwardDetail, true)
+end
+
+function tbWnd:OnGetExtraAward(nAchieveId)
+  if self.pInstance and self.pInstance:IsOpen() then
+    self.pInstance:GetExtraAward(nAchieveId)
+  else
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    self.pPanel:SetActive(tbControls.wndExtraAwardDetail, false)
+  end
+end
+
+function tbWnd:CloseByDefault()
+  self.pPanel:SetActive(tbControls.wndActivityiTips, false)
+  self.pPanel:SetActive(tbControls.wndExtraAwardDetail, false)
+  self:Close()
+end
+
+function tbWnd:OnHandleExtraParam(nLinkActivityId)
+  self.pPanel:SetActive(tbControls.wndJumpTo, true)
+  self:InitMapListScorllView(nLinkActivityId)
+end
+
+function tbWnd:InitMapListScorllView(nLinkActivityId)
+  self.pMapListScorllView:Clear()
+  local tbActivity = ActivityMgr:GetInstanceById(nLinkActivityId)
+  if nil == tbActivity then
+    return
+  end
+  local tbMapList = tbActivity:GetMapList()
+  local nIndex = 1
+  for i, nMapId in pairs(tbMapList) do
+    self.pMapListScorllView:SetElement(nIndex, function(tbElement)
+      self:SetMapListScorllViewElementInfo(tbElement, nMapId)
+    end)
+    nIndex = nIndex + 1
+  end
+end
+
+function tbWnd:SetMapListScorllViewElementInfo(tbElement, nMapId)
+  tbElement.pPanel:Label_SetText("txtMapName", i18n.EasyGet("{0}", i18n.Parse(Map:GetMapSetting(nMapId).MapName)))
+  tbElement.nMapId = nMapId
+end
+
+function tbWnd:OnClickArrowBtn(nMapId)
+  ActivityMgr:GotoMap(nMapId)
+  self:Close()
+end

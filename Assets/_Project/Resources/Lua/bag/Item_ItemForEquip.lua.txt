@@ -1,0 +1,306 @@
+Item.tbEquipModules = Item.tbEquipModules or {}
+Item.tbExtEquipModules = Item.tbExtEquipModules or {}
+Item.tbAttrXSEquipModules = Item.tbAttrXSEquipModules or {}
+
+function Item:OnUseEquip(pPlayer, pEquip)
+  if not pPlayer.IsMaskPlayerAttr() and pEquip.nEquipPos == Item.EQUIPPOS_HORSE then
+    Horse:ApplyHorseAttr(pPlayer, pEquip)
+  end
+  if MODULE_GAMESERVER then
+    Horse:UpdateFeature(pPlayer, pEquip)
+    Item.EquipEnhance:ApplyFeature(pPlayer, pEquip)
+  end
+  if MODULE_GAMECLIENT then
+    Horse:UpdateHorseViewState(pEquip)
+  end
+end
+
+function Item:OnUnuseEquip(pPlayer, pEquip)
+  if not pPlayer.IsMaskPlayerAttr() and pEquip.nEquipPos == Item.EQUIPPOS_HORSE then
+    Horse:RemoveHorseAttr(pPlayer, pEquip)
+  end
+  if MODULE_GAMESERVER then
+    Item.EquipEnhance:RemoveFeature(pPlayer, pEquip)
+  end
+end
+
+function Item:ApplyEquipAttrib(pPlayer, pEquip)
+  if pEquip.nEquipPos == Item.EQUIPPOS_EXTEND then
+    local nSlot = Item:GetExtEquipSlot(pEquip)
+    if self.tbExtEquipModules[nSlot] then
+      for szExtEquipModule, tbExtEquipModule in pairs(self.tbExtEquipModules[nSlot]) do
+        if tbExtEquipModule and tbExtEquipModule.onApplyEquip then
+          tbExtEquipModule:onApplyEquip(pPlayer, pEquip)
+        else
+          LogErr("Item:ApplyEquipAttrib error!", string.format("nSlot:%d, szExtEquipModule:%s not had onApplyEquip function", nSlot, szExtEquipModule))
+        end
+      end
+    end
+  elseif self.tbEquipModules[pEquip.nEquipPos] then
+    for szEquipModule, tbEquipModule in pairs(self.tbEquipModules[pEquip.nEquipPos]) do
+      if tbEquipModule and tbEquipModule.onApplyEquip then
+        tbEquipModule:onApplyEquip(pPlayer, pEquip)
+      else
+        LogErr("Item:ApplyEquipAttrib error!", string.format("nEquipPos:%d, szEquipModule:%s not had onApplyEquip function", pEquip.nEquipPos, szEquipModule))
+      end
+    end
+  end
+  if pEquip.nEquipPos >= Item.EQUIPPOS_HELM and pEquip.nEquipPos <= Item.EQUIPPOS_AMULET then
+    Item.EquipForge:ApplyAttrib(pPlayer, pEquip)
+    Item.EquipEnhance:ApplyAttrib(pPlayer.GetNpc(), pEquip, Item.EquipEnhance:GetEquipEnhanceLevel(pPlayer, pEquip.nEquipPos), pPlayer.dwID)
+    Item.EquipWuLian:ApplyAttrib(pPlayer.GetNpc(), pEquip, Item.EquipWuLian:GetEquipWuLianLevel(pPlayer, pEquip.nEquipPos), pPlayer.dwID)
+    Item.EquipJingZhu:ApplyAttrib(pPlayer.GetNpc(), pEquip, Item.EquipJingZhu:GetJingZhuLevel(pPlayer, pEquip.nEquipPos), pPlayer.dwID)
+    Item.Stone:ApplyStoneAttrib(pPlayer, pEquip)
+    Item.QiHun:ApplyQiHunAttrib(pPlayer, Item.QiHun:GetPutOnLevel(pPlayer, pEquip.nEquipPos))
+    Item.EquipSeriesActive:ApplyAttrib(pPlayer, pEquip)
+    Item:GetClass("EquipForgeSeed"):ApplyRandomAttr(pPlayer.GetNpc(), pEquip, pPlayer.dwID)
+  end
+end
+
+function Item:RemoveEquipAttrib(pPlayer, pEquip)
+  if pEquip.nEquipPos == Item.EQUIPPOS_EXTEND then
+    local nSlot = Item:GetExtEquipSlot(pEquip)
+    if self.tbExtEquipModules[nSlot] then
+      for szExtEquipModule, tbExtEquipModule in pairs(self.tbExtEquipModules[nSlot]) do
+        if tbExtEquipModule and tbExtEquipModule.onRemoveEquip then
+          tbExtEquipModule:onRemoveEquip(pPlayer, pEquip)
+        else
+          LogErr("Item:RemoveEquipAttrib error!", string.format("nSlot:%d, szExtEquipModule:%s not had onRemoveEquip function", nSlot, szExtEquipModule))
+        end
+      end
+    end
+  elseif self.tbEquipModules[pEquip.nEquipPos] then
+    for szEquipModule, tbEquipModule in pairs(self.tbEquipModules[pEquip.nEquipPos]) do
+      if tbEquipModule and tbEquipModule.onRemoveEquip then
+        tbEquipModule:onRemoveEquip(pPlayer, pEquip)
+      else
+        LogErr("Item:RemoveEquipAttrib error!", string.format("nEquipPos:%d, szEquipModule:%s not had onRemoveEquip function", pEquip.nEquipPos, szEquipModule))
+      end
+    end
+  end
+  if pEquip.nEquipPos >= Item.EQUIPPOS_HELM and pEquip.nEquipPos <= Item.EQUIPPOS_AMULET then
+    Item.EquipForge:RemoveAttrib(pPlayer, pEquip)
+    Item.EquipEnhance:RemoveAttrib(pPlayer, pEquip, Item.EquipEnhance:GetEquipEnhanceLevel(pPlayer, pEquip.nEquipPos), pPlayer.dwID)
+    Item.EquipWuLian:RemoveAttrib(pPlayer, pEquip, Item.EquipWuLian:GetEquipWuLianLevel(pPlayer, pEquip.nEquipPos), pPlayer.dwID)
+    Item.EquipJingZhu:RemoveAttrib(pPlayer, pEquip)
+    Item.Stone:RemoveStoneAttrib(pPlayer, pEquip)
+    Item.QiHun:RemoveQiHunAttrib(pPlayer, Item.QiHun:GetPutOnLevel(pPlayer, pEquip.nEquipPos))
+    Item.EquipSeriesActive:RemoveAttrib(pPlayer, pEquip)
+    Item:GetClass("EquipForgeSeed"):RemoveRandomAttr(pPlayer.GetNpc(), pEquip, pPlayer.dwID)
+  end
+end
+
+function Item:S2CApplyAllItemAttrib(bStart)
+  self:ApplyAllItemAttrib(me, bStart)
+end
+
+function Item:ApplyAllItemAttrib(pPlayer, bStart)
+  Item.EquipForge:ApplyAllItemAttrib(pPlayer, bStart)
+  Item.EquipSeriesActive:ApplyAllItemAttrib(pPlayer, bStart)
+  self.bAttrApplyLock = bStart
+  if not bStart then
+    for szAttrXSEquipModule, tbAttrXSEquipModule in pairs(self.tbAttrXSEquipModules) do
+      if tbAttrXSEquipModule and tbAttrXSEquipModule.ApplyAllItemAttrib then
+        tbAttrXSEquipModule:ApplyAllItemAttrib(pPlayer)
+      else
+        LogErr("Item:ApplyAllItemAttrib error!", string.format("szAttrXSEquipModule:%s not had ApplyAllItemAttrib function", szAttrXSEquipModule))
+      end
+    end
+  end
+end
+
+function Item:S2CRemoveAllItemAttrib(bStart)
+  self:RemoveAllItemAttrib(me, bStart)
+end
+
+function Item:RemoveAllItemAttrib(pPlayer, bStart)
+  Item.EquipForge:RemoveAllItemAttrib(pPlayer, bStart)
+  Item.EquipSeriesActive:RemoveAllItemAttrib(pPlayer, bStart)
+  self.bAttrRemoveLock = bStart
+  if not bStart then
+    for szAttrXSEquipModule, tbAttrXSEquipModule in pairs(self.tbAttrXSEquipModules) do
+      if tbAttrXSEquipModule and tbAttrXSEquipModule.RemoveAllItemAttrib then
+        tbAttrXSEquipModule:RemoveAllItemAttrib(pPlayer)
+      else
+        LogErr("Item:RemoveAllItemAttrib error!", string.format("szAttrXSEquipModule:%s not had RemoveAllItemAttrib function", szAttrXSEquipModule))
+      end
+    end
+  end
+end
+
+function Item:GetEquipResId(pPlayer, nEquipPos)
+  local pItem = pPlayer.GetEquipByPos(nEquipPos)
+  if nil ~= pItem then
+    local szName, nIconImage, nViewImage, nQuality, nResId = KItem.GetItemShowInfo(pItem.dwTemplateId, pPlayer.nFaction, pPlayer.nFactionSect, pPlayer.nSex)
+    return nResId
+  end
+end
+
+function Item:GetEquipTemplateId(pPlayer, nEquipPos)
+  local pItem = pPlayer.GetEquipByPos(nEquipPos)
+  if nil ~= pItem then
+    return pItem.dwTemplateId
+  end
+end
+
+function Item:GetResByTemplate(dwTemplateId, nFaction, nFactionSect, nSex)
+  local szName, nIconImage, nViewImage, nQuality, nResId = KItem.GetItemShowInfo(dwTemplateId, nFaction, nFactionSect, nSex)
+  return nResId
+end
+
+function Item:GetEquipNpcPart(pEquip)
+  local nEquipPos = self.EQUIPTYPE_POS[pEquip.nItemType]
+  local nNpcPart = self.EQUIPPOS_TO_NPC_RES_PART[nEquipPos]
+  return nNpcPart
+end
+
+function Item:GetEquipEffectResId(pPlayer, nShowType)
+  local tbData = self.tbEquipEffectSetting
+  if not tbData then
+    return 0
+  end
+  tbData = tbData[nShowType]
+  if not tbData then
+    return 0
+  end
+  tbData = tbData[pPlayer.nFaction] or tbData[-1]
+  if not tbData then
+    return 0
+  end
+  tbData = tbData[pPlayer.nFactionSect] or tbData[-1]
+  if not tbData then
+    return 0
+  end
+  tbData = tbData[pPlayer.nSex] or tbData[-1]
+  if not tbData then
+    return 0
+  end
+  local nResId = tbData
+  return nResId
+end
+
+function Item:LoadEquipEffectSetting()
+  local tbRawData = Lib:LoadTabFileEx("Setting/Item/EquipEffectShow.tab", "ddddd", nil, {
+    "ShowType",
+    "Faction",
+    "FactionSect",
+    "Sex",
+    "ResId"
+  }, nil, nil, false)
+  local tbFixData = {}
+  for _, tbData in pairs(tbRawData) do
+    local nShowType = tbData.ShowType
+    local nFaction = tbData.Faction
+    local nFactionSect = tbData.FactionSect
+    local nSex = tbData.Sex
+    tbFixData[nShowType] = tbFixData[nShowType] or {}
+    tbFixData[nShowType][nFaction] = tbFixData[nShowType][nFaction] or {}
+    tbFixData[nShowType][nFaction][nFactionSect] = tbFixData[nShowType][nFaction][nFactionSect] or {}
+    tbFixData[nShowType][nFaction][nFactionSect][nSex] = tbData.ResId
+  end
+  self.tbEquipEffectSetting = SetReadOnly(tbFixData)
+end
+
+Item:LoadEquipEffectSetting()
+
+function Item:RegisterEquipModule(tbEquipPos, szEquipModule, tbEquipModule)
+  for _, nEquipPos in pairs(tbEquipPos) do
+    self.tbEquipModules[nEquipPos] = self.tbEquipModules[nEquipPos] or {}
+    if self.tbEquipModules[nEquipPos][szEquipModule] then
+      Log("Item:RegisterEquipModule repeat! nEquipPos, szEquipModule", nEquipPos, szEquipModule)
+    else
+      self.tbEquipModules[nEquipPos][szEquipModule] = tbEquipModule
+    end
+  end
+end
+
+function Item:UnRegisterEquipModule(tbEquipPos, szEquipModule)
+  for _, nEquipPos in pairs(tbEquipPos) do
+    if self.tbEquipModules[nEquipPos] then
+      self.tbEquipModules[nEquipPos][szEquipModule] = nil
+    end
+  end
+end
+
+function Item:RegisterExtEquipModule(tbExtEquipPos, szExtEquipModule, tbExtEquipModule)
+  for _, nExtEquipSlot in pairs(tbExtEquipPos) do
+    self.tbExtEquipModules[nExtEquipSlot] = self.tbExtEquipModules[nExtEquipSlot] or {}
+    if self.tbExtEquipModules[nExtEquipSlot][szExtEquipModule] then
+      Log("Item:RegisterExtEquipModule repeat! nExtEquipSlot, szExtEquipModule", nExtEquipSlot, szExtEquipModule)
+    else
+      self.tbExtEquipModules[nExtEquipSlot][szExtEquipModule] = tbExtEquipModule
+    end
+  end
+end
+
+function Item:UnRegisterExtEquipModule(tbExtEquipPos, szExtEquipModule)
+  for _, nExtEquipSlot in pairs(tbExtEquipPos) do
+    if self.tbExtEquipModules[nExtEquipSlot] then
+      self.tbExtEquipModules[nExtEquipSlot][szExtEquipModule] = nil
+    end
+  end
+end
+
+function Item:RegisterAttrXSEquipModule(szAttrXSEquipModule, tbAttrXSEquipModule)
+  if self.tbAttrXSEquipModules[szAttrXSEquipModule] then
+    Log("Item:RegisterAttrXSEquipModule repeat! szAttrXSEquipModule", szAttrXSEquipModule)
+  else
+    self.tbAttrXSEquipModules[szAttrXSEquipModule] = tbAttrXSEquipModule
+  end
+end
+
+function Item:UnRegisterAttrXSEquipModule(szAttrXSEquipModule)
+  self.tbAttrXSEquipModules[szAttrXSEquipModule] = nil
+end
+
+function Item:CheckSystemIsHadFunc()
+  for nSlot, tbV in pairs(self.tbExtEquipModules) do
+    for szExtEquipModule, tbExtEquipModule in pairs(tbV) do
+      if not tbExtEquipModule.onApplyEquip then
+        LogErr("Item:CheckSystemIsHadFunc error!", string.format("nSlot:%d, szExtEquipModule:%s not had onApplyEquip function", nSlot, szExtEquipModule))
+        return false
+      end
+      if not tbExtEquipModule.onRemoveEquip then
+        LogErr("Item:CheckSystemIsHadFunc error!", string.format("nSlot:%d, szExtEquipModule:%s not had onRemoveEquip function", nSlot, szExtEquipModule))
+        return false
+      end
+      if not Item.tbAttrXSEquipModules[szExtEquipModule] and not tbExtEquipModule.onApplyRobotNpcEquip then
+        LogErr("Item:CheckSystemIsHadFunc error!", string.format("nSlot:%d, szExtEquipModule:%s not had onApplyRobotNpcEquip function", nSlot, szExtEquipModule))
+        return false
+      end
+    end
+  end
+  for nEquipPos, tbV in pairs(self.tbEquipModules) do
+    for szEquipModule, tbEquipModule in pairs(tbV) do
+      if not tbEquipModule.onApplyEquip then
+        LogErr("Item:CheckSystemIsHadFunc error!", string.format("nEquipPos:%d, szEquipModule:%s not had onApplyEquip function", nEquipPos, szEquipModule))
+        return false
+      end
+      if not tbEquipModule.onRemoveEquip then
+        LogErr("Item:CheckSystemIsHadFunc error!", string.format("nEquipPos:%d, szEquipModule:%s not had onRemoveEquip function", nEquipPos, szEquipModule))
+        return false
+      end
+      if not Item.tbAttrXSEquipModules[szEquipModule] and not tbEquipModule.onApplyRobotNpcEquip then
+        LogErr("Item:CheckSystemIsHadFunc error!", string.format("nEquipPos:%d, szEquipModule:%s not had onApplyRobotNpcEquip function", nEquipPos, szEquipModule))
+        return false
+      end
+    end
+  end
+  for szAttrXSEquipModule, tbAttrXSEquipModule in pairs(self.tbAttrXSEquipModules) do
+    if not tbAttrXSEquipModule.ApplyAllItemAttrib then
+      LogErr("Item:CheckSystemIsHadFunc error!", string.format("szAttrXSEquipModule:%s not had ApplyAllItemAttrib function", szAttrXSEquipModule))
+      return false
+    end
+    if not tbAttrXSEquipModule.RemoveAllItemAttrib then
+      LogErr("Item:CheckSystemIsHadFunc error!", string.format("szAttrXSEquipModule:%s not had RemoveAllItemAttrib function", szAttrXSEquipModule))
+      return false
+    end
+    if not tbAttrXSEquipModule.onApplyRobotNpcAllEquip then
+      LogErr("Item:CheckSystemIsHadFunc error!", string.format("szAttrXSEquipModule:%s not had onApplyRobotNpcAllEquip function", szAttrXSEquipModule))
+      return false
+    end
+  end
+  return true
+end
+
+Validator:Register(Item.CheckSystemIsHadFunc, Item)

@@ -1,0 +1,345 @@
+local tbWnd = Ui:CreateWindow("UIQinShiHuangLingEntrance")
+
+local function _Get(tb, ...)
+  if type(tb) == "table" then
+    return Lib:GetTableDeepKey(tb, ...)
+  end
+end
+
+local function _Set(tb, ...)
+  if type(tb) == "table" then
+    Lib:SetTableDeepKey(tb, ...)
+  end
+end
+
+local _tbPointName = {
+  function()
+    return i18n.EasyGet("\228\184\128\229\143\183\231\130\185")
+  end,
+  function()
+    return i18n.EasyGet("\228\186\140\229\143\183\231\130\185")
+  end,
+  function()
+    return i18n.EasyGet("\228\184\137\229\143\183\231\130\185")
+  end,
+  function()
+    return i18n.EasyGet("\229\155\155\229\143\183\231\130\185")
+  end,
+  function()
+    return i18n.EasyGet("\228\186\148\229\143\183\231\130\185")
+  end,
+  function()
+    return i18n.EasyGet("\229\133\173\229\143\183\231\130\185")
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_LEAVE,
+      self.OnLeaveMap
+    },
+    {
+      EventNotify.emNOTIFY_QINSHIHUANGLING_SYNC_MAP_DATA,
+      self.OnSyncMapData
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  txtTitle = "node/imgBG/txtTitle",
+  BossOccuredTime = "node/imgBG/Content/txtTime",
+  ItemTemplate = "node/imgBG/Content/AwardInfo/AwardList/MaskLayer/BG/Item",
+  BossTemplate = "node/imgBG/Content/BossList/maskLayer/Content/BossTemplate",
+  PointTemplate = "node/imgBG/Content/PointList/PointTemplate"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("QinShiHuangLingHelp")
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbSeriesCellCache = {}
+  self.tbBossScrollView = Ui:NewScrollView(self, self.BossTemplate, function(self, nIndex, tbElement)
+    self:OnBossCellSelected(nIndex, tbElement)
+  end)
+  self.tbItemView = Ui:NewItemGridView(self, self.ItemTemplate)
+  self.tbMapView = Ui:NewScrollView(self, self.PointTemplate)
+end
+
+function tbWnd:OnOpen()
+  self.pPanel:Label_SetText(self.txtTitle, i18n.EasyGet("\231\167\166\229\167\139\231\154\135\233\153\181"))
+  self:UpdateSyncData()
+end
+
+function tbWnd:UpdateSeriesList(pPanel, tbSeriesArr)
+  local tbCellArr = self.tbSeriesCellCache[pPanel]
+  if not tbCellArr then
+    tbCellArr = {}
+    self.tbSeriesCellCache[pPanel] = tbCellArr
+  end
+  for i = 1, #tbSeriesArr do
+    local nSeries = tbSeriesArr[i]
+    local szKey = "SeriesList/Series" .. i
+    local pSeries = tbCellArr[szKey]
+    if not pSeries then
+      szKey = pPanel:CloneObject("SeriesList/SeriesTemplate", "Series" .. i)
+      pSeries = pPanel:GetObject(szKey)
+      tbCellArr[szKey] = pSeries
+    end
+    assert(pSeries)
+    local seriesSetting = pSeries:GetComponent(Ui.UISeriesSetting)
+    assert(seriesSetting)
+    seriesSetting:SetSeries(nSeries)
+  end
+  pPanel:SetActive("SeriesList/SeriesTemplate", false)
+end
+
+function tbWnd:UpdateBossCell(tbElement, tbBoss)
+  assert(tbElement)
+  assert(tbBoss)
+  local tbServerData = QinShiHuangLing:GetServerData()
+  local bStart = tbServerData.nState >= QinShiHuangLing.STATE_CREATE_BOSS
+  local bEnd = false
+  if tbBoss.tbPosDatas then
+    bEnd = true
+    for _, tbData in pairs(tbBoss.tbPosDatas) do
+      if not tbData.bIsDead then
+        bEnd = false
+        break
+      end
+    end
+  end
+  local pPanel = tbElement.pPanel
+  local tbSeriesArr = self:GetBossSeries(tbBoss)
+  self:UpdateSeriesList(pPanel, tbSeriesArr)
+  local szName = 0 == tbBoss.nBossID and i18n.EasyGet("\231\167\166\229\167\139\231\154\135") or i18n.Parse(Npc:GetNameByTemplateId(tbBoss.nBossID))
+  pPanel:Label_SetText("txtName", szName)
+  pPanel:SetActive("imgClosed", bEnd)
+  if bEnd then
+    pPanel:Label_SetText("imgClosed/Text", i18n.EasyGet("\229\183\178\229\135\187\233\128\128"))
+  end
+  pPanel:SetActive("imgRefresh", not bEnd)
+  if not bEnd then
+    if QinShiHuangLing:GetState() == QinShiHuangLing.STATE_END_ACT then
+      pPanel:Label_SetText("imgRefresh/Text", i18n.EasyGet("\230\156\170\229\136\183\230\150\176"))
+    else
+      pPanel:Label_SetText("imgRefresh/Text", bStart and i18n.EasyGet("\229\183\178\229\136\183\230\150\176") or i18n.EasyGet("\230\156\170\229\136\183\230\150\176"))
+    end
+  end
+end
+
+function tbWnd:UpdateBossList()
+  self.tbBossScrollView:Reset()
+  local tbBossArr = self.tbBossArr or {}
+  local nCount = #tbBossArr
+  for i = 1, nCount do
+    self.tbBossScrollView:SetElement(i, function(tbElement)
+      self:UpdateBossCell(tbElement, tbBossArr[i])
+    end)
+  end
+  if nCount > 0 then
+    self.tbBossScrollView:SelectElement(QinShiHuangLing.nSelectIndex or 1)
+  end
+end
+
+function tbWnd:UpdateMapList()
+  local nIndex = QinShiHuangLing.nSelectIndex
+  local tbBoss = self.tbBossArr[nIndex]
+  assert(tbBoss)
+  local tbShowAward = Award:GetAllAwardNoRand(QinShiHuangLing.SHOW_AWARD_ID, 1)
+  self:UpdateAwardList(tbShowAward)
+  self.pPanel:Label_SetText(self.BossOccuredTime, i18n.EasyGet("\229\135\186\231\142\176\230\151\182\233\151\180\239\188\154{0}", QinShiHuangLing.szKingStartTimeToday))
+  self.tbMapView:Reset()
+  local nLayerCount = #QinShiHuangLing.tbMapTIDArr
+  local nLayerIndex = 1
+  if 0 == tbBoss.nBossID then
+    nLayerIndex = nLayerIndex + 1
+    nLayerCount = nLayerCount - 1
+  end
+  for i = 1, nLayerCount do
+    self.tbMapView:SetElement(i, function(tbElement)
+      self:UpdateMapCell(tbElement, nLayerIndex, tbBoss)
+    end)
+    nLayerIndex = nLayerIndex + 1
+  end
+end
+
+function tbWnd:GetLayerData(nLayerIndex, tbBoss)
+  local nMapTID = QinShiHuangLing:LayerIndex2MapTID(nLayerIndex)
+  if tbBoss.tbPosDatas then
+    for _, tbPosData in pairs(tbBoss.tbPosDatas) do
+      if tbPosData.nMapTID == nMapTID then
+        return tbPosData
+      end
+    end
+  end
+  return {nMapTID = nMapTID}
+end
+
+function tbWnd:GetBossPosCfg(tbBoss, nMapTID)
+  if tbBoss.tbPosDatas then
+    for _, tbPosData in pairs(tbBoss.tbPosDatas) do
+      if nMapTID == tbPosData.nMapTID then
+        local nPosID = tbPosData.nPosID
+        if nPosID then
+          local tbPosCfg = QinShiHuangLing:GetBossPosCfg(nPosID)
+          return tbPosCfg
+        end
+      end
+    end
+  end
+end
+
+function tbWnd:UpdateMapCell(tbElement, nLayerIndex, tbBoss)
+  assert(tbElement)
+  assert(nLayerIndex)
+  local tbData = self:GetLayerData(nLayerIndex, tbBoss)
+  local nTrapIndex
+  local tbBossPosCfg = self:GetBossPosCfg(tbBoss, tbData.nMapTID)
+  if tbBossPosCfg then
+    nTrapIndex = tbBossPosCfg.nTrapIndex
+  end
+  local bStart = nTrapIndex and QinShiHuangLing:GetState() >= QinShiHuangLing.STATE_CREATE_BOSS
+  local bEnd = tbData.bIsDead == true
+  local pPanel = tbElement.pPanel
+  pPanel:Label_SetText("PointInfo/txtLevel", Map:GetMapName(tbData.nMapTID))
+  local szPoint = ""
+  if nTrapIndex then
+    szPoint = _tbPointName[tonumber(nTrapIndex)]()
+  end
+  local szFlag = ""
+  if 0 == tbBoss.nBossID and bEnd then
+    szFlag = tbData.bIsFalseBoss and i18n.EasyGet("\239\188\136\229\129\135\239\188\137") or i18n.EasyGet("\239\188\136\231\156\159\239\188\137")
+  end
+  pPanel:Label_SetText("PointInfo/txtPoint", i18n.EasyGet("{0}{1}", szPoint, szFlag))
+  pPanel:SetActive("PointClear", bEnd)
+  if bEnd then
+    pPanel:Label_SetText("PointClear/txtKillName", i18n.EasyGet("\230\156\128\229\144\142\228\184\128\229\135\187\239\188\154"))
+    pPanel:Label_SetText("PointClear/txtKillName/txtKillNameValue", tbData.szPlayerName)
+    local szOrganization, szTitle
+    if tbData.szTongName then
+      szOrganization = tbData.szTongName
+      szTitle = i18n.EasyGet("\228\188\164\229\174\179\230\156\128\233\171\152\229\184\174\228\188\154\239\188\154")
+    elseif tbData.szKinName then
+      szOrganization = tbData.szKinName
+      szTitle = i18n.EasyGet("\228\188\164\229\174\179\230\156\128\233\171\152\229\174\182\230\151\143\239\188\154")
+    end
+    pPanel:SetActive("PointClear/txtKillTong", nil ~= szOrganization)
+    if szOrganization then
+      pPanel:Label_SetText("PointClear/txtKillTong", szTitle)
+      pPanel:Label_SetText("PointClear/txtKillTong/txtKillTongValue", szOrganization)
+    end
+  end
+  local tbCfg = bStart and tbBossPosCfg or nil
+  Ui:Button_BindEvent(pPanel, "btnGo", function()
+    self:GotoLayerWithIndex(nLayerIndex, tbCfg)
+  end)
+  if QinShiHuangLing:GetState() == QinShiHuangLing.STATE_END_ACT then
+    bStart = false
+  end
+  pPanel:SetActive("imgNonRefresh", not bStart and not bEnd)
+  pPanel:SetActive("imgRefresh", bStart and not bEnd)
+  pPanel:SetActive("imgClosed", bEnd)
+end
+
+function tbWnd:GotoLayerWithIndex(nLayerIndex, tbBossPosCfg)
+  local tbBossPos
+  if tbBossPosCfg then
+    local tbPos = tbBossPosCfg.tbPos[1]
+    tbBossPos = {
+      nMapTID = tonumber(tbBossPosCfg.nMapID),
+      nX = tonumber(tbPos[1]),
+      nY = tonumber(tbPos[2])
+    }
+  end
+  QinShiHuangLing:GotoLayer(nLayerIndex, tbBossPos)
+  self:Close()
+end
+
+function tbWnd:UpdateAwardList(tbAwardArr)
+  self.tbItemView:Reset()
+  for i = 1, #tbAwardArr do
+    local tbItem = tbAwardArr[i]
+    if tbItem then
+      self.tbItemView:SetItem(i, tbItem, true)
+    end
+  end
+end
+
+function tbWnd:OnLeaveMap()
+  Ui:CloseWindow("UIActivity")
+end
+
+function tbWnd:GetBossArr()
+  local tbBossArr = {}
+  local tbServerData = QinShiHuangLing:GetServerData()
+  local tbBossIDArr = QinShiHuangLing:GetBossIDArr()
+  local tbRunData = tbServerData.tbRunData
+  if tbRunData then
+    for _, nBossID in ipairs(tbBossIDArr) do
+      local tbBoss = {
+        nBossID = nBossID,
+        tbPosDatas = tbRunData[nBossID]
+      }
+      table.insert(tbBossArr, tbBoss)
+    end
+    local tbKing = {nBossID = 0}
+    local tbPosDatas = {}
+    for nKingID, _ in pairs(QinShiHuangLing.tbKingIDs) do
+      local tbPosSet = tbRunData[nKingID]
+      if tbPosSet then
+        for k, v in pairs(tbPosSet) do
+          tbPosDatas[k] = v
+        end
+      end
+    end
+    if next(tbPosDatas) then
+      tbKing.tbPosDatas = tbPosDatas
+    end
+    table.insert(tbBossArr, tbKing)
+  end
+  return tbBossArr
+end
+
+function tbWnd:GetBossSeries(tbBoss)
+  assert(tbBoss)
+  local tbSeriesArr = {}
+  if tbBoss.tbPosDatas then
+    for _, v in pairs(tbBoss.tbPosDatas) do
+      table.insert(tbSeriesArr, v.nSeries)
+    end
+  elseif 0 == tbBoss.nBossID then
+    for i = 1, 3 do
+      table.insert(tbSeriesArr, 6)
+    end
+  else
+    local nSeries
+    local tbCfg = _Get(QinShiHuangLing:GetServerData(), "tbBossCfg", tbBoss.nBossID)
+    if tbCfg then
+      nSeries = tbCfg.nSeries
+    end
+    table.insert(tbSeriesArr, nSeries or 6)
+  end
+  return tbSeriesArr
+end
+
+function tbWnd:UpdateSyncData()
+  self.tbBossArr = self:GetBossArr()
+  self:UpdateBossList()
+end
+
+function tbWnd:OnSyncMapData()
+  self:UpdateSyncData()
+end
+
+function tbWnd:OnBossCellSelected(nIndex, tbElement)
+  QinShiHuangLing.nSelectIndex = nIndex
+  self:UpdateMapList()
+end

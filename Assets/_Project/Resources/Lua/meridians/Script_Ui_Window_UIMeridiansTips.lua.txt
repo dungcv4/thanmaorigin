@@ -1,0 +1,347 @@
+local tbWnd = Ui:CreateWindow("UIMeridiansTips")
+local tbControls = {
+  btnSell = "imgBG/btnGroup/btnSell",
+  btnShare = "imgBG/btnGroup/btnShare",
+  btnPutOn = "imgBG/btnGroup/btnPutOn",
+  btnMarketSell = "imgBG/btnGroup/btnMarketSell",
+  txtName = "imgBG/Content/imgTitle/txtTitle",
+  ItemGrid = "imgBG/Content/ItemIntro/ItemGrid",
+  txtCount = "imgBG/Content/ItemIntro/txtNum",
+  txtLevelLimit = "imgBG/Content/ItemIntro/txtLevelLimit",
+  txtFightPower = "imgBG/Content/ItemIntro/txtFightPower",
+  imgMarkEquipped = "imgBG/Content/ItemIntro/imgMarkEquipped",
+  txtTradeLimitState = "imgBG/Content/ItemIntro/txtTradeLimitState",
+  SalePrice = "imgBG/Content/ItemIntro/SalePrice",
+  imgMoney = "imgBG/Content/ItemIntro/SalePrice/imgMoney",
+  txtSalePrice = "imgBG/Content/ItemIntro/SalePrice/txtSalePrice",
+  txtItemTime = "imgBG/Content/ItemIntro/txtItemTime",
+  AttrTemplate = "imgBG/Content/ItemIntro/ScrollView/Viewport/Content/Template/line1",
+  labDesc = "imgBG/Content/ItemIntro/ScrollView/Viewport/Content/labDesc",
+  txtSource = "imgBG/Content/ItemIntro/ScrollView/Viewport/Content/txtSource",
+  UITradeItemPanel = "UITradeItemPanel"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnMarketSell = function(self)
+    if self.nMarketType and self.nItemId then
+      MarketStallBase:QuickSell(self.nMarketType, self.nItemId)
+    end
+  end,
+  btnShare = function(self)
+    if self.nItemId and self.nItemId > 0 then
+      Ui:SetItemToChat(self.nItemId)
+      Ui:CloseWindow("UIBag")
+      self:Close()
+    end
+  end,
+  btnPutOn = function(self)
+    if not Ui:WindowVisible("UIMeridians") then
+      local nJMIndex = 1
+      for i = 1, JingMai.nMaxJingMai do
+        if JingMai:IsSystemOpen(me, i) then
+          nJMIndex = i
+        else
+          break
+        end
+      end
+      local nItemZTIndex = JingMai.tbHuMaiShi2ZHouTianIndex[self.nTemplateId]
+      Ui:OpenWindow("UIMeridians", nJMIndex, nil, nItemZTIndex)
+    end
+  end,
+  btnSell = function(self)
+    if not self.nItemId or self.nItemId <= 0 then
+      return
+    end
+    if Item.tbItemSell:CheckCanSellItem(self.nTemplateId) then
+      Ui:OpenWindow("UIItemSell", self.nItemId, self.nTemplateId)
+      self:Close()
+      return
+    end
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_DEL_ITEM,
+      self.OnDelItem
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.itemGrid = Ui:NewExistItemGrid(self, tbControls.ItemGrid)
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.AttrTemplate, nil, false, true)
+end
+
+function tbWnd:OnOpen(nItemId, nTemplateId, nFaction, nFactionSect, nSex, szOpt, tbItemExtParams, tbLinkInfo)
+  self.nItemId = nItemId
+  self.nTemplateId = nTemplateId
+  self.tbItemExtParams = tbItemExtParams or {}
+  self.tbLinkInfo = tbLinkInfo
+  self.szOpt = szOpt
+  self.tbTradeInfo = self.tbItemExtParams.tbTradeInfo
+  self.nTimer = Timer:Register(Env.GAME_FPS, self.OnUpdate, self)
+  self.pPanel:SetActive(tbControls.UITradeItemPanel, false)
+  self.itemGrid:SetItem(self.nItemId, self.nTemplateId, {bShowTip = false})
+  self.tbTradePanel = {}
+  self:InitUI()
+  self:UpdateItemCount()
+  self:SetTradeInfo()
+  self:UpdateSaleMoney()
+  self:UpdateMatketSell()
+  self:SetItemAttr()
+  self:UpdateTradePanel()
+  if self.nItemId and self.nItemId > 0 and self.szOpt ~= "Market_ItemBox" then
+    self.pPanel:SetActive(tbControls.btnPutOn, true)
+    self.pPanel:Button_SetText(tbControls.btnPutOn, i18n.EasyGet("\232\163\133\229\164\135"), "Text")
+    self.pPanel:SetActive(tbControls.btnShare, true)
+  else
+    self.pPanel:SetActive(tbControls.btnPutOn, false)
+    self.pPanel:SetActive(tbControls.btnShare, false)
+  end
+  if self.nItemId and self.nItemId > 0 and Item.tbItemSell:CheckCanSellItem(self.nTemplateId) and self.szOpt ~= "Market_ItemBox" then
+    self.pPanel:SetActive(tbControls.btnSell, true)
+  else
+    self.pPanel:SetActive(tbControls.btnSell, false)
+  end
+end
+
+function tbWnd:OnClose()
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+  end
+  self.nTimer = nil
+end
+
+function tbWnd:InitUI()
+  self.pPanel:SetActive(tbControls.btnMarketSell, false)
+  self.pPanel:Label_SetText(tbControls.labDesc, "")
+  self.pPanel:Label_SetText(tbControls.txtSource, "")
+  self.pPanel:Label_SetText(tbControls.txtItemTime, "")
+  self.pPanel:Label_SetText(tbControls.txtTradeLimitState, "")
+  self.pPanel:Label_SetText(tbControls.txtFightPower, "")
+  local szName = Item:GetName(self.nTemplateId, me)
+  if szName then
+    if EDITOR then
+      szName = string.format("%s (ID:%d)", szName, self.nTemplateId)
+    end
+    self.pPanel:Label_SetText(tbControls.txtName, szName)
+  end
+  local tbInfo = Item:GetItemBaseProp(self.nTemplateId)
+  if not tbInfo then
+    return
+  end
+  local szIntro2 = i18n.Parse(tbInfo.szIntro)
+  if szIntro2 and "" ~= szIntro2 then
+    szIntro2 = string.gsub(szIntro2, "\\n", "\n")
+    self.pPanel:Label_SetText(tbControls.labDesc, i18n.Parse(szIntro2))
+  end
+  local szSource = i18n.Parse(tbInfo.szSource)
+  if szSource and "" ~= szSource then
+    self.pPanel:Label_SetText(tbControls.txtSource, i18n.EasyGet("\232\142\183\229\143\150\233\128\148\229\190\132\239\188\154{0}", szSource))
+    self.pPanel:Label_SetColorByName(tbControls.txtSource, Item.tbTipsColorDef.ItemSource.ColorName or "Red")
+  end
+  local szRequiteLevel = i18n.EasyGet("\233\156\128\230\177\130\231\173\137\231\186\167\239\188\154\230\151\160\233\153\144\229\136\182")
+  if tbInfo.nRequireLevel then
+    if ZongShiSkill:IsZongShiByLevel(tbInfo.nRequireLevel) then
+      szRequiteLevel = i18n.EasyGet("\233\156\128\230\177\130\231\173\137\231\186\167\239\188\154{0}", tbInfo.nRequireLevel)
+    else
+      szRequiteLevel = i18n.EasyGet("\233\156\128\230\177\130\231\173\137\231\186\167\239\188\154{0}\231\186\167", tbInfo.nRequireLevel)
+    end
+  end
+  self.pPanel:Label_SetText(tbControls.txtLevelLimit, szRequiteLevel)
+end
+
+function tbWnd:GetFightPower()
+  local nFightPower = 0
+  return nFightPower
+end
+
+function tbWnd:UpdateItemCount()
+  if not self.nItemId then
+    self.pPanel:SetActive(self.txtCount, false)
+    return
+  end
+  self:SetItemCount()
+end
+
+function tbWnd:SetItemCount()
+  local pItem = KItem.GetItemObj(self.nItemId)
+  local nHaveNum = pItem and pItem.nCount or 1
+  self.pPanel:Label_SetText(tbControls.txtCount, i18n.EasyGet("\230\139\165\230\156\137<color=#ffb431> {0} </color>\228\187\182", nHaveNum or 0))
+  self.itemGrid:SetLabelSuffixText(tostring(nHaveNum))
+end
+
+function tbWnd:OnUpdate()
+  if not self.nItemId then
+    return
+  end
+  local pItem = KItem.GetItemObj(self.nItemId or 0)
+  if pItem then
+    local bHas, nGenTime, nTimeOut = Item:GetTimeOut(pItem)
+    if bHas then
+      local bIsTimeOut = Item:CheckIsTimeOut(pItem)
+      if bIsTimeOut then
+        self.pPanel:Label_SetText(tbControls.txtItemTime, i18n.EasyGet("\229\183\178\229\164\177\230\149\136"))
+      else
+        local nLeaveSec = nTimeOut - GetTime()
+        local nLeaveTime = Lib:TimeDesc2(nLeaveSec)
+        if nLeaveSec < 600 then
+          nLeaveTime = string.format("<color=#b60000>%s</color>", nLeaveTime)
+        else
+          nLeaveTime = string.format("<color=#ffff0e>%s</color>", nLeaveTime)
+        end
+        self.pPanel:Label_SetText(tbControls.txtItemTime, i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154{0}", nLeaveTime))
+      end
+    end
+  end
+  return true
+end
+
+function tbWnd:SetTradeInfo()
+  if not self.nItemId then
+    return
+  end
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return
+  end
+  local bCanTrade, szTradeWay = self:GetItemTradeText(pItem)
+  if bCanTrade then
+    self.pPanel:Label_SetText(tbControls.txtTradeLimitState, szTradeWay)
+    self.pPanel:Label_SetColorByName(tbControls.txtTradeLimitState, Item.tbTipsColorDef.ItemTransaction.ColorName or "Red")
+  else
+    self.pPanel:Label_SetText(tbControls.txtTradeLimitState, "")
+  end
+end
+
+function tbWnd:GetItemTradeText(pItem)
+  if not pItem.IsInTradeLimit(Item.eTRADELIMITWAY.P2P) then
+    return true, i18n.EasyGet("\229\143\175\228\186\164\230\152\147")
+  end
+  if not pItem.IsInTradeLimit(Item.eTRADELIMITWAY.MARKETSTALL) then
+    return true, i18n.EasyGet("\229\143\175\230\145\134\230\145\138")
+  end
+  return false
+end
+
+function tbWnd:UpdateMatketSell()
+  if not self.nItemId then
+    return
+  end
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return
+  end
+  if self.szOpt == "Market_ItemBox" then
+    return
+  end
+  local nCanMarketStall = false
+  self.nMarketType = nil
+  if pItem and not pItem.IsInTradeLimit(Item.eTRADELIMITWAY.MARKETSTALL) then
+    if MarketStallBase.tbYuanBaoStallItemSettings[pItem.dwTemplateId] then
+      nCanMarketStall = true
+      self.nMarketType = MarketStallBase.tbStallType.YuanBao
+    elseif MarketStallBase.tbGoldStallItemSettings[pItem.dwTemplateId] then
+      nCanMarketStall = true
+      self.nMarketType = MarketStallBase.tbStallType.Gold
+    end
+  end
+  self.pPanel:SetActive(tbControls.btnMarketSell, nCanMarketStall)
+end
+
+function tbWnd:UpdateSaleMoney()
+  if not self.nItemId then
+    self.pPanel:SetActive(tbControls.SalePrice, false)
+    return
+  end
+  local szCurrency, nPrice = Item.tbItemSell:GetSellCurrencyValue(self.nTemplateId, self.nItemId)
+  if szCurrency then
+    self.pPanel:SetActive(tbControls.SalePrice, true)
+    self.pPanel:Label_SetText(tbControls.txtSalePrice, nPrice)
+    local tbCustomData = Item.tbItemSell:GetCustomSellData(szCurrency)
+    local szIcon = tbCustomData.funcGetIcon(szCurrency)
+    self.pPanel:Sprite_SetSprite(tbControls.imgMoney, szIcon)
+  else
+    self.pPanel:SetActive(tbControls.SalePrice, false)
+  end
+end
+
+function tbWnd:SetItemAttr()
+  self.tbScrollView:Reset()
+  local tbHuMaiFuData
+  if self.nItemId and self.nItemId > 0 then
+    local pItem = KItem.GetItemObj(self.nItemId)
+    if pItem then
+      local tbHuMaiFu = Item:GetClass("HuMaiFu")
+      tbHuMaiFuData = tbHuMaiFu:GetAddAttrData(pItem)
+    end
+  else
+    tbHuMaiFuData = self.tbLinkInfo and self.tbLinkInfo.tbHuMaiFuData
+  end
+  if tbHuMaiFuData then
+    local tbAttrInfo = JingMai:GetHuMaiFuAddAttrDesc(tbHuMaiFuData)
+    for i = 1, #tbAttrInfo do
+      self.tbScrollView:SetElement(i, function(tbElement)
+        local pPanel = tbElement.pPanel
+        local szText, nColor = table.unpack(tbAttrInfo[i])
+        if not nColor then
+          pPanel:Label_SetText("txtClass", szText)
+          pPanel:SetActive("Attribute1", false)
+        else
+          pPanel:SetActive("txtClass", false)
+          pPanel:Label_SetText("Attribute1/txtAttr", szText)
+          if type(nColor) == "number" then
+            local szColor, _ = Item:GetQualityColor(nColor)
+            pPanel:Label_SetColorByName("Attribute1/txtAttr", szColor or "White")
+          else
+            pPanel:Label_SetColorByName("Attribute1/txtAttr", nColor or "White")
+          end
+        end
+      end)
+    end
+  end
+end
+
+function tbWnd:UpdateTradePanel()
+  if not self.tbTradeInfo then
+    for _, szWndType in ipairs(self.tbTradePanel) do
+      self.pPanel:SetActive(szWndType, false)
+    end
+    return
+  end
+  local bNotInTBPanel = true
+  local szWndType = self.tbTradeInfo.szWndType
+  for k, v in ipairs(self.tbTradePanel) do
+    if szWndType == v then
+      bNotInTBPanel = false
+      break
+    end
+  end
+  if bNotInTBPanel then
+    local szWnd = Ui:CreatePanel(szWndType, szWndType, self)
+    table.insert(self.tbTradePanel, szWndType)
+    self.tbTradePanelObj = self.tbTradePanelObj or {}
+    self.tbTradePanelObj[szWndType] = szWnd
+  end
+  if "UIMarketStallBuyPanel" == szWndType then
+    self.tbTradePanelObj[szWndType]:OnOpen(self.tbTradeInfo.nStallType, self.tbTradeInfo.nSeTypeId, self.tbTradeInfo.nStallItemTempId, self.tbTradeInfo.tbItem)
+  elseif "UIMarketStallSellPanel" == szWndType then
+    self.tbTradePanelObj[szWndType]:OnOpen(self.tbTradeInfo.nStallType, self.tbTradeInfo.nShowType, self.tbTradeInfo.index, self.tbTradeInfo.bBag, self.tbTradeInfo.tbItem and self.tbTradeInfo.tbItem.nPrice, self.tbTradeInfo.nTimeout)
+  elseif "UITradeItemPanel" == szWndType then
+    self.tbTradePanelObj[szWndType]:OnOpen(self.tbTradeInfo.nItemId, self.tbTradeInfo.nOnTradeCount, self.tbTradeInfo.nMaxCount, self.tbTradeInfo.bOnTrade)
+  end
+  if tbWnd.szlastPanel then
+    self.pPanel:SetActive(tbWnd.szlastPanel, false)
+  end
+  tbWnd.szlastPanel = szWndType
+  self.pPanel:SetActive(szWndType, true)
+end
+
+function tbWnd:OnDelItem(nItemId)
+  if self.nItemId == nItemId then
+    self:Close()
+  end
+end

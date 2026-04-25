@@ -1,0 +1,349 @@
+local tbWnd = Ui:CreateClass("UIEquipLianHua", "UIPanel")
+tbWnd.tbControls = {
+  EquipTemplate = "panelEquipList/imgList/List/Template",
+  txtEquipNameBefore = "panelLianHua/EquipBefore/txtEquipName",
+  txtLianHuaStateBefore = "panelLianHua/EquipBefore/txtLianHuaState",
+  goUIItemGridBefore = "panelLianHua/EquipBefore/UIItemGrid",
+  txtEquipNameAfter = "panelLianHua/EquipAfter/txtEquipName",
+  txtLianHuaStateAfter = "panelLianHua/EquipAfter/txtLianHuaState",
+  goUIItemGridAfter = "panelLianHua/EquipAfter/UIItemGrid",
+  AttributeBasic = "panelLianHua/BasicAttr/Attribute",
+  AttributeSuit = "panelConsume/SuitAttr/Attribute",
+  txtLevelSuit = "panelConsume/SuitAttr/txtLevel",
+  goCost = "panelConsume/Cost",
+  txtFeeValue = "panelConsume/Cost/txtLianHuaFee/txtFeeValue",
+  goUIItemGridConsume1 = "panelConsume/Cost/itme1/UIItemGrid",
+  txtItemNumConsume1 = "panelConsume/Cost/itme1/txtItemNum",
+  goUIItemGridConsume2 = "panelConsume/Cost/itme2/UIItemGrid",
+  txtItemNumConsume2 = "panelConsume/Cost/itme2/txtItemNum",
+  txtMaxLvTip = "panelLianHua/txtMaxLvTip",
+  btnLianHua = "panelConsume/btnLianHua",
+  EquipLianHua_Effect = "EquipLianHua_Effect",
+  imgDiscountLine = "panelConsume/Cost/itme2/imgDiscountLine",
+  txtItemDiscountNum = "panelConsume/Cost/itme2/imgDiscountLine/txtItemDiscountNum",
+  txtLianHuaAllLevel = "panelLianHua/btnLianHuaLvBg/LianHuaLv/txtValue",
+  btnAttributeLook = "panelLianHua/btnAttributeLook"
+}
+tbWnd.tbOnClick = {
+  btnLianHua = function(self)
+    local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+    local bRet, szErr = Item.EquipLianHua:CanLianHua(me, nEquipPos)
+    if not bRet then
+      if szErr == i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179") then
+        GainCurrency:ReadyForJump("Coin")
+      else
+        me.CenterMsg(szErr)
+      end
+      return
+    end
+    RemoteServer.OnEquipLianHuaRequest("LianHuaReq", nEquipPos)
+  end,
+  btnAttributeLook = function(self)
+    self.tbOwner:ShowLianHuaGradeScoreInfo()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbEquipScrollView = Ui:NewScrollView(self, self.EquipTemplate, self.OnEquipClick, false, true)
+  self.tbUIItemGridBefore = Ui:NewExistItemGrid(self, self.goUIItemGridBefore)
+  self.tbUIItemGridBefore:SetClickEnable(false)
+  self.tbUIItemGridAfter = Ui:NewExistItemGrid(self, self.goUIItemGridAfter)
+  self.tbUIItemGridAfter:SetClickEnable(false)
+  self.tbUIItemGridConsume1 = Ui:NewExistItemGrid(self, self.goUIItemGridConsume1)
+  self.tbUIItemGridConsume1:SetClickEnable(false)
+  self.tbUIItemGridConsume2 = Ui:NewExistItemGrid(self, self.goUIItemGridConsume2)
+  self.tbUIItemGridConsume2:SetClickEnable(false)
+end
+
+function tbWnd:OnOpen(nEquipPos)
+  self.nEquipIndex = 1
+  self.tbSVData = {}
+  local tbEquip = me.GetEquips()
+  for k, v in pairs(tbEquip) do
+    if k <= Item.EQUIPPOS_AMULET then
+      local pEquip = KItem.GetItemObj(v)
+      table.insert(self.tbSVData, {
+        k,
+        v,
+        Item.tbEquipSort[pEquip.nEquipPos]
+      })
+    end
+  end
+  
+  local function fnEquipSortCmp(a, b)
+    return a[3] < b[3]
+  end
+  
+  table.sort(self.tbSVData, fnEquipSortCmp)
+  for i = #self.tbSVData, 1, -1 do
+    local nEPos = self.tbSVData[i][1]
+    local pEquip = KItem.GetItemObj(self.tbSVData[i][2])
+    if pEquip and pEquip.nLevel < Item.EquipLianHua.tbMinLeveLimit[nEPos] then
+      table.remove(self.tbSVData, i)
+    end
+  end
+  if nEquipPos then
+    for k, v in ipairs(self.tbSVData) do
+      if v[1] == nEquipPos then
+        self.nEquipIndex = k
+        break
+      end
+    end
+  end
+  self:UpdateLianHuaEquipSV()
+  self:UpdateEquipDetailInfo()
+  self.tbEquipScrollView:ScrollToIndex(self.nEquipIndex)
+  self:UpdateBtnLookState()
+end
+
+function tbWnd:OnClose()
+  if self.nEffectTimer then
+    Timer:Close(self.nEffectTimer)
+  end
+  self.nEffectTimer = nil
+  self.pPanel:SetActive(self.EquipLianHua_Effect, false)
+end
+
+function tbWnd:NotifyLianHua(szParam)
+  local tbElement = self.tbEquipScrollView:GetElement(self.nEquipIndex)
+  local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+  local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, nEquipPos)
+  tbElement.pPanel:Label_SetText("txtLianHuaLevel/txtLevelValue", tostring(nLianHuaLevel))
+  self:EquipfnSetItem(self.nEquipIndex, tbElement)
+  self:UpdateEquipDetailInfo()
+  if szParam and "showeffect" == szParam then
+    if self.nEffectTimer then
+      Timer:Close(self.nEffectTimer)
+      self.pPanel:SetActive(self.EquipLianHua_Effect, false)
+    end
+    self.pPanel:SetActive(self.EquipLianHua_Effect, true)
+    self.nEffectTimer = Timer:Register(Env.GAME_FPS * 2, function()
+      self.pPanel:SetActive(self.EquipLianHua_Effect, false)
+      self.nEffectTimer = nil
+    end)
+  end
+end
+
+function tbWnd:EquipfnSetItem(i, tbElement)
+  local nEquipPos, nEquipId = self.tbSVData[i][1], self.tbSVData[i][2]
+  local pEquip = KItem.GetItemObj(nEquipId)
+  if not pEquip then
+    return
+  end
+  local pPanel = tbElement.pPanel
+  local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  itemGrid:SetItem(nEquipId, pEquip.dwTemplateId)
+  itemGrid:SetClickEnable(true, function()
+    self:OnEquipClick(i)
+  end)
+  tbElement.pPanel:SetActive("imgSelected", i == self.nEquipIndex)
+  local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, nEquipPos)
+  pPanel:Label_SetText("txtEquipName", Item:GetName(pEquip.dwTemplateId, me))
+  if Item.EquipLianHua:CheckEquipLevel(nEquipPos, pEquip.nLevel) then
+    pPanel:Label_SetColor("txtLianHuaLevel", 0.17647058823529413, 0.17647058823529413, 0.17647058823529413)
+    pPanel:Label_SetText("txtLianHuaLevel", i18n.EasyGet("\231\130\188\229\140\150\229\147\129\233\152\182"))
+    pPanel:Label_SetText("txtLianHuaLevel/txtLevelValue", tostring(nLianHuaLevel))
+  else
+    pPanel:Label_SetColorByName("txtLianHuaLevel", "Red")
+    pPanel:Label_SetText("txtLianHuaLevel", i18n.EasyGet("\229\147\129\233\152\182\228\184\141\232\182\179"))
+    pPanel:Label_SetText("txtLianHuaLevel/txtLevelValue", "")
+  end
+  pPanel:Label_SetText("txtLianHuaLevel/txtPrgLevelValue", string.format("(%d/%d)", tostring(nLianHuaLevel), pEquip.nLevel))
+  RedPointMgr:DynamicRegisteRedPoint(pPanel, "Main", {
+    Item.EquipLianHua.tbEquipPos2RedPoint[nEquipPos]
+  })
+end
+
+function tbWnd:UpdateLianHuaEquipSV()
+  self.tbEquipScrollView:Reset()
+  for i, v in pairs(self.tbSVData) do
+    self.tbEquipScrollView:SetElement(i, function(tbElement)
+      self:EquipfnSetItem(i, tbElement)
+    end)
+  end
+end
+
+function tbWnd:OnEquipClick(nIndex)
+  if self.nEquipIndex == nIndex then
+    return
+  end
+  local tbOldElement = self.tbEquipScrollView:GetElement(self.nEquipIndex)
+  if tbOldElement then
+    tbOldElement.pPanel:SetActive("imgSelected", false)
+  end
+  self.nEquipIndex = nIndex
+  local tbCurElement = self.tbEquipScrollView:GetElement(self.nEquipIndex)
+  tbCurElement.pPanel:SetActive("imgSelected", true)
+  self:UpdateEquipDetailInfo()
+end
+
+function tbWnd:UpdateEquipDetailInfo()
+  if not self.tbSVData[self.nEquipIndex] then
+    return
+  end
+  local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+  local pEquip = me.GetEquipByPos(nEquipPos)
+  if not pEquip then
+    return
+  end
+  local tbLHMGR = Item.EquipLianHua
+  self.pPanel:Label_SetText(self.txtLianHuaAllLevel, tbLHMGR:GetLianHuaLevelCount(me))
+  local nCurLevel = tbLHMGR:GetLianHuaLevel(me, nEquipPos)
+  self.tbUIItemGridBefore:SetItem(pEquip.dwId, pEquip.dwTemplateId)
+  self.tbUIItemGridBefore:SetClickEnable(true)
+  local tbItemExtParams = {
+    nLianHuaLevel = pEquip.nLevel
+  }
+  self.tbUIItemGridAfter:SetItem(pEquip.dwId, pEquip.dwTemplateId, nil, me.nFaction, me.nFactionSect, me.nSex, nil, nil, tbItemExtParams)
+  self.tbUIItemGridAfter:SetClickEnable(true)
+  self.pPanel:Label_SetText(self.txtEquipNameBefore, Item:GetName(pEquip.dwTemplateId, me))
+  self.pPanel:Label_SetText(self.txtLianHuaStateAfter, i18n.EasyGet("\231\130\188\229\140\150\229\147\129\233\152\182{0}", pEquip.nLevel))
+  if pEquip.nLevel == nCurLevel then
+    self.pPanel:Label_SetText(self.txtEquipNameAfter, Item:GetName(pEquip.dwTemplateId, me))
+  else
+    self.pPanel:Label_SetText(self.txtEquipNameAfter, string.format("%s\194\183%s", Item.EquipLianHua.tbEquipPos2NamePrefix[nEquipPos](), Item:GetName(pEquip.dwTemplateId, me)))
+  end
+  if nCurLevel <= 0 then
+    self.pPanel:Label_SetText(self.txtLianHuaStateBefore, i18n.EasyGet("\230\156\170\231\130\188\229\140\150"))
+  else
+    self.pPanel:Label_SetText(self.txtLianHuaStateBefore, i18n.EasyGet("\231\130\188\229\140\150\229\147\129\233\152\182{0}", nCurLevel))
+  end
+  local nMinLevelLimit = Item.EquipLianHua.tbMinLeveLimit[nEquipPos]
+  if nMinLevelLimit > pEquip.nLevel then
+    self.pPanel:SetActive(self.txtMaxLvTip, false)
+    self.pPanel:SetActive(self.goCost, false)
+    self.pPanel:SetActive(self.btnLianHua, false)
+  else
+    self.pPanel:SetActive(self.btnLianHua, true)
+    if nCurLevel >= pEquip.nLevel then
+      self.pPanel:SetActive(self.txtMaxLvTip, false)
+      self.pPanel:SetActive(self.goCost, false)
+    else
+      self.pPanel:SetActive(self.goCost, true)
+      self.pPanel:SetActive(self.txtMaxLvTip, false)
+      self:UpdateConsumeInfo(nCurLevel, pEquip)
+    end
+  end
+  self:UpdateAttrInfo(pEquip)
+end
+
+function tbWnd:UpdateAttrInfo(pEquip)
+  local tbBaseAttrib = pEquip.GetBaseAttrib()
+  local nCurLevel = Item.EquipLianHua:GetLianHuaLevel(me, pEquip.nEquipPos)
+  local tbAttrLianHua = Item.EquipLianHua:GetLianHuaBaseAttrib(pEquip)
+  for i = 1, Item.EquipLianHua.ATTR_NUM_LIMIT do
+    local tbCurAttrNum = tbBaseAttrib[i].tbValue
+    local tbNextAttrNum = {}
+    tbNextAttrNum[1] = tbCurAttrNum[1] + tbAttrLianHua[i][2]
+    tbNextAttrNum[2] = tbCurAttrNum[2] + tbAttrLianHua[i][3]
+    tbNextAttrNum[3] = tbCurAttrNum[3] + tbAttrLianHua[i][4]
+    if nCurLevel == pEquip.nLevel then
+      tbCurAttrNum = tbNextAttrNum
+    end
+    local szDesc, szValueCur = FightSkill:GetMagicDescSplit(tbBaseAttrib[i].szName, tbCurAttrNum)
+    local _, szValueNext = FightSkill:GetMagicDescSplit(tbBaseAttrib[i].szName, tbNextAttrNum)
+    self.pPanel:Label_SetText(string.format("%s%d%s", self.AttributeBasic, i, "/txtAttribute"), szDesc)
+    local szSubValue = FightSkill:StringValueSubResult(szValueCur, szValueNext)
+    self.pPanel:Label_SetText(string.format("%s%d%s", self.AttributeBasic, i, "/txtValue"), szValueCur)
+    self.pPanel:Label_SetText(string.format("%s%d%s", self.AttributeBasic, i, "/txtNewValue"), szValueNext)
+    if "" == szSubValue then
+      self.pPanel:Label_SetText(string.format("%s%d%s", self.AttributeBasic, i, "/txtAddValue"), "")
+    else
+      self.pPanel:Label_SetText(string.format("%s%d%s", self.AttributeBasic, i, "/txtAddValue"), szSubValue)
+    end
+  end
+  self:UpdateSuitAttrInfo(pEquip)
+end
+
+function tbWnd:FindSuitCfg(pEquip)
+  for _, v in ipairs(Item.EquipLianHua.SuitAttrValue) do
+    for k, v1 in ipairs(v[0]) do
+      if v1 == pEquip.nEquipPos then
+        return v
+      end
+    end
+  end
+end
+
+function tbWnd:UpdateSuitAttrInfo(pEquip)
+  local nSuitIndex, tbSuitCfg = Item.EquipLianHua:FindSuitCfgByEquipPos(pEquip.nEquipPos)
+  if not tbSuitCfg then
+    return
+  end
+  local nAllCount = #tbSuitCfg[0]
+  local nCurCount = 0
+  for i = 1, nAllCount do
+    local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, tbSuitCfg[0][i])
+    if nLianHuaLevel > 0 then
+      nCurCount = nCurCount + 1
+    end
+  end
+  local szSuitName = Item.EquipLianHua:GetLianHuaSuitName(nSuitIndex)
+  self.pPanel:Label_SetText(self.txtLevelSuit, i18n.EasyGet("{0}({1}/{2})", i18n.Get(szSuitName), nCurCount, nAllCount))
+  for i = 1, 3 do
+    local txtSuit = string.format("%s%d%s", self.AttributeSuit, i, "/txtSuit")
+    local txtAttribute = string.format("%s%d%s", self.AttributeSuit, i, "/txtAttribute")
+    local txtValue = string.format("%s%d%s", self.AttributeSuit, i, "/txtValue")
+    local tbSuitNum = Item.EquipLianHua.tbSuit2EquipNum[nSuitIndex]
+    if nCurCount >= tbSuitNum[i] then
+      self.pPanel:Label_SetColorByName(txtSuit, "Green")
+      self.pPanel:Label_SetColorByName(txtAttribute, "Green")
+      self.pPanel:Label_SetColorByName(txtValue, "Green")
+    else
+      self.pPanel:Label_SetColorByName(txtSuit, "Gray2")
+      self.pPanel:Label_SetColorByName(txtAttribute, "Gray2")
+      self.pPanel:Label_SetColorByName(txtValue, "Gray2")
+    end
+    self.pPanel:Label_SetText(txtSuit, i18n.EasyGet("{0}\228\187\182\229\165\151", tbSuitNum[i]))
+    local szDesc, szValue = FightSkill:GetMagicDescSplit(tbSuitCfg[i][1], {
+      tbSuitCfg[i][2],
+      tbSuitCfg[i][3],
+      tbSuitCfg[i][4]
+    })
+    self.pPanel:Label_SetText(txtAttribute, szDesc)
+    self.pPanel:Label_SetText(txtValue, szValue)
+  end
+end
+
+function tbWnd:UpdateConsumeInfo(nCurLevel, pEquip)
+  local nItemId, nNum, nCoin, nMaterialNum = Item.EquipLianHua:GetLianHuaConsumeInfo(nCurLevel, pEquip.nLevel, pEquip.nEquipPos)
+  if nItemId <= 0 then
+    return
+  end
+  self.tbUIItemGridConsume1:SetItemByTemplate(nItemId)
+  self.tbUIItemGridConsume1:SetClickEnable(true)
+  local nCurItemNum = me.GetItemCountByTypeInBag(nItemId)
+  if nNum <= nCurItemNum then
+    self.pPanel:Label_SetColorByName(self.txtItemNumConsume1, "Enough")
+  else
+    self.pPanel:Label_SetColorByName(self.txtItemNumConsume1, "NotEnough")
+  end
+  self.pPanel:Label_SetText(self.txtItemNumConsume1, nCurItemNum .. "/" .. nNum)
+  local nMaterialId = Item.EquipLianHua.nLianHuaMaterialId
+  self.tbUIItemGridConsume2:SetItemByTemplate(nMaterialId)
+  self.tbUIItemGridConsume2:SetClickEnable(true)
+  local nCurMaterialNum = me.GetItemCountByTypeInBag(nMaterialId)
+  if nMaterialNum <= nCurMaterialNum then
+    self.pPanel:Label_SetColorByName(self.txtItemNumConsume2, "Enough")
+  else
+    self.pPanel:Label_SetColorByName(self.txtItemNumConsume2, "NotEnough")
+  end
+  self.pPanel:Label_SetText(self.txtItemNumConsume2, nCurMaterialNum .. "/" .. nMaterialNum)
+  local nOrgNum = Item.EquipLianHua.LianHuaInfo[pEquip.nEquipPos][pEquip.nLevel][3]
+  if nMaterialNum < nOrgNum then
+    self.pPanel:SetActive(self.imgDiscountLine, true)
+    self.pPanel:Label_SetText(self.txtItemDiscountNum, nOrgNum)
+  else
+    self.pPanel:SetActive(self.imgDiscountLine, false)
+  end
+  self.pPanel:Label_SetText(self.txtFeeValue, nCoin)
+end
+
+function tbWnd:UpdateBtnLookState()
+  local tbInfoCfg = Item.EquipLianHua:GetLianHuaScoreCfg()
+  if not tbInfoCfg then
+    self.pPanel:SetActive(self.btnAttributeLook, false)
+  else
+    self.pPanel:SetActive(self.btnAttributeLook, true)
+  end
+end

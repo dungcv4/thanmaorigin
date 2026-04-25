@@ -1,0 +1,1082 @@
+local tbUi = Ui:CreateClass("UISocial_TeacherPanel", "UIPanel")
+tbUi.tbControls = {
+  btnApplyList = "btnApplyList",
+  btnAdd = "StuNumObj/btnAdd",
+  btnReport = "RightPlayerInfo/TaskListObj/btnReport",
+  btnCancelDismiss = "RightPlayerInfo/btnCancelDismiss",
+  btnFindTea = "EmptyObj/TeacherRulesObj/btnFindTea",
+  btnFindStu = "EmptyObj/StudentRulesObj/btnFindStu",
+  btnAwardsView = "RoleInfoObj/btnAwardsView",
+  btnYIShi = "RoleInfoObj/btnYIShi",
+  btnGoto = "TeaGuideObj/btnGoto",
+  btnCancelTea = "TeaGuideObj/btnCancelTea",
+  btnSendTeaGift = "RoleInfoObj/btnSendTeaGift",
+  btnTeaAdd1 = "TeaAndStuList/Player1/btnTeaAdd1",
+  btnTeaAdd2 = "TeaAndStuList/Player2/btnTeaAdd2",
+  btnStuAdd1 = "TeaAndStuList/Player3/btnStuAdd1",
+  btnStuAdd2 = "TeaAndStuList/Player4/btnStuAdd2",
+  btnTea1 = "TeaAndStuList/Player1",
+  btnTea2 = "TeaAndStuList/Player2",
+  btnTeacherShop = "btnTeacherShop",
+  txtStudentNum = "StuNumObj/StudentNumber/txtStudentNum"
+}
+local template = {
+  taskItemTemplate = "RightPlayerInfo/TaskListObj/TaskListScrollView/Viewport/Grid/Item",
+  StuTemplate = "TeaAndStuList/StuScrollView/Viewport/paneBG/PrenticeTemplate"
+}
+local tbChuanGongIcon = {
+  szSendIconPath = "UI/atlas/Family/btn_kin_chuangong.png",
+  szRecieveIconPath = "UI/atlas/Family/btn_kin_beichuangong.png",
+  szDisableSendIconPath = "UI/atlas/Family/btn_kin_chuangong_disable.png",
+  szDisableRecieveIconPath = "UI/atlas/Family/btn_kin_beichuangong_disable.png"
+}
+
+function tbUi:OnCreate()
+  self.tbSelectedTask = {}
+  self.tbSelectedTask2TaskId = {}
+  self.tbIdList = {}
+  self.nGraduated = 0
+  self.tbTaskScrollView = Ui:NewLoopScrollView(self, template.taskItemTemplate)
+  self.tbStuScrollView = Ui:NewScrollView(self, template.StuTemplate, function(self, nIndex, tbElement)
+    if self.nTeaStuIndex == nIndex + 2 then
+      return
+    end
+    self.nTeaStuIndex = nIndex + 2
+    self.bSelectTeaStu = true
+    self.nSelectId = self.tbIdList[self.nTeaStuIndex]
+    self:UpdateView()
+  end, nil, true)
+  self.PutongStuAwardsItem = Ui:NewExistItemGrid(self, "EmptyObj/TeacherRulesObj/PutongStuAwardsItem/UIItemGrid")
+  self.JiechuStuAwardsItem = Ui:NewExistItemGrid(self, "EmptyObj/TeacherRulesObj/JiechuStuAwardsItem/UIItemGrid")
+  self.PutongTeaAwardsItem = Ui:NewExistItemGrid(self, "EmptyObj/StudentRulesObj/PutongTeaAwardsItem/UIItemGrid")
+  self.JiechuTeaAwardsItem = Ui:NewExistItemGrid(self, "EmptyObj/StudentRulesObj/JiechuTeaAwardsItem/UIItemGrid")
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnApplyList, {
+    RedPointMgr.EVENT.MP_TeacherApply
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnReport, {
+    RedPointMgr.EVENT.MP_btnTaskReport,
+    RedPointMgr.EVENT.MP_btnGoalReport
+  })
+end
+
+function tbUi:OnOpen(nSelectId)
+  self.nSelectId = nSelectId
+  self.nGraduated = 0
+  self.nTeaStuIndex = 0
+  self.tbIdList = {}
+  self.bCompleted = false
+  self:UpdateView()
+end
+
+function tbUi:UpdateView()
+  local tbTeaStuData = self:UpdateLeftList()
+  self:UpdateGuideInfo(not tbTeaStuData)
+  if tbTeaStuData then
+    self.bSelectTeaStu = false
+    if self.nSelectId then
+      for key, value in pairs(tbTeaStuData) do
+        if self.nSelectId and self.nSelectId == value.dwId then
+          self.nTeaStuIndex = key
+          self.bSelectTeaStu = true
+          break
+        end
+      end
+    end
+    if not self.bSelectTeaStu then
+      for key, value in pairs(tbTeaStuData) do
+        self.nTeaStuIndex = key
+        break
+      end
+    end
+    self.tbLastTeacherData = tbTeaStuData[self.nTeaStuIndex]
+    self:UpdateTeacherInfo(self.tbLastTeacherData)
+  end
+  for i = 1, 2 do
+    if self.nTeaStuIndex == i then
+      self.pPanel:SetActive(string.format("TeaAndStuList/Player%d/PlayerInfor/imgSelect", i), true)
+    else
+      self.pPanel:SetActive(string.format("TeaAndStuList/Player%d/PlayerInfor/imgSelect", i), false)
+    end
+  end
+  for i = 1, self.nGraduated + 2 do
+    local nIdx = i + 2
+    if self.nTeaStuIndex == nIdx then
+      self.pPanel:SetActive(string.format("TeaAndStuList/StuScrollView/Viewport/paneBG/Element%d/PlayerInfor/imgSelect", i), true)
+    else
+      self.pPanel:SetActive(string.format("TeaAndStuList/StuScrollView/Viewport/paneBG/Element%d/PlayerInfor/imgSelect", i), false)
+    end
+    self.nGraduated = 0
+  end
+end
+
+function tbUi:UpdateLeftList()
+  local masterCtrl = MasterPrentice:GetMPInfo()
+  local tbTeaStuData = {}
+  local bUpdate = false
+  local bEmpty = true
+  if masterCtrl.tbMyMaster then
+    for i = 1, 2 do
+      if masterCtrl.tbMyMaster[i] then
+        self.pPanel:SetActive(string.format("TeaAndStuList/Player%d/btnTeaAdd%d", i, i), false)
+        self.pPanel:SetActive(string.format("TeaAndStuList/Player%d/PlayerInfor", i), true)
+        local dwId = masterCtrl.tbMyMaster[i]
+        local tbTempData = {dwId = dwId, bMaster = 1}
+        tbTeaStuData[i] = tbTempData
+        bUpdate = true
+        bEmpty = false
+        self.tbIdList[i] = dwId
+        self.pPanel:SetActive(string.format("TeaAndStuList/Player%d/PlayerInfor/imgRedPoint", i), false)
+        self:updatePlayerInfo(string.format("TeaAndStuList/Player%d", i), tbTempData)
+        self.pPanel:SetActive(string.format("TeaAndStuList/Player%d/btnChat", i), true)
+        Ui:Button_BindEvent(self.pPanel, string.format("TeaAndStuList/Player%d/btnChat", i), self.OnChatSomeone, self, dwId)
+      else
+        self.pPanel:SetActive(string.format("TeaAndStuList/Player%d/btnTeaAdd%d", i, i), true)
+        self.pPanel:SetActive(string.format("TeaAndStuList/Player%d/PlayerInfor", i), false)
+        self.pPanel:SetActive(string.format("TeaAndStuList/Player%d/btnChat", i), false)
+      end
+    end
+  else
+    self.pPanel:SetActive("TeaAndStuList/Player1/btnTeaAdd1", true)
+    self.pPanel:SetActive("TeaAndStuList/Player2/btnTeaAdd2", true)
+    self.pPanel:SetActive("TeaAndStuList/Player1/PlayerInfor", false)
+    self.pPanel:SetActive("TeaAndStuList/Player2/PlayerInfor", false)
+    self.pPanel:SetActive("TeaAndStuList/Player1/btnChat", false)
+    self.pPanel:SetActive("TeaAndStuList/Player2/btnChat", false)
+  end
+  self.tbStuScrollView:Reset()
+  if masterCtrl.tbMyPrentices then
+    if masterCtrl.tbMyPrentices[1] then
+      for i = 1, #masterCtrl.tbMyPrentices[1] do
+        local dwId = masterCtrl.tbMyPrentices[1][i]
+        local tbTempData = {dwId = dwId, bMaster = 0}
+        tbTeaStuData[2 + i] = tbTempData
+        bUpdate = true
+        bEmpty = false
+        self.tbStuScrollView:SetElement(i, function(tbItem)
+          self:updatePlayerInfo(string.format("TeaAndStuList/StuScrollView/Viewport/paneBG/Element%d", i), tbTempData, true)
+          self.tbIdList[i + 2] = dwId
+        end)
+      end
+      if 1 == #masterCtrl.tbMyPrentices[1] then
+        self.tbStuScrollView:SetElement(2, function(tbItem)
+          self:updatePlayerInfo(string.format("TeaAndStuList/StuScrollView/Viewport/paneBG/Element%d", 2), nil, true, true)
+        end)
+      elseif 0 == #masterCtrl.tbMyPrentices[1] then
+        for i = 1, 2 do
+          self.tbStuScrollView:SetElement(i, function(tbItem)
+            self:updatePlayerInfo(string.format("TeaAndStuList/StuScrollView/Viewport/paneBG/Element%d", i), nil, true, true)
+          end)
+        end
+      end
+    end
+    self.pPanel:Label_SetText(self.txtStudentNum, string.format("%d/%d", #masterCtrl.tbMyPrentices[1], MasterPrentice.Def.MAX_PRENTICE_COUNT))
+    if masterCtrl.tbMyPrentices[2] then
+      self.nGraduated = #masterCtrl.tbMyPrentices[2]
+      for i = 1, #masterCtrl.tbMyPrentices[2] do
+        local dwId = masterCtrl.tbMyPrentices[2][i]
+        local tbTempData = {
+          dwId = dwId,
+          bMaster = 0,
+          bGraduated = 1
+        }
+        local nElement = 2 + i
+        tbTeaStuData[2 + nElement] = tbTempData
+        bUpdate = true
+        bEmpty = false
+        self.tbStuScrollView:SetElement(nElement, function(tbItem)
+          self:updatePlayerInfo(string.format("TeaAndStuList/StuScrollView/Viewport/paneBG/Element%d", nElement), tbTempData, true)
+          self.tbIdList[nElement + 2] = dwId
+        end)
+      end
+    end
+  else
+    for i = 1, 2 do
+      self.tbStuScrollView:SetElement(i, function(tbItem)
+        self:updatePlayerInfo(string.format("TeaAndStuList/StuScrollView/Viewport/paneBG/Element%d", i), nil, true, true)
+      end)
+    end
+    self.pPanel:Label_SetText(self.txtStudentNum, string.format("0/%d", MasterPrentice.Def.MAX_PRENTICE_COUNT))
+  end
+  if bUpdate then
+    self.tbTeaStuData = tbTeaStuData
+  end
+  if bEmpty then
+    self.tbTeaStuData = nil
+    self.nTeaStuIndex = 0
+  end
+  return self.tbTeaStuData
+end
+
+function tbUi:updatePlayerInfo(szPlayer, tbItem, bPrentice, bEmpty)
+  self.pPanel:SetActive(szPlayer .. "/btnChat", false)
+  if bPrentice and true == bEmpty then
+    self.pPanel:SetActive(szPlayer .. "/btnStuAdd", true)
+    Ui:Button_BindEvent(self.pPanel, szPlayer .. "/btnStuAdd", function()
+      self:TryFindPlayer(1)
+    end)
+    self.pPanel:SetActive(szPlayer .. "/PlayerInfor", false)
+    return
+  else
+    if bPrentice then
+      self.pPanel:SetActive(szPlayer .. "/btnStuAdd", false)
+      self.pPanel:SetActive(szPlayer .. "/PlayerInfor", true)
+    end
+    local tbInfo = FriendShip:GetFriendDataInfo(tbItem.dwId)
+    local tbPlayerInfo = MasterPrentice._CacheTable[tbItem.dwId]
+    local tbPortraitObj = Ui:NewExistPortraitObjPanel(self, szPlayer .. "/PlayerInfor/PortraitObj")
+    if tbInfo then
+      local tbInfo2 = {
+        szName = tbInfo.szName,
+        nPortrait = tbInfo.nPortrait,
+        nPortraitFrame = tbInfo.nPortraitFrame
+      }
+      tbPortraitObj:SetRoleIcon(tbInfo2.nPortrait)
+      tbPortraitObj:SetPortraitFrame(tbInfo2.nPortraitFrame)
+      tbPortraitObj:SetFactionIcon(tbInfo.nFaction)
+      tbPortraitObj:SetLevel(tbInfo.nLevel)
+      self.pPanel:Label_SetText(szPlayer .. "/PlayerInfor/PlayerName/txtPlayerName", tbInfo2.szName)
+      Ui:Button_BindEvent(self.pPanel, szPlayer .. "/PlayerInfor/PortraitObj", self.onClickShowFriendDetails, self, tbInfo)
+      local szHonorName, nFontColor = HonorLevel:GetHonorNameByStarLevel(tbInfo.nHonorStarLevel, false)
+      local szPath = szPlayer .. "/PlayerInfor/PlayerName/HonorTitle"
+      local obj = self.pPanel:GetObject(szPath)
+      local pHonorTitle = obj:GetComponent(Ui.UIHonorTitle)
+      pHonorTitle:SetHonorTitle(i18n.Parse(szHonorName), nFontColor)
+    elseif tbPlayerInfo then
+      local tbInfo2 = {
+        szName = tbPlayerInfo.szName,
+        nPortrait = tbPlayerInfo.nPortrait
+      }
+      tbPortraitObj:SetRoleIcon(tbInfo2.nPortrait)
+      tbPortraitObj:SetFactionIcon(tbPlayerInfo.nFaction)
+      tbPortraitObj:SetLevel(tbPlayerInfo.nLevel)
+      self.pPanel:Label_SetText(szPlayer .. "/PlayerInfor/PlayerName/txtPlayerName", tbInfo2.szName)
+      Ui:Button_BindEvent(self.pPanel, szPlayer .. "/PlayerInfor/PortraitObj", self.onClickShowFriendDetails, self, tbPlayerInfo)
+      local szHonorName, nFontColor = HonorLevel:GetHonorNameByStarLevel(tbPlayerInfo.nHonorStarLevel, false)
+      local szPath = szPlayer .. "/PlayerInfor/PlayerName/HonorTitle"
+      local obj = self.pPanel:GetObject(szPath)
+      local pHonorTitle = obj:GetComponent(Ui.UIHonorTitle)
+      pHonorTitle:SetHonorTitle(i18n.Parse(szHonorName), nFontColor)
+    else
+      self.pPanel:SetActive(szPlayer .. "/PlayerInfor/PlayerName/HonorTitle", false)
+    end
+    local bOnline = tbInfo and tbInfo.nState == Player.emPLAYER_STATE_NORMAL
+    local szOnlineState
+    if tbPlayerInfo then
+      szOnlineState = self:GetOnlineState(bOnline, tbPlayerInfo.nLastOnlineTime)
+    else
+      szOnlineState = self:GetOnlineState(bOnline, GetTime())
+    end
+    if szOnlineState then
+      self.pPanel:SetActive(szPlayer .. "/PlayerInfor/txtOutline", true)
+      self.pPanel:SetActive(szPlayer .. "/PlayerInfor/txtOnline", false)
+      self.pPanel:Label_SetText(szPlayer .. "/PlayerInfor/txtOutline", szOnlineState)
+      self.pPanel:SetActive(szPlayer .. "/btnChat", true)
+      Ui:Button_BindEvent(self.pPanel, szPlayer .. "/btnChat", self.OnChatSomeone, self, tbItem.dwId)
+    else
+      self.pPanel:SetActive(szPlayer .. "/PlayerInfor/txtOutline", false)
+      self.pPanel:SetActive(szPlayer .. "/PlayerInfor/txtOnline", true)
+      self.pPanel:SetActive(szPlayer .. "/btnChat", true)
+      Ui:Button_BindEvent(self.pPanel, szPlayer .. "/btnChat", self.OnChatSomeone, self, tbItem.dwId)
+    end
+    self.pPanel:SetActive(szPlayer .. "/PlayerInfor/imgMarkCom", tbItem.bGraduated)
+    tbPortraitObj:SetOutlineObjActive(tbInfo and tbInfo.nState ~= Player.emPLAYER_STATE_NORMAL)
+    tbPortraitObj:SetOutlineText(Lib:IIF(tbInfo and tbInfo.nState == Player.emPLAYER_STATE_ZONE, i18n.EasyGet("\232\183\168\230\156\141"), i18n.EasyGet("\231\166\187\231\186\191")))
+    self.pPanel:SetActive(szPlayer .. "/PlayerInfor", true)
+    local tbMPData = MasterPrentice:GetMPData(tbItem.dwId, me.dwID)
+    if tbMPData and tbInfo then
+      if tbMPData.status == MasterPrentice.Def.STATUS_AFTER_APPENTICE then
+        if MasterPrentice.tbTaskComlated and MasterPrentice.tbTaskComlated[tbItem.dwId] and 2 == tbInfo.nState then
+          self.pPanel:SetActive(szPlayer .. "/PlayerInfor/imgRedPoint", true)
+        end
+      elseif tbMPData.status == MasterPrentice.Def.STATUS_APPRENTICE and MasterPrentice.tbGoalComlated and MasterPrentice.tbGoalComlated[tbItem.dwId] and 2 == tbInfo.nState then
+        self.pPanel:SetActive(szPlayer .. "/PlayerInfor/imgRedPoint", true)
+      end
+    end
+  end
+end
+
+function tbUi:UpdateApprenticeGuide(bShow, bMaster)
+  self.pPanel:SetActive("RightPlayerInfo", not bShow)
+  self.pPanel:SetActive("TeaGuideObj", bShow)
+  self.pPanel:SetActive(self.btnSendTeaGift, false)
+  local txtGuideDetail = i18n.EasyGet("\228\184\128. \229\135\134\229\184\136\229\190\146\229\143\140\230\150\185\231\187\132\233\152\159\229\137\141\229\190\128\228\184\180\229\174\137\229\159\142\231\154\132\229\184\136\229\190\146\231\174\161\231\144\134\229\145\152\230\137\128\229\156\168\229\156\176\231\130\185\227\128\130")
+  txtGuideDetail = string.format([[
+%s
+%s]], txtGuideDetail, i18n.EasyGet("\228\186\140. \229\135\134\229\184\136\231\136\182\228\189\156\228\184\186\233\152\159\233\149\191\228\184\142\229\184\136\229\190\146\231\174\161\231\144\134\229\145\152\229\175\185\232\175\157\239\188\140\233\128\137\230\139\169\226\128\156\227\128\144\231\187\132\233\152\159\227\128\145\230\139\156\229\184\136\230\148\182\229\190\146\226\128\157\227\128\130"))
+  txtGuideDetail = string.format([[
+%s
+%s]], txtGuideDetail, i18n.EasyGet("\228\184\137. \230\139\156\229\184\136\228\187\170\229\188\143\230\173\163\229\188\143\229\174\140\230\136\144\239\188\140\229\184\136\229\190\146\229\133\179\231\179\187\231\188\148\231\187\147\230\136\144\229\138\159\227\128\130"))
+  txtGuideDetail = string.format([[
+%s
+%s]], txtGuideDetail, i18n.EasyGet("\229\155\155. \232\175\183\233\152\133\232\175\187\229\184\136\229\190\146\231\179\187\231\187\159\231\154\132\229\184\174\229\138\169\233\161\187\231\159\165\239\188\140\228\187\148\231\187\134\228\186\134\232\167\163\229\184\136\229\190\146\231\179\187\231\187\159\231\142\169\230\179\149\227\128\130"))
+  self.pPanel:Label_SetText("TeaGuideObj/txtGuideDetail", txtGuideDetail)
+  if 1 == bMaster then
+    self.pPanel:Label_SetText("TeaGuideObj/btnGoto/Text", i18n.EasyGet("\229\137\141\229\190\128\230\139\156\229\184\136"))
+  else
+    self.pPanel:Label_SetText("TeaGuideObj/btnGoto/Text", i18n.EasyGet("\229\137\141\229\190\128\230\148\182\229\190\146"))
+  end
+end
+
+function tbUi:UpdateTeacherInfo(tbTeacherData)
+  if not tbTeacherData then
+    return
+  end
+  local roleId = tbTeacherData.dwId
+  local tbMPData = self:GetMPData(tbTeacherData)
+  local tbPlayerInfo = MasterPrentice._CacheTable[roleId]
+  if not tbPlayerInfo then
+    LogErr("No PlayerInfo", me.dwID, roleId)
+    MasterPrentice:CheckMPInfo()
+    return
+  end
+  local bShowGift = false
+  local szTitle, szDesc = "", ""
+  if tbMPData.status == MasterPrentice.Def.STATUS_APPRENTICE then
+    self.pPanel:SetActive("RoleInfoObj", true)
+    self.pPanel:SetActive(self.btnYIShi, true)
+    self:UpdateApprenticeGuide(false)
+    szTitle = i18n.EasyGet("\229\135\186\229\184\136\230\157\161\228\187\182")
+    local nApprenticeDay = tbMPData.nApprenticeTime and math.floor((GetTime() - tbMPData.nApprenticeTime) / 86400) or 0
+    local nNeedApprenticeDay = math.floor(MasterPrentice.Cfg.TIME_GRADUATE / 86400)
+    nApprenticeDay = nApprenticeDay <= nNeedApprenticeDay and nApprenticeDay or nNeedApprenticeDay
+    szDesc = string.format("%s%s", szDesc, i18n.EasyGet("1.\229\174\140\230\136\144{0}\228\184\170\229\184\136\229\190\146\231\155\174\230\160\135({1}/{0})\239\188\140\229\174\140\230\136\14448\228\184\170\229\143\175\229\174\140\231\190\142\229\135\186\229\184\136", MasterPrentice.Cfg.GRADUATE_GOAL_COUNT1, MasterPrentice.MPTask:GetFinishedGoalCount(tbMPData) or 0))
+    szDesc = string.format([[
+%s
+%s]], szDesc, i18n.EasyGet("2.\230\139\156\229\184\136{0}\229\164\169\229\144\142({1}/{0})", nNeedApprenticeDay, nApprenticeDay))
+    szDesc = string.format([[
+%s
+%s]], szDesc, i18n.EasyGet("3.\228\184\190\232\161\140\232\191\135\230\139\156\229\184\136\228\187\170\229\188\143({0}/1)", tbMPData.bCeremony and 1 or 0))
+  elseif tbMPData.status == MasterPrentice.Def.STATUS_AFTER_APPENTICE then
+    self.pPanel:SetActive("RoleInfoObj", true)
+    self.pPanel:SetActive(self.btnYIShi, false)
+    self:UpdateApprenticeGuide(false)
+    local tbInfo = FriendShip:GetFriendDataInfo(roleId)
+    if tbInfo and 2 == tbInfo.nState then
+      bShowGift = 1 ~= tbTeacherData.bMaster and not tbMPData.bGift and true or false
+    end
+    if 1 ~= tbTeacherData.bMaster then
+      szTitle = i18n.EasyGet("\229\135\186\229\184\136\229\144\142\230\175\143\229\145\168\229\143\175\228\184\186\229\190\146\229\188\159\229\184\131\231\189\174\230\156\128\229\164\154{0}\228\184\170\228\187\187\229\138\161\239\188\140\229\190\146\229\188\159\229\174\140\230\136\144\229\144\142\229\143\175\232\142\183\229\190\151\228\184\176\229\142\154\229\144\141\230\156\155\229\165\150\229\138\177", MasterPrentice.Cfg.WEEK_TASK_COUNT)
+    else
+      szTitle = i18n.EasyGet("\229\135\186\229\184\136\229\144\142\230\175\143\229\145\168\229\143\175\228\187\165\229\144\145\229\184\136\231\136\182\231\148\179\232\175\183\229\184\131\231\189\174{0}\228\184\170\228\187\187\229\138\161\239\188\140\229\174\140\230\136\144\228\187\187\229\138\161\229\144\142\229\143\175\232\142\183\229\190\151\228\184\176\229\142\154\231\187\143\233\170\140\229\165\150\229\138\177", MasterPrentice.Cfg.WEEK_TASK_COUNT)
+    end
+    local taskCount = 0
+    for i, v in pairs(tbMPData.tbTaskList or {}) do
+      taskCount = taskCount + 1
+    end
+    if 0 == taskCount then
+      if tbMPData.nLastTaskWeek >= Lib:GetLocalWeek(GetTime() - 14400) then
+        szDesc = i18n.EasyGet("\230\156\172\229\145\168\228\187\187\229\138\161\229\183\178\229\174\140\230\136\144")
+      elseif 1 ~= tbTeacherData.bMaster then
+        szDesc = i18n.EasyGet("\230\156\172\229\145\168\228\187\187\229\138\161\232\191\152\230\156\170\229\184\131\231\189\174\239\188\140\229\191\171\229\142\187\229\184\131\231\189\174\228\187\187\229\138\161\229\144\167")
+      else
+        szDesc = i18n.EasyGet("\230\156\172\229\145\168\228\187\187\229\138\161\232\191\152\230\156\170\229\184\131\231\189\174\239\188\140\229\191\171\230\143\144\233\134\146\229\184\136\231\136\182\229\184\131\231\189\174\228\187\187\229\138\161\229\144\167")
+      end
+    elseif tbMPData.nLastTaskWeek >= Lib:GetLocalWeek(GetTime() - 14400) then
+      szDesc = i18n.EasyGet("\228\187\187\229\138\161\229\183\178\229\184\131\231\189\174\239\188\136\230\156\172\229\145\168\239\188\137")
+    else
+      szDesc = i18n.EasyGet("\228\187\187\229\138\161\229\183\178\229\184\131\231\189\174\239\188\136\233\157\158\230\156\172\229\145\168\239\188\137")
+    end
+  end
+  self.pPanel:Label_SetText("RoleInfoObj/info/txtBattleNum", szTitle)
+  self.pPanel:Label_SetText("RoleInfoObj/info/txtTip", szDesc)
+  self.pPanel:SetActive("RoleInfoObj/info/txtRiQi", true)
+  self.pPanel:Label_SetText("RoleInfoObj/info/txtRiQi", i18n.EasyGet("\228\186\142{0}\231\187\147\228\184\186\229\184\136\229\190\146", Lib:TimeDesc10(tbMPData.nApprenticeTime or 0)))
+  self.pPanel:SetActive(self.btnSendTeaGift, bShowGift)
+  if 1 == tbMPData.bDismiss and tbMPData.nDismissTime then
+    if me.dwID == tbMPData.ApplyDismissID then
+      MasterPrentice:QueryDismissApply(me.dwID, roleId)
+    elseif roleId == tbMPData.ApplyDismissID then
+      MasterPrentice:QueryDismissApply(roleId, me.dwID)
+    end
+  else
+    self.pPanel:SetActive("RightPlayerInfo/txtDismissTime", false)
+    self.pPanel:SetActive("RightPlayerInfo/btnCancelDismiss", false)
+  end
+  self.pPanel:SetActive("RightPlayerInfo/TaskListObj", true)
+  self:UpdateTaskInfo(tbTeacherData, tbMPData)
+end
+
+function tbUi:UpdateDismissData(tbApply)
+  if not tbApply then
+    return
+  end
+  local szTime = Lib:TimeDesc5(tbApply.nTime + tbApply.nLifeTime - GetTime())
+  local szDismissMsg = ""
+  if tbApply.nFromId == me.dwID then
+    szDismissMsg = i18n.EasyGet("\230\173\163\229\156\168\231\148\179\232\175\183\232\167\163\233\153\164\229\184\136\229\190\146\229\133\179\231\179\187\239\188\154{0}", szTime)
+    self.pPanel:SetActive("RightPlayerInfo/btnCancelDismiss", true)
+    Ui:Button_BindEvent(self.pPanel, "RightPlayerInfo/btnCancelDismiss", function()
+      local function fnConfirm()
+        local roleId = tbApply.nToId
+        
+        if 1 == self.tbLastTeacherData.bMaster then
+          RemoteServer.MasterPrentictRequest("DoCancelDismiss", roleId, 0)
+        else
+          RemoteServer.MasterPrentictRequest("DoCancelDismiss", roleId, 1)
+        end
+        local tbNewMPData = self:GetMPData(self.tbLastTeacherData)
+        if 1 == tbNewMPData.bRetCancelDismiss then
+          self.pPanel:SetActive("RightPlayerInfo/btnCancelDismiss", false)
+          self.pPanel:SetActive("RightPlayerInfo/txtDismissTime", false)
+        end
+      end
+      
+      me.MsgBox(i18n.EasyGet("\229\176\134\229\143\150\230\182\136\231\148\179\232\175\183\232\167\163\233\153\164\229\184\136\229\190\146\229\133\179\231\179\187\239\188\140\230\152\175\229\144\166\231\187\167\231\187\173\239\188\159"), {
+        {
+          i18n.EasyGet("\231\161\174\229\174\154"),
+          fnConfirm
+        },
+        {
+          i18n.EasyGet("\229\143\150\230\182\136")
+        }
+      })
+    end)
+    self.pPanel:SetActive("RightPlayerInfo/txtDismissTime", true)
+  elseif tbApply.nToId == me.dwID then
+    szDismissMsg = i18n.EasyGet("\229\175\185\230\150\185\230\173\163\229\156\168\231\148\179\232\175\183\232\167\163\233\153\164\229\184\136\229\190\146\229\133\179\231\179\187\239\188\154{0}", szTime)
+    self.pPanel:SetActive("RightPlayerInfo/btnCancelDismiss", false)
+    self.pPanel:SetActive("RightPlayerInfo/txtDismissTime", true)
+  end
+  self.pPanel:Label_SetText("RightPlayerInfo/txtDismissTime", szDismissMsg)
+  self.pPanel:SetActive(self.btnSendTeaGift, false)
+end
+
+function tbUi:UpdateGuideInfo(bEmpty)
+  self.pPanel:SetActive("EmptyObj", bEmpty)
+  self.pPanel:SetActive("TeaGuideObj", not bEmpty)
+  self.pPanel:SetActive("RightPlayerInfo", not bEmpty)
+  self.pPanel:SetActive("RoleInfoObj", not bEmpty)
+  if not bEmpty then
+    return
+  end
+  local bEnable1, bEnable2 = true, true
+  local masterCtrl = MasterPrentice:GetMPInfo()
+  self.pPanel:Label_SetText("EmptyObj/TeacherRulesObj/txtTeaRule01", i18n.EasyGet("\231\142\169\229\174\182\232\167\146\232\137\178\232\190\190\229\136\176{0}\231\186\167", MasterPrentice.Cfg.PRENTICE_LEVEL))
+  if me.nLevel < MasterPrentice.Cfg.PRENTICE_LEVEL then
+    self.pPanel:SetActive("EmptyObj/TeacherRulesObj/txtTeaRule01/imgRight", false)
+    bEnable1 = false
+  else
+    self.pPanel:SetActive("EmptyObj/TeacherRulesObj/txtTeaRule01/imgRight", true)
+  end
+  if masterCtrl.tbMyMaster and #masterCtrl.tbMyMaster >= 2 then
+    self.pPanel:SetActive("EmptyObj/TeacherRulesObj/txtTeaRule00/imgRight", false)
+    bEnable1 = false
+  else
+    self.pPanel:SetActive("EmptyObj/TeacherRulesObj/txtTeaRule02/imgRight", true)
+  end
+  if masterCtrl.ApprenticeTimeCD and (masterCtrl.ApprenticeTimeCD[2] or 0) > GetTime() then
+    self.pPanel:SetActive("EmptyObj/TeacherRulesObj/txtTeaRule03/imgRight", false)
+    bEnable1 = false
+  else
+    self.pPanel:SetActive("EmptyObj/TeacherRulesObj/txtTeaRule03/imgRight", true)
+  end
+  if bEnable1 then
+    self.pPanel:SetActive("EmptyObj/TeacherRulesObj/txtTeaConform", true)
+    self.pPanel:SetActive("EmptyObj/TeacherRulesObj/txtTeaUnconform", false)
+  else
+    self.pPanel:SetActive("EmptyObj/TeacherRulesObj/txtTeaUnconform", true)
+    self.pPanel:SetActive("EmptyObj/TeacherRulesObj/txtTeaConform", false)
+  end
+  local tbLimitLevel = MasterPrentice.Cfg.MASTER_LEVEL
+  local nLimitLevel = 0
+  for szOpenTime, nLevel in pairs(tbLimitLevel) do
+    if 1 == GetTimeFrameState(szOpenTime) then
+      nLimitLevel = math.max(nLimitLevel, nLevel)
+    end
+  end
+  self.pPanel:Label_SetText("EmptyObj/StudentRulesObj/txtStuRule01", i18n.EasyGet("\231\142\169\229\174\182\232\167\146\232\137\178\232\190\190\229\136\176{0}\231\186\167", nLimitLevel))
+  if nLimitLevel > me.nLevel then
+    self.pPanel:SetActive("EmptyObj/StudentRulesObj/txtStuRule01/imgRight", false)
+    bEnable2 = false
+  else
+    self.pPanel:SetActive("EmptyObj/StudentRulesObj/txtStuRule01/imgRight", true)
+  end
+  if masterCtrl.tbMyPrentices and #masterCtrl.tbMyPrentices[1] >= 2 then
+    self.pPanel:SetActive("EmptyObj/StudentRulesObj/txtStuRule02/imgRight", false)
+    bEnable2 = false
+  else
+    self.pPanel:SetActive("EmptyObj/StudentRulesObj/txtStuRule02/imgRight", true)
+  end
+  if masterCtrl.ApprenticeTimeCD and (masterCtrl.ApprenticeTimeCD[1] or 0) > GetTime() then
+    self.pPanel:SetActive("EmptyObj/StudentRulesObj/txtStuRule03/imgRight", false)
+    bEnable2 = false
+  else
+    self.pPanel:SetActive("EmptyObj/StudentRulesObj/txtStuRule03/imgRight", true)
+  end
+  if bEnable2 then
+    self.pPanel:SetActive("EmptyObj/StudentRulesObj/txtStuConform", true)
+    self.pPanel:SetActive("EmptyObj/StudentRulesObj/txtStuUnconform", false)
+  else
+    self.pPanel:SetActive("EmptyObj/StudentRulesObj/txtStuUnconform", true)
+    self.pPanel:SetActive("EmptyObj/StudentRulesObj/txtStuConform", false)
+  end
+  local tbAward = MasterPrentice.Def.tbGraduateAward
+  self.PutongStuAwardsItem:SetGenericItemTemplate(tbAward[1][1], tbAward[2][1])
+  self.JiechuStuAwardsItem:SetGenericItemTemplate(tbAward[1][2], tbAward[2][2])
+  self.PutongTeaAwardsItem:SetGenericItemTemplate(tbAward[1][3], tbAward[2][3])
+  self.JiechuTeaAwardsItem:SetGenericItemTemplate(tbAward[1][4], tbAward[2][4])
+  self.PutongStuAwardsItem:SetClickEnable(true)
+  self.JiechuStuAwardsItem:SetClickEnable(true)
+  self.PutongTeaAwardsItem:SetClickEnable(true)
+  self.JiechuTeaAwardsItem:SetClickEnable(true)
+end
+
+function tbUi:ToggleTask(taskId)
+  if self.tbSelectedTask[taskId] then
+    self.tbSelectedTask[taskId] = nil
+  else
+    self.tbSelectedTask[taskId] = 1
+  end
+  return self.tbSelectedTask[taskId]
+end
+
+function tbUi:IsTaskActive(taskId)
+  return self.tbSelectedTask[taskId]
+end
+
+function tbUi:SetMPTaskForEveryPrentice(tbTask)
+  if #tbTask ~= MasterPrentice.Cfg.WEEK_TASK_COUNT then
+    return
+  end
+  
+  local function fnAgree()
+    local masterCtrl = MasterPrentice:GetMPInfo()
+    if masterCtrl and masterCtrl.tbMyPrentices and masterCtrl.tbMyPrentices[2] then
+      for _, nPrenticeId in pairs(masterCtrl.tbMyPrentices[2]) do
+        local tbMPData = MasterPrentice:GetMPData(me.dwID, nPrenticeId)
+        if tbMPData and tbMPData.nLastTaskWeek < Lib:GetLocalWeek(GetTime() - 14400) then
+          MasterPrentice:SetMPTask(nPrenticeId, tbTask)
+        end
+      end
+    end
+  end
+  
+  local function fnCancel()
+  end
+  
+  Ui:OpenWindow("UIMessageBoxBig", i18n.EasyGet("\230\152\175\229\144\166\228\184\186\229\133\182\228\189\153\229\183\178\229\135\186\229\184\136\229\190\146\229\188\159\229\184\131\231\189\174\231\155\184\229\144\140\228\187\187\229\138\161\239\188\159"), {fnAgree, fnCancel}, {
+    i18n.EasyGet("\231\161\174\229\174\154"),
+    i18n.EasyGet("\229\143\150\230\182\136")
+  })
+end
+
+local function fnSetTask(self, tbTeacherData)
+  local nPrenticeId = tbTeacherData.dwId
+  local tbInfo = FriendShip:GetFriendDataInfo(nPrenticeId)
+  if not tbInfo or 2 ~= tbInfo.nState then
+    me.CenterMsg(i18n.EasyGet("\229\190\146\229\188\159\228\184\141\229\156\168\231\186\191\239\188\140\228\184\141\229\143\175\228\187\165\229\143\145\229\184\131\228\187\187\229\138\161\229\147\166"))
+    return
+  end
+  local tbTask = {}
+  for k, v in pairs(self.tbSelectedTask) do
+    if v and self.tbSelectedTask2TaskId[k] then
+      table.insert(tbTask, self.tbSelectedTask2TaskId[k])
+    end
+  end
+  
+  local function fnAgree()
+    MasterPrentice:SetMPTask(nPrenticeId, tbTask)
+    if #tbTask == MasterPrentice.Cfg.WEEK_TASK_COUNT then
+      self:SetMPTaskForEveryPrentice(tbTask)
+    end
+  end
+  
+  if #tbTask ~= MasterPrentice.Cfg.WEEK_TASK_COUNT then
+    if #tbTask > MasterPrentice.Cfg.WEEK_TASK_COUNT then
+      me.CenterMsg(i18n.EasyGet("\230\175\143\229\145\168\230\156\128\229\164\154\229\143\170\232\131\189\229\184\131\231\189\174{0}\228\184\170\228\187\187\229\138\161\239\188\129", MasterPrentice.Cfg.WEEK_TASK_COUNT))
+      return
+    elseif 0 == #tbTask then
+      me.CenterMsg(i18n.EasyGet("\232\175\183\232\135\179\229\176\145\229\139\190\233\128\137\228\184\128\228\184\170\228\187\187\229\138\161"))
+    else
+      me.MsgBox(i18n.EasyGet("\230\156\172\229\145\168\229\184\131\231\189\174\231\154\132\228\187\187\229\138\161\230\149\176\233\135\143\228\184\141\232\182\179{0}\228\184\170\239\188\140\230\152\175\229\144\166\231\161\174\229\174\154\239\188\159", MasterPrentice.Cfg.WEEK_TASK_COUNT), {
+        {
+          i18n.EasyGet("\231\161\174\229\174\154"),
+          fnAgree
+        },
+        {
+          i18n.EasyGet("\229\143\150\230\182\136")
+        }
+      }, nil, -1, nil)
+      return
+    end
+  else
+    me.MsgBox(i18n.EasyGet("\230\152\175\229\144\166\231\161\174\229\174\154\229\184\131\231\189\174\232\191\153\228\186\155\228\187\187\229\138\161?\229\184\131\231\189\174\229\144\142\228\184\141\229\143\175\230\155\180\230\141\162\229\133\182\228\187\150\228\187\187\229\138\161"), {
+      {
+        i18n.EasyGet("\231\161\174\229\174\154"),
+        fnAgree
+      },
+      {
+        i18n.EasyGet("\229\143\150\230\182\136")
+      }
+    }, nil, -1, nil)
+  end
+end
+
+local function fnAskTask(self, tbTeacherData)
+  local nMasterId = tbTeacherData.dwId
+  local tbInfo = FriendShip:GetFriendDataInfo(nMasterId)
+  if not tbInfo or 2 ~= tbInfo.nState then
+    me.CenterMsg(i18n.EasyGet("\229\184\136\231\136\182\228\184\141\229\156\168\231\186\191\239\188\140\230\151\160\230\179\149\231\148\179\232\175\183\228\187\187\229\138\161\229\147\166"))
+    return
+  end
+  MasterPrentice:AskMPTask(nMasterId)
+end
+
+local function fnReportTask(self, tbTeacherData)
+  local nMasterId = tbTeacherData.dwId
+  local tbMPData = self:GetMPData(tbTeacherData)
+  local nFinishedTaskCount, nPrenticeExp = MasterPrentice.MPTask:GetFinishedTaskCount(tbMPData)
+  
+  local function fnAgree()
+    MasterPrentice:ReportTask(nMasterId)
+  end
+  
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\156\172\230\172\161\229\145\168\229\184\184\228\187\187\229\138\161\228\184\128\229\133\177\229\174\140\230\136\144\228\186\134{0}\228\184\170\239\188\140\n\229\133\177\232\174\161\229\143\175\232\142\183\229\190\151{1}\231\187\143\233\170\140\239\188\140\230\152\175\229\144\166\231\161\174\229\174\154\228\184\138\228\186\164\239\188\159\n(<color=#ffff0e>\228\184\138\228\186\164\229\144\142\230\156\172\229\145\168\229\176\134\230\151\160\230\179\149\231\187\167\231\187\173\229\174\140\230\136\144\229\136\171\231\154\132\228\187\187\229\138\161</color>)", nFinishedTaskCount, nPrenticeExp), {
+    {fnAgree},
+    {}
+  }, {
+    i18n.EasyGet("\231\161\174\229\174\154"),
+    i18n.EasyGet("\229\143\150\230\182\136")
+  })
+end
+
+local function fnReportGoal(self, tbTeacherData)
+  local nMasterId = tbTeacherData.dwId
+  MasterPrentice.tbGoalComlated = MasterPrentice.tbGoalComlated or {}
+  MasterPrentice:ReportGoal(nMasterId)
+end
+
+local function _GetReport(tbLastTeacherData, tbMPData)
+  if tbMPData.status == MasterPrentice.Def.STATUS_APPRENTICE then
+    if 1 == tbLastTeacherData.bMaster then
+      return true, fnReportGoal, i18n.EasyGet("\230\177\135\230\138\165\228\187\187\229\138\161")
+    else
+      return false, nil, ""
+    end
+  elseif tbMPData.status == MasterPrentice.Def.STATUS_AFTER_APPENTICE then
+    local taskCount, bReported = 0, tbMPData.bReportedTask
+    for i, v in pairs(tbMPData.tbTaskList or {}) do
+      taskCount = taskCount + 1
+    end
+    if 0 == tbLastTeacherData.bMaster then
+      if 0 == taskCount then
+        return true, fnSetTask, i18n.EasyGet("\229\143\145\229\184\131\228\187\187\229\138\161"), true
+      end
+    elseif 0 == taskCount then
+      return true, fnAskTask, i18n.EasyGet("\231\148\179\232\175\183\228\187\187\229\138\161")
+    elseif 1 ~= bReported then
+      return true, fnReportTask, i18n.EasyGet("\228\184\138\228\186\164\228\187\187\229\138\161")
+    end
+  end
+  return false
+end
+
+function tbUi:UpdateTaskInfo(tbLastTeacherData, tbMPData)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.MP_btnTaskReport)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.MP_btnGoalReport)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.MP_TaskReport)
+  self.tbSelectedTask = {}
+  self.tbSelectedTask2TaskId = {}
+  local taskType, tbTasks = 0, {}
+  local bShowButton, szButton
+  if tbMPData.status == MasterPrentice.Def.STATUS_APPRENTICE then
+    tbTasks = MasterPrentice.MPTask.tbGoalSetting
+    taskType = 1
+    local tbInfo = FriendShip:GetFriendDataInfo(tbLastTeacherData.dwId)
+    if MasterPrentice.tbGoalComlated and MasterPrentice.tbGoalComlated[tbLastTeacherData.dwId] and tbInfo and 2 == tbInfo.nState then
+      RedPointMgr:LightRedPoint(RedPointMgr.EVENT.MP_btnGoalReport)
+    end
+  elseif tbMPData.status == MasterPrentice.Def.STATUS_AFTER_APPENTICE then
+    tbTasks = MasterPrentice.MPTask.tbTaskSetting
+    taskType = 2
+    local tbInfo = FriendShip:GetFriendDataInfo(tbLastTeacherData.dwId)
+    if MasterPrentice.tbTaskComlated and MasterPrentice.tbTaskComlated[tbLastTeacherData.dwId] and tbInfo and 2 == tbInfo.nState then
+      RedPointMgr:LightRedPoint(RedPointMgr.EVENT.MP_btnTaskReport)
+    end
+  else
+    return
+  end
+  bShowButton, _, szButton = _GetReport(tbLastTeacherData, tbMPData)
+  self.pPanel:Label_SetText("RightPlayerInfo/TaskListObj/btnReport/Text", szButton)
+  self.pPanel:SetActive("RightPlayerInfo/TaskListObj/btnReport", bShowButton)
+  self.pPanel:SetActive("RightPlayerInfo/TaskListObj/ListTitleObj/txtStuAwards", 1 == tbLastTeacherData.bMaster)
+  self.pPanel:SetActive("RightPlayerInfo/TaskListObj/ListTitleObj/txtTeaAwards", 0 == tbLastTeacherData.bMaster)
+  self.tbTaskScrollView:Clear()
+  if tbMPData.tbTaskList and Lib:CountTB(tbMPData.tbTaskList) > 0 then
+    self:updateWeekTaskInfo(tbMPData, tbTasks, taskType, tbLastTeacherData)
+  else
+    self.bCompleted = false
+    local tbNewTasks = {}
+    for nId, tbInfo in pairs(tbTasks) do
+      local nStartTimeFrame = 1
+      local nEndTimeFrame = 0
+      if not Lib:IsEmptyStr(tbInfo.StartTimeFrame) then
+        nStartTimeFrame = GetTimeFrameState(tbInfo.StartTimeFrame)
+      end
+      if not Lib:IsEmptyStr(tbInfo.EndTimeFrame) then
+        nEndTimeFrame = GetTimeFrameState(tbInfo.EndTimeFrame)
+      end
+      if 1 == nStartTimeFrame and 0 == nEndTimeFrame then
+        table.insert(tbNewTasks, tbInfo)
+        table.insert(self.tbSelectedTask2TaskId, tbInfo.ID)
+      end
+    end
+    self:updateGoalInfo(tbMPData, tbNewTasks, taskType, tbLastTeacherData)
+  end
+end
+
+function tbUi:updateWeekTaskInfo(tbMPData, tbTasks, taskType, tbLastTeacherData)
+  local tbIndexList = {}
+  for nIndex in pairs(tbMPData.tbTaskList) do
+    tbIndexList[#tbIndexList + 1] = nIndex
+  end
+  
+  local function setItemFunc(tbLoopScroll, nIndex, this)
+    local nNewIndex = tbIndexList[nIndex]
+    local tbInfo = tbMPData.tbTaskList[nNewIndex]
+    local tbElement = tbLoopScroll:GetElement(nIndex)
+    local pPanel = tbElement.pPanel
+    this:SetTaskListData(tbElement, tbTasks[nNewIndex], taskType, tbMPData, this, tbLastTeacherData.bMaster, this.tbSelectedTask[nNewIndex])
+    pPanel:SetActive("TaskCheckBox", false)
+  end
+  
+  self.tbTaskScrollView:Clear()
+  self.tbTaskScrollView:SetElement(Lib:CountTB(tbMPData.tbTaskList), setItemFunc)
+  self.tbTaskScrollView:GoTop()
+end
+
+function tbUi:updateGoalInfo(tbMPData, tbTasks, taskType, tbLastTeacherData)
+  local bApprentice, bCanChuanGong
+  if tbMPData.status == MasterPrentice.Def.STATUS_APPRENTICE then
+    local nLastChuangong = tbMPData.nLastChuangongDate or 0
+    bCanChuanGong = nLastChuangong >= Lib:GetLocalDay(GetTime() - 14400) and 0 or 1
+    bApprentice = true
+  end
+  
+  local function setItemFunc(tbLoopScroll, nIndex, this)
+    local tbElement = tbLoopScroll:GetElement(nIndex)
+    if bApprentice then
+      if 1 == nIndex then
+        tbElement.pPanel:Label_SetText("txtTask", i18n.EasyGet("\229\184\136\229\190\146\228\188\160\229\138\159"))
+        tbElement.pPanel:SetActive("txtProgress", true)
+        tbElement.pPanel:Label_SetText("txtProgress", string.format("%d/1", 1 == bCanChuanGong and 0 or 1))
+        tbElement.pPanel:SetActive("btnChuangong", true)
+        tbElement.pPanel:SetActive("TaskCheckBox", false)
+        tbElement.pPanel:SetActive("txtAwards", false)
+        tbElement.pPanel:SetActive("txtCompleted", false)
+        tbElement.pPanel:SetActive("txtSubmission", false)
+        tbElement.pPanel:SetActive("txtCompletedAgo", false)
+        local dwRoleId, bMaster = self.tbLastTeacherData.dwId, self.tbLastTeacherData.bMaster
+        local Relation = MasterPrentice:GetRelation(me, dwRoleId)
+        if 1 == bCanChuanGong then
+          tbElement.pPanel:Button_SetEnable("btnChuangong", true)
+          Ui:Button_BindEvent(tbElement.pPanel, "btnChuangong", self.OnClickChuanGong, self)
+          if Relation == MasterPrentice.Def.Relation_Master then
+            tbElement.pPanel:Sprite_SetSprite("btnChuangong", tbChuanGongIcon.szRecieveIconPath)
+          elseif Relation == MasterPrentice.Def.Relation_Prentice then
+            tbElement.pPanel:Sprite_SetSprite("btnChuangong", tbChuanGongIcon.szSendIconPath)
+          end
+        else
+          Ui:Button_UnBindEvent(tbElement.pPanel, "btnChuangong")
+          if Relation == MasterPrentice.Def.Relation_Master then
+            tbElement.pPanel:Sprite_SetSprite("btnChuangong", tbChuanGongIcon.szDisableRecieveIconPath)
+          elseif Relation == MasterPrentice.Def.Relation_Prentice then
+            tbElement.pPanel:Sprite_SetSprite("btnChuangong", tbChuanGongIcon.szDisableSendIconPath)
+          end
+        end
+        return
+      end
+      nIndex = nIndex - 1
+    end
+    local tbInfo = tbTasks[nIndex]
+    if 1 == tbLastTeacherData.bGraduated then
+      tbElement.pPanel:SetActive("TaskCheckBox", true)
+      Ui:Toggle_BindEvent(tbElement.pPanel, "TaskCheckBox", function(self, isOn)
+        if true == isOn then
+          self.tbSelectedTask[nIndex] = 1
+        else
+          self.tbSelectedTask[nIndex] = nil
+        end
+        local nNowTaskNum = 0
+        for k, v in pairs(self.tbSelectedTask) do
+          if v then
+            nNowTaskNum = nNowTaskNum + 1
+          end
+        end
+        if nNowTaskNum > MasterPrentice.Cfg.WEEK_TASK_COUNT then
+          me.CenterMsg(i18n.EasyGet("\230\175\143\229\145\168\230\156\128\229\164\154\229\143\170\232\131\189\229\184\131\231\189\174{0}\228\184\170\228\187\187\229\138\161\239\188\129", MasterPrentice.Cfg.WEEK_TASK_COUNT))
+          tbElement.pPanel:Toggle_SetChecked("TaskCheckBox", false)
+          return
+        end
+        if nNowTaskNum > 0 then
+          if nNowTaskNum > MasterPrentice.Cfg.WEEK_TASK_COUNT then
+            nNowTaskNum = MasterPrentice.Cfg.WEEK_TASK_COUNT
+          end
+          self.pPanel:SetActive("RightPlayerInfo/txtDismissTime", true)
+          self.pPanel:Label_SetText("RightPlayerInfo/txtDismissTime", i18n.EasyGet("\229\183\178\233\128\137\230\139\169\239\188\136{0}/{1}\239\188\137", nNowTaskNum, MasterPrentice.Cfg.WEEK_TASK_COUNT))
+        else
+          self.pPanel:SetActive("RightPlayerInfo/txtDismissTime", false)
+        end
+      end, this)
+      if not self.tbSelectedTask[nIndex] then
+        tbElement.pPanel:Toggle_SetChecked("TaskCheckBox", false)
+      end
+      Ui:Button_BindEvent(tbElement.pPanel, "", this.OnTaskItemClick, this, nIndex, tbElement)
+    else
+      tbElement.pPanel:SetActive("TaskCheckBox", false)
+    end
+    this:SetTaskListData(tbElement, tbInfo, taskType, tbMPData, this, tbLastTeacherData.bMaster, this.tbSelectedTask[nIndex])
+  end
+  
+  self.tbTaskScrollView:Clear()
+  local nCount = Lib:CountTB(tbTasks) + (bApprentice and 1 or 0)
+  self.tbTaskScrollView:SetElement(nCount, setItemFunc)
+  self.tbTaskScrollView:GoTop()
+end
+
+function tbUi:SetTaskListData(tbItem, tbTask, taskType, tbMPData, pParent, bMaster, bSelectable)
+  local TaskStatus = MasterPrentice.Def.TaskStatus
+  local nFinish, nCount = 0, 0
+  if 1 == taskType then
+    nFinish, nCount = MasterPrentice.MPTask:GetGoalData(tbTask, tbMPData)
+  else
+    nFinish, nCount = MasterPrentice.MPTask:GetTaskData(tbTask, tbMPData)
+  end
+  local panel = tbItem.pPanel
+  self.pParent = pParent
+  panel:Label_SetText("txtTask", i18n.Parse(tbTask.Title))
+  panel:SetActive("btnChuangong", false)
+  panel:SetActive("txtProgress", false)
+  panel:SetActive("txtCompleted", false)
+  panel:SetActive("txtSubmission", false)
+  panel:SetActive("txtCompletedAgo", false)
+  panel:SetActive("txtAwards", true)
+  if TaskStatus.Expired == nFinish then
+    panel:SetActive("txtCompletedAgo", true)
+  elseif TaskStatus.Reported == nFinish then
+    panel:SetActive("txtSubmission", true)
+  elseif TaskStatus.Finished == nFinish then
+    panel:SetActive("txtCompleted", true)
+    self.bCompleted = true
+  else
+    panel:SetActive("txtProgress", true)
+    panel:Label_SetText("txtProgress", nCount .. "/" .. tbTask.Count)
+  end
+  local nAward
+  if 1 ~= bMaster then
+    if 1 == taskType then
+      nAward = tbTask.MasterMoney
+    else
+      nAward = MasterPrentice.Cfg.MASTER_MONEY_OF_TASK
+    end
+  elseif 1 == taskType then
+    nAward = tbTask.PrenticeExp * me.GetBaseAwardExp()
+  else
+    nAward = MasterPrentice:GetPrenticeExpByLevel(me.nLevel)
+  end
+  panel:Label_SetText("txtAwards", nAward)
+  if bSelectable then
+    panel:Toggle_SetChecked("TaskCheckBox", true)
+  else
+    panel:Toggle_SetChecked("TaskCheckBox", false)
+  end
+end
+
+function tbUi:OnTaskItemClick(nIndex, tbElement)
+  local bActive = self:ToggleTask(nIndex)
+  tbElement.pPanel:Toggle_SetChecked("TaskCheckBox", bActive)
+end
+
+function tbUi:onClickShowFriendDetails(tbInfo)
+  local tbData = {}
+  tbData.dwRoleId = tbInfo.dwRoleId
+  tbData.szName = tbInfo.szName
+  tbData.nLevel = tbInfo.nLevel
+  tbData.szKinOrTongName = tbInfo.szKinOrTongName ~= "" and tbInfo.szKinOrTongName or i18n.EasyGet("\230\154\130\230\151\160")
+  tbData.nFaction = tbInfo.nFaction
+  tbData.nPortrait = tbInfo.nPortrait
+  tbData.nHonorStarLevel = tbInfo.nHonorStarLevel
+  Ui:OpenWindow("UIRightPopUpMenu", "roleselectFromUI", tbData, self, 317, -170)
+end
+
+function tbUi:OnClickChuanGong()
+  local tbMPData = self:GetMPData(self.tbLastTeacherData)
+  if tbMPData.status == MasterPrentice.Def.STATUS_AFTER_APPENTICE then
+    me.CenterMsg(i18n.EasyGet("\229\183\178\229\135\186\229\184\136\230\151\160\230\179\149\232\191\155\232\161\140\228\188\160\229\138\159"))
+    return
+  end
+  local dwRoleId, bMaster = self.tbLastTeacherData.dwId, self.tbLastTeacherData.bMaster
+  local Relation = MasterPrentice:GetRelation(me, dwRoleId)
+  if Relation == MasterPrentice.Def.Relation_Master then
+    ChuanGong:RequestChuanGong_MP(dwRoleId, ChuanGong.tbRelationType.Recieve, {"UISocial"})
+  elseif Relation == MasterPrentice.Def.Relation_Prentice then
+    ChuanGong:RequestChuanGong_MP(dwRoleId, ChuanGong.tbRelationType.Send, {"UISocial"})
+  end
+end
+
+tbUi.tbOnClick = {}
+
+function tbUi.tbOnClick:btnApplyList()
+  Ui:OpenWindow("UITeacherApply")
+end
+
+function tbUi.tbOnClick:btnAdd()
+  self:TryFindPlayer(1)
+end
+
+function tbUi.tbOnClick:btnReport()
+  local tbTeacherData = self.tbLastTeacherData
+  local tbMPData = self:GetMPData(tbTeacherData)
+  local _, fnBtn, _, _ = _GetReport(tbTeacherData, tbMPData)
+  if fnBtn then
+    fnBtn(self, tbTeacherData)
+  else
+    MasterPrentice:CheckMPInfo()
+  end
+  self:UpdateView()
+end
+
+function tbUi.tbOnClick:btnFindTea()
+  self:TryFindPlayer(0)
+end
+
+function tbUi.tbOnClick:btnFindStu()
+  self:TryFindPlayer(1)
+end
+
+function tbUi.tbOnClick:btnTeaAdd1()
+  self:TryFindPlayer(0)
+end
+
+function tbUi.tbOnClick:btnTeaAdd2()
+  self:TryFindPlayer(0)
+end
+
+function tbUi.tbOnClick:btnTea1()
+  self.nTeaStuIndex = 1
+  self.bSelectTeaStu = true
+  self.nSelectId = self.tbIdList[1]
+  self:UpdateView()
+end
+
+function tbUi.tbOnClick:btnTea2()
+  self.nTeaStuIndex = 2
+  self.bSelectTeaStu = true
+  self.nSelectId = self.tbIdList[2]
+  self:UpdateView()
+end
+
+function tbUi.tbOnClick:btnAwardsView()
+  Ui:OpenWindow("UITeacherAwards")
+end
+
+function tbUi.tbOnClick:btnYIShi()
+  self:OnGoToNpc()
+end
+
+function tbUi.tbOnClick:btnGoto()
+  self:OnGoToNpc()
+end
+
+function tbUi.tbOnClick:btnCancelTea()
+  MasterPrentice:DoApplyDismiss(self.tbLastTeacherData.dwId, 1 == self.tbLastTeacherData.bMaster and 0 or 1)
+  self.bSelectTeaStu = false
+  self:UpdateView()
+end
+
+function tbUi.tbOnClick:btnSendTeaGift()
+  local tbInfo = FriendShip:GetFriendDataInfo(self.tbLastTeacherData.dwId)
+  if not tbInfo or 2 ~= tbInfo.nState then
+    me.CenterMsg(i18n.EasyGet("\229\190\146\229\188\159\228\184\141\229\156\168\231\186\191\239\188\140\230\151\160\230\179\149\232\181\160\233\128\129\231\164\188\231\137\169\229\147\166"))
+    return
+  end
+  Ui:OpenWindow("UITeacherGift", self.tbLastTeacherData.dwId)
+end
+
+function tbUi.tbOnClick:btnTeacherShop()
+  Ui:OpenWindow("UIStore", Shop.ShopTypeStr.ShiTu)
+end
+
+function tbUi:GetOnlineState(bOnline, nLastOnlineTime)
+  if bOnline then
+    return nil
+  end
+  local nToday = Lib:GetLocalDay()
+  local nLoginDay = Lib:GetLocalDay(nLastOnlineTime)
+  if nToday == nLoginDay then
+    return i18n.EasyGet("\228\187\138\229\164\169")
+  elseif nToday == nLoginDay + 1 then
+    return i18n.EasyGet("\230\152\168\229\164\169")
+  elseif nToday > nLoginDay + 1 and nToday < nLoginDay + 7 then
+    return i18n.EasyGet("2\229\164\169\229\137\141")
+  else
+    return i18n.EasyGet("7\229\164\169\229\137\141")
+  end
+end
+
+function tbUi:TryFindPlayer(bMaster)
+  local bOpen, szMsg = MasterPrentice:IsOpen()
+  if not bOpen then
+    me.CenterMsg(szMsg)
+    return
+  end
+  local tbLimitLevel = MasterPrentice.Cfg.MASTER_LEVEL
+  local nLimitLevel = 0
+  for szOpenTime, nLevel in pairs(tbLimitLevel) do
+    if 1 == GetTimeFrameState(szOpenTime) then
+      nLimitLevel = math.max(nLimitLevel, nLevel)
+    end
+  end
+  if 1 == bMaster and nLimitLevel > me.nLevel then
+    me.CenterMsg(i18n.EasyGet("\231\173\137\231\186\167\228\184\141\229\164\159{0}\231\186\167,\228\184\141\232\131\189\230\148\182\229\190\146", nLimitLevel))
+    return
+  elseif 1 ~= bMaster and me.nLevel < MasterPrentice.Cfg.PRENTICE_LEVEL then
+    me.CenterMsg(i18n.EasyGet("\231\173\137\231\186\167\228\184\141\229\164\159{0}\231\186\167,\228\184\141\232\131\189\230\139\156\229\184\136", MasterPrentice.Cfg.PRENTICE_LEVEL))
+    return
+  end
+  local prenticeCount = 0
+  if prenticeCount >= 2 then
+    me.CenterMsg(i18n.EasyGet("\230\156\170\229\135\186\229\184\136\229\188\159\229\173\144\230\149\176\229\183\178\231\187\143\232\190\190\229\136\176\228\184\138\233\153\144"))
+    return
+  end
+  Ui:OpenWindow("UITeacherFind", bMaster)
+end
+
+function tbUi:GetMPData(tbTeacherData)
+  local tbMPData
+  if 1 == tbTeacherData.bMaster then
+    tbMPData = MasterPrentice:GetMPData(tbTeacherData.dwId, me.dwID)
+  else
+    tbMPData = MasterPrentice:GetMPData(me.dwID, tbTeacherData.dwId)
+  end
+  if not tbMPData then
+    tbMPData = {}
+    MasterPrentice:CheckMPInfo()
+  end
+  return tbMPData
+end
+
+function tbUi:OnSendGiftSuccess()
+  self.pPanel:SetActive(self.btnSendTeaGift, false)
+end
+
+function tbUi:OnChatSomeone(dwRoleId)
+  ChatMgr:OpenPrivateWindow(dwRoleId, {dwRoleId = dwRoleId})
+  Ui:CloseWindow("UISocial")
+end
+
+function tbUi:OnGoToNpc()
+  Ui:CloseWindow("UISocial")
+  local nNpcTemplateId = 11041
+  local nMapTemplateId = 1
+  local nPosX, nPosY, nWalkNearLength = Npc:GetNpcPos(nNpcTemplateId, nMapTemplateId)
+  
+  local function fnCallback()
+    local nNpcId = KNpc.GetNpcIdByTemplateId(nNpcTemplateId)
+    if nNpcId then
+      Operation:SimpleTap(nNpcId)
+    end
+  end
+  
+  AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, fnCallback, nWalkNearLength, nil, nNpcTemplateId)
+end

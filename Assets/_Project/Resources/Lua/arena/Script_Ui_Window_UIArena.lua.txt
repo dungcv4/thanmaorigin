@@ -1,0 +1,206 @@
+local tbWnd = Ui:CreateWindow("UIArena")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_PLAYERINFO_ARRIVE,
+      self.UpdatePersonInfo
+    },
+    {
+      EventNotify.emNOTIFY_CHALLENGE,
+      self.UpdateChallengeScorllView
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  txtRemainTimes = "node/imgBG/Content/ArenaInfo/RemainTimes/txtRemainTimesValue",
+  txtMyRanking = "node/imgBG/Content/ArenaInfo/RankInfo/MyRanking/txtMyRankingValue",
+  btnAddTimes = "node/imgBG/Content/ArenaInfo/RemainTimes/btnAddTimes",
+  txtRankName = "node/imgBG/Content/ArenaInfo/Rank/txtRank",
+  imgRank = "node/imgBG/Content/ArenaInfo/Rank/imgRank",
+  btnRefresh = "node/imgBG/Content/ArenaInfo/btnRefresh",
+  btnHelp = "node/imgBG/txtTitle/btnInfo",
+  ChallengeItem = "node/imgBG/Content/ArenaInfo/PlayerList/Viewport/Content/item",
+  txtName = "node/imgBG/Content/ArenaInfo/RankInfo/Rank%d/txtName",
+  btnAwardPreview = "node/imgBG/Content/ArenaInfo/btnAwardPreview",
+  wndAwardPreview = "wndAwardPreview",
+  btnCloseWndAwardPreview = "wndAwardPreview/Empty4Raycast",
+  rankAwardRawItem = "wndAwardPreview/imgBg/AwardList/Viewport/Content/Template",
+  rankAwardItem = "wndAwardPreview/imgBg/AwardList/Viewport/Content/Template/itemList/itemTemplate"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnRefresh = function(self)
+    Arena:RequestChallengeList(true)
+  end,
+  btnAddTimes = function(self)
+    Arena:UICallBuyDegree()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("ArenaHelp")
+  end,
+  btnAwardPreview = function(self)
+    self.pPanel:SetActive(self.wndAwardPreview, true)
+    self:ShowUIRankAward()
+  end,
+  btnCloseWndAwardPreview = function(self)
+    self.pPanel:SetActive(self.wndAwardPreview, false)
+  end
+}
+tbWnd.nPlayeListSize = 3
+
+function tbWnd:OnCreate()
+  self.pPanel:Label_SetText(self.txtRemainTimes, 0)
+  self.pPanel:Label_SetText(self.txtMyRanking, 0)
+  self.pChallengeScorllView = Ui:NewScrollView(self, self.ChallengeItem, function(_, nIndex, tbElement)
+  end, false, false)
+  self.pRankAwardRawScrollView = Ui:NewScrollView(self, self.rankAwardRawItem)
+  self.pAwardScrollView = Ui:NewScrollView(self, self.rankAwardItem)
+end
+
+function tbWnd:OnOpen()
+  self:UpdatePersonInfo()
+  self:UpdateChallengeScorllView()
+  Arena:ReqRegisterNeedRefreshArenaInfo()
+  self:UpdateRankName()
+end
+
+function tbWnd:OnClose()
+  Arena:ReqUnRegisterNeedRefreshArenaInfo()
+end
+
+function tbWnd:UpdateRankName()
+  local tbRank = {}
+  local tbChallengeDataList = Arena:GetChallengeList()
+  for i, challengeData in ipairs(tbChallengeDataList) do
+    if not challengeData.bIsNpc then
+      tbRank[challengeData.nPos] = challengeData.szName
+    else
+      local nNpcTemplateId = Arena:GetNpcIdByRankPostion(challengeData.nPos)
+      tbRank[challengeData.nPos] = i18n.Parse(KNpc.GetNameByTemplateId(nNpcTemplateId))
+    end
+  end
+  local nShowPersonNum = 3
+  for i = 1, nShowPersonNum do
+    local txtRankPlayerPath = string.format("node/imgBG/Content/ArenaInfo/RankInfo/Rank%d/txtName", i)
+    self.pPanel:Label_SetText(txtRankPlayerPath, tbRank[i])
+  end
+end
+
+function tbWnd:ShowUIRankAward()
+  self.pRankAwardRawScrollView:Clear()
+  for i, arenaRankAwardCfgData in ipairs(Arena.tbArenaRankAwardCfg) do
+    local nAwardId = arenaRankAwardCfgData.nAwardId
+    local nAwardKey = Arena:GetAwardKeyByLinkKey(arenaRankAwardCfgData.nAwardLinkKey, true)
+    local szTitle = arenaRankAwardCfgData.szTitle
+    self.pRankAwardRawScrollView:SetElement(i, function(tbElementRow)
+      tbElementRow.pPanel:Label_SetText("txtTitle", i18n.Parse(szTitle))
+      local tbItemScrollView = Ui:NewScrollView(tbElementRow, "itemList/itemTemplate")
+      tbItemScrollView:Clear()
+      local tbAllAward = Award:GetAward(nAwardId, nAwardKey)
+      for j, tbAward in ipairs(tbAllAward) do
+        tbItemScrollView:SetElement(j, function(tbElement)
+          local szType = tbAward[1]
+          local tbItemGrid = tbElement.tbItemGrid
+          tbItemGrid = tbItemGrid or Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+          tbItemGrid:SetClickEnable(true)
+          if szType == Player.AwardType2Name[Player.award_type_item] then
+            tbItemGrid:SetItemByTemplate(tbAward[2], tbAward[3])
+          else
+            tbItemGrid:SetDigitalItem(szType, tbAward[2])
+          end
+        end)
+      end
+    end)
+  end
+end
+
+function tbWnd:UpdateChallengeScorllView()
+  self.pChallengeScorllView:Clear()
+  local tbChallengeDataList = Arena:GetChallengeList()
+  local nSelfIndex = 0
+  for i, challengeData in ipairs(tbChallengeDataList) do
+    self.pChallengeScorllView:SetElement(i, function(tbElement)
+      local tbPortraitObjPanel = Ui:NewExistPortraitObjPanel(tbElement, "PortraitObj")
+      if not challengeData.bIsNpc then
+        tbElement.pPanel:Label_SetText("txtRanking", challengeData.nPos > 0 and challengeData.nPos or i18n.EasyGet("\230\156\170\228\184\138\230\166\156"))
+        tbElement.pPanel:Label_SetText("PlayerName/txtPlayerName", challengeData.szName)
+        tbElement.pPanel:Label_SetText("FightPower/txtFightPowerValue", challengeData.nFightPower)
+        tbElement.pPanel:Label_SetText("Kin/txtKinValue", challengeData.szKinName == "" and i18n.EasyGet("\230\151\160") or challengeData.szKinName)
+        tbPortraitObjPanel:SetRoleIcon(challengeData.nPortrait)
+        tbPortraitObjPanel:SetPortraitFrame(challengeData.nPortraitFrame or 0)
+        tbPortraitObjPanel:SetFactionIcon(challengeData.nFaction)
+        tbPortraitObjPanel:SetLevel(challengeData.nLevel)
+        tbPortraitObjPanel:SetFactionIconActive(true)
+        local obj = tbElement.pPanel:GetObject("PlayerName/HonorTitle")
+        local pHonorTitle = obj:GetComponent(Ui.UIHonorTitle)
+        local szName, szColor = HonorLevel:GetHonorNameByStarLevel(challengeData.nHonorStarLevel, false)
+        pHonorTitle:SetHonorTitle(i18n.Parse(szName), szColor)
+      else
+        local nNpcTemplateId = Arena:GetNpcIdByRankPostion(challengeData.nPos)
+        tbElement.pPanel:Label_SetText("txtRanking", challengeData.nPos > 0 and challengeData.nPos or i18n.EasyGet("\230\156\170\228\184\138\230\166\156"))
+        tbElement.pPanel:Label_SetText("PlayerName/txtPlayerName", i18n.Parse(KNpc.GetNameByTemplateId(nNpcTemplateId)))
+        tbElement.pPanel:Label_SetText("FightPower/txtFightPowerValue", i18n.EasyGet("\230\156\170\231\159\165"))
+        tbElement.pPanel:Label_SetText("Kin/txtKinValue", i18n.EasyGet("\230\156\170\231\159\165"))
+        tbPortraitObjPanel:SetRoleIcon(0)
+        tbPortraitObjPanel:SetPortraitFrame(0)
+        tbPortraitObjPanel:SetLevel(me.nTotalLevel)
+        tbPortraitObjPanel:SetFactionIconActive(false)
+        tbElement.pPanel:SetActive("PlayerName/HonorTitle", false)
+      end
+      tbElement.pPanel:SetActive("btnChallenge", challengeData.bIsCanChallenge)
+      Ui:Button_BindEvent(tbElement.pPanel, "btnChallenge", function()
+        Arena.nRefreshChallengeListTime = Arena.nRefreshChallengeListTime or 0
+        if Arena.nSyncChallengeListTime and Arena.nRefreshChallengeListTime <= Arena.nSyncChallengeListTime then
+          me.CenterMsg(i18n.Get(Arena.Cfg.tbText.szRankUpdateTips))
+          self:UpdateChallengeScorllView()
+          return
+        end
+        Arena:TryChallengeByPos(challengeData.nPos, challengeData.nPlayerId)
+      end, self)
+    end)
+    if challengeData.nPlayerId == me.dwID then
+      nSelfIndex = i
+    end
+  end
+  self.pChallengeScorllView:ScrollToIndex(nSelfIndex, false)
+  Arena.nRefreshChallengeListTime = GetTime()
+end
+
+function tbWnd:UpdatePersonInfo()
+  local tbInfo = Arena.tbMyInfo
+  local nLevel = Arena:GetRankLevelByPos(tbInfo.nRank)
+  self.pPanel:Label_SetText(self.txtMyRanking, tbInfo.nRank > 0 and tbInfo.nRank or i18n.EasyGet("\230\156\170\228\184\138\230\166\156"))
+  self.pPanel:Label_SetText(self.txtRemainTimes, string.format("%d/%d", DegreeCtrl:GetDegree(me, "Arena"), Arena.Cfg.nDailyFreeCount))
+  self.pPanel:Label_SetText(self.txtRankName, i18n.Get(Arena.Cfg.tbRankLevel2Name[nLevel]))
+  self.pPanel:Sprite_SetSprite(self.imgRank, Arena.Cfg.tbRankLevel2Img[nLevel])
+end
+
+function tbWnd:GetAboveSelfChallengeItemInfo()
+  local tbChallengeDataList = Arena:GetChallengeList()
+  local nSelfRank
+  for i = 1, #tbChallengeDataList do
+    if tbChallengeDataList[i].nPlayerId == me.dwID then
+      nSelfRank = i
+      break
+    end
+  end
+  if nil ~= nSelfRank then
+    local nAboveSelfRank = nSelfRank - 1
+    if nAboveSelfRank >= 1 then
+      return self.pChallengeScorllView.tbElementList[nAboveSelfRank]
+    else
+      return nil
+    end
+  else
+    LogErr("ChallengeInfo can not find self")
+  end
+end
+
+function tbWnd:GetChallengeButtonFromItemInfo(tbItemInfo)
+  return tbItemInfo.pPanel:GetObject("btnChallenge")
+end

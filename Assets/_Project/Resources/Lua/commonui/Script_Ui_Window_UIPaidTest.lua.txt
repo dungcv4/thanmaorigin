@@ -1,0 +1,129 @@
+local tbWnd = Ui:CreateWindow("UIPaidTest")
+local tbControls = {
+  UIMoneyPanel = "UIMoneyPanel",
+  ElementTemplate = "node/Content/ElementTemplate/Cell1",
+  imgTitle2 = "node/imgBg/imgTitle2",
+  btnClose = "node/imgBg/btnClose",
+  txtTime = "node/imgBg/txtTime"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.OnMoneyChange,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SHOP_BUY_RESULT,
+      self.OnResponseBuy,
+      self
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, tbControls.UIMoneyPanel)
+  self.tbWareScroll = Ui:NewScrollView(self, tbControls.ElementTemplate, function(self, nIndex, tbElement)
+    self:OnItemClick(tbElement)
+  end, nil, true)
+end
+
+function tbWnd:OnOpen()
+  local pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.MillionGoldIngots)
+  if not pInstance or not pInstance:IsOpen() then
+    self:Close()
+    return
+  end
+  local tbList = Shop:GetJinDingWares()
+  if not tbList or 0 == Lib:CountTB(tbList) then
+    LogErr(string.format("JinDing SHOP CAN NOT OPEN"))
+    return
+  end
+  self.tbList = tbList
+  self.pPanel:Label_SetText(tbControls.txtTime, i18n.EasyGet("\230\180\187\229\138\168\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154{0}", Lib:TimeDesc5(pInstance:GetScheduleCfg().nEndTime - GetTime())))
+  self.tbMoneyPanel:SetDynamicCurrencyType("JinDing")
+  self.tbMoneyPanel:HideDynamicBtnPlus()
+  self.pPanel:SetActive(tbControls.imgTitle2, false)
+  self:UpdateShow(tbList)
+end
+
+function tbWnd:fnSetItem(tbElement, tbInfo, nIndex)
+  local pPanel = tbElement.pPanel
+  local tbWare = Shop:GetAWare(tbInfo.nWareId)
+  if not tbWare then
+    return
+  end
+  tbElement.tbData = tbWare
+  local nPrice = Shop:GetPrice(tbWare)
+  pPanel:Label_SetText("txtMoneyNum", nPrice)
+  local szName = KItem.GetItemShowInfo(tbWare.nItemId, me.nFaction, me.nFactionSect, me.nSex)
+  local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  itemGrid:SetItemByTemplate(tbWare.nItemId)
+  itemGrid:SetClickEnable(true, function()
+    self:OnItemClick(tbElement)
+  end)
+  pPanel:Label_SetText("txtTitle", i18n.Parse(szName))
+  local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+  if -1 == nRemainCount then
+    pPanel:SetActive("Limit", false)
+    pPanel:Label_SetText("Limit/txtLimitNum", "")
+  else
+    pPanel:SetActive("Limit", true)
+    pPanel:Label_SetText("Limit/txtLimitNum", tostring(nRemainCount))
+  end
+  if 0 == nRemainCount then
+    pPanel:SetActive("imgSoldOutBg", true)
+  else
+    pPanel:SetActive("imgSoldOutBg", false)
+  end
+  local szMoney, szMoneyAtlas = Currency:GetIcon(tbWare.szCurrencyType)
+  pPanel:Sprite_SetSprite("txtMoneyNum/imgMoney", szMoney)
+  if tbInfo.nRecommend and 1 == tbInfo.nRecommend then
+    pPanel:SetActive("imgRecommend", true)
+  else
+    pPanel:SetActive("imgRecommend", false)
+  end
+end
+
+function tbWnd:UpdateShow(tbList)
+  self.tbWareScroll:Reset()
+  for i, v in pairs(tbList) do
+    self.tbWareScroll:SetElement(i, function(tbElement)
+      self:fnSetItem(tbElement, v, i)
+    end)
+  end
+end
+
+function tbWnd:OnMoneyChange()
+  self.tbMoneyPanel:SetDynamicCurrencyType("JinDing")
+end
+
+function tbWnd:OnItemClick(tbElement, bAutoBuy)
+  local nRemainCount = Shop:GetShopRemainCount(tbElement.tbData, me)
+  if 0 == nRemainCount then
+    me.CenterMsg(i18n.Get(Shop.Terms.InsufficientRemainInventory))
+    return
+  end
+  Ui:OpenWindow("UIShopBuy", tbElement.tbData, true, nil, bAutoBuy)
+end
+
+function tbWnd:OnResponseBuy(bSuccess, nItemId)
+  if bSuccess then
+    for i, tbInfo in ipairs(self.tbList) do
+      local tbWare = Shop:GetAWare(tbInfo.nWareId)
+      if tbWare and tbWare.nItemId == nItemId then
+        local tbElement = self.tbWareScroll:GetElement(i)
+        if tbElement then
+          self:fnSetItem(tbElement, tbInfo, i)
+        end
+      end
+    end
+  end
+end

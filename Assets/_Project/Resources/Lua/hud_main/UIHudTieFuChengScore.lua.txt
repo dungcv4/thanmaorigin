@@ -1,0 +1,136 @@
+local tbWnd = Ui:CreateWindow("UIHudTieFuChengScore")
+tbWnd.tbControls = {
+  btnTong = "imgBG/DomainScoreInfo/btnList/btnTong",
+  btnPillar = "imgBG/DomainScoreInfo/btnList/btnColumn",
+  btnAttendee = "imgBG/DomainScoreInfo/btnList/btnIndividual",
+  txtScoreTitle = "imgBG/DomainScoreInfo/panel/ListTitle/txtMap",
+  txtScoreValue = "imgBG/DomainScoreInfo/panel/ListTitle/txtScore",
+  txtScoreRank = "imgBG/DomainScoreInfo/panel/ListTitle/txtRank",
+  goScoreTemplate = "imgBG/DomainScoreInfo/panel/List/Viewport/Content/Template",
+  goMyScore = "imgBG/DomainScoreInfo/MyScore"
+}
+tbWnd.PAGE_INDEX = {
+  TONG = 1,
+  PILLAR = 2,
+  ATTENDEE = 3
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_TIEFUCHENG_SCORE,
+      self.OnSyncTieFuChengScore
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.tbPageBtnGroup = Ui:NewButtonGroup(self, {
+    self.btnTong,
+    self.btnPillar,
+    self.btnAttendee
+  }, true, self.SwitchPage)
+  self.tbScoreScroll = Ui:NewScrollView(self, self.goScoreTemplate, nil, nil, true)
+  self.tbTongList = {}
+  self.tbAttendeeList = {}
+  self.tbPillarList = {}
+  self.nQueryDay = 0
+end
+
+function tbWnd:OnOpen()
+  TieFuCheng:QueryScoreReq()
+  self.nPageIndex = nil
+  self.tbPageBtnGroup:Select(self.PAGE_INDEX.TONG)
+  self:UpdateShow()
+  self.nQueryScoreTimer = Timer:Register(Env.GAME_FPS * TieFuCheng.INTERVAL.DAEMON, self.QueryScore, self)
+end
+
+function tbWnd:SwitchPage(nIndex)
+  TieFuCheng:QueryScoreReq()
+  if self.nPageIndex == nIndex then
+    return
+  end
+  self.nPageIndex = nIndex
+  self:UpdateShow()
+end
+
+function tbWnd:UpdateShow()
+  self.tbScoreScroll:Reset()
+  if self.nPageIndex == self.PAGE_INDEX.TONG then
+    self.pPanel:Label_SetText(self.txtScoreTitle, i18n.EasyGet("\229\184\174\228\188\154\229\144\141"))
+    self.pPanel:Label_SetText(self.txtScoreValue, i18n.EasyGet("\231\187\159\230\178\187\229\138\155"))
+    self.pPanel:Label_SetText(self.txtScoreRank, i18n.EasyGet("\230\142\146\229\144\141"))
+    for nRank, tbTongInfo in ipairs(self.tbTongList) do
+      self.tbScoreScroll:SetElement(nRank, function(tbElement)
+        local pPanel = tbElement.pPanel
+        pPanel:Label_SetText("txtMap", tostring(tbTongInfo.szName))
+        pPanel:Label_SetText("txtScore", tostring(tbTongInfo.nScore))
+        pPanel:Label_SetText("txtRank", tostring(nRank))
+      end)
+    end
+    self.pPanel:SetActive(self.goMyScore, false)
+  elseif self.nPageIndex == self.PAGE_INDEX.PILLAR then
+    self.pPanel:Label_SetText(self.txtScoreTitle, i18n.EasyGet("\231\186\191\232\183\175"))
+    self.pPanel:Label_SetText(self.txtScoreValue, i18n.EasyGet("\230\159\177\229\173\144"))
+    self.pPanel:Label_SetText(self.txtScoreRank, i18n.EasyGet("\232\161\128\233\135\143"))
+    for nIndex, tbPillarInfo in ipairs(self.tbPillarList) do
+      self.tbScoreScroll:SetElement(nIndex, function(tbElement)
+        local pPanel = tbElement.pPanel
+        pPanel:Label_SetText("txtMap", tostring(tbPillarInfo.nIndex))
+        pPanel:Label_SetText("txtScore", i18n.Parse(tbPillarInfo.szName))
+        pPanel:Label_SetText("txtRank", string.format("%.0f%%", tbPillarInfo.nLifePercent * 100))
+      end)
+    end
+    self.pPanel:SetActive(self.goMyScore, false)
+  elseif self.nPageIndex == self.PAGE_INDEX.ATTENDEE then
+    self.pPanel:Label_SetText(self.txtScoreTitle, i18n.EasyGet("\229\144\141\229\173\151"))
+    self.pPanel:Label_SetText(self.txtScoreValue, i18n.EasyGet("\231\167\175\229\136\134"))
+    self.pPanel:Label_SetText(self.txtScoreRank, i18n.EasyGet("\230\142\146\229\144\141"))
+    local nMyRank
+    for nRank, tbPlayerInfo in ipairs(self.tbAttendeeList) do
+      self.tbScoreScroll:SetElement(nRank, function(tbElement)
+        local pPanel = tbElement.pPanel
+        pPanel:Label_SetText("txtMap", tbPlayerInfo.szName)
+        pPanel:Label_SetText("txtScore", tostring(tbPlayerInfo.nScore))
+        pPanel:Label_SetText("txtRank", tostring(nRank))
+      end)
+    end
+    if self.tbMyInfo and self.tbMyInfo.szName and self.tbMyInfo.nScore and self.tbMyInfo.nRank then
+      self.pPanel:SetActive(self.goMyScore, true)
+      self.pPanel:Label_SetText(self.goMyScore .. "/txtName", self.tbMyInfo.szName)
+      self.pPanel:Label_SetText(self.goMyScore .. "/txtScore", self.tbMyInfo.nScore)
+      self.pPanel:Label_SetText(self.goMyScore .. "/txtRank", self.tbMyInfo.nRank)
+    else
+      self.pPanel:SetActive(self.goMyScore, false)
+    end
+  end
+end
+
+function tbWnd:OnSyncTieFuChengScore(tbTongList, tbAttendeeList, tbPillarList)
+  self.tbTongList = tbTongList or {}
+  self.tbAttendeeList = tbAttendeeList or {}
+  self.tbPillarList = tbPillarList or {}
+  self.tbMyInfo = {}
+  if tbAttendeeList then
+    self.tbMyInfo = tbAttendeeList.tbPlayerInfo or {}
+  end
+  if Ui:WindowVisible(self.ClassName) then
+    self:UpdateShow()
+  end
+end
+
+function tbWnd:QueryScore()
+  if not Ui:WindowVisible(self.ClassName) or not TieFuCheng:QueryScoreReq() then
+    Ui:CloseWindow(self.ClassName)
+    Timer:Close(self.nQueryScoreTimer)
+    self.nQueryScoreTimer = nil
+    return false
+  end
+  return true
+end
+
+function tbWnd:OnClose()
+  Timer:Close(self.nQueryScoreTimer)
+  self.nQueryScoreTimer = nil
+end

@@ -1,0 +1,78 @@
+Require("CommonScript/Item/EquipWuLian/EquipWuLianCommon.lua")
+Require("Script/Ui/Common/RedPointMgr.lua")
+local EquipWuLian = Item.EquipWuLian
+EquipWuLian.tbWuLianLevelData = EquipWuLian.tbWuLianLevelData or {}
+
+function EquipWuLian:OnLoginC()
+  self:LoadFightPowerSetting()
+end
+
+function EquipWuLian:WuLianReqC(pPlayer, nPos, tbItemList)
+  local bRet, szErr = self:CanWuLianWithReminderWindow(pPlayer, nPos, tbItemList)
+  if not bRet then
+    pPlayer.CenterMsg(szErr)
+    return
+  end
+  RemoteServer.RequestEquipWuLian("WuLianReqS", nPos, tbItemList)
+end
+
+function EquipWuLian:WuLianRsp(bSuccess, nPos, nOrgLv, nNewLv)
+  if bSuccess then
+    self:RefreshAttrib(me, nPos, nOrgLv, nNewLv)
+  end
+  if Ui:WindowVisible("UIEquipment") then
+    Ui:GetWindow("UIEquipment"):NotifyEquipEnhance("WuLian", bSuccess, nPos)
+  end
+  Item.EquipEnhance:OnCheckRedPoint()
+end
+
+function EquipWuLian:SCReturnXuanJing(tbItemList)
+  local tbMsgList = {}
+  for _, tbItem in ipairs(tbItemList) do
+    table.insert(tbMsgList, i18n.EasyGet("{0}\231\186\167\231\142\132\230\153\182{1}\228\184\170", tbItem[1], tbItem[2]))
+  end
+  me.CenterMsg(i18n.EasyGet("\229\183\178\229\133\168\233\162\157\232\191\148\232\191\152\232\182\133\229\135\186\233\131\168\229\136\134\231\142\132\230\153\182"), true)
+  me.Msg(i18n.EasyGet("\230\173\166\231\130\188\230\136\144\229\138\159\231\142\135\232\182\133\229\135\186100%\239\188\140\229\183\178\229\176\134\229\164\154\229\135\186\231\154\132\230\136\144\229\138\159\231\142\135\230\138\152\231\174\151\230\136\144\229\166\130\228\184\139\231\142\132\230\153\182\232\191\148\232\191\152\239\188\154{0}", table.concat(tbMsgList, "\239\188\140")))
+end
+
+function EquipWuLian:QuickCheckWuLian(pPlayer, pEquip)
+  local nHasVal = 0
+  for _, nItemTid in pairs(Item.EquipEnhance.XUANJING_ITEM) do
+    local nNum = pPlayer.GetItemCountInBags(nItemTid)
+    if 0 ~= nNum then
+      nHasVal = nHasVal + KItem.GetBaseValue(nItemTid) * nNum
+    end
+  end
+  local nHasMoney = pPlayer.GetMoney(Item.EquipEnhance.MONEY_TYPE)
+  local nReqVal, nReqMoney = self:CalcWuLianCost(pPlayer, pEquip, self:GetEquipWuLianLevel(pPlayer, pEquip.nEquipPos))
+  if nReqVal and nReqMoney and nHasVal >= nReqVal and nHasMoney >= nReqMoney then
+    return true
+  else
+    return false
+  end
+end
+
+function EquipWuLian:CanShowWuLianButtonInUIEquipTips(nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return false
+  end
+  local nEquipPos = pItem.nEquipPos
+  if nEquipPos < Item.EQUIPPOS_HELM or nEquipPos > Item.EQUIPPOS_AMULET then
+    return false
+  end
+  return true
+end
+
+function EquipWuLian:IsWuLianOpenC(nEnhanceLv, nEquipLevel)
+  if nEnhanceLv < Item.EquipEnhance.nMaxLevel then
+    return false
+  end
+  if nEquipLevel < self.WULIAN_LV[1].LV_REQ then
+    return false
+  end
+  if 1 ~= GetTimeFrameState(self.WULIAN_LV[1].TIMEFRAME_REQ) then
+    return false
+  end
+  return true
+end

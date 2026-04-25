@@ -1,0 +1,137 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.EMeiFireWork)
+tbActivity.Protocol = {
+  OnCheerReq = 1,
+  OnSynData = 2,
+  OnSynDataReq = 3,
+  OnLightRedPointResp = 4
+}
+tbActivity.nSendMailInterval = 1
+tbActivity.nSendNumPerBatch = 50
+tbActivity.nHeartBeatInterval = 20
+tbActivity.nRemindStartInterVal = 60
+tbActivity.nRemindStartCount = 2
+tbActivity.OpenBoxCount = 1
+tbActivity.CheerCount = 2
+tbActivity.GetMailTimeFrame = 3
+tbActivity.LastResetTime = 4
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/EmeiActivity/EMeiFireWork/FireWorkCfg.tab"
+  local tbActivityConfig = Lib:EasyLoadTabFile(szFilepath, {"nConfigId"})
+  if not tbActivityConfig then
+    LogErr("%s not find", szFilepath)
+    return false
+  end
+  self.ACTIVITY_CONFIG = {}
+  for nConfigId, tbConfig in pairs(tbActivityConfig) do
+    tbConfig.nRemindTime = Lib:ParseNumbericDateToTime(tbConfig.nRemindTime)
+    self.ACTIVITY_CONFIG[nConfigId] = tbConfig
+  end
+  szFilepath = "Setting/Activity/EmeiActivity/EMeiFireWork/BoxLocation.tab"
+  local tbBoxLocation = Lib:EasyLoadTabFile(szFilepath)
+  for _, tbInfo in pairs(tbBoxLocation) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("EMeiFireWork:LoadConfig BoxLocation nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbBoxLocation = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbBoxLocation or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbBoxLocation[tbInfo.nMapId] = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbBoxLocation[tbInfo.nMapId] or {}
+    table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbBoxLocation[tbInfo.nMapId], {
+      tbInfo.nLocX,
+      tbInfo.nLocY
+    })
+  end
+  szFilepath = "Setting/Activity/EmeiActivity/EMeiFireWork/MapList.tab"
+  local tbMapList = Lib:EasyLoadTabFile(szFilepath)
+  for _, tbInfo in pairs(tbMapList) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("EMeiFireWork:LoadConfig MapList nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMapList = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMapList or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbMapList[tbInfo.nMapId] = tbInfo.nMapId
+  end
+  szFilepath = "Setting/Activity/EmeiActivity/EMeiFireWork/FireWorkLocation.tab"
+  local tbFireWorkLocation = Lib:EasyLoadTabFile(szFilepath)
+  for _, tbInfo in pairs(tbFireWorkLocation) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("EMeiFireWork:LoadConfig MapList nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFireWorkLocation = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFireWorkLocation or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFireWorkLocation[tbInfo.nMapId] = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFireWorkLocation[tbInfo.nMapId] or {}
+    table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbFireWorkLocation[tbInfo.nMapId], {
+      tbInfo.nLocX,
+      tbInfo.nLocY
+    })
+  end
+  self.bLoadConfig = true
+  return true
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  if not tbActCfg then
+    LogErr(string.format("tbActivity:LoadConfigWithGroup ERROR tbActCfg is nil szGroupName = %s, szGroupSubType = %s", szGroupName, szGroupSubType))
+  end
+  self.tbConfig = tbActCfg.Cfg
+  self.tbConfig.szName = i18n.Encode(self.tbConfig.szName)
+  self.tbConfig.szDesc = i18n.Encode(self.tbConfig.szDesc)
+  self.tbConfig.szInfoText = i18n.Encode(self.tbConfig.szInfoText)
+  self.tbConfig.szBtnGoText = i18n.Encode(self.tbConfig.szBtnGoText)
+  self.tbConfig.szShowTime = i18n.Encode(self.tbConfig.szShowTime)
+  self.tbConfig.szRemindTip = i18n.Encode(self.tbConfig.szRemindTip)
+  self.tbConfig.szSmallPanelText = i18n.Encode(self.tbConfig.szSmallPanelText)
+  self.tbConfig.szNotifyMsgTitle = i18n.Encode(self.tbConfig.szNotifyMsgTitle)
+  self.tbConfig.szNotifyMsgContent = i18n.Encode(self.tbConfig.szNotifyMsgContent)
+  self.tbConfig.txtSecondTittle = i18n.Encode(self.tbConfig.txtSecondTittle or "")
+  self.tbConfig.tbMapList = {}
+  self.tbConfig.tbBoxLocation = {}
+  self.tbConfig.tbFireWorkLocation = {}
+  for _, tbInfo in pairs(tbActCfg.tbMapList) do
+    self.tbConfig.tbMapList[tbInfo.nMapId] = tbInfo.nMapId
+    local szBoxLocationFile = tbInfo.szBoxLocationFile
+    local tbBoxPosList = Lib:LoadTabFileEx(szBoxLocationFile, "dd", nil, {"PosX", "PosY"}, nil, nil, true)
+    if tbBoxPosList then
+      self.tbConfig.tbBoxLocation[tbInfo.nMapId] = {}
+      for _, tbPos in ipairs(tbBoxPosList) do
+        table.insert(self.tbConfig.tbBoxLocation[tbInfo.nMapId], {
+          tbPos.PosX,
+          tbPos.PosY
+        })
+      end
+    end
+    local szFireWorkLocationFile = tbInfo.szFireWorkLocationFile
+    local txFireWorkPosList = Lib:LoadTabFileEx(szFireWorkLocationFile, "dd", nil, {"PosX", "PosY"}, nil, nil, true)
+    if txFireWorkPosList then
+      self.tbConfig.tbFireWorkLocation[tbInfo.nMapId] = {}
+      for _, tbPos in ipairs(txFireWorkPosList) do
+        table.insert(self.tbConfig.tbFireWorkLocation[tbInfo.nMapId], {
+          tbPos.PosX,
+          tbPos.PosY
+        })
+      end
+    end
+  end
+  self.tbConfig.nRemindTime = Lib:ParseNumbericDateToTime(self.tbConfig.nRemindTime)
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+end
+
+function tbActivity:CheckConfigValid()
+  local tbConfig = self:GetConfig()
+  if Lib:IsEmptyStr(tbConfig.szLogWay) then
+    LogErr("[EMeiFireWork:CheckConfigValid] bad logway! please check it! szLogWay=", tbConfig.szLogWay, self:GetId())
+    return false
+  end
+  return true
+end
+
+function tbActivity:InitExtraData(tbConfig)
+  self.SaveKey = GetGroupKey(self.tbConfig.szSaveKey)
+  self.szLogWay = self.tbConfig.szLogWay
+end
+
+function tbActivity:CanCheer(pPlayer)
+  local nPlayerCheer = pPlayer.GetUserValue(self.SaveKey, self.CheerCount)
+  if nPlayerCheer and nPlayerCheer < self.tbConfig.nPlayerMaxCheer then
+    return true
+  end
+  return false
+end

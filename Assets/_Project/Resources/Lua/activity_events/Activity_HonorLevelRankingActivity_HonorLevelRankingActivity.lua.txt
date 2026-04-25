@@ -1,0 +1,152 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+Require("CommonScript/Event/Event.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.HonorLevelRankingActivity)
+tbActivity.Protocol = {
+  OnGetRankingDataReq = 1,
+  OnGetRankingDataResp = 2,
+  OnGetFinishTimeReq = 3,
+  OnGetFinishTimeResp = 4
+}
+tbActivity.nCompletionStage = 0
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szAwardFilePath = "Setting/Activity/HonorLevelRankingActivity/RankingAward.tab"
+  local szActivityFilePath = "Setting/Activity/HonorLevelRankingActivity/HonorLevelRankingActivity.tab"
+  self.tbAwardList = Lib:EasyLoadTabFile(szAwardFilePath)
+  self.ACTIVITY_CONFIG = Lib:EasyLoadTabFile(szActivityFilePath, {"nConfigId"})
+  for _, tbConfig in pairs(self.ACTIVITY_CONFIG) do
+    if not tbConfig.szScriptDataKey then
+      tbConfig.szScriptDataKey = "KeyHonorLevelRankingActivity"
+    end
+  end
+  self.bLoadConfig = true
+end
+
+function tbActivity:CheckConfig(nConfigId)
+  self:LoadConfig()
+  if not self.ACTIVITY_CONFIG[nConfigId] then
+    LogErr(string.format("[%s] CheckConfig fail. nConfigId =%d not found", self.szClassName, nConfigId))
+    return false
+  end
+  if not self:CheckAndSetAwardConfig(nConfigId) then
+    return false
+  end
+  return true
+end
+
+function tbActivity:CheckAndSetAwardConfig(nConfigId)
+  local tbStageList = {}
+  local tbAwardConfig = {}
+  for _, tbAward in ipairs(self.tbAwardList) do
+    local tbConfig = tbAwardConfig[tbAward.nHonorLevel]
+    if not tbConfig then
+      tbAwardConfig[tbAward.nHonorLevel] = {}
+      tbConfig = tbAwardConfig[tbAward.nHonorLevel]
+    end
+    if tbConfig[tbAward.nStage] then
+      LogErr(string.format("[%s] CheckConfig fail. nConfigId =%d duplicate definition of ranking =%d rewards for honorLevel =%d", self.szClassName, nConfigId, tbAward.nStage, tbAward.nHonorLevel))
+      return false
+    end
+    tbConfig[tbAward.nStage] = tbAward.nAwardKey
+    local tbStages = tbStageList[tbAward.nHonorLevel]
+    if not tbStages then
+      tbStageList[tbAward.nHonorLevel] = {}
+      tbStages = tbStageList[tbAward.nHonorLevel]
+    end
+    if tbAward.nStage > 0 then
+      table.insert(tbStages, tbAward.nStage)
+    end
+  end
+  for nHonorLevel, tbAward in pairs(tbAwardConfig) do
+    if not tbAward[self.nCompletionStage] then
+      LogErr(string.format("[%s] CheckConfig fail. nConfigId =%d can not find the completed reward for the honorLevel =%d", self.szClassName, nConfigId, nHonorLevel))
+      return false
+    end
+  end
+  for _, tbStages in pairs(tbStageList) do
+    if not Lib:IsEmptyTB(tbStages) then
+      table.sort(tbStages, function(a, b)
+        return a < b
+      end)
+    end
+  end
+  self.tbStageList = SetReadOnly(tbStageList, true)
+  self.tbAwardConfig = SetReadOnly(tbAwardConfig, true)
+  return true
+end
+
+function tbActivity:OnModify(tbConfig)
+  self:InitMetaData(tbConfig)
+  if self.InitExtraData then
+    self:InitExtraData(tbConfig)
+  end
+  self.tbConfig = self.ACTIVITY_CONFIG[tbConfig.nConfigId]
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+end
+
+function tbActivity:IsActivityOpen()
+  if MODULE_GAMESERVER then
+    if 1 == self.nCanOpen then
+      if self.nActivityFinishTime then
+        return self.nActivityFinishTime > GetTime()
+      end
+      return true
+    end
+    return false
+  else
+    if self.nActivityFinishTime then
+      return self.nActivityFinishTime > GetTime()
+    end
+    return true
+  end
+end
+
+function tbActivity:GetAwardInfo(nRank)
+  local nAwardId = self.tbConfig.nAwardId
+  local nAwardKey = self:GetStageAwardKey(nRank)
+  if not nAwardKey or nAwardKey <= 0 then
+    LogErr(string.format("[%s]. GetAwardInfo nRank =%d,GetStageAwardKey nAwardKey is %s", self.szClassName, nRank, nAwardKey))
+    return
+  end
+  return Award:GetAward(nAwardId, nAwardKey)
+end
+
+function tbActivity:GetStageAwardKey(nRank)
+  local nHonorLevel = HonorLevel:GetCurTimeframeMaxLevel()
+  if not self.tbAwardConfig[nHonorLevel] then
+    LogErr(string.format("[%s]. GetStageAwardKey get award config by honorLevel=%d is nil", self.szClassName, nHonorLevel))
+    return
+  end
+  local nRankingCount = self:GetRankCount()
+  if not nRank or nRank > nRankingCount then
+    return self.tbAwardConfig[nHonorLevel][self.nCompletionStage]
+  elseif nRank and nRank <= nRankingCount then
+    local tbStages = self.tbStageList[nHonorLevel]
+    if #tbStages > 0 then
+      for _, nStage in ipairs(tbStages) do
+        if nRank <= nStage then
+          return self.tbAwardConfig[nHonorLevel][nStage]
+        end
+      end
+      LogErr(string.format("[%s]. GetStageAwardKey get ranking award failed, ranking =%d error, unable to obtain award", self.szClassName, nRank))
+      return
+    else
+      return self.tbAwardConfig[nHonorLevel][self.nCompletionStage]
+    end
+  end
+end
+
+function tbActivity:GetRankCount()
+  return self.tbConfig.nRankLength or 0
+end
+
+function tbActivity:GetSaveKeyFieldName()
+  return ActivityMgr.NoSaveKey
+end
+
+function tbActivity:GetScriptDataFieldName()
+  return "szScriptDataKey"
+end

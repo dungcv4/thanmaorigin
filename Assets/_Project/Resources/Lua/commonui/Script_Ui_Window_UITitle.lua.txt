@@ -1,0 +1,289 @@
+local tbWnd = Ui:CreateWindow("UITitle")
+tbWnd.DefSelectCatagoryId = 4
+tbWnd.DefSelectSmallIndex = 1
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_UPDATE_TITLE,
+      self.OnTitleUpdate,
+      self
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  UITree = "node/imgBG/Content/TitleList/UITree",
+  txtDesc = "node/imgBG/Content/TitleInfo/txtDesc",
+  txtGetTip = "node/imgBG/Content/TitleInfo/txtGetTip",
+  txtTime = "node/imgBG/Content/TitleInfo/txtTime",
+  txtInfoAttr = "node/imgBG/Content/TitleInfo/txtInfoAttr",
+  btnTakeOff = "node/imgBG/Content/TitleInfo/btnTakeOff",
+  btnWear = "node/imgBG/Content/TitleInfo/btnWear",
+  NpcModel = "node/imgBG/Content/NpcModel",
+  txtActive = "node/imgBG/Content/TitleInfo/imgTitleBg/imgActive/Text",
+  btnShowAttrList = "node/imgBG/Content/btnShowAttrList",
+  wndAttrList = "node/wndAttrList",
+  closeAttrList = "node/wndAttrList/Empty4Raycast",
+  AttribTemplate = "node/wndAttrList/imgBg/ScrollView/Viewport/Content/template",
+  txtNotCollected = "node/imgBG/Content/TitleInfo/imgTitleBg/txtNotCollected",
+  txtTitleShow = "node/imgBG/Content/Title"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    return self:Close()
+  end,
+  btnWear = function(self)
+    if not self.tbSelectNode then
+      return
+    end
+    local tbSmallData = self.tbSmallData[self.tbSelectNode.nSmallIndex]
+    if not tbSmallData then
+      return
+    end
+    local tbTitleData = PlayerTitle:GetPlayerTitleData()
+    if tbTitleData.nActivateTitle and tbTitleData.nActivateTitle ~= tbSmallData.tbInfo.nTitleID then
+      RemoteServer.ActiveTitle(tbSmallData.tbInfo.nTitleID)
+    end
+  end,
+  btnTakeOff = function(self)
+    if not self.tbSelectNode then
+      return
+    end
+    local tbSmallData = self.tbSmallData[self.tbSelectNode.nSmallIndex]
+    if not tbSmallData then
+      return
+    end
+    local tbTitleData = PlayerTitle:GetPlayerTitleData()
+    if tbTitleData.nActivateTitle and tbTitleData.nActivateTitle == tbSmallData.tbInfo.nTitleID then
+      RemoteServer.ActiveTitle(0)
+    end
+  end,
+  btnShowAttrList = function(self)
+    self.pPanel:SetActive(self.wndAttrList, true)
+  end,
+  closeAttrList = function(self)
+    self.pPanel:SetActive(self.wndAttrList, false)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.pTree = Ui:NewTree(self, self.UITree, self.TreeBigBtnOnClick, self.TreeSmallBtnOnClick)
+  local obj = self.pPanel:GetObject(self.NpcModel)
+  self.pNpcModel = obj:GetComponent(Ui.UINpcModel)
+  self.tbAttribView = Ui:NewScrollView(self, self.AttribTemplate, nil, false, true)
+  local obj = self.pPanel:GetObject(self.txtTitleShow)
+  self.pUITitle = obj:GetComponent(Ui.UITitle)
+end
+
+function tbWnd:SelectTitle(nTitleID)
+  local tbTitle = PlayerTitle:GetTitle(nTitleID)
+  if not tbTitle then
+    return
+  end
+  local tbTitleTemp = PlayerTitle:GetTitleTemplate(nTitleID)
+  if 1 ~= tbTitleTemp.bShow then
+    return
+  end
+  local tbInfo, nSmallIndex
+  for nIndex, tbData in ipairs(self.tbSmallData) do
+    if tbData.tbInfo.nTitleID == nTitleID then
+      nSmallIndex = nIndex
+      tbInfo = tbData.tbInfo
+      break
+    end
+  end
+  if not tbInfo or not nSmallIndex then
+    return
+  end
+  self:TreeSmallBtnOnClick(tbInfo, nSmallIndex)
+  if self.tbSelectNode then
+    self.pTree:RawSelectNode(self.tbSelectNode.nBigIndex, self.tbSelectNode.nSmallIndex, true)
+  end
+end
+
+function tbWnd:OnOpen(nTitleID)
+  self:UpdateTreeData()
+  self:ShowModel()
+  if nTitleID then
+    self:SelectTitle(nTitleID)
+  else
+    local pNpc = me.GetNpc()
+    local nUsedTitleID = pNpc.nTitleID
+    if nUsedTitleID and nUsedTitleID > 0 then
+      self:SelectTitle(nUsedTitleID)
+    end
+  end
+  self.pTree:GoTop()
+end
+
+function tbWnd:OnClose()
+  self.pNpcModel:Release()
+  self.tbSelectNode = nil
+end
+
+function tbWnd:TreeBigBtnOnClick(tbInfo, nBigIndex)
+end
+
+function tbWnd:TreeSmallBtnOnClick(tbInfo, nSmallIndex)
+  local tbTitleTemp = tbInfo.tbTitleTemp
+  local txtTime = ""
+  local bHasEndTime = tbInfo.nEndTime and tbInfo.nEndTime > 0
+  local bHasTimeout = tbTitleTemp.Timeout > 0
+  if bHasEndTime then
+    txtTime = tostring(Lib:OSDate("%Y-%m-%d %H:%M", tbInfo.nEndTime))
+  elseif bHasTimeout then
+    txtTime = tostring(Lib:TimeFullDesc(tbTitleTemp.Timeout))
+  else
+    txtTime = i18n.EasyGet("\230\176\184\228\185\133\230\139\165\230\156\137")
+  end
+  local szAttribMsg = ""
+  if tbTitleTemp and tbTitleTemp.AttrGroup > 0 and tbTitleTemp.AttrLevel > 0 then
+    local tbAttr = KItem.GetExternAttrib(tbTitleTemp.AttrGroup, tbTitleTemp.AttrLevel)
+    for _, tbAttrib in ipairs(tbAttr) do
+      local szDesc = FightSkill:GetMagicDesc(tbAttrib.szAttribName, tbAttrib.tbValue)
+      if not Lib:IsEmptyStr(szDesc) then
+        szAttribMsg = table.concat({
+          szAttribMsg,
+          szDesc,
+          "  "
+        })
+      end
+    end
+  end
+  if Lib:IsEmptyStr(szAttribMsg) then
+    szAttribMsg = i18n.EasyGet("\230\151\160")
+  end
+  local szDesc = i18n.Parse(tbTitleTemp.Desc)
+  local szSource = i18n.Parse(tbTitleTemp.Source)
+  self.pPanel:Label_SetText(self.txtDesc, i18n.EasyGet("\231\167\176\229\143\183\230\143\143\232\191\176\239\188\154{0}", szDesc))
+  self.pPanel:Label_SetText(self.txtGetTip, i18n.EasyGet("\232\142\183\229\190\151\230\150\185\229\188\143\239\188\154{0}", szSource))
+  self.pPanel:Label_SetText(self.txtTime, i18n.EasyGet("\231\167\176\229\143\183\230\151\182\230\149\136\239\188\154{0}", txtTime))
+  self.pPanel:Label_SetText(self.txtInfoAttr, i18n.EasyGet("\229\177\158\230\128\167\229\138\160\230\136\144\239\188\154{0}", szAttribMsg))
+  self.pUITitle:SetTitle(i18n.Parse(tbInfo.szTitle or tbTitleTemp.Name), tbTitleTemp.ColorID, tbTitleTemp.GTopColorID, tbTitleTemp.GBottomColorID, tbTitleTemp.OutlineColorID, tbTitleTemp.OutlineAlpha)
+  self.pUITitle:SetBGEffect(tbTitleTemp.BGEffectResID)
+  local tbTitleData = PlayerTitle:GetPlayerTitleData()
+  if tbTitleData.tbAllTitle[tbTitleTemp.TitleID] then
+    if tbTitleData.nActivateTitle and tbTitleData.nActivateTitle == tbTitleTemp.TitleID then
+      self.pPanel:SetActive(self.btnWear, false)
+      self.pPanel:SetActive(self.btnTakeOff, true)
+    else
+      self.pPanel:SetActive(self.btnWear, true)
+      self.pPanel:SetActive(self.btnTakeOff, false)
+    end
+    self.pPanel:SetActive(self.txtNotCollected, false)
+  else
+    self.pPanel:SetActive(self.btnWear, false)
+    self.pPanel:SetActive(self.btnTakeOff, false)
+    self.pPanel:SetActive(self.txtNotCollected, true)
+  end
+  self.tbSelectNode = {
+    nBigIndex = self.tbCategory[tbTitleTemp.nCategoryId],
+    nSmallIndex = nSmallIndex
+  }
+end
+
+function tbWnd:UpdateTreeData(bForceUpdateTree)
+  self.tbBigData = {}
+  self.tbSmallData = {}
+  local tbAttribList = {}
+  self.tbCategory = {}
+  local tbTitleData = PlayerTitle:GetPlayerTitleData()
+  for _, tbTitle in pairs(tbTitleData.tbAllTitle) do
+    local tbTitleInfo = {}
+    tbTitleInfo.nTitleID = tbTitle.nTitleID
+    tbTitleInfo.nEndTime = tbTitle.nEndTime
+    local tbTitleTemp = PlayerTitle:GetTitleTemplate(tbTitleInfo.nTitleID)
+    if tbTitleTemp and tbTitleTemp.AttrGroup > 0 and tbTitleTemp.AttrLevel > 0 then
+      local tbAttr = KItem.GetExternAttrib(tbTitleTemp.AttrGroup, tbTitleTemp.AttrLevel)
+      for _, tbAttrib in ipairs(tbAttr) do
+        local szDesc = FightSkill:GetMagicDesc(tbAttrib.szAttribName, tbAttrib.tbValue)
+        if not Lib:IsEmptyStr(szDesc) then
+          table.insert(tbAttribList, szDesc)
+        end
+      end
+    end
+    if 1 == tbTitleTemp.bShow then
+      local nCategoryId = tbTitleTemp.nCategoryId
+      if not self.tbCategory[nCategoryId] then
+        table.insert(self.tbBigData, {
+          nType = nCategoryId,
+          szText = PlayerTitle:GetCategoryName(nCategoryId),
+          tbInfo = {nCategoryId = nCategoryId}
+        })
+        self.tbCategory[nCategoryId] = #self.tbBigData
+      end
+      tbTitleInfo.tbTitleTemp = tbTitleTemp
+      tbTitleInfo.szTitle = tbTitle.szTitle
+      table.insert(self.tbSmallData, {
+        bSubMenu = true,
+        nType = nCategoryId,
+        szText = string.format("<color=#1560b5>%s</color>", i18n.Parse(tbTitle.szTitle or tbTitleTemp.Name)),
+        tbInfo = tbTitleInfo,
+        tbCallBackInfo = {IsLock = false}
+      })
+    end
+  end
+  local tbAllTitleTemp = PlayerTitle:GetAllTitle()
+  for nTitleID, tbTitleTemp in pairs(tbAllTitleTemp) do
+    if not tbTitleData.tbAllTitle[nTitleID] and 1 == tbTitleTemp.bShow and 1 == tbTitleTemp.bShowNoGet and (0 == tbTitleTemp.Faction or me.nFaction == tbTitleTemp.Faction) then
+      local tbTitleInfo = {}
+      if 1 == tbTitleTemp.bShow then
+        local nCategoryId = tbTitleTemp.nCategoryId
+        if not self.tbCategory[nCategoryId] then
+          table.insert(self.tbBigData, {
+            nType = nCategoryId,
+            szText = PlayerTitle:GetCategoryName(nCategoryId),
+            tbInfo = {nCategoryId = nCategoryId}
+          })
+          self.tbCategory[nCategoryId] = #self.tbBigData
+        end
+        tbTitleInfo.tbTitleTemp = tbTitleTemp
+        table.insert(self.tbSmallData, {
+          bSubMenu = true,
+          nType = nCategoryId,
+          szText = string.format("<color=#1560b5>%s</color>", i18n.Parse(tbTitleTemp.Name)),
+          tbInfo = tbTitleInfo,
+          tbCallBackInfo = {IsLock = true}
+        })
+      end
+    end
+  end
+  self.pTree:SetData(self.tbBigData, self.tbSmallData, nil, self.SmallCallBack, bForceUpdateTree)
+  self.tbAttribView:Clear()
+  for i = 1, #tbAttribList do
+    self.tbAttribView:SetElement(i, function(tbElement)
+      tbElement.pPanel:Label_SetText("txtAttrDesc", tbAttribList[i])
+    end)
+  end
+  if self.tbSelectNode then
+    self.pTree:RawSelectNode(self.tbSelectNode.nBigIndex, self.tbSelectNode.nSmallIndex, true)
+  else
+    self.tbSelectNode = {
+      nBigIndex = self.tbCategory[self.DefSelectCatagoryId],
+      nSmallIndex = self.DefSelectSmallIndex
+    }
+    self.pTree:SelectNode(self.tbSelectNode.nBigIndex, self.tbSelectNode.nSmallIndex, true)
+  end
+  self.pTree:GoTop()
+end
+
+function tbWnd:SmallCallBack(szKey, tbCallBackInfo)
+  if szKey and tbCallBackInfo then
+    if tbCallBackInfo.IsLock then
+      self.pPanel:SetActive(szKey .. "/imgLock", true)
+    else
+      self.pPanel:SetActive(szKey .. "/imgLock", false)
+    end
+  end
+end
+
+function tbWnd:OnTitleUpdate()
+  self:UpdateTreeData(true)
+end
+
+function tbWnd:ShowModel()
+  local tbFeature, tbEffect = me.GetNpcResInfo()
+  self.pNpcModel:ShowModel(me.nSex, 1, tbFeature[Npc.NpcResPartsDef.npc_part_body], tbFeature[Npc.NpcResPartsDef.npc_part_weapon], tbFeature[Npc.NpcResPartsDef.npc_part_mantle], tbFeature[Npc.NpcResPartsDef.npc_part_horse], tbFeature[Npc.NpcResPartsDef.npc_part_head], tbFeature[Npc.NpcResPartsDef.npc_part_wind], tbEffect[Npc.NpcResPartsDef.npc_part_weapon])
+end

@@ -1,0 +1,539 @@
+local tbWnd = Ui:CreateWindow("UIItemBatchSellPanel")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnAddItemEvent
+    },
+    {
+      EventNotify.emNOTIFY_DEL_ITEM,
+      self.OnDelItemEvent
+    },
+    {
+      EventNotify.emNOTIFY_PARTNER_EQUIP_DECOMPOSE_SUCCESS,
+      self.ResetSelectItem
+    },
+    {
+      EventNotify.emNOTIFY_SHENGBING_RECYCLE_SUCCESS,
+      self.ResetSelectItem
+    }
+  }
+end
+
+local tbToggle = Ui.tbToggle
+local tbKey2Classify = Ui.tbKey2Classify
+local SORT_KEY = Ui:GetUi_SORT_KEY()
+local nMaxSelectNum = 50
+tbWnd.tbLinkFromBag = {
+  [tbToggle.TogEquip] = true,
+  [tbToggle.TogStone] = true,
+  [tbToggle.TogZhenYuan] = true,
+  [tbToggle.TogJingMai] = true,
+  [tbToggle.HorseSkillStone] = true,
+  [tbToggle.TogLingZhu] = true,
+  [tbToggle.TogAll] = true
+}
+local tbControls = {
+  btnClose = "imgBG/BG/btnClose",
+  btnTemplate = "imgBG/ScrollViewbtnGroup/Viewport/Content/btnTemplate",
+  goItemCell = "imgBG/bagItemSV/BIViewport/BIContent/ItemCell",
+  txtTips = "imgBG/txtTips",
+  NothingInBag = "imgBG/NothingInBag",
+  TogWhiteItem = "imgBG/txtQuickSelect/TogWhiteItem",
+  TogGreenItem = "imgBG/txtQuickSelect/TogGreenItem",
+  TogBlueItem = "imgBG/txtQuickSelect/TogBlueItem",
+  TogAllItem = "imgBG/txtQuickSelect/TogAllItem",
+  imgMoney = "imgBG/GoldDisplay/txtSell/imgMoney",
+  txtMoney = "imgBG/GoldDisplay/txtSell/txtMoney",
+  btnBatchSell = "imgBG/btnBatchSell",
+  TogPurpleItem = "imgBG/txtQuickSelect/TogPurpleItem",
+  AutoSell = "imgBG/Down",
+  TogAutoSellWhiteItem = "imgBG/Down/txtAuto/Toggle/TogWhiteItem",
+  TogAutoSellGreenItem = "imgBG/Down/txtAuto/Toggle/TogGreenItem",
+  TogAutoSellBlueItem = "imgBG/Down/txtAuto/Toggle/TogBlueItem",
+  TogAutoSellPurpleItem = "imgBG/Down/txtAuto/Toggle/TogPurpleItem",
+  TogAutoSellTradeItem = "imgBG/Down/txtInfo/TogAllItem"
+}
+tbWnd.tbAutoTog2Quality = {
+  [tbControls.TogAutoSellWhiteItem] = 1,
+  [tbControls.TogAutoSellGreenItem] = 2,
+  [tbControls.TogAutoSellBlueItem] = 3,
+  [tbControls.TogAutoSellPurpleItem] = 4,
+  [tbControls.TogAutoSellTradeItem] = Item.tbItemBatchSell.TRADE_ITEM_OPT
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:DoSell()
+  if self.bIsDoingSell then
+    return me.CenterMsg(i18n.EasyGet("\230\173\163\229\156\168\229\135\186\229\148\174\231\137\169\229\147\129\228\184\173\239\188\129"))
+  end
+  if Lib:CountTB(self.tbSelectItem) <= 0 then
+    return me.CenterMsg(i18n.EasyGet("\232\175\183\229\133\136\233\128\137\230\139\169\231\137\169\229\147\129"))
+  end
+  local str = ""
+  for szCurrencyType, nValue in pairs(self.tbObtainMoney) do
+    if nValue > 0 then
+      local tbCustomData = Item.tbItemBatchSell:GetCustomSellData(szCurrencyType)
+      local bRet, szTip = tbCustomData.funcCanAddValue(me, nValue)
+      if not bRet then
+        return me.CenterMsg(szTip)
+      end
+      local szName = tbCustomData.funcGetObtainName(szCurrencyType)
+      str = str .. nValue .. szName .. "\239\188\140"
+    end
+  end
+  
+  local function funcOk()
+    local tbDwId = {}
+    for k, v in pairs(self.tbSelectItem) do
+      table.insert(tbDwId, v.nItemId)
+    end
+    self.bIsDoingSell = true
+    local tbItemSell = Item.tbItemBatchSell.tbItemSellRequest[self.nItemKind] or Item.tbItemBatchSell.tbItemSellRequest.Default
+    tbItemSell(tbDwId)
+  end
+  
+  local szDesc = ""
+  szDesc = i18n.EasyGet("\230\137\185\233\135\143\229\135\186\229\148\174\232\142\183\229\190\151{0}\230\152\175\229\144\166\231\161\174\229\174\154\229\135\186\229\148\174", str)
+  Ui:OpenWindow("UIMessageBox", szDesc, {
+    {funcOk},
+    {}
+  })
+end
+
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnBatchSell = function(self)
+    self:DoSell()
+  end
+}
+tbWnd.tbOnToggleClick = {
+  TogWhiteItem = function(self, isOn)
+    self.tbSelectQuality[1] = isOn
+    self:QuickSelectItems()
+  end,
+  TogGreenItem = function(self, isOn)
+    self.tbSelectQuality[2] = isOn
+    self:QuickSelectItems()
+  end,
+  TogBlueItem = function(self, isOn)
+    self.tbSelectQuality[3] = isOn
+    self:QuickSelectItems()
+  end,
+  TogPurpleItem = function(self, isOn)
+    self.tbSelectQuality[4] = isOn
+    self:QuickSelectItems()
+  end,
+  TogAllItem = function(self, isOn)
+    if isOn then
+      self.pPanel:Toggle_SetEnable(self.TogWhiteItem, false)
+      self.pPanel:Toggle_SetEnable(self.TogGreenItem, false)
+      self.pPanel:Toggle_SetEnable(self.TogBlueItem, false)
+      self.pPanel:Toggle_SetEnable(self.TogPurpleItem, false)
+    else
+      self.pPanel:Toggle_SetEnable(self.TogWhiteItem, true)
+      self.pPanel:Toggle_SetEnable(self.TogGreenItem, true)
+      self.pPanel:Toggle_SetEnable(self.TogBlueItem, true)
+      self.pPanel:Toggle_SetEnable(self.TogPurpleItem, true)
+      self.pPanel:Toggle_SetChecked(self.TogWhiteItem, false)
+      self.pPanel:Toggle_SetChecked(self.TogGreenItem, false)
+      self.pPanel:Toggle_SetChecked(self.TogBlueItem, false)
+      self.pPanel:Toggle_SetChecked(self.TogPurpleItem, false)
+    end
+    self.bIsHadAll = isOn
+    self:QuickSelectItems()
+  end,
+  TogAutoSellWhiteItem = function(self, isOn)
+    Item.tbItemBatchSell:SaveAutoSellData(self.nItemKind, 1, isOn)
+  end,
+  TogAutoSellGreenItem = function(self, isOn)
+    Item.tbItemBatchSell:SaveAutoSellData(self.nItemKind, 2, isOn)
+  end,
+  TogAutoSellBlueItem = function(self, isOn)
+    Item.tbItemBatchSell:SaveAutoSellData(self.nItemKind, 3, isOn)
+  end,
+  TogAutoSellPurpleItem = function(self, isOn)
+    if isOn then
+      local szName = i18n.Parse(Item.tbItemBatchSell.tbItemAutoSellCfg[self.nItemKind].szBtnName)
+      
+      local function funcOk()
+        Item.tbItemBatchSell:SaveAutoSellData(self.nItemKind, 4, true)
+      end
+      
+      local function fnCancel()
+        self.pPanel:Toggle_SetChecked(tbControls.TogAutoSellPurpleItem, false)
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\164\167\228\190\160\231\161\174\232\174\164\232\166\129\232\135\170\229\138\168\229\155\158\230\148\182\231\180\171\232\137\178\229\147\129\232\180\168\231\154\132{0}\229\144\151\239\188\159", szName), {
+        {funcOk},
+        {fnCancel}
+      })
+    else
+      Item.tbItemBatchSell:SaveAutoSellData(self.nItemKind, 4, false)
+    end
+  end,
+  TogAutoSellTradeItem = function(self, isOn)
+    if isOn then
+      local function funcOk()
+        Item.tbItemBatchSell:SaveAutoSellData(self.nItemKind, Item.tbItemBatchSell.TRADE_ITEM_OPT, true)
+      end
+      
+      local function fnCancel()
+        self.pPanel:Toggle_SetChecked(tbControls.TogAutoSellTradeItem, false)
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\164\167\228\190\160\231\161\174\232\174\164\232\166\129\232\135\170\229\138\168\229\155\158\230\148\182\229\143\175\228\186\164\230\152\147\233\129\147\229\133\183\229\144\151\239\188\159"), {
+        {funcOk},
+        {fnCancel}
+      })
+    else
+      Item.tbItemBatchSell:SaveAutoSellData(self.nItemKind, Item.tbItemBatchSell.TRADE_ITEM_OPT, false)
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbTypeQuality = {}
+  self:AppendTypeQuality()
+  self.tbBtnScrollView = Ui:NewScrollView(self, tbControls.btnTemplate, nil)
+  local nCount = 1
+  local tbBtnList = {}
+  for _, tbCfg in ipairs(Item.tbItemBatchSell.tbItemBatchSellCfg) do
+    local pFunc = Item.tbItemBatchSell.tbItemSellOpenFunc[Ui.tbToggle[tbCfg.szTogName]]
+    if not pFunc or pFunc() then
+      self.tbBtnScrollView:SetElement(nCount, function(tbElement)
+        tbElement.pPanel:Label_SetText("Text", i18n.Parse(tbCfg.szBtnName))
+        tbBtnList[Ui.tbToggle[tbCfg.szTogName]] = tbElement.szKey
+      end)
+      nCount = nCount + 1
+    end
+  end
+  self.tbItemKindGroup = Ui:NewButtonGroup(self, tbBtnList, true, function(self, nIndex)
+    self.tbSelectItem = {}
+    self.tbObtainMoney = {}
+    self.nItemKind = nIndex
+    self:UpdateItemSVPanel()
+  end)
+  self.tbBagScrollView = Ui:NewLoopScrollView(self, tbControls.goItemCell, "Item")
+  self.nRow = 6
+end
+
+function tbWnd:OnOpen(nItemKind)
+  self.nItemKind = tbToggle.TogEquip
+  if nItemKind and self.tbLinkFromBag[nItemKind] then
+    self.nItemKind = nItemKind
+  end
+  self.bIsDoingSell = false
+  self.tbSelectQuality = {}
+  self.tbSelectItem = {}
+  self.tbObtainMoney = {}
+  self:InitCanSellItem()
+  self:UpdateItemSVDataList()
+  self.tbItemKindGroup:Select(self.nItemKind)
+  self:UpdateItemSVPanel()
+  self.bIsHadAll = false
+  self:ResetToggle()
+end
+
+function tbWnd:ResetToggle()
+  self.bIsResetToggle = true
+  self.pPanel:Toggle_SetChecked(tbControls.TogWhiteItem, false)
+  self.pPanel:Toggle_SetChecked(tbControls.TogGreenItem, false)
+  self.pPanel:Toggle_SetChecked(tbControls.TogBlueItem, false)
+  self.pPanel:Toggle_SetChecked(tbControls.TogPurpleItem, false)
+  self.pPanel:Toggle_SetChecked(tbControls.TogAllItem, false)
+  self.bIsResetToggle = false
+end
+
+function tbWnd:InitCanSellItem()
+  self.tbBagItems = {}
+  local tbItem = me.GetItemListInBag()
+  for i, pItem in ipairs(tbItem) do
+    if Item.tbItemBatchSell:CheckCanSellItem(pItem.dwTemplateId) then
+      self.tbBagItems[pItem.dwId] = pItem
+    end
+  end
+end
+
+function tbWnd:OnClose()
+  Item.tbItemBatchSell:DoAllAutoSellOnce()
+end
+
+function tbWnd:GetAllBagItemTogClassify(tbBagItems)
+  local tbItemLists = {}
+  for _, nToggle in pairs(tbToggle) do
+    tbItemLists[nToggle] = {}
+  end
+  for dwId, pItem in pairs(tbBagItems) do
+    local tbData = {
+      nCount = pItem.nCount,
+      nQuality = pItem.nQuality,
+      nKey = pItem.GetSingleValue(),
+      nItemId = dwId,
+      dwTemplateId = pItem.dwTemplateId,
+      dwTradeLimitType = pItem.dwTradeLimitType,
+      nLevel = pItem.nLevel,
+      szClass = pItem.szClass,
+      nSortKey = SORT_KEY[pItem.nItemType] or 1000
+    }
+    local tbClassifyTag = Item.tbItemBatchSell:GetItemTogClassify(pItem) or {}
+    for nClassify, _ in pairs(tbClassifyTag) do
+      table.insert(tbItemLists[nClassify], tbData)
+    end
+  end
+  return tbItemLists
+end
+
+function tbWnd:UpdateItemSVDataList()
+  self.tbItemLists = self:GetAllBagItemTogClassify(self.tbBagItems)
+  self.tbItemList = self.tbItemLists[self.nItemKind]
+end
+
+function tbWnd:OnAddItemEvent(dwId, nNewItem, nAddCount)
+  local pItem = KItem.GetItemObj(dwId)
+  if not pItem or not Item.tbItemBatchSell:CheckCanSellItem(pItem.dwTemplateId) then
+    return
+  end
+  if 0 == nNewItem then
+    self:UpdateItemSVDataList()
+    self:UpdateItemSVPanel()
+  end
+end
+
+function tbWnd:OnDelItemEvent(dwId, dwTemplateId)
+  if not Item.tbItemBatchSell:CheckCanSellItem(dwTemplateId) then
+    return
+  end
+  if self.tbBagItems[dwId] then
+    self.tbBagItems[dwId] = nil
+  end
+  if self.bIsDoingSell then
+    return
+  end
+  self:UpdateItemSVDataList()
+  self:UpdateItemSVPanel()
+end
+
+function tbWnd.EquipItemSortFunc(sellItemDataA, sellItemDataB)
+  if sellItemDataA.szClass ~= sellItemDataB.szClass then
+    if sellItemDataA.szClass == "MainEquip" then
+      return true
+    end
+    if sellItemDataB.szClass == "MainEquip" then
+      return false
+    end
+  end
+  if sellItemDataA.nQuality ~= sellItemDataB.nQuality then
+    return sellItemDataA.nQuality < sellItemDataB.nQuality
+  end
+  if sellItemDataA.nLevel ~= sellItemDataB.nLevel then
+    return sellItemDataA.nLevel < sellItemDataB.nLevel
+  end
+  if sellItemDataA.nSortKey ~= sellItemDataB.nSortKey then
+    return sellItemDataA.nSortKey < sellItemDataB.nSortKey
+  end
+  if sellItemDataA.nKey ~= sellItemDataB.nKey then
+    return sellItemDataA.nKey < sellItemDataB.nKey
+  end
+  if sellItemDataA.dwTemplateId ~= sellItemDataB.dwTemplateId then
+    return sellItemDataA.dwTemplateId < sellItemDataB.dwTemplateId
+  end
+  return sellItemDataA.nItemId < sellItemDataB.nItemId
+end
+
+function tbWnd:UpdateItemSVPanel()
+  for szTogName, bActive in pairs(self.tbTypeQuality[self.nItemKind]) do
+    self.pPanel:SetActive(szTogName, bActive)
+  end
+  if not self.tbAutoTypeQuality[self.nItemKind] then
+    self.pPanel:SetActive(tbControls.AutoSell, false)
+  else
+    self:UnInitToggleEvent()
+    for szTogName, bActive in pairs(self.tbAutoTypeQuality[self.nItemKind]) do
+      self.pPanel:SetActive(szTogName, bActive)
+      if Item.tbItemBatchSell:GetAutoSellQualityData(self.nItemKind, self.tbAutoTog2Quality[szTogName]) then
+        self.pPanel:Toggle_SetChecked(szTogName, true)
+      else
+        self.pPanel:Toggle_SetChecked(szTogName, false)
+      end
+    end
+    self.pPanel:SetActive(tbControls.AutoSell, true)
+    self:InitToggleEvent()
+  end
+  self.tbItemList = self.tbItemLists[self.nItemKind]
+  
+  local function fnSort(tbA, tbB)
+    if tbA.nQuality ~= tbB.nQuality then
+      return tbA.nQuality < tbB.nQuality
+    end
+    if tbA.nKey ~= tbB.nKey then
+      return tbA.nKey < tbB.nKey
+    end
+    if tbA.dwTemplateId ~= tbB.dwTemplateId then
+      return tbA.dwTemplateId < tbB.dwTemplateId
+    end
+    return tbA.nItemId < tbB.nItemId
+  end
+  
+  if self.nItemKind == tbToggle.TogEquip then
+    table.sort(self.tbItemList, self.EquipItemSortFunc)
+  else
+    table.sort(self.tbItemList, fnSort)
+  end
+  local nCount = Lib:CountTB(self.tbItemList)
+  
+  local function fnSetItem(tbLoopScroll, nIndex)
+    for i = 1, self.nRow do
+      local curIndex = (nIndex - 1) * self.nRow + i
+      local itemObj = tbLoopScroll:GetGridElement(nIndex, i)
+      local itemGrid = Ui:NewExistItemGrid(itemObj, "UIItemGrid")
+      if curIndex <= nCount then
+        itemGrid:SetActive(true)
+        local tbItem = self.tbItemList[curIndex]
+        local nItemId = tbItem and tbItem.nItemId
+        local dwTemplateId = tbItem and tbItem.dwTemplateId
+        itemGrid.szItemOpt = "ItemSell"
+        itemGrid:SetItem(nItemId, dwTemplateId, {
+          bShowTip = true,
+          bShowSeries = tbControls.bShowSeries
+        })
+        itemObj.pPanel:SetActive("imgSelected", self.tbSelectItem[curIndex] and true or false)
+        itemObj.pPanel:SetActive("UIItemGrid/ImgSelect", self.tbSelectItem[curIndex] and true or false)
+        self:itemCallBack(tbItem, itemObj, itemGrid)
+        itemGrid:SetClickEnable(true, function()
+          local szCurrencyType, nNum = Item.tbItemBatchSell:GetSellRewardValue(dwTemplateId, nItemId)
+          local nAddMoney = nNum * tbItem.nCount
+          if self.tbSelectItem[curIndex] then
+            itemObj.pPanel:SetActive("imgSelected", false)
+            itemObj.pPanel:SetActive("UIItemGrid/ImgSelect", false)
+            self.tbSelectItem[curIndex] = nil
+            self.tbObtainMoney[szCurrencyType] = self.tbObtainMoney[szCurrencyType] or 0
+            self.tbObtainMoney[szCurrencyType] = self.tbObtainMoney[szCurrencyType] - nAddMoney
+          else
+            if Lib:CountTB(self.tbSelectItem) >= nMaxSelectNum then
+              me.CenterMsg(i18n.EasyGet("\233\128\137\230\139\169\231\154\132\230\149\176\233\135\143\229\164\159\229\164\154\228\186\134\239\188\140\229\133\136\229\155\158\230\148\182\228\184\128\228\184\139\229\144\167\239\188\129"))
+              return
+            end
+            self.tbObtainMoney[szCurrencyType] = self.tbObtainMoney[szCurrencyType] or 0
+            local tbCustomData = Item.tbItemBatchSell:GetCustomSellData(szCurrencyType)
+            local bRet, szTip = tbCustomData.funcCanAddValue(me, self.tbObtainMoney[szCurrencyType] + nAddMoney)
+            if not bRet then
+              return me.CenterMsg(szTip)
+            end
+            itemObj.pPanel:SetActive("imgSelected", true)
+            itemObj.pPanel:SetActive("UIItemGrid/ImgSelect", true)
+            self.tbSelectItem[curIndex] = tbItem
+            self.tbObtainMoney[szCurrencyType] = self.tbObtainMoney[szCurrencyType] + nAddMoney
+          end
+        end)
+      else
+        itemObj.pPanel:SetActive("imgSelected", false)
+        itemObj.pPanel:SetActive("UIItemGrid/ImgSelect", false)
+        itemGrid:SetEmpty()
+        itemGrid:SetActive(false)
+      end
+    end
+  end
+  
+  self.tbBagScrollView:SetElement(math.ceil(nCount / self.nRow), fnSetItem)
+end
+
+function tbWnd:QuickSelectItems()
+  if self.bIsResetToggle then
+    return
+  end
+  self.tbSelectItem = {}
+  self.tbObtainMoney = {}
+  if self.bIsHadAll then
+    for i = 1, #self.tbItemList do
+      if i > nMaxSelectNum then
+        break
+      end
+      local szCurrencyType, nNum = Item.tbItemBatchSell:GetSellRewardValue(self.tbItemList[i].dwTemplateId, self.tbItemList[i].nItemId)
+      local nAddMoney = nNum * self.tbItemList[i].nCount
+      self.tbObtainMoney[szCurrencyType] = self.tbObtainMoney[szCurrencyType] or 0
+      local tbCustomData = Item.tbItemBatchSell:GetCustomSellData(szCurrencyType)
+      local bRet, szTip = tbCustomData.funcCanAddValue(me, self.tbObtainMoney[szCurrencyType] + nAddMoney)
+      if bRet then
+        self.tbObtainMoney[szCurrencyType] = self.tbObtainMoney[szCurrencyType] + nAddMoney
+        self.tbSelectItem[i] = self.tbItemList[i]
+      end
+    end
+  else
+    local nCount = 0
+    for i = 1, #self.tbItemList do
+      if self.tbSelectQuality[self.tbItemList[i].nQuality] then
+        if nCount >= nMaxSelectNum then
+          break
+        end
+        local szCurrencyType, nNum = Item.tbItemBatchSell:GetSellRewardValue(self.tbItemList[i].dwTemplateId, self.tbItemList[i].nItemId)
+        local nAddMoney = nNum * self.tbItemList[i].nCount
+        local tbCustomData = Item.tbItemBatchSell:GetCustomSellData(szCurrencyType)
+        self.tbObtainMoney[szCurrencyType] = self.tbObtainMoney[szCurrencyType] or 0
+        local bRet, szTip = tbCustomData.funcCanAddValue(me, self.tbObtainMoney[szCurrencyType] + nAddMoney)
+        if bRet then
+          self.tbObtainMoney[szCurrencyType] = self.tbObtainMoney[szCurrencyType] + nAddMoney
+          self.tbSelectItem[i] = self.tbItemList[i]
+          nCount = nCount + 1
+        end
+      end
+    end
+  end
+  self:UpdateItemSVPanel()
+end
+
+function tbWnd:ResetSelectItem()
+  self:ResetToggle()
+  self:UpdateItemSVDataList()
+  self:QuickSelectItems()
+  self.bIsDoingSell = false
+end
+
+function tbWnd:AppendTypeQuality()
+  self.tbAutoTypeQuality = {}
+  for _, tbCfg in ipairs(Item.tbItemBatchSell.tbItemBatchSellCfg) do
+    self.tbTypeQuality[Ui.tbToggle[tbCfg.szTogName]] = {}
+    local tb = self.tbTypeQuality[Ui.tbToggle[tbCfg.szTogName]]
+    tb[tbControls.TogWhiteItem] = 1 == tbCfg.nWhiteItem
+    tb[tbControls.TogGreenItem] = 1 == tbCfg.nGreenItem
+    tb[tbControls.TogBlueItem] = 1 == tbCfg.nBlueItem
+    tb[tbControls.TogPurpleItem] = 1 == tbCfg.nPurpleItem
+    tb[tbControls.TogAllItem] = 1 == tbCfg.nAllItem
+    if 1 == tbCfg.nCanAutoSell then
+      self.tbAutoTypeQuality[Ui.tbToggle[tbCfg.szTogName]] = {}
+      tb = self.tbAutoTypeQuality[Ui.tbToggle[tbCfg.szTogName]]
+      if tbCfg.szTogName == "TogEquip" then
+        tb[tbControls.TogAutoSellGreenItem] = true
+        tb[tbControls.TogAutoSellPurpleItem] = false
+        tb[tbControls.TogAutoSellWhiteItem] = false
+        tb[tbControls.TogAutoSellBlueItem] = false
+      else
+        tb[tbControls.TogAutoSellPurpleItem] = 1 == tbCfg.nPurpleItem
+        tb[tbControls.TogAutoSellWhiteItem] = 1 == tbCfg.nWhiteItem
+        tb[tbControls.TogAutoSellGreenItem] = 1 == tbCfg.nGreenItem
+        tb[tbControls.TogAutoSellBlueItem] = 1 == tbCfg.nBlueItem
+      end
+      tb[tbControls.TogAutoSellTradeItem] = true
+    end
+  end
+end
+
+function tbWnd:AppendLinkFromBag()
+  for _, tbCfg in ipairs(Item.tbItemBatchSell.tbItemBatchSellCfg) do
+    self.tbLinkFromBag[Ui.tbToggle[tbCfg.szTogName]] = true
+  end
+end
+
+function tbWnd:itemCallBack(tbItem, itemObj, itemGrid)
+  local pItem = KItem.GetItemObj(tbItem.nItemId)
+  if Item.PartnerEquip:CheckIsPartnerEquip(pItem) then
+    local nEquipLevel = Item.PartnerEquip:GetEquipLevel(pItem)
+    itemObj.pPanel:SetActive("txtLv", nEquipLevel and nEquipLevel > 0)
+    itemObj.pPanel:Label_SetText("txtLv", "+" .. (nEquipLevel or 0))
+  else
+    itemObj.pPanel:SetActive("txtLv", false)
+  end
+end

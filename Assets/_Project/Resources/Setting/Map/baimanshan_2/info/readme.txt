@@ -1,0 +1,15 @@
+auto_pos.txt:
+用于抓取玩家自动寻路的目标点位，szTargetType代表当开始某一个目标的时候，需要寻路的目标点
+escort_pos.txt:
+用于抓取金鸡的自动寻路路径点
+obstacle_pos.txt:
+障碍Trap点：
+szTrapName代表抓的Trap点的名字，PosX以及PosY代表当障碍没有开放时，玩家会被传回到哪里
+refresh_pos.txt:
+用于刷怪的点位文件，szNpcName代表刷的是哪种怪，PosX以及PosY代表这些怪会被刷到那些点上
+revive_pos.txt:
+用于抓取复活点的点位文件，szTargetType代表当完成哪个目标之后，复活的点会被变更到PosX以及PosY上
+
+ps：
+szTargetType的所有类型请见BaiManMountain.xlsx配置表中的TargetCfg
+szNpcName的所有类型请见BaiManMountain.xlsx配置表中的MonsterNpcCfg

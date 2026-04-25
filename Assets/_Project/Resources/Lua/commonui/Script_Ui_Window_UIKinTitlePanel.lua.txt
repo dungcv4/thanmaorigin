@@ -1,0 +1,99 @@
+local tbWnd = Ui:CreateWindow("UIKinTitlePanel")
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  Template = "node/imgBG/Content/ScrollView/List/Template",
+  btnSave = "node/imgBG/Content/BtnSaveChange"
+}
+tbWnd.tbCareersNoNeedSearch = {
+  [Kin.Def.Career_Elite] = function()
+    i18n.EasyGet("\227\128\144\229\133\168\228\189\147\231\178\190\232\139\177\230\136\144\229\145\152\227\128\145")
+  end,
+  [Kin.Def.Career_Normal] = function()
+    i18n.EasyGet("\227\128\144\229\133\168\228\189\147\230\173\163\229\188\143\230\136\144\229\145\152\227\128\145")
+  end,
+  [Kin.Def.Career_Trainee] = function()
+    i18n.EasyGet("\227\128\144\229\133\168\228\189\147\232\167\129\228\185\160\230\136\144\229\145\152\227\128\145")
+  end
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnSave = function(self)
+    self:OnSave()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbScrollView = Ui:NewScrollView(self, self.Template)
+end
+
+function tbWnd:OnOpen()
+  local bCanSet = Kin:CheckMyAuthority(Kin.Def.Authority_EditKinTitle) and true or false
+  self.pPanel:SetActive(self.btnSave, bCanSet)
+  self.tbScrollView:Clear()
+  local tbBaseInfo = Kin:GetBaseInfo()
+  local tbTitleSetting = tbBaseInfo and tbBaseInfo.tbKinTitle
+  tbTitleSetting = tbTitleSetting or {}
+  for nCareer, szName in pairs(Kin.Def.Career_Name) do
+    local txtName = ""
+    if self.tbCareersNoNeedSearch[nCareer] then
+      txtName = self.tbCareersNoNeedSearch[nCareer]()
+    else
+      local tbMemberList = Kin:GetMemberList() or {}
+      for i = 1, #tbMemberList do
+        if tbMemberList[i].nCareer == nCareer then
+          txtName = tbMemberList[i].szName
+        end
+      end
+    end
+    self.tbScrollView:SetElement(nCareer, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtPost", i18n.Get(szName))
+      pPanel:Label_SetText("txtName", txtName)
+      pPanel:Input_SetText("InputField", tbTitleSetting[nCareer] or i18n.Get(szName))
+      pPanel:Input_SetEnable("InputField", bCanSet)
+    end)
+  end
+end
+
+function tbWnd:OnSave()
+  local tbChangeTitles = {}
+  local tbNewTitles = {}
+  local tbBaseInfo = Kin:GetBaseInfo()
+  local tbTitleSetting = tbBaseInfo and tbBaseInfo.tbKinTitle
+  tbTitleSetting = tbTitleSetting or {}
+  for nCareer = 1, self.tbScrollView:GetCount() do
+    local tbElement = self.tbScrollView:GetElement(nCareer)
+    local szTitle = tbElement.pPanel:Input_GetText("InputField")
+    table.insert(tbNewTitles, szTitle)
+  end
+  for nCareer = 1, #tbNewTitles do
+    if tbNewTitles[nCareer] ~= tbTitleSetting[nCareer] and tbNewTitles[nCareer] ~= i18n.Get(Kin.Def.Career_Name[nCareer]) then
+      table.insert(tbChangeTitles, {
+        nCareer = nCareer,
+        szTitle = tbNewTitles[nCareer]
+      })
+    end
+  end
+  if 0 == #tbChangeTitles then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.NotModified))
+    return
+  end
+  for nCareer1 = 1, #tbNewTitles do
+    if "" ~= tbNewTitles[nCareer1] then
+      for nCareer2 = 1, #tbNewTitles do
+        if nCareer1 ~= nCareer2 and (tbNewTitles[nCareer1] == tbNewTitles[nCareer2] or tbNewTitles[nCareer1] == i18n.Get(Kin.Def.Career_Name[nCareer2])) then
+          me.CenterMsg(i18n.Get(Kin.Cfg.Msg.ModificationConflict))
+          return
+        end
+      end
+    end
+  end
+  local bRet, szError = Kin:SetKinTitleCheck(tbChangeTitles)
+  if bRet then
+    self:Close()
+  else
+    me.CenterMsg(i18n.Get(szError))
+  end
+end

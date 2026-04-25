@@ -1,0 +1,71 @@
+function RankBoard:OnGetRanBoadData(tbData, szKey, nPage, tbMyRankInfo)
+  self.tbAllData[szKey][nPage] = tbData
+  
+  self.tbUpdateDataTime[szKey] = self.tbUpdateDataTime[szKey] or {}
+  self.tbUpdateDataTime[szKey][nPage] = GetTime()
+  if tbMyRankInfo then
+    self.tbMyRankInfo[szKey] = tbMyRankInfo
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_RANKBOARD_DATA, szKey, nPage)
+end
+
+function RankBoard:CheckUpdateData(szKey, nPage)
+  if not self.tbAllData[szKey] then
+    return
+  end
+  local tbData = RankBoard.tbAllData[szKey][nPage]
+  local bHasMy = self.tbMyRankInfo[szKey] and true or false
+  if not tbData then
+    self:RequestOpenRankBoard(szKey, nPage, not bHasMy)
+    return
+  end
+  local nUpdateTime = self.tbUpdateDataTime[szKey] and self.tbUpdateDataTime[szKey][nPage]
+  if not nUpdateTime or GetTime() - nUpdateTime > self.nRequestDelay then
+    self:RequestOpenRankBoard(szKey, nPage, true)
+    return
+  end
+  return tbData
+end
+
+function RankBoard:ClientInit()
+  self.tbRecord = {}
+  self.tbAllData = {}
+  self.tbUpdateDataTime = {}
+  self.tbMyRankInfo = {}
+  for k, v in pairs(self.tbSetting) do
+    self.tbAllData[k] = {}
+  end
+end
+
+function RankBoard:GetMyRankInfo(szKey)
+  local tbInfo = self.tbMyRankInfo and self.tbMyRankInfo[szKey]
+  if not tbInfo then
+    return
+  end
+  return tbInfo.nPosition, tbInfo.nValue
+end
+
+function RankBoard:RequestOpenRankBoard(szKey, nPage, bNeedMy)
+  if self.nRequestTimer then
+    Timer:Close(self.nRequestTimer)
+    self.nRequestTimer = nil
+  end
+  
+  local function fnCall()
+    RemoteServer.OpenRankBoard(szKey, nPage, bNeedMy)
+  end
+  
+  self.nRequestTimer = Timer:Register(9, fnCall)
+end
+
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, RankBoard.ClientInit, RankBoard)
+RankBoard.FnIsShowCallBack = {
+  SummerFishing = function()
+    local pInstance = ActivityMgr:GetInstanceById(42)
+    if not pInstance or not pInstance:IsOpen() then
+      return false
+    else
+      return true
+    end
+  end
+}

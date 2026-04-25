@@ -1,0 +1,199 @@
+Require("Script/Welfare/WeekMonthCardC.lua")
+local tbWnd = Ui:CreateClass("UIWeekMonthCard", "UIPanel")
+local tbControls = {
+  txtRemainDayWeek = "Detail/Week/txtCountdown",
+  txtAwardDailyWeek = "Detail/Week/txtDescGroup/txtDesc2",
+  txtAwardAllWeek = "Detail/Week/txtDescGroup/txtDesc4",
+  txtFirstBuyWeek = "Detail/Week/txtDescFirstGroup/txtDesc2",
+  btnBuyWeek = "Detail/Week/btnActive",
+  btnCostWeek = "Detail/Week/btnRecharge",
+  txtRemainDayMonth = "Detail/Month/txtCountdown",
+  txtAwardDailyMonth = "Detail/Month/txtDescGroup/txtDesc2",
+  txtAwardAllMonth = "Detail/Month/txtDescGroup/txtDesc4",
+  txtFirstBuyMonth = "Detail/Month/txtDescFirstGroup/txtDesc2",
+  btnBuyMonth = "Detail/Month/btnActive",
+  btnCostMonth = "Detail/Month/btnRecharge",
+  ItemTemplateWeek = "Detail/Week/AwardsList/ItemTemplate",
+  ItemTemplateMonth = "Detail/Month/AwardsList/ItemTemplate",
+  btnPrerogative = "Detail/Month/btnPrerogative"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnBuyWeek = function(self)
+    local nState = WeekMonthCard:GetWeekCardAwardState()
+    if nState == WeekMonthCard.nNotBuy then
+      WeekMonthCard:OnChargeWeekCardReq()
+    elseif nState == WeekMonthCard.nNotGet then
+      WeekMonthCard:GetWeekCardAward()
+    end
+  end,
+  btnBuyMonth = function(self)
+    local nState = WeekMonthCard:GetMonthCardAwardState()
+    if nState == WeekMonthCard.nNotBuy then
+      WeekMonthCard:OnChargeMonthCardReq()
+    elseif nState == WeekMonthCard.nNotGet then
+      WeekMonthCard:GetMonthCardAward()
+    end
+  end,
+  btnCostWeek = function(self)
+    WeekMonthCard:OnChargeWeekCardReq()
+  end,
+  btnCostMonth = function(self)
+    WeekMonthCard:OnChargeMonthCardReq()
+  end,
+  btnPrerogative = function(self)
+    self.tbOwner:ShowMonthPrivilege()
+  end
+}
+
+local function fFormatThousands(nNumber)
+  local szNumber = tostring(tonumber(nNumber) or 0)
+  local nLength = #szNumber
+  local nIndex, nBreakTime = nLength, nLength
+  while true do
+    szNumber, nIndex = string.gsub(szNumber, "^(-?%d+)(%d%d%d)", "%1,%2")
+    nBreakTime = nBreakTime - 1
+    if 0 == nIndex or 0 == nBreakTime then
+      break
+    end
+  end
+  return szNumber
+end
+
+local tbItemGridShowUnit = {1, 5}
+local tbAwardStateDesc = {
+  [WeekMonthCard.nNotBuy] = {
+    btnDesc = function(nProductIndex)
+      local nProductId = WeekMonthCard.tbIndex2ProductId[nProductIndex]
+      local tbProductSetting = Recharge:GetProductSettingById(nProductId)
+      local szShowPrice = Recharge:GetShowPrice(tbProductSetting)
+      return szShowPrice
+    end,
+    disableRenewBtn = true
+  },
+  [WeekMonthCard.nNotGet] = {
+    btnDesc = function()
+      return i18n.EasyGet("\233\162\134\229\143\150")
+    end,
+    remainDesc = function(...)
+      return i18n.EasyGet("\229\137\169\228\189\153{0}\229\164\169", ...)
+    end
+  },
+  [WeekMonthCard.nHadGet] = {
+    btnDesc = function()
+      return i18n.EasyGet("\230\156\172\230\151\165\229\183\178\233\162\134")
+    end,
+    remainDesc = function(...)
+      return i18n.EasyGet("\229\137\169\228\189\153{0}\229\164\169", ...)
+    end,
+    disableBuyBtn = true
+  }
+}
+
+function tbWnd:OnCreate()
+  self.tbAwardsListWeek = Ui:NewItemGridView(self, self.ItemTemplateWeek)
+  self.tbAwardsListMonth = Ui:NewItemGridView(self, self.ItemTemplateMonth)
+end
+
+function tbWnd:OnOpen()
+  self._tbDynReddotList = {}
+  WeekMonthCard.bHaveClick = true
+  WeekMonthCard:UpdateReddotState()
+  self:UpdateView()
+end
+
+function tbWnd:UpdateView()
+  self:UpdateContentDesc()
+  self:UpdateAwardPreview()
+end
+
+function tbWnd:_RegDynReddot(szPath)
+  if self._tbDynReddotList[szPath] then
+    return
+  end
+  self._tbDynReddotList[szPath] = true
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, szPath, {
+    RedPointMgr.EVENT.WeekMonthCard
+  })
+end
+
+function tbWnd:_UnRegDynReddot(szPath)
+  if not self._tbDynReddotList[szPath] then
+    return
+  end
+  RedPointMgr:DynamicUnRegist(self.pPanel, szPath)
+  self._tbDynReddotList[szPath] = nil
+end
+
+function tbWnd:UpdateContentDesc()
+  local nState, nRemainDay = WeekMonthCard:GetWeekCardAwardState()
+  local tbWeekStateDesc = tbAwardStateDesc[nState]
+  self.pPanel:Button_SetText(tbControls.btnBuyWeek, tbWeekStateDesc.btnDesc(1), "Text")
+  self.pPanel:Label_SetText(tbControls.txtRemainDayWeek, tbWeekStateDesc.remainDesc and tbWeekStateDesc.remainDesc(nRemainDay) or "")
+  self.pPanel:Button_SetEnable(tbControls.btnBuyWeek, not tbWeekStateDesc.disableBuyBtn)
+  local bHideCostWeekBtn = tbWeekStateDesc.disableRenewBtn
+  if not bHideCostWeekBtn then
+    local nWeekCardLeftDay = WeekMonthCard:GetWeekCardLeftDay(me)
+    bHideCostWeekBtn = nWeekCardLeftDay > Recharge.WEEK_DAY_LIMIT
+  end
+  self.pPanel:SetActive(tbControls.btnCostWeek, not bHideCostWeekBtn)
+  local nWeedPerDayYuanBao, nWeedAllYuanBao = WeekMonthCard:GetWeedPerDayYuanBao()
+  self.pPanel:Label_SetText(tbControls.txtAwardDailyWeek, string.format("%s\239\188\140", nWeedPerDayYuanBao))
+  self.pPanel:Label_SetText(tbControls.txtAwardAllWeek, tostring(nWeedAllYuanBao))
+  self.pPanel:Label_SetText(tbControls.txtFirstBuyWeek, tostring(WeekMonthCard.Cfg.nWeedItemValueYuanbao))
+  if nState == WeekMonthCard.nNotGet then
+    self:_RegDynReddot(tbControls.btnBuyWeek)
+  else
+    self:_UnRegDynReddot(tbControls.btnBuyWeek)
+  end
+  nState, nRemainDay = WeekMonthCard:GetMonthCardAwardState()
+  local tbMonthStateDesc = tbAwardStateDesc[nState]
+  self.pPanel:Button_SetText(tbControls.btnBuyMonth, tbMonthStateDesc.btnDesc(2), "Text")
+  self.pPanel:Label_SetText(tbControls.txtRemainDayMonth, tbMonthStateDesc.remainDesc and tbMonthStateDesc.remainDesc(nRemainDay) or "")
+  self.pPanel:Button_SetEnable(tbControls.btnBuyMonth, not tbMonthStateDesc.disableBuyBtn)
+  local bHideCostMonthBtn = tbMonthStateDesc.disableRenewBtn
+  if not bHideCostMonthBtn then
+    local nMonthCardLeftDay = WeekMonthCard:GetMonthCardLeftDay(me)
+    bHideCostMonthBtn = nMonthCardLeftDay > Recharge.MON_DAY_LIMIT
+  end
+  self.pPanel:SetActive(tbControls.btnCostMonth, not bHideCostMonthBtn)
+  local nMonthPerDayYuanBao, nMonthAllYuanBao = WeekMonthCard:GetMonthPerDayYuanBao()
+  self.pPanel:Label_SetText(tbControls.txtAwardDailyMonth, string.format("%s\239\188\140", nMonthPerDayYuanBao))
+  self.pPanel:Label_SetText(tbControls.txtAwardAllMonth, tostring(nMonthAllYuanBao))
+  self.pPanel:Label_SetText(tbControls.txtFirstBuyMonth, tostring(WeekMonthCard.Cfg.nMonthItemValueYuanbao))
+  if nState == WeekMonthCard.nNotGet then
+    self:_RegDynReddot(tbControls.btnBuyMonth)
+  else
+    self:_UnRegDynReddot(tbControls.btnBuyMonth)
+  end
+end
+
+function tbWnd:UpdateAwardPreview()
+  local nUnitMinCount, nUnitMaxCount = table.unpack(tbItemGridShowUnit)
+  local tbWeekAwards = Award:GetAward(WeekMonthCard.Cfg.nAwardId, WeekMonthCard.Cfg.nAwardWeekKey, {})
+  tbWeekAwards = {
+    table.unpack(tbWeekAwards or {}, nUnitMinCount, nUnitMaxCount)
+  }
+  for nIndex, tbAwardInfo in ipairs(tbWeekAwards) do
+    self.tbAwardsListWeek:SetItem(nIndex, tbAwardInfo, true)
+  end
+  self.tbAwardsListWeek:ResetFrom(#tbWeekAwards + 1)
+  local tbMonthAwards = Award:GetAward(WeekMonthCard.Cfg.nAwardId, WeekMonthCard.Cfg.nAwardMonthKey, {})
+  tbMonthAwards = {
+    table.unpack(tbMonthAwards or {}, nUnitMinCount, nUnitMaxCount)
+  }
+  for nIndex, tbAwardInfo in ipairs(tbMonthAwards) do
+    self.tbAwardsListMonth:SetItem(nIndex, tbAwardInfo, true)
+  end
+  self.tbAwardsListMonth:ResetFrom(#tbMonthAwards + 1)
+end
+
+function tbWnd:OnClose()
+  local tbRegKey = {}
+  for szKey, _ in pairs(self._tbDynReddotList) do
+    table.insert(tbRegKey, szKey)
+  end
+  for szKey, _ in pairs(tbRegKey) do
+    self:_UnRegDynReddot(szKey)
+  end
+end

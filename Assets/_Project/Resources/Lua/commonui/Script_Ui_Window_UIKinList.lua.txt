@@ -1,0 +1,163 @@
+local tbWnd = Ui:CreateWindow("UIKinList")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_KIN_DATA,
+      self.onKinSyncData
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnCreateKin = "node/imgBG/Content/btnCreateKin",
+  btnJoinKin = "node/imgBG/Content/btnJoinKin",
+  Template = "node/imgBG/Content/imgList/List/Template",
+  NotInfo = "node/imgBG/Content/imgList/NotInfo",
+  txtKinName = "node/imgBG/Content/Right/txtKinName",
+  txtKinLevel = "node/imgBG/Content/Right/txtKinLevel",
+  txtKinNotice = "node/imgBG/Content/Right/KinNotice/txtContent",
+  txtKinInfo = "node/imgBG/Content/Right/KinInfo/txtContent",
+  btnPrevious = "node/imgBG/Content/imgList/btnPrevious",
+  btnNext = "node/imgBG/Content/imgList/btnNext",
+  txtPage = "node/imgBG/Content/imgList/txtPage",
+  btnChatMaster = "node/imgBG/Content/btnChatMaster"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnCreateKin = function(self)
+    if Kin:HasKin() then
+      me.CenterMsg(i18n.Get(Kin.Cfg.Msg.AlreadyJoinKin))
+      return
+    end
+    Ui:OpenWindow("UICreateKin")
+    self:Close()
+  end,
+  btnJoinKin = function(self)
+    self:ApplyJoinKin()
+  end,
+  btnPrevious = function(self)
+    self:OnClickPrevious()
+  end,
+  btnNext = function(self)
+    self:OnClickNext()
+  end,
+  btnChatMaster = function(self)
+    self:OnChatMaster()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbKinListScrollView = Ui:NewScrollView(self, self.Template, function(self, nIndex, tbElement)
+    self:OnClickOneKin(nIndex)
+  end)
+  self.tbApplyKinMap = {}
+end
+
+function tbWnd:OnOpen()
+  self:ClearChooseInfo()
+  Kin:UpdateJoinKinsData(1, true)
+end
+
+function tbWnd:onKinSyncData(szDataType, tbJoinKinsData, nPage, nMaxPage)
+  if "JoinKins" == szDataType then
+    self:OnUpdateScrollView(tbJoinKinsData, nPage, nMaxPage)
+  elseif "New" == szDataType then
+    self.tbApplyKinMap = {}
+    self:OnUpdateScrollView(self.tbCurrentPageList, self.nCurrentPage, self.nMaxPage)
+  end
+end
+
+function tbWnd:OnUpdateScrollView(tbJoinKinsData, nPage, nMaxPage)
+  self.nCurrentPage = nPage
+  self.nMaxPage = nMaxPage > 0 and nMaxPage or 1
+  self.pPanel:Label_SetText(self.txtPage, string.format("%d/%d", self.nCurrentPage, self.nMaxPage))
+  self.tbKinListScrollView:Clear()
+  self.tbCurrentPageList = tbJoinKinsData or {}
+  local tbKinList = self.tbCurrentPageList
+  self.pPanel:SetActive(self.NotInfo, 0 == #tbKinList)
+  for i = 1, #tbKinList do
+    self.tbKinListScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtKinName", tbKinList[i].szName)
+      pPanel:Label_SetText("txtTongName", tbKinList[i].szTongName or "")
+      pPanel:Label_SetText("txtLevel", tbKinList[i].nLevel)
+      pPanel:Label_SetText("txtMemberCount", tbKinList[i].nMemberCount .. "/" .. tbKinList[i].nMaxMemberCount)
+      pPanel:Label_SetText("txtMasterName", tbKinList[i].szMasterName)
+      local bShowTips = self.tbApplyKinMap[tbKinList[i].nKinId] and true or false
+      pPanel:SetActive("imgApplied", bShowTips)
+      Ui:SetVipLevelEffect(pPanel, tbKinList[i].nLeaderVipLevel, "txtMasterName")
+    end)
+  end
+  if #tbKinList > 0 then
+    self.tbKinListScrollView:SelectElement(1)
+  end
+end
+
+function tbWnd:OnClickOneKin(nIndex)
+  self.nChooseIndex = nIndex
+  local tbInfo = self.tbCurrentPageList[nIndex]
+  self.pPanel:Label_SetText(self.txtKinName, tbInfo.szName)
+  self.pPanel:Label_SetText(self.txtKinLevel, i18n.EasyGet("{0}\231\186\167", tbInfo.nLevel))
+  self.pPanel:Label_SetText(self.txtKinNotice, tbInfo.szDeclaration)
+  self.pPanel:Label_SetText(self.txtKinInfo, i18n.EasyGet("\229\174\182\230\151\143\229\145\168\230\180\187\232\183\131\229\186\166:{0}", tbInfo.nWeekActive))
+end
+
+function tbWnd:ClearChooseInfo()
+  self.nChooseIndex = nil
+  self.pPanel:Label_SetText(self.txtKinName, "")
+  self.pPanel:Label_SetText(self.txtKinLevel, "")
+  self.pPanel:Label_SetText(self.txtKinNotice, "")
+  self.pPanel:Label_SetText(self.txtKinInfo, "")
+end
+
+function tbWnd:ApplyJoinKin()
+  if not self.nChooseIndex or not self.tbCurrentPageList then
+    return
+  end
+  local nKinId = self.tbCurrentPageList[self.nChooseIndex].nKinId
+  if Kin:ApplyKin(nKinId) then
+    self.tbApplyKinMap[nKinId] = 1
+    local tbElement = self.tbKinListScrollView:GetElement(self.nChooseIndex)
+    if tbElement then
+      tbElement.pPanel:SetActive("imgApplied", true)
+    end
+  end
+end
+
+function tbWnd:OnClickPrevious()
+  if not self.nCurrentPage or not self.nMaxPage then
+    return
+  end
+  if self.nCurrentPage <= 1 then
+    me.CenterMsg(i18n.EasyGet("\229\183\178\231\187\143\230\152\175\231\172\172\228\184\128\233\161\181"))
+    return
+  end
+  Kin:UpdateJoinKinsData(self.nCurrentPage - 1, true)
+end
+
+function tbWnd:OnClickNext()
+  if not self.nCurrentPage or not self.nMaxPage then
+    return
+  end
+  if self.nCurrentPage >= self.nMaxPage then
+    me.CenterMsg(i18n.EasyGet("\229\183\178\231\187\143\230\152\175\230\156\128\229\144\142\228\184\128\233\161\181"))
+    return
+  end
+  Kin:UpdateJoinKinsData(self.nCurrentPage + 1, true)
+end
+
+function tbWnd:OnChatMaster()
+  if not self.nCurrentPage or not self.nMaxPage then
+    return
+  end
+  local dwRoleId = self.tbCurrentPageList[self.nChooseIndex].nMasterId
+  local szMasterName = self.tbCurrentPageList[self.nChooseIndex].szMasterName
+  if not dwRoleId then
+    return
+  end
+  ChatMgr:OpenPrivateWindow(dwRoleId, {dwRoleId = dwRoleId, szName = szMasterName})
+end

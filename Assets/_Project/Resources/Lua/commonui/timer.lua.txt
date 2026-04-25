@@ -1,0 +1,241 @@
+Timer.bDebug = false
+if MODULE_GAMECLIENT then
+  local DateTime = CS.System.DateTime
+  local DateTimeKind = CS.System.DateTimeKind
+  local time1970 = DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+  
+  function Timer:GetTickCount()
+    if not Timer.bDebug then
+      return 0
+    end
+    local span = DateTime.UtcNow:Subtract(time1970)
+    return span.TotalMilliseconds
+  end
+end
+local GetTickCount = GetTickCount or os.clock
+if MODULE_GAMECLIENT then
+  GetTickCount = Timer.GetTickCount
+end
+Timer.tbDebugInfo = {
+  nLastDebugTime = GetTickCount(),
+  nTotalCount = 0,
+  nTotalCost = 0,
+  tbDetailInfo = {}
+}
+
+function Timer:DumpDebugInfo()
+  local tbDebugInfo = self.tbDebugInfo
+  Log("=================================================================================================")
+  Log("TimerDebugInfo:")
+  Log(string.format("TotalCount: %d", tbDebugInfo.nTotalCount))
+  Log(string.format("TotalCost: %0.2f", tbDebugInfo.nTotalCost))
+  Log("TopTimer:")
+  for i, tbInfo in pairs(tbDebugInfo.tbDetailInfo) do
+    Log(string.format("%d. CallBackCost: %0.2f DestoryCost: %0.2f From: %s:", i, tbInfo.nCallBackCost, tbInfo.nDestoryCost, tbInfo.szFrom))
+  end
+  Log("=================================================================================================")
+end
+
+function Timer:ResetDebugInfo()
+  Timer.tbDebugInfo = {
+    nLastDebugTime = GetTickCount(),
+    nTotalCount = 0,
+    nTotalCost = 0,
+    tbDetailInfo = {}
+  }
+end
+
+if not Timer.tbTimeTable then
+  Timer.tbTimeTable = {}
+  Timer.tbRegister = {}
+  if not Timer.nHaveUsedTimerId then
+    Timer.nHaveUsedTimerId = 0
+  end
+end
+
+function Timer:OnActive(uCurrentTime)
+  if self.bDebug then
+    self.tbDebugInfo.tbDetailInfo = {}
+    for nRegisterId, tbInfo in pairs(self.tbRegister) do
+      self.tbDebugInfo.tbDetailInfo[nRegisterId] = {
+        szFrom = tbInfo.szFrom,
+        nCallBackCost = 0,
+        nDestoryCost = 0,
+        nRegisterId = nRegisterId
+      }
+    end
+  end
+  local tbTime = self.tbTimeTable[uCurrentTime]
+  if not tbTime then
+    return
+  end
+  local nNowTime = GetTickCount()
+  local nTotalCount = 0
+  self.tbToBeClose = {}
+  for nIdx, nRegisterId in pairs(tbTime) do
+    if not self.tbToBeClose[nRegisterId] then
+      local tbEvent = self.tbRegister[nRegisterId]
+      local tbCallBack = tbEvent.tbCallBack
+      local nCost
+      if self.bDebug then
+        nCost = GetTickCount()
+      end
+      local bOK, bRet = Lib:CallBack(tbCallBack)
+      if self.bDebug then
+        nCost = GetTickCount() - nCost
+        if nCost > 5 then
+          Lib:LogFormat("[Timer:OnActive] [szFunc=%s] [cost=%d]", tbEvent.szFrom, nCost)
+        end
+      end
+      if not (bOK and bRet) or 0 == bRet then
+        self.tbToBeClose[nRegisterId] = 1
+      elseif bRet then
+        local uNewTime = RegisterTimerPoint(tbEvent.nWaitTime)
+        tbEvent.nWaitTime = tbEvent.nWaitTime
+        tbEvent.uActiveTime = uNewTime
+        local tbNewTime = self.tbTimeTable[uNewTime]
+        if not tbNewTime then
+          self.tbTimeTable[uNewTime] = {nRegisterId}
+          tbEvent.nIdx = 1
+        else
+          tbEvent.nIdx = #tbNewTime + 1
+          tbNewTime[tbEvent.nIdx] = nRegisterId
+        end
+      end
+      if self.bDebug then
+        nTotalCount = nTotalCount + 1
+        self.tbDebugInfo.tbDetailInfo[nRegisterId].nCallBackCost = nCost
+      end
+    end
+  end
+  for nRegisterId in pairs(self.tbToBeClose) do
+    local tbEvent = self.tbRegister[nRegisterId]
+    self.tbRegister[nRegisterId] = nil
+    if tbEvent.uActiveTime ~= uCurrentTime then
+      self.tbTimeTable[tbEvent.uActiveTime][tbEvent.nIdx] = nil
+    end
+    local nDestoryCost = 0
+    if tbEvent.OnDestroy then
+      local nCurTime = 0
+      if self.bDebug then
+        nCurTime = GetTickCount()
+      end
+      tbEvent:OnDestroy(nRegisterId)
+      if self.bDebug then
+        nDestoryCost = GetTickCount() - nCurTime
+      end
+    end
+    if self.bDebug and self.tbDebugInfo.tbDetailInfo[nRegisterId] then
+      self.tbDebugInfo.tbDetailInfo[nRegisterId].nDestoryCost = math.min(nDestoryCost, 1)
+    end
+  end
+  self.tbTimeTable[uCurrentTime] = nil
+  self.tbToBeClose = nil
+  if self.bDebug then
+    self.tbDebugInfo.nTotalCount = nTotalCount
+    self.tbDebugInfo.nTotalCost = GetTickCount() - nNowTime
+  end
+end
+
+function Timer:UpdateTimerFrame(nChangeFrame)
+  local tbTemp = {}
+  for nFrame, tbTime in pairs(self.tbTimeTable) do
+    tbTemp[nChangeFrame + nFrame] = tbTime
+    for nIdx, nRegisterId in pairs(tbTime) do
+      if self.tbRegister[nRegisterId] then
+        self.tbRegister[nRegisterId].uActiveTime = self.tbRegister[nRegisterId].uActiveTime + nChangeFrame
+      end
+    end
+  end
+  self.tbTimeTable = tbTemp
+end
+
+function Timer:Register(nWaitTime, ...)
+  local arg = {
+    ...
+  }
+  local tbEvent = {nWaitTime = nWaitTime, tbCallBack = arg}
+  return self:RegisterEx(tbEvent)
+end
+
+function Timer:RegisterEx(tbEvent)
+  assert(tbEvent.nWaitTime > 0)
+  local level = 2
+  local name = debug.getinfo(level, "n").name or "null"
+  local source = debug.getinfo(level, "S").source or "null"
+  local line = debug.getinfo(level, "l").currentline or -1
+  local szFrom = string.format("<%s@%s:%d>", name, source, line)
+  tbEvent.szFrom = szFrom
+  tbEvent.uActiveTime = RegisterTimerPoint(tbEvent.nWaitTime)
+  Timer.nHaveUsedTimerId = Timer.nHaveUsedTimerId + 1
+  local nRegisterId = Timer.nHaveUsedTimerId
+  self.tbRegister[nRegisterId] = tbEvent
+  local tbNewTime = self.tbTimeTable[tbEvent.uActiveTime]
+  if not tbNewTime then
+    tbNewTime = {}
+    self.tbTimeTable[tbEvent.uActiveTime] = tbNewTime
+    tbEvent.nIdx = 1
+    tbNewTime[tbEvent.nIdx] = nRegisterId
+  else
+    tbEvent.nIdx = #tbNewTime + 1
+    tbNewTime[tbEvent.nIdx] = nRegisterId
+  end
+  return nRegisterId
+end
+
+function Timer:Close(nRegisterId)
+  local tbEvent = self.tbRegister[nRegisterId]
+  if not tbEvent then
+    return
+  end
+  if self.tbToBeClose then
+    self.tbToBeClose[nRegisterId] = 1
+  else
+    self.tbTimeTable[tbEvent.uActiveTime][tbEvent.nIdx] = nil
+    self.tbRegister[nRegisterId] = nil
+    if tbEvent.OnDestroy then
+      tbEvent:OnDestroy(nRegisterId)
+    end
+  end
+end
+
+function Timer:GetRestTime(nRegisterId)
+  local tbEvent = self.tbRegister[nRegisterId]
+  if not tbEvent then
+    return -1
+  else
+    return tbEvent.uActiveTime - GetFrame()
+  end
+end
+
+function Timer:GetWaitTime(nRegisterId)
+  local tbEvent = self.tbRegister[nRegisterId]
+  if not tbEvent then
+    return -1
+  else
+    return tbEvent.nWaitTime
+  end
+end
+
+function Timer:RegisterTimerEvent(total, frame, count, ...)
+  frame = frame or 1
+  count = count or 100
+  local beginIdx = 1
+  local tbCallBack = {
+    ...
+  }
+  local argsCnt = #tbCallBack
+  return Timer:Register(frame, function()
+    local endIdx = beginIdx + count > total and total or beginIdx + count
+    for i = beginIdx, endIdx do
+      tbCallBack[argsCnt + 1] = i
+      Lib:CallBack(tbCallBack)
+    end
+    if endIdx >= total then
+      return false
+    else
+      beginIdx = endIdx + 1
+      return true
+    end
+  end)
+end

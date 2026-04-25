@@ -1,0 +1,237 @@
+local tbWnd = Ui:CreateWindow("UIMarketStallSell")
+local szSaveKey = "MarketStallShowAllGrps"
+tbWnd.tbControls = {
+  btnClose = "imgBG/btnClose",
+  txtDetail = "imgBG/ItemInfo/panelDetail/txtDetail",
+  UIItemGrid = "imgBG/ItemInfo/UIItemGrid",
+  imgMoney = "imgBG/ItemInfo/txtAveragePrice/imgMoney",
+  txtAveragePrice = "imgBG/ItemInfo/txtAveragePrice",
+  txtAveragePriceValue = "imgBG/ItemInfo/txtAveragePrice/txtAveragePriceValue",
+  txtGoodNum = "imgBG/ItemInfo/txtGoodNum",
+  txtGoodName = "imgBG/ItemInfo/txtGoodName",
+  txtTime = "imgBG/ItemInfo/txtCountdown/txtAveragePriceValue",
+  txtCountdown = "imgBG/ItemInfo/txtCountdown",
+  txtTimeOut = "imgBG/ItemInfo/txtTimeOut",
+  btnSell = "imgBG/PriceSetting/btnSell",
+  btnReSell = "imgBG/PriceSetting/btnReSell",
+  btnFree = "imgBG/PriceSetting/btnFree",
+  txtPricePer = "imgBG/PriceSetting/txtOne/txtPricePer",
+  imgMoneyAll = "imgBG/PriceSetting/txtAll/imgMoney",
+  txtPrice = "imgBG/PriceSetting/txtAll/txtPrice",
+  imgMoneyOne = "imgBG/PriceSetting/txtOne/imgMoney",
+  UIPriceAddAndSubGroup = "imgBG/PriceSetting/txtOne/UIAddAndSubGroup",
+  UINumAddAndSubGroup = "imgBG/PriceSetting/txtAmount/UIAddAndSubGroup",
+  txtFreePrice = "imgBG/PriceSetting/txtFee/txtPrice",
+  imgFreeMoney = "imgBG/PriceSetting/txtFee/imgMoney"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnSell = function(self)
+    local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+    if MarketStallClass:NewSell(self.nShowType, self.curIndex, self.nOnePrice, self.nNum) then
+      self:Close()
+    end
+  end,
+  btnFree = function(self)
+    local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+    if MarketStallClass:CancelSell(self.curIndex) then
+      self:Close()
+    end
+  end,
+  btnReSell = function(self)
+    local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+    if MarketStallClass:UpdateSell(self.curIndex, self.nOnePrice) then
+      self:Close()
+    end
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MS_GET_AVG_PRICE,
+      self.UpdateAvgPrice,
+      self
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.PriceAddAndSubGroup = Ui:NewExistAddAndSubGroup(self, self.UIPriceAddAndSubGroup)
+  self.PriceAddAndSubGroup:BindEvent(function(nInput)
+    self:UpdatePriceNumberInput(nInput)
+  end, function()
+    return self:UpdatePriceInput(true)
+  end, function()
+    return self:UpdatePriceInput(false)
+  end)
+  self.PriceAddAndSubGroup:SetOnlyAddAndReduceCallState(true, true)
+  self.NumAddAndSubGroup = Ui:NewExistAddAndSubGroup(self, self.UINumAddAndSubGroup)
+  self.NumAddAndSubGroup:BindEvent(function(nValue)
+    return self:UpdateNumberInput(nValue)
+  end)
+  self.ItemGrid = Ui:NewExistItemGrid(self, self.UIItemGrid)
+end
+
+function tbWnd:OnOpen(tbData)
+  self.dwItemId = tbData.dwItemId
+  self.nStallType = tbData.nStallType
+  self.nShowType = tbData.nShowType
+  self.curIndex = tbData.index
+  self.bBag = tbData.bBag
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  self.nBasePrice, _, self.nMinPercent, self.nMaxPercent = MarketStallClass:GetPriceInfo(tbData.nItemTemplateId)
+  if not self.nBasePrice then
+    MarketStallClass:CancelSell(self.curIndex)
+    return 0
+  end
+  local szIcon = Currency:GetIcon(MarketStallBase.tbMoneyType[self.nStallType])
+  self.pPanel:Sprite_SetSprite(self.imgMoney, szIcon)
+  self.pPanel:Sprite_SetSprite(self.imgMoneyAll, szIcon)
+  self.pPanel:Sprite_SetSprite(self.imgMoneyOne, szIcon)
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  local _, szCurrencyType = MarketStallClass:GetSellCost(0)
+  self.pPanel:Sprite_SetSprite(self.imgFreeMoney, Currency:GetIcon(szCurrencyType))
+  local nItemTempalteId = tbData.nItemTemplateId
+  self.ItemGrid:SetItem(tbData.dwItemId, nItemTempalteId)
+  self.pPanel:Label_SetText(self.txtGoodNum, i18n.EasyGet("\229\189\147\229\137\141\230\139\165\230\156\137\239\188\154{0}", tbData.nCount))
+  self.pPanel:Label_SetText(self.txtGoodName, Item:GetName(nItemTempalteId, me))
+  self.pPanel:Label_SetText(self.txtDetail, Item:GetIntro(nItemTempalteId) or "")
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  MarketStallClass:SetStallItemGrid(self.ItemGrid, tbData.tbItem, MarketStallBase.tbReqItemDataCbType.SELL_INFO_PANEL)
+  self.nMaxPrice = math.min(math.ceil(self.nBasePrice * self.nMaxPercent / 100), 9999999)
+  self.nMinPrice = math.max(math.ceil(self.nBasePrice * self.nMinPercent / 100), 1)
+  self.PriceAddAndSubGroup:SetNumRange(self.nMinPrice, self.nMaxPrice)
+  if self.nStallType == MarketStallBase.tbStallType.YuanBao then
+    self.PriceAddAndSubGroup:SetNumPadNotOpen()
+  else
+    self.PriceAddAndSubGroup:SetNumPadOpen()
+  end
+  self.nOnePrice = tbData.nPrice or self.nBasePrice
+  self.nMaxNum = tbData.nCount or 1
+  self.nPercent = math.ceil(self.nOnePrice * 100 / self.nBasePrice)
+  self.PriceAddAndSubGroup:SetInputValue(self.nOnePrice)
+  if self.bBag then
+    self:SetCurCount(1)
+    self.pPanel:SetActive(self.btnSell, true)
+    self.pPanel:SetActive(self.btnReSell, false)
+    self.pPanel:SetActive(self.btnFree, false)
+    self.NumAddAndSubGroup:SetNumRange(1, self.nMaxNum)
+    self.NumAddAndSubGroup:SetEnable(true)
+    self.NumAddAndSubGroup:SetButtonActive(true, true, true)
+    self.pPanel:SetActive(self.txtCountdown, false)
+    self.pPanel:SetActive(self.txtTimeOut, false)
+  else
+    self.pPanel:SetActive(self.btnSell, false)
+    self.pPanel:SetActive(self.btnReSell, true)
+    self.pPanel:SetActive(self.btnFree, true)
+    self.NumAddAndSubGroup:SetNumRange(self.nMaxNum, self.nMaxNum)
+    self.NumAddAndSubGroup:SetEnable(false)
+    self.NumAddAndSubGroup:SetButtonActive(false, false, false)
+    if tbData.bTimeOut then
+      self.pPanel:SetActive(self.txtCountdown, false)
+      self.pPanel:SetActive(self.txtTimeOut, true)
+    else
+      local szCancelTime = MarketStallBase.nTimeout - (GetTime() - tbData.nTime)
+      self.pPanel:Label_SetText(self.txtTime, string.format("%02d:%02d", math.floor(szCancelTime / 3600), math.floor(szCancelTime % 3600 / 60)))
+      self.pPanel:SetActive(self.txtCountdown, true)
+      self.pPanel:SetActive(self.txtTimeOut, false)
+    end
+    self:SetCurCount(self.nMaxNum)
+  end
+  self:UpdatePriceNumberInput(self.nOnePrice)
+  self.pPanel:Label_SetText(self.txtPrice, self.nOnePrice * self.nNum)
+  self.pPanel:Label_SetText(self.txtAveragePriceValue, 0)
+  self.pPanel:SetActive(self.txtAveragePrice, true)
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  if MarketStallClass then
+    MarketStallClass:GetAvgPrice(tbData.nItemTemplateId)
+  end
+end
+
+function tbWnd:UpdateAvgPrice(nPrice)
+  self.pPanel:Label_SetText(self.txtAveragePriceValue, nPrice)
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:SetCurCount(count)
+  self.NumAddAndSubGroup:SetInputValue(count)
+  self.nNum = count
+  self:UpdateChargeCost()
+end
+
+function tbWnd:UpdateChargeCost()
+  local nCost = self.nNum * self.nOnePrice
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  local nCharge, szCurrencyType = MarketStallClass:GetSellCost(nCost)
+  local nHadMoney = me.GetMoney(szCurrencyType)
+  if nCharge <= nHadMoney then
+    self.pPanel:Label_SetColorByID(self.txtFreePrice, 602)
+  else
+    self.pPanel:Label_SetColorByID(self.txtFreePrice, 505)
+  end
+  self.pPanel:Label_SetText(self.txtFreePrice, nCharge)
+  self.pPanel:Label_SetText(self.txtPrice, nCost)
+end
+
+function tbWnd:UpdatePriceInput(bAdd)
+  local nChangePrice = math.ceil(self.nBasePrice * 10 / 100)
+  if not bAdd then
+    nChangePrice = -nChangePrice
+  end
+  self.nOnePrice = self.nOnePrice + nChangePrice
+  if self.nOnePrice < self.nMinPrice then
+    self.nOnePrice = self.nMinPrice
+    me.CenterMsg(i18n.EasyGet("\229\164\167\228\190\160\239\188\140\228\184\141\232\131\189\229\134\141\228\190\191\229\174\156\228\186\134"))
+  elseif self.nOnePrice > self.nMaxPrice then
+    self.nOnePrice = self.nMaxPrice
+    me.CenterMsg(i18n.EasyGet("\229\164\167\228\190\160\239\188\140\228\184\141\232\131\189\229\134\141\232\180\181\228\186\134"))
+  end
+  self.PriceAddAndSubGroup:SetInputValue(self.nOnePrice)
+  self:UpdateIncDesc()
+  self:UpdateChargeCost()
+end
+
+function tbWnd:UpdateIncDesc()
+  local curPrice = self.nOnePrice
+  local str = ""
+  if curPrice ~= self.nBasePrice then
+    local delta = curPrice - self.nBasePrice
+    local strPrefix = delta >= 0 and "+" or "-"
+    local addInfo = string.format("%d%%", math.ceil(100 * math.abs(delta) / self.nBasePrice))
+    str = i18n.EasyGet("\229\159\186\229\135\134\228\187\183{0}{1}", strPrefix, addInfo)
+  end
+  self.pPanel:Label_SetText(self.txtPricePer, str)
+end
+
+function tbWnd:UpdateNumberInput(nInput)
+  if not self.nShowType then
+    return 0
+  end
+  local ret = nInput
+  local MarketStallClass = MarketStallMgr:GetMarketStallObj(self.nStallType)
+  local tbData = MarketStallClass.tbAvaliableItems[self.nShowType][self.curIndex]
+  local maxCount = tbData and tbData.nCount or 0
+  if nInput > maxCount then
+    ret = maxCount
+    me.CenterMsg(i18n.EasyGet("\231\137\169\229\147\129\230\149\176\233\135\143\229\176\177\232\191\153\228\185\136\229\164\154\228\186\134"))
+  end
+  if nInput < 1 then
+    ret = 1
+    me.CenterMsg(i18n.EasyGet("\229\135\186\229\148\174\230\149\176\233\135\143\228\184\141\232\131\189\229\134\141\229\176\145\228\186\134"))
+  end
+  self:SetCurCount(ret)
+  return ret
+end
+
+function tbWnd:UpdatePriceNumberInput(nInput)
+  self.nOnePrice = nInput
+  self.nPercent = math.ceil(self.nOnePrice * 100 / self.nBasePrice)
+  self:UpdateIncDesc()
+  self:UpdateChargeCost()
+  return nInput
+end

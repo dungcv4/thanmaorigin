@@ -1,0 +1,216 @@
+Require("CommonScript/XiaKeDao/XiaKeDaoCom.lua")
+XiaKeDao = XiaKeDao or {}
+XiaKeDao.tbBossShowInfoList = XiaKeDao.tbBossShowInfoList or {}
+XiaKeDao.bIsCanExit = true
+
+function XiaKeDao:EnterFuben()
+  FubenUIController:CloseFubenUI()
+  if Ui:WindowVisible("UIHudRightBottom") then
+    Ui:GetWindow("UIHudRightBottom"):SetIconsShow()
+  end
+  if Ui:WindowVisible("UIHud") then
+    Ui:GetWindow("UIHud"):SetXiaKeDaoBtnEffect(true)
+  end
+  AFK:Start()
+  Timer:Register(Env.GAME_FPS * 2, function()
+    if XiaKeDao:IsXiaKeDaoFuben(me.nMapTemplateId) then
+      RemoteServer.RequestXiaKeDao("ReqPlayerListInfo")
+    end
+  end)
+end
+
+function XiaKeDao:UpdateAllBossInfo(tbBossShowInfoList, bIsZone)
+  for nIndex, tbBossInfo in ipairs(tbBossShowInfoList) do
+    self:SetBossData(nIndex, tbBossInfo)
+  end
+  XiaKeDao.tbBossShowInfoList = tbBossShowInfoList
+  if Ui:WindowVisible("UIXiakedao") then
+    Ui:GetWindow("UIXiakedao"):UpdateBossInfo()
+  end
+end
+
+function XiaKeDao:UpdatePlayerListInfo(tbPlayerList)
+  if not XiaKeDao:IsXiaKeDaoFuben(me.nMapTemplateId) then
+    return
+  end
+  self.tbPlayerList = tbPlayerList
+  self.nGroup = tbPlayerList[me.dwID].nGroup
+  if Ui:WindowVisible("UIHudLeftPanelXiakedao") then
+    Ui:GetWindow("UIHudLeftPanelXiakedao"):SetPlayerList(tbPlayerList)
+    Ui:GetWindow("UIHudLeftPanelXiakedao"):UpdateBelongPlayerInfo()
+    Ui:GetWindow("UIHudLeftPanelXiakedao"):UpdatePlayerList()
+  else
+    Ui:OpenWindow("UIHudLeftPanelXiakedao", tbPlayerList)
+  end
+end
+
+function XiaKeDao:GetGroup()
+  return self.nGroup
+end
+
+function XiaKeDao:UpdateBossInfo(nIndex, tbBossShowInfo)
+  self:SetBossData(nIndex, tbBossShowInfo)
+  XiaKeDao.tbBossShowInfoList[nIndex] = tbBossShowInfo
+end
+
+function XiaKeDao:SetBossData(nIndex, tbBossShowInfo)
+  local tbBossInfo = XiaKeDao.tbBossShowInfoList[nIndex]
+  if tbBossInfo then
+    if tbBossInfo.bHadShowInfo1 ~= nil then
+      tbBossShowInfo.bHadShowInfo1 = tbBossInfo.bHadShowInfo1
+    end
+    if nil ~= tbBossInfo.bHadShowInfo2 then
+      tbBossShowInfo.bHadShowInfo2 = tbBossInfo.bHadShowInfo2
+    end
+  end
+end
+
+function XiaKeDao:ReqApplyEnterMap(nIndex)
+  if XiaKeDao:IsOpenZone() then
+    RemoteServer.RequestXiaKeDao("ApplyZoneEnterMap", nIndex)
+  else
+    RemoteServer.RequestXiaKeDao("ApplyEnterMap", nIndex)
+  end
+end
+
+function XiaKeDao:OnClientSendAssist()
+  RemoteServer.RequestXiaKeDao("OnSendAssist")
+end
+
+function XiaKeDao:OnReqBossInfoList()
+  if XiaKeDao:IsOpenZone() then
+    RemoteServer.RequestXiaKeDao("ReqZoneBossInfoList")
+  else
+    RemoteServer.RequestXiaKeDao("ReqBossInfoList")
+  end
+end
+
+function XiaKeDao:GetTimeFrameMapList(nDifficultyIndex)
+  if XiaKeDao:IsOpenZone() then
+    return self:GetZoneTimeFrameMapList(nDifficultyIndex)
+  else
+    return self:GetCurTimeFrameMapList()
+  end
+end
+
+function XiaKeDao:SynZoneOpenTimeFrame(szDayOpenTimeFrame, nOpenTime)
+  self.szDayOpenTimeFrame = szDayOpenTimeFrame
+  self.nOpenTime = nOpenTime
+end
+
+function XiaKeDao:GetBossInfoList()
+  return XiaKeDao.tbBossShowInfoList
+end
+
+function XiaKeDao:IsNeedExitFubenButton()
+  return true, {
+    function()
+      me.MsgBox(i18n.EasyGet("\230\152\175\229\144\166\231\161\174\229\174\154\231\166\187\229\188\128\228\190\160\229\174\162\229\178\155\239\188\159\n\239\188\136\233\128\128\229\135\186\229\144\142{0}\231\167\146\229\134\133\230\151\160\230\179\149\229\134\141\232\191\155\229\133\165\228\190\160\229\174\162\229\178\155\239\188\137", XiaKeDao.Cfg.nLeaveFBCD), {
+        {
+          i18n.szOk,
+          function()
+            FubenUIController:RequireQuit()
+          end
+        },
+        {
+          i18n.szCancel
+        }
+      })
+    end
+  }
+end
+
+function XiaKeDao:IsShowTipWhenQuit()
+  return false
+end
+
+function XiaKeDao:RegisterFubenUIChecker()
+  FubenUIController:RegisterChecker(self.Cfg.tbMapIdList, self)
+end
+
+function XiaKeDao:SetBelong(nId)
+  self.nBelongId = nId
+end
+
+function XiaKeDao:GetBelongId()
+  return self.nBelongId
+end
+
+function XiaKeDao:ChallengeFailed()
+  Ui:OpenWindow("UIBattleResult", false)
+end
+
+function XiaKeDao:CloseFubenUI()
+end
+
+function XiaKeDao:OnPlayerLogin()
+  self:OnReqBossInfoList()
+  if XiaKeDao:IsXiaKeDaoFuben(me.nMapTemplateId) then
+    RemoteServer.RequestXiaKeDao("ReqPlayerListInfo")
+  end
+end
+
+function XiaKeDao:CanAssist()
+  if not XiaKeDao:IsXiaKeDaoFuben(me.nMapTemplateId) then
+    return false
+  end
+  if not me.dwKinId or me.dwKinId <= 0 then
+    return false
+  end
+  if self.tbPlayerList and self.tbPlayerList[me.dwID] and not self.tbPlayerList[me.dwID].nOwner then
+    return false
+  end
+  return true
+end
+
+function XiaKeDao:GetLeaveCD()
+  return self.nLeaveCD
+end
+
+function XiaKeDao:OnLeaveXiaKeDao(nLeaveCD, nOwner)
+  if nLeaveCD then
+    self.nLeaveCD = nLeaveCD
+  end
+  Ui:CloseWindow("UIHudLeftPanelXiakedao")
+  if nOwner and 1 == nOwner and DegreeCtrl:GetDegree(me, "XiaKeDaoJoinNum") > 0 then
+    self:OnReqBossInfoList()
+    Ui:OpenWindow("UIXiakedao")
+  end
+  AFK:Stop()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEAVE_XIAKEDAO)
+end
+
+function XiaKeDao:OpenDeathWin(szMsg, nReviveTime, nNeedCoin)
+  Ui:OpenWindow("UIMessageBox_Xiakedao", szMsg, nReviveTime, nNeedCoin)
+end
+
+function XiaKeDao:OnXiaKeDaoClientRevive()
+  if XiaKeDao:IsXiaKeDaoFuben(me.nMapTemplateId) then
+    RemoteServer.RequestXiaKeDao("OnXiaKeDaoRevive")
+  end
+end
+
+function XiaKeDao:OnXiaKeDaoClientLeaveMap()
+  if XiaKeDao:IsXiaKeDaoFuben(me.nMapTemplateId) then
+    RemoteServer.RequestXiaKeDao("OnXiaKeDaoLeaveMap")
+  end
+end
+
+function XiaKeDao:OnPlayerLogOut()
+  if self.m_Tick then
+    Timer:Close(self.m_Tick)
+    self.m_Tick = nil
+  end
+end
+
+function XiaKeDao:OnSendOpenTipWin()
+  if 0 == me.GetUserValue(self.szSaveKey, 6) then
+    RemoteServer.RequestXiaKeDao("RecordOpenTipWin")
+  end
+end
+
+XiaKeDao:RegisterFubenUIChecker()
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, XiaKeDao)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, XiaKeDao.OnPlayerLogin, XiaKeDao)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, XiaKeDao)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, XiaKeDao.OnPlayerLogOut, XiaKeDao)

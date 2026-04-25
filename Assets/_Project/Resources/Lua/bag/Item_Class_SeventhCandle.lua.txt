@@ -1,0 +1,180 @@
+Require("Setting/Item/Other/SeventhCandleCfg.lua")
+local tbItem = Item:GetClass("SeventhCandle")
+local tbCfg = Item.SeventhCandle.Cfg
+local nNeedMemberCount = 2
+
+function tbItem:OnUse(it)
+  if 0 == me.dwTeamID then
+    me.CenterMsg(i18n.Get(tbCfg.Terms.szLackPeople))
+    return 0
+  end
+  local tbMembers = TeamMgr:GetMembers(me.dwTeamID)
+  if #tbMembers > nNeedMemberCount then
+    me.CenterMsg(i18n.Get(tbCfg.Terms.szManyPeople))
+    return 0
+  elseif #tbMembers < nNeedMemberCount then
+    me.CenterMsg(i18n.Get(tbCfg.Terms.szLackPeople))
+    return 0
+  end
+  local szMapName = Map:GetMapName(me.nMapTemplateId)
+  local pMember
+  for _, dwID in ipairs(tbMembers) do
+    if dwID ~= me.dwID then
+      pMember = KPlayer.GetPlayerObjById(dwID)
+      if not pMember then
+        local tbRoleStayInfo = KPlayer.GetRoleStayInfo(dwID)
+        if tbRoleStayInfo then
+          me.CenterMsg(i18n.Get(tbCfg.Terms.szNotOnLine, tbRoleStayInfo.szName))
+        end
+        return 0
+      else
+        break
+      end
+    end
+  end
+  if not pMember then
+    me.CenterMsg(i18n.EasyGet("\229\175\185\230\150\185\228\184\141\229\156\168\231\186\191\228\184\138"))
+    return 0
+  end
+  local bRet, szMsg = self:CheckMapAndDistance(me, pMember)
+  if not bRet then
+    me.CenterMsg(szMsg)
+    return 0
+  end
+  local szRollText = ""
+  if 0 == me.nSex then
+    if 0 == pMember.nSex then
+      szRollText = i18n.Get(tbCfg.Terms.szRollTip, me.szName, i18n.Get(tbCfg.Terms.szMale), pMember.szName, i18n.Get(tbCfg.Terms.szMale), szMapName)
+    else
+      szRollText = i18n.Get(tbCfg.Terms.szRollTip, me.szName, i18n.Get(tbCfg.Terms.szMale), pMember.szName, i18n.Get(tbCfg.Terms.szFemale), szMapName)
+    end
+  elseif 0 == pMember.nSex then
+    szRollText = i18n.Get(tbCfg.Terms.szRollTip, me.szName, i18n.Get(tbCfg.Terms.szFemale), pMember.szName, i18n.Get(tbCfg.Terms.szMale), szMapName)
+  else
+    szRollText = i18n.Get(tbCfg.Terms.szRollTip, me.szName, i18n.Get(tbCfg.Terms.szFemale), pMember.szName, i18n.Get(tbCfg.Terms.szFemale), szMapName)
+  end
+  local pNpc = KNpc.GetNearestNpcByTemplateId(me.GetNpc(), tbCfg.nNpcId, tbCfg.nNpcInterval)
+  if pNpc then
+    me.CenterMsg(i18n.Get(tbCfg.Terms.szTooClose))
+    return 0
+  end
+  if self:CheckOtherNpcNearBy(pMember) then
+    me.CenterMsg(i18n.Get(tbCfg.Terms.szTooClose))
+    return 0
+  end
+  local bRet2, szMsg2 = FriendShip:AddImitity(me.dwID, pMember.dwID, tbCfg.nAddIntimacy, Env.LogWay_SeventhEvening)
+  if not bRet2 then
+    if szMsg2 and not Lib:IsEmptyStr(szMsg2) then
+      me.CenterMsg(szMsg2)
+    end
+    return 0
+  end
+  self:AddNpc(pMember)
+  if szRollText and not Lib:IsEmptyStr(szRollText) then
+    KPlayer.SendWorldNotify(1, 999, szRollText, ChatMgr.SystemMsgType.System, 1)
+  end
+  me.CallClientScript("Ui:CloseWindow", "UIBag")
+  me.CallClientScript("Ui:CloseWindow", "UIItemTips")
+  return 1
+end
+
+function tbItem:OnClientUse(it)
+  if not me then
+    return 0
+  end
+  if not TeamMgr:HasTeam() then
+    me.CenterMsg(i18n.Get(tbCfg.Terms.szLackPeople))
+    return 0
+  elseif TeamMgr:GetMembersCount() < nNeedMemberCount then
+    me.CenterMsg(i18n.Get(tbCfg.Terms.szLackPeople))
+    return 0
+  elseif TeamMgr:GetMembersCount() > nNeedMemberCount then
+    me.CenterMsg(i18n.Get(tbCfg.Terms.szManyPeople))
+    return 0
+  end
+  local tbMembers = TeamMgr:GetMembers()
+  local _, tbMemberInfo = next(tbMembers)
+  if tbMemberInfo then
+    local bIsFriend = FriendShip:IsFriend(me.dwID, tbMemberInfo.nPlayerID)
+    if not bIsFriend then
+      local function fnAgree()
+        FriendShip:RequestAddFriend(tbMemberInfo.nPlayerID)
+        
+        Ui:CloseWindow("UIMessageBox")
+        return 0
+      end
+      
+      local function fnCancel()
+        return 0
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\130\168\228\184\142{0}\232\191\152\228\184\141\230\152\175\229\165\189\229\143\139\239\188\140\230\152\175\229\144\166\232\166\129\229\143\145\229\135\186\229\165\189\229\143\139\231\148\179\232\175\183\239\188\159", tbMemberInfo.szName), {
+        {fnAgree},
+        {fnCancel}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      })
+      return 0
+    end
+    return 1
+  else
+    return 0
+  end
+end
+
+function tbItem:AddNpc(pPlayer)
+  if pPlayer then
+    local nMapId, nLocX, nLocY = pPlayer.GetWorldPos()
+    local pNewNpc = KNpc.Add(tbCfg.nNpcId, 1, -1, nMapId, nLocX, nLocY, 0, 0, 0)
+    if pNewNpc then
+      self.tbNpcPos = self.tbNpcPos or {}
+      self.tbNpcPos[nMapId] = self.tbNpcPos[nMapId] or {}
+      self.tbNpcPos[nMapId][pNewNpc.nId] = {nLocX = nLocX, nLocY = nLocY}
+      Npc:AddTimer(pNewNpc, Env.GAME_FPS * tbCfg.nExistSec, function()
+        self.tbNpcPos[nMapId][pNewNpc.nId] = nil
+        pNewNpc.Delete()
+        return false
+      end)
+    end
+  end
+end
+
+function tbItem:CheckOtherNpcNearBy(pPlayer)
+  local nMapId, nLocX, nLocY = pPlayer.GetWorldPos()
+  if not self.tbNpcPos then
+    return false
+  else
+    local tbNpcPos = self.tbNpcPos[nMapId] or {}
+    for _, tbInfo in pairs(tbNpcPos) do
+      if Lib:GetDistance(nLocX, nLocY, tbInfo.nLocX, tbInfo.nLocY) <= tbCfg.nNpcInterval then
+        return true
+      end
+    end
+    return false
+  end
+end
+
+function tbItem:CheckMapAndDistance(pPlayer, pMember)
+  local bProperMap = false
+  if pPlayer.nMapTemplateId then
+    for _, nId in ipairs(tbCfg.tbUseMap) do
+      if nId == pPlayer.nMapTemplateId then
+        bProperMap = true
+      end
+    end
+  end
+  if not bProperMap then
+    return false, i18n.Get(tbCfg.Terms.szNotProperMap)
+  end
+  local nMemberMapId, nMemberX, nMemberY = pMember.GetWorldPos()
+  local nMeMapId, nMeX, nMeY = pPlayer.GetWorldPos()
+  if nMemberMapId ~= nMeMapId then
+    return false, i18n.Get(tbCfg.Terms.szNotInSameMap, pMember.szName)
+  end
+  local nDistance = Lib:GetDistance(nMemberX, nMemberY, nMeX, nMeY)
+  if nDistance > tbCfg.nMemberDist then
+    return false, i18n.Get(tbCfg.Terms.szMemberTooFar, pMember.szName)
+  end
+  return true, ""
+end

@@ -1,0 +1,273 @@
+local tbWnd = Ui:CreateWindow("UISelectAwards")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  txtTitle = "node/imgBG/txtTitle",
+  Template = "node/imgBG/Content/AwardsList/Viewport/Content/Template",
+  txtTips = "node/imgBG/Content/SelectTips/txtTips",
+  txtValue = "node/imgBG/Content/SelectTips/txtValue",
+  btnOK = "node/imgBG/Content/btnOK",
+  UIAddAndSubGroup = "node/imgBG/Content/UIAddAndSubGroup",
+  txtSetNum = "node/imgBG/Content/txtSetNum"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseHelper()
+  end,
+  btnOK = function(self)
+    self:OnClickOK()
+  end
+}
+tbWnd.PARAM_SELECT_ID = 1
+tbWnd.TYPE_LIST = {
+  SelectAward = {
+    fnSetTitle = function()
+      return i18n.EasyGet("\233\128\137\230\139\169\229\165\150\229\138\177")
+    end,
+    fnGetTxtTips = function(this)
+      return i18n.EasyGet("\228\187\142\228\187\165\228\184\139\229\165\150\229\138\177\228\184\173\230\140\145\233\128\1371\228\187\182")
+    end,
+    fnGetTxtValue = function(this)
+      local nCount = 0
+      for _, nNum in pairs(this.tbIndexList) do
+        nCount = nCount + nNum
+      end
+      return i18n.EasyGet("({0}/1)", nCount)
+    end,
+    szTxtSetNum = function()
+      return i18n.EasyGet("\232\174\190\231\189\174\230\149\176\233\135\143")
+    end
+  },
+  ExchangeItem = {
+    fnSetTitle = function(szItemName)
+      return i18n.EasyGet("{0}\229\133\145\230\141\162", szItemName)
+    end,
+    fnGetTxtTips = function(this)
+      local szCostName = i18n.Parse(KItem.GetItemShowInfo(this.tbExchangeList[1][1][1][2]))
+      if not next(this.tbIndexList) then
+        return i18n.EasyGet("\232\175\183\233\128\137\230\139\169\233\156\128\232\166\129\230\182\136\232\128\151{0}\230\157\165\229\133\145\230\141\162\231\154\132\233\129\147\229\133\183", szCostName)
+      end
+      local nAwardIndex, _ = next(this.tbIndexList)
+      local tbOrgInfo = this.tbExchangeList[nAwardIndex][1][1]
+      local tbTargetInfo = this.tbExchangeList[nAwardIndex][1][2]
+      local szTargetName = i18n.Parse(KItem.GetItemShowInfo(tbTargetInfo[2]))
+      return i18n.EasyGet("\230\175\143\230\172\161\229\133\145\230\141\162\230\182\136\232\128\151<color=#54AB4D>{0}\228\184\170{1}</color>\229\133\145\230\141\162<color=#54AB4D>{2}\228\184\170{3}</color>", tbOrgInfo[3], szCostName, tbTargetInfo[3], szTargetName)
+    end,
+    fnGetTxtValue = function(this)
+      return ""
+    end,
+    szTxtSetNum = function()
+      return i18n.EasyGet("\229\133\145\230\141\162\230\172\161\230\149\176")
+    end,
+    fnSetNumRange = function(this)
+      if not next(this.tbIndexList) then
+        this.nMaxInputCount = math.min(20, this.pItem.nCount)
+      else
+        local nAwardIndex = next(this.tbIndexList)
+        local tbOrgInfo = this.tbExchangeList[nAwardIndex][1][1]
+        this.nMaxInputCount = math.min(20, math.max(1, math.floor(this.pItem.nCount / tbOrgInfo[3])))
+      end
+      this.AddAndSubGroup:SetNumRange(this.nMinInputCount, this.nMaxInputCount)
+      this.AddAndSubGroup:SetInputValue(1)
+      this.nSelectNum = 1
+    end
+  }
+}
+
+function tbWnd:OnCreate()
+  self.tbItemScrollView = Ui:NewSuperGridView(self, tbControls.Template, self.SetItemInfo)
+  self.nCurIndex = nil
+  self.tbIndexList = nil
+  self.AddAndSubGroup = Ui:NewExistAddAndSubGroup(self, tbControls.UIAddAndSubGroup)
+  self.AddAndSubGroup:BindEvent(function(nValue)
+    return self:OnNumberChange(nValue)
+  end, nil, nil, nil, {})
+end
+
+function tbWnd:OnOpen(nItemId, nParamId, szType, fnCallback, ...)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    Ui:CloseWindow(self.ClassName)
+    return
+  end
+  self.nParamId = nParamId
+  self.nSelectNum = 1
+  self.nAwardIndex = nil
+  self.nItemId = nItemId
+  self.pItem = pItem
+  self.nTemplateId = pItem.dwTemplateId
+  self.nMinInputCount = 1
+  self.nMaxInputCount = math.min(20, pItem.nCount)
+  self.AddAndSubGroup:SetNumRange(self.nMinInputCount, self.nMaxInputCount)
+  self.AddAndSubGroup:SetInputValue(1)
+  self.szType = szType or "SelectAward"
+  self.fnCallback = fnCallback
+  self.tbCallbackArgs = {
+    ...
+  }
+  self:InitData()
+  self:UpdateSetNumTxt()
+  if "ExchangeItem" == szType then
+    return self:OnOpenExhangeItem(pItem)
+  end
+  self:UpdateSelectTips()
+  self:OnOpenSelectAward(pItem)
+end
+
+function tbWnd:OnOpenSelectAward(pItem)
+  local nSelectId = self.nParamId
+  self.tbCfg = Item.SelectAward:GetCfgById(nSelectId)
+  if not self.tbCfg then
+    me.CenterMsg(i18n.EasyGet("\233\129\147\229\133\183{0}\229\165\150\229\138\177\233\128\137\230\139\169\233\133\141\231\189\174{1}\228\184\141\229\173\152\229\156\168", pItem.dwTemplateId, nSelectId))
+    return 0
+  end
+  self:UpdateItemList(self.tbCfg)
+  self:UpdateTitle()
+end
+
+function tbWnd:OnOpenExhangeItem(pItem)
+  local nExchangeId = self.nParamId
+  self.tbExchangeList = Item.ExchangeItem:GetExchangeItemList(nExchangeId, pItem.dwTemplateId)
+  if not next(self.tbExchangeList) then
+    return 0
+  end
+  self.nMaxInputCount = math.min(20, math.max(1, math.floor(pItem.nCount / 1)))
+  self.AddAndSubGroup:SetNumRange(self.nMinInputCount, self.nMaxInputCount)
+  local szItemName = i18n.Parse(KItem.GetItemShowInfo(pItem.dwTemplateId))
+  self:UpdateTitle(szItemName)
+  self:UpdateSelectTips()
+  local tbShowList = {}
+  for _, tbInfo in ipairs(self.tbExchangeList) do
+    table.insert(tbShowList, tbInfo[1][2])
+  end
+  self:UpdateItemList(tbShowList)
+  self:UpdateSelectTips()
+end
+
+function tbWnd:UpdateTitle(...)
+  if not self.TYPE_LIST[self.szType] or not self.TYPE_LIST[self.szType].fnSetTitle then
+    return
+  end
+  self.pPanel:Label_SetText(tbControls.txtTitle, self.TYPE_LIST[self.szType].fnSetTitle(...))
+end
+
+function tbWnd:OnNumberChange(nValue)
+  self.nSelectNum = nValue
+  return nValue
+end
+
+function tbWnd:InitData()
+  self.nCurIndex = nil
+  self.tbIndexList = {}
+end
+
+function tbWnd:UpdateItemList(tbAwardList)
+  self.tbItemScrollView:SetFuncSetItem(self.SetItemInfo)
+  local tbList = {}
+  for nIndex, tbInfo in ipairs(tbAwardList) do
+    table.insert(tbList, {
+      nIndex = nIndex,
+      tbAwardInfo = Lib:CopyTB(tbInfo)
+    })
+  end
+  self.tbItemScrollView:SetAllElement(tbList)
+end
+
+function tbWnd:SetItemInfo(tbElement, tbInfo, nIndex)
+  local tbBaseInfo = Item:GetItemBaseProp(tbInfo.tbAwardInfo[2]) or {}
+  tbElement.pPanel:Label_SetText("txtItemName", i18n.Parse(tbBaseInfo.szName or ""))
+  if not tbElement.tbItemGridScrollView then
+    tbElement.tbItemGridScrollView = Ui:NewExistItemGrid(tbElement, "item/UIItemGrid")
+  end
+  tbElement.tbItemGridScrollView:SetGenericItem(tbInfo.tbAwardInfo)
+  tbElement.tbItemGridScrollView:SetClickEnable(true)
+  local nCount = me.GetItemCountInBags(tbInfo.tbAwardInfo[2])
+  tbElement.pPanel:Label_SetText("txtItemNumber", i18n.EasyGet("\230\139\165\230\156\137\230\149\176\233\135\143\239\188\154{0}", nCount))
+  Ui:Toggle_BindEvent(tbElement.pPanel, "ToggleSelect", function(self, bOn)
+    self:SelectToggle(nIndex, tbInfo.nIndex, bOn)
+  end, self)
+  if self.tbIndexList[tbInfo.nIndex] then
+    tbElement.pPanel:Toggle_SetChecked("ToggleSelect", true)
+  else
+    tbElement.pPanel:Toggle_SetChecked("ToggleSelect", false)
+  end
+end
+
+function tbWnd:UpdateCount()
+  self:UpdateSelectTips()
+end
+
+function tbWnd:UpdateSelectTips()
+  if not (self.TYPE_LIST[self.szType] and self.TYPE_LIST[self.szType].fnGetTxtTips) or not self.TYPE_LIST[self.szType].fnGetTxtValue then
+    return
+  end
+  self.pPanel:Label_SetText(tbControls.txtTips, self.TYPE_LIST[self.szType].fnGetTxtTips(self))
+  self.pPanel:Label_SetText(tbControls.txtValue, self.TYPE_LIST[self.szType].fnGetTxtValue(self))
+end
+
+function tbWnd:SelectToggle(nIndex, nAwardIndex, bOn)
+  if not bOn then
+    if self.tbIndexList[nAwardIndex] then
+      self.nCurIndex = nil
+      self.tbIndexList[nAwardIndex] = nil
+      self:UpdateCount()
+    end
+    if self.TYPE_LIST[self.szType] and self.TYPE_LIST[self.szType].fnSetNumRange then
+      self.TYPE_LIST[self.szType].fnSetNumRange(self)
+    end
+    return
+  end
+  if self.tbIndexList[nAwardIndex] then
+    return
+  end
+  if next(self.tbIndexList) and not self.tbIndexList[nAwardIndex] then
+    local tbElement = self.tbItemScrollView:GetElement(self.nCurIndex)
+    if tbElement then
+      tbElement.pPanel:Toggle_SetChecked("ToggleSelect", false)
+    else
+      local nTmpId = next(self.tbIndexList)
+      self.tbIndexList[nTmpId] = nil
+      self.nCurIndex = nil
+    end
+  end
+  self.nCurIndex = nIndex
+  self.tbIndexList[nAwardIndex] = 1
+  self.nAwardIndex = nAwardIndex
+  self:UpdateCount()
+  if self.TYPE_LIST[self.szType] and self.TYPE_LIST[self.szType].fnSetNumRange then
+    self.TYPE_LIST[self.szType].fnSetNumRange(self)
+  end
+end
+
+function tbWnd:CloseHelper()
+  self:Close()
+end
+
+function tbWnd:UseItem()
+  if not next(self.tbIndexList) then
+    me.CenterMsg(i18n.EasyGet("\230\156\170\233\128\137\230\139\169\229\165\150\229\138\177"))
+    return
+  end
+  self.tbIndexList[self.nAwardIndex] = self.nSelectNum
+  RemoteServer.UseManyItem(self.nItemId, self.nSelectNum, self.tbIndexList)
+  self:Close()
+end
+
+function tbWnd:OnClickOK()
+  if not next(self.tbIndexList) then
+    me.CenterMsg(i18n.EasyGet("\230\156\170\233\128\137\230\139\169\229\165\150\229\138\177"))
+    return
+  end
+  if self.fnCallback then
+    self.fnCallback(table.unpack(self.tbCallbackArgs or {}), self.nParamId, self.nItemId, self.nTemplateId, self.nSelectNum, self.tbIndexList)
+    return
+  end
+  self:UseItem()
+end
+
+function tbWnd:UpdateSetNumTxt()
+  if not self.TYPE_LIST[self.szType] or not self.TYPE_LIST[self.szType].szTxtSetNum then
+    return
+  end
+  self.pPanel:Label_SetText(tbControls.txtSetNum, self.TYPE_LIST[self.szType].szTxtSetNum())
+end

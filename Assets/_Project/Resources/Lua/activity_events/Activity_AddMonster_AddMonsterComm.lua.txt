@@ -1,0 +1,208 @@
+Require("CommonScript/Activity/ActivityMgrDef.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.AddMonster)
+tbActivity.Protocol = {OnSyncNpcState = 1, ReqLightRedPoint = 2}
+
+function tbActivity:LoadConfig()
+  local szFilePath = "Setting/Activity/Common/AddMonster.tab"
+  local tbField = {
+    "nConfigId",
+    "szScriptTableKey",
+    "nJoinLevel",
+    "nIsAddInActivity",
+    "nMaxNpcNumByMap",
+    "nRevive",
+    "nReviveTime",
+    "szGradeNum",
+    "nAwardId",
+    "szGradeAwardKey",
+    "nMaxGradeAward",
+    "nKillerAwardKey",
+    "nKillerTongAwardKey",
+    "nMaxKillerAward",
+    "nDamageAwardKey",
+    "nMaxDamageAward",
+    "nJoinAwardKey",
+    "szJoinAwardMailTitle",
+    "szJoinAwardMailText",
+    "szPrepareEvent",
+    "szStartEvent",
+    "szEndEvent",
+    "szLogWay",
+    "szLogWayKill",
+    "szLogWayShangHai",
+    "szPrepareNotity",
+    "szStartNotity",
+    "szEndNotity",
+    "szRedPoint",
+    "szNotifyTitle",
+    "szNotifyContent",
+    "szNotifyProcess",
+    "szNotifyParam",
+    "nLastingTime"
+  }
+  self.ACTIVITY_CONFIG = Lib:LoadTabFileEx(szFilePath, "dsdddddsdsdddddddssssssssssssssssd", "nConfigId", tbField)
+  local szFilePath = "Setting/Activity/Common/NpcPosList.tab"
+  local tbField = {
+    "nConfigId",
+    "nMapTemplateId",
+    "szPosText"
+  }
+  local tbNpcPosCfg = Lib:LoadTabFileEx(szFilePath, "dds", nil, tbField)
+  local tbPosTable = {}
+  for _, tbInfo in ipairs(tbNpcPosCfg) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("AddMonster:LoadConfig NpcPosList nConfigId=%d not exist", tbInfo.nConfigId))
+    if tbPosTable[tbInfo.nConfigId] == nil then
+      tbPosTable[tbInfo.nConfigId] = {}
+    end
+    if tbPosTable[tbInfo.nConfigId][tbInfo.nMapTemplateId] == nil then
+      tbPosTable[tbInfo.nConfigId][tbInfo.nMapTemplateId] = {}
+    end
+    local szPosText = tbInfo.szPosText
+    if nil == szPosText then
+      break
+    end
+    local szFile = Map:GetMapPosFile(tbInfo.nMapTemplateId, szPosText)
+    if nil == szFile then
+      break
+    end
+    local tbPosList = Lib:LoadTabFileEx(szFile, "dd", nil, {"PosX", "PosY"}, nil, nil, true)
+    for _, tbPos in ipairs(tbPosList) do
+      local tbPosData = {}
+      tbPosData.nPosX = tbPos.PosX
+      tbPosData.nPosY = tbPos.PosY
+      table.insert(tbPosTable[tbInfo.nConfigId][tbInfo.nMapTemplateId], tbPosData)
+    end
+  end
+  for nConfigId, tbMapPos in pairs(tbPosTable) do
+    if self.ACTIVITY_CONFIG[nConfigId] ~= nil then
+      self.ACTIVITY_CONFIG[nConfigId].tbMapPos = tbMapPos
+    end
+  end
+  local szFilePath = "Setting/Activity/Common/NpcFrameList.tab"
+  local tbField = {
+    "nConfigId",
+    "szTimeFrame",
+    "nNpcTemplateID",
+    "nNeedNotify"
+  }
+  local tbNpcFrameCfg = Lib:LoadTabFileEx(szFilePath, "dsdd", nil, tbField)
+  local tbNpcFrameTable = {}
+  for _, tbInfo in ipairs(tbNpcFrameCfg) do
+    if tbNpcFrameTable[tbInfo.nConfigId] == nil then
+      tbNpcFrameTable[tbInfo.nConfigId] = {}
+    end
+    tbNpcFrameTable[tbInfo.nConfigId][tbInfo.szTimeFrame] = {
+      nTemplateId = tbInfo.nNpcTemplateID,
+      nNeedNotify = tbInfo.nNeedNotify or 0
+    }
+  end
+  for nConfigId, tbNpcFrame in pairs(tbNpcFrameTable) do
+    if self.ACTIVITY_CONFIG[nConfigId] ~= nil then
+      self.ACTIVITY_CONFIG[nConfigId].tbNpcFrame = tbNpcFrame
+    end
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  self.tbConfig = tbActCfg.Cfg
+  self.tbConfig.szJoinAwardMailTitle = i18n.Encode(self.tbConfig.szJoinAwardMailTitle)
+  self.tbConfig.szJoinAwardMailText = i18n.Encode(self.tbConfig.szJoinAwardMailText)
+  self.tbConfig.szPrepareNotity = i18n.Encode(self.tbConfig.szPrepareNotity)
+  self.tbConfig.szStartNotity = i18n.Encode(self.tbConfig.szStartNotity)
+  self.tbConfig.szEndNotity = i18n.Encode(self.tbConfig.szEndNotity)
+  self.tbConfig.szNotifyTitle = i18n.Encode(self.tbConfig.szNotifyTitle)
+  self.tbConfig.szNotifyContent = i18n.Encode(self.tbConfig.szNotifyContent)
+  self.tbConfig.szDesc = i18n.Encode(self.tbConfig.szDesc)
+  self.tbConfig.szName = i18n.Encode(self.tbConfig.szName)
+  self.tbConfig.szShowTime = i18n.Encode(self.tbConfig.szShowTime)
+  self.tbConfig.szBtnGoText = i18n.Encode(self.tbConfig.szBtnGoText)
+  self.tbConfig.txtSecondTittle = i18n.Encode(self.tbConfig.txtSecondTittle)
+  self.tbConfig.szSmallPanelText = i18n.Encode(self.tbConfig.szSmallPanelText)
+  self.tbConfig.tbMapPos = {}
+  for _, tbInfo in ipairs(tbActCfg.NpcPosList) do
+    local szPosFile = tbInfo.szPosFile
+    if nil == szPosFile then
+      break
+    end
+    local szFile = Map:GetMapPosFile(tbInfo.nMapTemplateId, szPosFile)
+    if nil == szFile then
+      break
+    end
+    self.tbConfig.tbMapPos[tbInfo.nMapTemplateId] = self.tbConfig.tbMapPos[tbInfo.nMapTemplateId] or {}
+    local tbPosList = Lib:LoadTabFileEx(szFile, "dd", nil, {"PosX", "PosY"}, nil, nil, true)
+    for _, tbPos in ipairs(tbPosList) do
+      local tbPosData = {}
+      tbPosData.nPosX = tbPos.PosX
+      tbPosData.nPosY = tbPos.PosY
+      table.insert(self.tbConfig.tbMapPos[tbInfo.nMapTemplateId], tbPosData)
+    end
+  end
+  self.tbConfig.tbNpcFrame = {}
+  for _, tbInfo in ipairs(tbActCfg.NpcFrameList) do
+    self.tbConfig.tbNpcFrame[tbInfo.szTimeFrame] = {
+      nTemplateId = tbInfo.nNpcTemplateID,
+      nNeedNotify = tbInfo.nNeedNotify or 0
+    }
+  end
+  self.tbConfig.tbMapNameList = {}
+  if tbActCfg.tbMapNameList then
+    for nMapId, tbMapName in pairs(tbActCfg.tbMapNameList) do
+      self.tbConfig.tbMapNameList[nMapId] = {}
+      for nIdx, szMapName in ipairs(tbMapName) do
+        self.tbConfig.tbMapNameList[nMapId][nIdx] = i18n.Encode(szMapName)
+      end
+    end
+  end
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+end
+
+function tbActivity:CheckConfigValid(tbConfig)
+  return true
+end
+
+function tbActivity:GetActivityMaxTimeFrame()
+  local tbTimeFrame = {}
+  for szTimeFrame, _ in pairs(self.tbConfig.tbNpcFrame) do
+    tbTimeFrame[szTimeFrame] = 1
+  end
+  return Lib:GetMaxTimeFrame(tbTimeFrame)
+end
+
+function tbActivity:GetMapList()
+  if self.tbConfig.tbMapPos ~= nil then
+    local tbMap = {}
+    local tbMapList = {}
+    for nMapId, tbPosDataList in pairs(self.tbConfig.tbMapPos) do
+      if nil == tbMap[nMapId] then
+        tbMap[nMapId] = 1
+        table.insert(tbMapList, nMapId)
+      end
+    end
+    return tbMapList
+  end
+  return {}
+end
+
+function tbActivity:GetSaveKeyFieldName()
+  return ActivityMgr.NoSaveKey
+end
+
+tbActivity.FnProcessCallBack = {
+  OpenActivityUI = function(tbData)
+    Ui:OpenWindowWithCallback(tbData.tbParam[1], function(_, tbWnd)
+      tbWnd:OnClickActivityHelper(tbData.tbParam[3])
+    end, nil, tbData.tbParam[2])
+  end,
+  GoToPos = function(tbData)
+    AutoPath:GotoAndCallEx(tbData.tbParam[1], tbData.tbParam[2], tbData.tbParam[3])
+  end
+}
+tbActivity.AwardType = {
+  GradeAward = 1,
+  KillerAward = 2,
+  DamageAward = 3
+}

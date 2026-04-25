@@ -1,0 +1,179 @@
+local tbWnd = Ui:CreateClass("UIOtherFactionSkill", "UIPanel")
+tbWnd.tbControls = {
+  BaseSkillTemplate = "UIFactionSkillView/group/BaseSkill/maskLayer/Viewport/paneBG/SkillTemplate",
+  btnFactionSect0 = "UIFactionSkillView/FactionSect/btnFaction1",
+  btnFactionSect1 = "UIFactionSkillView/FactionSect/btnFaction2",
+  btnHelp = "UIFactionSkillView/btnHelp",
+  txtSeries = "UIFactionSkillView/group/txtSeries"
+}
+tbWnd.tbOnClick = {}
+
+function tbWnd:OnCreate()
+  self.tbBaseSkillView = Ui:NewSuperListView(self, self.BaseSkillTemplate, self.SetSkillElementInfo)
+  self.tbFactionGroup = Ui:NewButtonGroup(self, {
+    [1] = self.btnFactionSect0,
+    [2] = self.btnFactionSect1
+  }, true, function(self, nIndex)
+    self:ChangeFactionSectSelec(nIndex - 1)
+  end)
+  self.pPanel:SetActive(self.btnHelp, false)
+end
+
+function tbWnd:OnOpen()
+  self.pAsyncRole = self.tbOwner.pAsyncRole
+  self.nFactionSect = self.pAsyncRole.GetFactionSect()
+  self.nFaction = self.pAsyncRole.GetFaction()
+  if 0 == self.nFactionSect then
+    self.tbFactionGroup:Select(1)
+  elseif 1 == self.nFactionSect then
+    self.tbFactionGroup:Select(2)
+  end
+  self.nFactionSectSelect = self.nFactionSect
+  self.pPanel:Button_SetText(self.btnFactionSect0, Faction:GetSectName(self.nFaction, 0), "Text")
+  if self.nFaction > 0 then
+    self.pPanel:SetActive(self.btnFactionSect1, true)
+    self.pPanel:Button_SetText(self.btnFactionSect1, Faction:GetSectName(self.nFaction, 1), "Text")
+  else
+    self.pPanel:SetActive(self.btnFactionSect1, false)
+  end
+  self.pPanel:Label_SetText(self.txtSeries, Faction:GetSectDesc(self.nFaction, self.nFactionSect))
+  self:UpdateSkillList()
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:onClickViewSkill(nIndex)
+  Ui:OpenWindow("UISkillShow", self.tbSkillList[nIndex], self.nFactionSect == self.nFactionSectSelect, false)
+end
+
+function tbWnd:ChangeFactionSectSelec(nFactionSect)
+  if nFactionSect == self.nFactionSectSelect then
+    return
+  end
+  self.nFactionSectSelect = nFactionSect
+  self.pPanel:Label_SetText(self.txtSeries, Faction:GetSectDesc(self.nFaction, self.nFactionSect))
+  self:UpdateSkillList()
+end
+
+function tbWnd:UpdateSkillList()
+  local tbSkillData = self.pAsyncRole.GetSkills() or {}
+  local tbFactionSkill = FightSkill:GetFactionSkill(self.nFaction, self.nFactionSectSelect)
+  self.tbSkillList = {}
+  for _, tbInfo in pairs(tbFactionSkill) do
+    local nSkillId = tbInfo.SkillId
+    local nSkillLevel = tbSkillData[nSkillId] or 0
+    local tbSkillInfo = FightSkill:GetSkillSetting(nSkillId, nSkillLevel)
+    tbSkillInfo = tbSkillInfo or FightSkill:GetSkillSetting(nSkillId, nSkillLevel + 1) or {}
+    local nReqLevel, nCoin, nExp, nPoint = FightSkill:GetSkillLevelUpNeed(nSkillId, nSkillLevel)
+    local nMaxSkillLevel = FightSkill:GetAsyncSkillMaxLevel(self.pAsyncRole, nSkillId)
+    local bMax = nSkillLevel >= nMaxSkillLevel
+    local szCurMagicDesc, szNextMagicDesc, szClassName = self:FormatMagicDesc(nSkillId, nSkillLevel)
+    if 0 ~= tbInfo.SortInUI then
+      local tbSkillListInfo = {
+        nId = nSkillId,
+        nLevel = nSkillLevel,
+        nMaxLevel = nMaxSkillLevel,
+        nReqLevel = nReqLevel,
+        nCoin = nCoin,
+        nExp = nExp,
+        nPoint = nPoint,
+        bMax = bMax,
+        nSkillGroup = tbInfo.SkillGroup,
+        szName = tbSkillInfo.SkillName or "",
+        szDesc = tbSkillInfo.Desc or "",
+        szProperty = tbSkillInfo.Property or "",
+        nCD = tbSkillInfo.TimePerCast or 0,
+        bPassive = tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_passivity or tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_inst_missile,
+        nRadius = tbSkillInfo.AttackRadius or 0,
+        nGainLevel = tbInfo.GainLevel,
+        nSort = tbInfo.SortInUI,
+        szBtnName = tbInfo.BtnName,
+        szBtnIcon = tbInfo.BtnIcon,
+        szIconAltlas = tbInfo.IconAltlas,
+        szCurMagicDesc = szCurMagicDesc or "",
+        szNextMagicDesc = szNextMagicDesc or "",
+        szClassName = szClassName or ""
+      }
+      tbSkillListInfo.bIsOtherPlayer = true
+      if tbSkillInfo.IsAura then
+        tbSkillListInfo.bPassive = true
+      end
+      table.insert(self.tbSkillList, tbSkillListInfo)
+    end
+  end
+  table.sort(self.tbSkillList, function(item1, item2)
+    return item1.nSort < item2.nSort
+  end)
+  local tbBaseSkill = {}
+  for i = 1, #self.tbSkillList do
+    local tbSkill = self.tbSkillList[i]
+    if 1 == tbSkill.nSkillGroup then
+      tbSkill.nIndex = i
+      table.insert(tbBaseSkill, tbSkill)
+    end
+  end
+  self.tbBaseSkillView:SetAllElement(tbBaseSkill)
+  local nElementIndex = 1
+  for i = 1, #self.tbSkillList do
+    local tbSkill = self.tbSkillList[i]
+    if 2 == tbSkill.nSkillGroup then
+      local szPathPrefix = "UIFactionSkillView/group/FactionSkill/Skill" .. nElementIndex + 1 .. "/"
+      self:UpdateFactionSkillInfo(tbSkill, szPathPrefix, i)
+      nElementIndex = nElementIndex + 1
+    end
+  end
+  for i = 1, #self.tbSkillList do
+    local tbSkill = self.tbSkillList[i]
+    if 3 == tbSkill.nSkillGroup then
+      local szPathPrefix = "UIFactionSkillView/group/DaChengSkill/Skill1/"
+      self:UpdateFactionSkillInfo(tbSkill, szPathPrefix, i)
+    end
+  end
+  if Ui:WindowVisible("UISkillShow") then
+    local tbSkillShow = Ui:GetWindow("UISkillShow")
+    if tbSkillShow and tbSkillShow.tbSkillInfo then
+      local tbInfo = self:GetSkillInfo(tbSkillShow.tbSkillInfo.nId)
+      if tbInfo then
+        tbSkillShow:UpdateInfo(tbInfo)
+      end
+    end
+  end
+end
+
+function tbWnd:UpdateFactionSkillInfo(tbSkill, szPathPrefix, nSkillIndex)
+  Ui:Button_BindEvent(self.pPanel, szPathPrefix .. "SkillIcon/btnSkill", self.onClickViewSkill, self, nSkillIndex)
+  self.pPanel:Sprite_SetSprite(szPathPrefix .. "SkillIcon/btnSkill", tbSkill.szIconAltlas)
+  self.pPanel:Label_SetText(szPathPrefix .. "txtMessage/txtSkillName", i18n.Parse(tbSkill.szName))
+  self.pPanel:SetActive(szPathPrefix .. "SkillIcon/imgInvalid", false)
+  self.pPanel:Label_SetText(szPathPrefix .. "txtMessage/txtSkillLevel", i18n.Get(FightSkill.Terms.LevelLabel, tbSkill.nLevel, FightSkill:GetAsyncSkillMaxLevel(self.pAsyncRole, tbSkill.nId)))
+end
+
+function tbWnd:FormatMagicDesc(nSkillId, nSkillLevel)
+  local szCurMagicDesc, szNextMagicDesc, szClassName
+  if nSkillLevel <= 0 then
+    szCurMagicDesc = ""
+    szNextMagicDesc, szClassName = FightSkill:GetSkillMagicDesc(nSkillId, 1)
+  else
+    szCurMagicDesc, szClassName = FightSkill:GetSkillMagicDesc(nSkillId, nSkillLevel)
+    szNextMagicDesc = FightSkill:GetSkillMagicDesc(nSkillId, nSkillLevel + 1)
+  end
+  return szCurMagicDesc, szNextMagicDesc, szClassName
+end
+
+function tbWnd:SetSkillElementInfo(tbElement, tbSkill, nIndex)
+  local pPanel = tbElement.pPanel
+  Ui:Button_BindEvent(pPanel, "btnSkill", self.onClickViewSkill, self, tbSkill.nIndex)
+  pPanel:Sprite_SetSprite("btnSkill", tbSkill.szIconAltlas)
+  pPanel:Label_SetText("txtSkillName", i18n.Parse(tbSkill.szName))
+  pPanel:SetActive("imgInvalid", false)
+  pPanel:Label_SetText("txtSkillLevel", i18n.Get(FightSkill.Terms.LevelLabel, tbSkill.nLevel, FightSkill:GetAsyncSkillMaxLevel(self.pAsyncRole, tbSkill.nId)))
+end
+
+function tbWnd:GetSkillInfo(nSkillId)
+  for _, tbInfo in pairs(self.tbSkillList) do
+    if tbInfo.nId == nSkillId then
+      return tbInfo
+    end
+  end
+end

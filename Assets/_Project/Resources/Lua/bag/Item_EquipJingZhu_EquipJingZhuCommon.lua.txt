@@ -1,0 +1,581 @@
+Require("CommonScript/Item/EquipJingZhu/EquipJingZhuCfg.lua")
+Require("CommonScript/AttributeModule/AttributeModule.lua")
+local EquipJingZhu = Item.EquipJingZhu
+EquipJingZhu.SAVE_JINGZHU_GROUP = GetGroupKey("EquipJingZhu")
+EquipJingZhu.LEVEL_OFFSET = 21
+EquipJingZhu.BREAK_OFFSET = 31
+EquipJingZhu.FAIL_OFFSET = 41
+EquipJingZhu.GRADE_SCORE_LEVEL = 51
+EquipJingZhu.MAX_JINGZHU_LEVEL = 52
+EquipJingZhu.DAILY_JING_ZHU_TIME_LIMIT = 80
+EquipJingZhu.POS_2_DEGREE = {
+  [Item.EQUIPPOS_HELM] = "HelmJingZhu",
+  [Item.EQUIPPOS_ARMOR] = "ArmorJingZhu",
+  [Item.EQUIPPOS_BELT] = "BeltJingZhu",
+  [Item.EQUIPPOS_CUFF] = "CuffJingZhu",
+  [Item.EQUIPPOS_BOOTS] = "BootsJingZhu",
+  [Item.EQUIPPOS_WEAPON] = "WeaponJingZhu",
+  [Item.EQUIPPOS_NECKLACE] = "NecklaceJingZhu",
+  [Item.EQUIPPOS_RING] = "RingJingZhu",
+  [Item.EQUIPPOS_PENDANT] = "PendantJingZhu",
+  [Item.EQUIPPOS_AMULET] = "AmuletJingZhu"
+}
+EquipJingZhu.ATTR_NUM_LIMIT = 2
+EquipJingZhu.JingZhuConsumeItemNumRatio = {
+  [Item.EQUIPPOS_HELM] = 1,
+  [Item.EQUIPPOS_ARMOR] = 3,
+  [Item.EQUIPPOS_BELT] = 1,
+  [Item.EQUIPPOS_CUFF] = 1,
+  [Item.EQUIPPOS_BOOTS] = 1,
+  [Item.EQUIPPOS_WEAPON] = 5,
+  [Item.EQUIPPOS_NECKLACE] = 2,
+  [Item.EQUIPPOS_RING] = 2,
+  [Item.EQUIPPOS_PENDANT] = 2,
+  [Item.EQUIPPOS_AMULET] = 2
+}
+
+function EquipJingZhu:GetJingZhuLevel(pPlayer, nPos)
+  if nPos < Item.EQUIPPOS_HELM or nPos > Item.EQUIPPOS_AMULET then
+    return 0
+  end
+  return pPlayer.GetUserValue(self.SAVE_JINGZHU_GROUP, self.LEVEL_OFFSET + nPos)
+end
+
+function EquipJingZhu:GetJingZhuBreakLevel(pPlayer, nPos)
+  return pPlayer.GetUserValue(self.SAVE_JINGZHU_GROUP, self.BREAK_OFFSET + nPos)
+end
+
+function EquipJingZhu:GetJingZhuFailCount(pPlayer, nPos)
+  return pPlayer.GetUserValue(self.SAVE_JINGZHU_GROUP, self.FAIL_OFFSET + nPos)
+end
+
+function EquipJingZhu:GetEquipJingZhuGradeScore(pPlayer)
+  return pPlayer.GetUserValue(self.SAVE_JINGZHU_GROUP, self.GRADE_SCORE_LEVEL)
+end
+
+function EquipJingZhu:CheckIsOpen()
+  if 1 == GetTimeFrameState(self.tbTimeFrameMaxLevel[1].szTimeFrame) then
+    return true
+  end
+  return false
+end
+
+function EquipJingZhu:GetJingZhuMaxLevel(nEquipLevel)
+  local nMaxLevel = 0
+  local nMaxTimeFrameLevel = 0
+  for k, v in ipairs(self.tbTimeFrameMaxLevel) do
+    if 1 == GetTimeFrameState(v.szTimeFrame) then
+      nMaxTimeFrameLevel = v.nLevel
+    end
+  end
+  local nEquipMaxLevel = 0
+  for k, v in pairs(self.tbEquipMaxLevel) do
+    if nEquipLevel >= v.nEquipLevel then
+      nEquipMaxLevel = v.nLevel
+    end
+  end
+  nMaxLevel = math.min(nMaxTimeFrameLevel, nEquipMaxLevel)
+  if nMaxLevel > #self.tbJingZhuInfo then
+    nMaxLevel = #self.tbJingZhuInfo
+  end
+  return nMaxLevel
+end
+
+function EquipJingZhu:GetJingZhuSuccessRateCfg(nLevel)
+  if not self.tbJingZhuInfo[nLevel] then
+    return 0, 0
+  end
+  local nHoujinLevel = 0
+  for i = 1, #self.tbHouJinLevel do
+    if 1 == GetTimeFrameState(self.tbHouJinLevel[i].szTimeFrame) then
+      nHoujinLevel = math.max(self.tbHouJinLevel[i].nLevel, nHoujinLevel)
+    end
+  end
+  if nLevel <= nHoujinLevel then
+    return math.floor(self.tbJingZhuInfo[nLevel][9] * 100), math.floor(self.tbJingZhuInfo[nLevel][2] * 100)
+  else
+    return math.floor(self.tbJingZhuInfo[nLevel][1] * 100), math.floor(self.tbJingZhuInfo[nLevel][2] * 100)
+  end
+end
+
+function EquipJingZhu:GetPlayerJingZhuSuccessRate(pPlayer, nPos, nNextLevel)
+  local nBaseRate, nAddRate = self:GetJingZhuSuccessRateCfg(nNextLevel)
+  local nFailCount = self:GetJingZhuFailCount(pPlayer, nPos)
+  local nAllRate = nBaseRate + nAddRate * nFailCount
+  return math.min(nAllRate, 100)
+end
+
+function EquipJingZhu:GetJingZhuConsumeInfo(nLevel, nEquipPos)
+  if not self.tbJingZhuInfo[nLevel] then
+    return -1
+  end
+  local nItemTemplateId = self.tbJingZhuInfo[nLevel][3]
+  local nItemNum = self.tbJingZhuInfo[nLevel][4] * EquipJingZhu.JingZhuConsumeItemNumRatio[nEquipPos]
+  local nCoin = self.tbJingZhuInfo[nLevel][5] * EquipJingZhu.JingZhuConsumeItemNumRatio[nEquipPos]
+  return nItemTemplateId, nItemNum, nCoin
+end
+
+function EquipJingZhu:GetJingZhuBreakConfig(nLevel, nEquipPos)
+  if not self.tbJingZhuInfo[nLevel] then
+    return -1
+  end
+  local nItemTemplateId = self.tbJingZhuInfo[nLevel][6]
+  local nItemNum = self.tbJingZhuInfo[nLevel][7] * EquipJingZhu.JingZhuConsumeItemNumRatio[nEquipPos]
+  return nItemTemplateId, nItemNum
+end
+
+function EquipJingZhu:GetJingZhuAddAttrNum(nLevel, szAttrType)
+  local tbAttr = {
+    0,
+    0,
+    0
+  }
+  if not self.tbJingZhuInfo[nLevel] then
+    return tbAttr
+  end
+  if self.tbAttrType2ConfigIndex[szAttrType] then
+    tbAttr = self.tbJingZhuInfo[nLevel][8][self.tbAttrType2ConfigIndex[szAttrType]]
+  end
+  return tbAttr
+end
+
+function EquipJingZhu:GetTodayJingZhuTimes(pPlayer, nPos)
+  return DegreeCtrl:GetDegree(pPlayer, self.POS_2_DEGREE[nPos])
+end
+
+EquipJingZhu.tbCanNotJingZhuReason = {
+  SystemNotOpen = 1,
+  NotWearEquip = 2,
+  HaveNoTimes = 3,
+  IsMaxLevel = 4,
+  NeedBreak = 5,
+  CostItemWrong = 6,
+  LackMaterial = 7,
+  LackCoin = 8
+}
+EquipJingZhu.tbCanNotJingZhuReasonToText = {
+  [EquipJingZhu.tbCanNotJingZhuReason.SystemNotOpen] = function()
+    return i18n.EasyGet("\231\179\187\231\187\159\229\176\154\230\156\170\229\188\128\229\144\175")
+  end,
+  [EquipJingZhu.tbCanNotJingZhuReason.NotWearEquip] = function()
+    return i18n.EasyGet("\232\163\133\229\164\135\230\156\170\231\169\191\230\136\180")
+  end,
+  [EquipJingZhu.tbCanNotJingZhuReason.HaveNoTimes] = function()
+    return i18n.EasyGet("\232\175\165\233\131\168\228\189\141\229\189\147\229\164\169\231\178\190\233\147\184\230\172\161\230\149\176\229\183\178\231\148\168\229\174\140")
+  end,
+  [EquipJingZhu.tbCanNotJingZhuReason.IsMaxLevel] = function()
+    return i18n.EasyGet("\229\183\178\231\178\190\233\147\184\232\135\179\230\156\128\233\171\152\231\173\137\231\186\167\239\188\140\230\155\180\230\141\162\230\155\180\233\171\152\233\152\182\232\163\133\229\164\135\229\143\175\228\187\165\231\187\167\231\187\173\231\178\190\233\147\184\239\188\129")
+  end,
+  [EquipJingZhu.tbCanNotJingZhuReason.NeedBreak] = function()
+    return i18n.EasyGet("\233\156\128\232\166\129\231\170\129\231\160\180\230\137\141\232\131\189\231\187\167\231\187\173\231\178\190\233\147\184")
+  end,
+  [EquipJingZhu.tbCanNotJingZhuReason.CostItemWrong] = function()
+    return i18n.EasyGet("\231\178\190\233\147\184\230\182\136\232\128\151\233\129\147\229\133\183\233\148\153\232\175\175")
+  end,
+  [EquipJingZhu.tbCanNotJingZhuReason.LackMaterial] = function()
+    return i18n.EasyGet("\231\178\190\233\147\184\231\159\179\228\184\141\232\182\179")
+  end,
+  [EquipJingZhu.tbCanNotJingZhuReason.LackCoin] = function()
+    return i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179")
+  end
+}
+
+function EquipJingZhu:GetCanNotJingZhuTextByReason(nReason)
+  return self.tbCanNotJingZhuReasonToText[nReason]()
+end
+
+function EquipJingZhu:CanJingZhu(pPlayer, nPos)
+  if not self:CheckIsOpen() then
+    return false, self.tbCanNotJingZhuReason.SystemNotOpen
+  end
+  local pEquip = pPlayer.GetEquipByPos(nPos)
+  if not pEquip then
+    return false, self.tbCanNotJingZhuReason.NotWearEquip
+  end
+  if self:GetTodayJingZhuTimes(pPlayer, nPos) <= 0 then
+    return false, self.tbCanNotJingZhuReason.HaveNoTimes
+  end
+  local nCurLevel = self:GetJingZhuLevel(pPlayer, nPos)
+  local nNextLevel = nCurLevel + 1
+  local nMaxConfigLevel = self:GetJingZhuMaxLevel(pEquip.nLevel)
+  if nNextLevel > nMaxConfigLevel then
+    return false, self.tbCanNotJingZhuReason.IsMaxLevel
+  end
+  local nBreakTemplateId, nBreakItemNum = self:GetJingZhuBreakConfig(nCurLevel, nPos)
+  if nBreakTemplateId > 0 then
+    local nBreakLevel = self:GetJingZhuBreakLevel(pPlayer, nPos)
+    if nCurLevel > nBreakLevel then
+      return false, self.tbCanNotJingZhuReason.NeedBreak
+    end
+  end
+  local nItemTemplateId, nItemNum, nCostCoin = self:GetJingZhuConsumeInfo(nNextLevel, nPos)
+  if nItemTemplateId <= 0 then
+    return false, self.tbCanNotJingZhuReason.CostItemWrong
+  end
+  local nCurNum = pPlayer.GetItemCountByTypeInBag(nItemTemplateId)
+  if nItemNum > nCurNum then
+    local nNeedSynthesisNum = nItemNum - nCurNum
+    local bCanSynthesis, nSynthesisCostCoin, _, emCanNotSynthesisReason = self:CanSynthesisSpecificNum(pPlayer, nItemTemplateId, nNeedSynthesisNum, pPlayer.GetMoney("Coin"))
+    if not bCanSynthesis then
+      local emCanNotJingZhuReason
+      if emCanNotSynthesisReason == self.tbCanNotSynthesisReason.LackCoin then
+        emCanNotJingZhuReason = self.tbCanNotJingZhuReason.LackCoin
+      else
+        emCanNotJingZhuReason = self.tbCanNotJingZhuReason.LackMaterial
+      end
+      return false, emCanNotJingZhuReason
+    else
+      nCostCoin = nCostCoin + nSynthesisCostCoin
+    end
+  end
+  if nCostCoin > pPlayer.GetMoney("Coin") then
+    return false, self.tbCanNotJingZhuReason.LackCoin
+  end
+  return true
+end
+
+function EquipJingZhu:CanJingZhuWithReminderWindow(pPlayer, nPos)
+  local bRet, nReason = self:CanJingZhu(pPlayer, nPos)
+  local szErrMsg
+  if nil ~= nReason then
+    szErrMsg = self:GetCanNotJingZhuTextByReason(nReason)
+  end
+  if bRet then
+    return bRet
+  elseif nReason and nReason == self.tbCanNotJingZhuReason.LackCoin then
+    GainCurrency:ReadyForJump("Coin")
+    return bRet
+  else
+    return bRet, szErrMsg
+  end
+end
+
+EquipJingZhu.tbCanNotBreakReason = {
+  SystemNotOpen = 1,
+  NotWearEquip = 2,
+  IsMaxLevel = 3,
+  NeedNotBreak = 4,
+  HaveBreak = 5,
+  LackMaterial = 6,
+  LackCoin = 7
+}
+EquipJingZhu.tbCanNotBreakReasonToText = {
+  [EquipJingZhu.tbCanNotBreakReason.SystemNotOpen] = function()
+    return i18n.EasyGet("\231\179\187\231\187\159\229\176\154\230\156\170\229\188\128\229\144\175")
+  end,
+  [EquipJingZhu.tbCanNotBreakReason.NotWearEquip] = function()
+    return i18n.EasyGet("\232\163\133\229\164\135\230\156\170\231\169\191\230\136\180")
+  end,
+  [EquipJingZhu.tbCanNotBreakReason.IsMaxLevel] = function()
+    return i18n.EasyGet("\229\183\178\231\178\190\233\147\184\232\135\179\230\156\128\233\171\152\231\173\137\231\186\167\239\188\140\230\155\180\230\141\162\230\155\180\233\171\152\233\152\182\232\163\133\229\164\135\229\143\175\228\187\165\231\187\167\231\187\173\231\178\190\233\147\184\239\188\129")
+  end,
+  [EquipJingZhu.tbCanNotBreakReason.NeedNotBreak] = function()
+    return i18n.EasyGet("\229\189\147\229\137\141\231\173\137\231\186\167\228\184\141\233\156\128\232\166\129\231\170\129\231\160\180")
+  end,
+  [EquipJingZhu.tbCanNotBreakReason.HaveBreak] = function()
+    return i18n.EasyGet("\229\189\147\229\137\141\231\173\137\231\186\167\229\183\178\231\170\129\231\160\180")
+  end,
+  [EquipJingZhu.tbCanNotBreakReason.LackMaterial] = function()
+    return i18n.EasyGet("\233\153\168\233\147\129\228\184\141\232\182\179")
+  end,
+  [EquipJingZhu.tbCanNotBreakReason.LackCoin] = function()
+    return i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179")
+  end
+}
+
+function EquipJingZhu:GetCanNotBreakTextByReason(nReason)
+  return self.tbCanNotBreakReasonToText[nReason]()
+end
+
+function EquipJingZhu:CanJZBreak(pPlayer, nPos)
+  if not self:CheckIsOpen() then
+    return false, self.tbCanNotBreakReason.SystemNotOpen
+  end
+  local pEquip = pPlayer.GetEquipByPos(nPos)
+  if not pEquip then
+    return false, self.tbCanNotBreakReason.NotWearEquip
+  end
+  local nLevel = self:GetJingZhuLevel(pPlayer, nPos)
+  local nMaxConfigLevel = self:GetJingZhuMaxLevel(pEquip.nLevel)
+  if nLevel >= nMaxConfigLevel then
+    return false, self.tbCanNotBreakReason.IsMaxLevel
+  end
+  local nItemTemplateId, nBreakItemNum = self:GetJingZhuBreakConfig(nLevel, nPos)
+  if nItemTemplateId <= 0 then
+    return false, self.tbCanNotBreakReason.NeedNotBreak
+  end
+  if nLevel <= self:GetJingZhuBreakLevel(pPlayer, nPos) then
+    return false, self.tbCanNotBreakReason.HaveBreak
+  end
+  local nCurNum = pPlayer.GetItemCountByTypeInBag(nItemTemplateId)
+  if nBreakItemNum > nCurNum then
+    local nNeedSynthesisNum = nBreakItemNum - nCurNum
+    local bCanSynthesis, _, _, emCanNotSynthesisReason = self:CanSynthesisSpecificNum(pPlayer, nItemTemplateId, nNeedSynthesisNum, pPlayer.GetMoney("Coin"))
+    if not bCanSynthesis then
+      local emCanNotBreakReason
+      if emCanNotSynthesisReason == self.tbCanNotSynthesisReason.LackCoin then
+        emCanNotBreakReason = self.tbCanNotBreakReason.LackCoin
+      else
+        emCanNotBreakReason = self.tbCanNotBreakReason.LackMaterial
+      end
+      return false, emCanNotBreakReason
+    end
+  end
+  return true
+end
+
+EquipJingZhu.tbCanNotSynthesisReason = {
+  NoConfig = 1,
+  LackMaterial = 2,
+  LackCoin = 3
+}
+EquipJingZhu.tbCanNotSynthesisReasonToText = {
+  [EquipJingZhu.tbCanNotSynthesisReason.NoConfig] = function()
+    return i18n.EasyGet("\230\178\161\230\156\137\229\144\136\230\136\144\233\133\141\231\189\174")
+  end,
+  [EquipJingZhu.tbCanNotSynthesisReason.LackMaterial] = function()
+    return i18n.EasyGet("\229\144\136\230\136\144\230\157\144\230\150\153\228\184\141\232\182\179")
+  end,
+  [EquipJingZhu.tbCanNotSynthesisReason.LackCoin] = function()
+    return i18n.EasyGet("\229\144\136\230\136\144\233\147\182\228\184\164\228\184\141\232\182\179")
+  end
+}
+
+function EquipJingZhu:GetCanNotSynthesisTextByReason(nReason)
+  return self.tbCanNotSynthesisReasonToText[nReason]()
+end
+
+local SYNTHESIS_CONFIG_SOURCE_ID = 1
+local SYNTHESIS_CONFIG_PER_NEED = 2
+local SYNTHESIS_CONFIG_TARGET_ID = 3
+local SYNTHESIS_CONFIG_PER_COIN = 5
+
+function EquipJingZhu:GetSynthesisCfgByTargetId(nTargetId)
+  for _, v in pairs(self.tbSynthesisInfo) do
+    if v[SYNTHESIS_CONFIG_TARGET_ID] == nTargetId then
+      return v
+    end
+  end
+  return nil
+end
+
+function EquipJingZhu:CanSynthesisSpecificNum(pPlayer, nTargetId, nTargetNum, nUseCoinLimit)
+  local tbConfig = self:GetSynthesisCfgByTargetId(nTargetId)
+  if nil == tbConfig then
+    return false, 0, {}, self.tbCanNotSynthesisReason.NoConfig
+  else
+    local nSourceId = tbConfig[SYNTHESIS_CONFIG_SOURCE_ID]
+    local nSourceItemNum = pPlayer.GetItemCountByTypeInBag(nSourceId)
+    local nPerCoin = tbConfig[SYNTHESIS_CONFIG_PER_COIN]
+    local nPerNeed = tbConfig[SYNTHESIS_CONFIG_PER_NEED]
+    local nNeedCostCoin = nTargetNum * nPerCoin
+    local nRestCoin = nUseCoinLimit - nNeedCostCoin
+    if nRestCoin < 0 then
+      return false, 0, {}, self.tbCanNotSynthesisReason.LackCoin
+    else
+      local nNeedSourceItemNum = nPerNeed * nTargetNum
+      if nSourceItemNum >= nNeedSourceItemNum then
+        return true, nNeedCostCoin, {
+          [nSourceId] = nNeedSourceItemNum
+        }, nil
+      else
+        local bCan, nNeedCostCoinRecursion, tbCostMaterial, emReason = self:CanSynthesisSpecificNum(pPlayer, nSourceId, nNeedSourceItemNum - nSourceItemNum, nRestCoin)
+        if bCan then
+          if nSourceItemNum > 0 then
+            tbCostMaterial[nSourceId] = nSourceItemNum
+          end
+          return true, nNeedCostCoin + nNeedCostCoinRecursion, tbCostMaterial, nil
+        else
+          if emReason == self.tbCanNotSynthesisReason.NoConfig then
+            emReason = self.tbCanNotSynthesisReason.LackMaterial
+          end
+          return false, 0, {}, emReason
+        end
+      end
+    end
+  end
+end
+
+function EquipJingZhu:GetCanSynthesisNum(pPlayer, nTargetId)
+  local tbSynthesisConfigList = {}
+  local tbHaveItem = {}
+  local tbSysthesisToTargetNeedNum = {}
+  local tbSysthesisToTargetCoin = {}
+  local nConfigTargetId = nTargetId
+  local nIndex = 0
+  repeat
+    local tbConfig = self:GetSynthesisCfgByTargetId(nConfigTargetId)
+    if nil ~= tbConfig then
+      table.insert(tbSynthesisConfigList, tbConfig)
+      local nSourceId = tbConfig[SYNTHESIS_CONFIG_SOURCE_ID]
+      local nSourceIdCount = pPlayer.GetItemCountByTypeInBag(nSourceId)
+      table.insert(tbHaveItem, nSourceIdCount)
+      local nPerNeed = tbConfig[SYNTHESIS_CONFIG_PER_NEED]
+      local nPerCoin = tbConfig[SYNTHESIS_CONFIG_PER_COIN]
+      local nPreviousNeedNum = 1
+      local nPreciousNeedCoin = 0
+      if nIndex > 0 then
+        nPreviousNeedNum = tbSysthesisToTargetNeedNum[nIndex]
+        nPreciousNeedCoin = tbSysthesisToTargetCoin[nIndex]
+      end
+      table.insert(tbSysthesisToTargetNeedNum, nPerNeed * nPreviousNeedNum)
+      table.insert(tbSysthesisToTargetCoin, nPreciousNeedCoin + nPreviousNeedNum * nPerCoin)
+      nIndex = nIndex + 1
+      nConfigTargetId = nSourceId
+    end
+  until nil == tbConfig
+  local nTargetItemSum = 0
+  local nLeftCoin = pPlayer.GetMoney("Coin")
+  while true do
+    local nFindIndex
+    for nIndex2, nItemCount in ipairs(tbHaveItem) do
+      if nItemCount > 0 then
+        nFindIndex = nIndex2
+        break
+      end
+    end
+    if nil ~= nFindIndex then
+      local nMaterialCanSysthesisTimes = math.floor(tbHaveItem[nFindIndex] / tbSysthesisToTargetNeedNum[nFindIndex])
+      local nCoinCanSysthesisTimes = math.floor(nLeftCoin / tbSysthesisToTargetCoin[nFindIndex])
+      local nCanSysthesisTimes = math.min(nMaterialCanSysthesisTimes, nCoinCanSysthesisTimes)
+      if nCanSysthesisTimes >= 1 then
+        nTargetItemSum = nTargetItemSum + nCanSysthesisTimes
+        nLeftCoin = nLeftCoin - tbSysthesisToTargetCoin[nFindIndex] * nCanSysthesisTimes
+        tbHaveItem[nFindIndex] = tbHaveItem[nFindIndex] - tbSysthesisToTargetNeedNum[nFindIndex] * nCanSysthesisTimes
+      else
+        local nNeedCoin, nNeedMaterialCount
+        if nFindIndex - 1 > 0 then
+          nNeedMaterialCount = tbSysthesisToTargetNeedNum[nFindIndex - 1]
+          nNeedCoin = tbSysthesisToTargetCoin[nFindIndex - 1]
+        else
+          nNeedMaterialCount = 1
+          nNeedCoin = 0
+        end
+        local nIndex3 = nFindIndex
+        while nIndex3 <= #tbSynthesisConfigList and nNeedMaterialCount > 0 do
+          nNeedCoin = nNeedCoin + tbSynthesisConfigList[nIndex3][SYNTHESIS_CONFIG_PER_COIN] * nNeedMaterialCount
+          nNeedMaterialCount = nNeedMaterialCount * tbSynthesisConfigList[nIndex3][SYNTHESIS_CONFIG_PER_NEED]
+          local nThisLayerCanSynthesisNum = math.min(tbHaveItem[nIndex3], nNeedMaterialCount)
+          tbHaveItem[nIndex3] = tbHaveItem[nIndex3] - nThisLayerCanSynthesisNum
+          nNeedMaterialCount = nNeedMaterialCount - nThisLayerCanSynthesisNum
+          nIndex3 = nIndex3 + 1
+        end
+        if nNeedMaterialCount <= 0 and nLeftCoin >= nNeedCoin then
+          nTargetItemSum = nTargetItemSum + 1
+          nLeftCoin = nLeftCoin - nNeedCoin
+        else
+          break
+        end
+      end
+    else
+      break
+    end
+  end
+  return nTargetItemSum
+end
+
+function EquipJingZhu:ApplyAttrib(pNpc, pEquip, nLevel, nPlayerId)
+  if pEquip.nEquipPos < Item.EQUIPPOS_HELM or pEquip.nEquipPos > Item.EQUIPPOS_AMULET then
+    return
+  end
+  local tbBaseAttrList = pEquip.GetBaseAttrib()
+  for i = 1, self.ATTR_NUM_LIMIT do
+    local tbAttrNum = self:GetJingZhuAddAttrNum(nLevel, tbBaseAttrList[i].szName)
+    if 1 == tbBaseAttrList[i].bActive and tbAttrNum then
+      pNpc.ApplyMagicAttrib(tbBaseAttrList[i].szName, table.unpack(tbAttrNum))
+      if nPlayerId then
+        AttributeHelp:LogAttrApply(nPlayerId, "EquipJingZhu", tbBaseAttrList[i].szName, table.unpack(tbAttrNum))
+      end
+    end
+  end
+end
+
+function EquipJingZhu:RemoveAttrib(pPlayer, pEquip, nLevel)
+  if pEquip.nEquipPos < Item.EQUIPPOS_HELM or pEquip.nEquipPos > Item.EQUIPPOS_AMULET then
+    return
+  end
+  nLevel = nLevel or self:GetJingZhuLevel(pPlayer, pEquip.nEquipPos)
+  local tbBaseAttrList = pEquip.GetBaseAttrib()
+  for i = 1, self.ATTR_NUM_LIMIT do
+    local tbAttrNum = self:GetJingZhuAddAttrNum(nLevel, tbBaseAttrList[i].szName)
+    if 1 == tbBaseAttrList[i].bActive and tbAttrNum then
+      pPlayer.RemoveMagicAttrib(tbBaseAttrList[i].szName, table.unpack(tbAttrNum))
+      AttributeHelp:LogAttrRemove(pPlayer.dwID, "EquipJingZhu", tbBaseAttrList[i].szName, table.unpack(tbAttrNum))
+    end
+  end
+end
+
+function EquipJingZhu:OnEquip(pPlayer)
+  local nGradeLevel = self:GetEquipJingZhuGradeScore(pPlayer)
+  if nGradeLevel > 0 then
+    self:ApplyGradeScoreAttrib(pPlayer, nGradeLevel, pPlayer.dwID)
+  end
+end
+
+function EquipJingZhu:OnUnEquip(pPlayer)
+  local nGradeLevel = self:GetEquipJingZhuGradeScore(pPlayer)
+  if nGradeLevel > 0 then
+    self:RemoveGradeScoreAttrib(pPlayer, nGradeLevel, pPlayer.dwID)
+  end
+end
+
+function EquipJingZhu:RefreshAttrib(pPlayer, nPos, nOrgLv, nNewLv)
+  local pEquip = pPlayer.GetEquipByPos(nPos)
+  if not pEquip then
+    return
+  end
+  if pPlayer.IsMaskPlayerAttr() then
+    return
+  end
+  self:RemoveAttrib(pPlayer, pEquip, nOrgLv)
+  self:ApplyAttrib(pPlayer.GetNpc(), pEquip, nNewLv, pPlayer.dwID)
+end
+
+function EquipJingZhu:ApplyGradeScoreAttrib(pNpc, nLevel, nPlayerId)
+  if self.tbGradeScoreInfo[nLevel] then
+    for i = 1, #self.tbGradeScoreInfo[nLevel] do
+      pNpc.ApplyMagicAttrib(table.unpack(self.tbGradeScoreInfo[nLevel][i]))
+      if nPlayerId then
+        AttributeHelp:LogAttrApply(nPlayerId, "EquipJingZhu", table.unpack(self.tbGradeScoreInfo[nLevel][i]))
+      end
+    end
+  end
+end
+
+function EquipJingZhu:RemoveGradeScoreAttrib(pNpc, nLevel, nPlayerId)
+  if self.tbGradeScoreInfo[nLevel] then
+    for i = 1, #self.tbGradeScoreInfo[nLevel] do
+      pNpc.RemoveMagicAttrib(table.unpack(self.tbGradeScoreInfo[nLevel][i]))
+      if nPlayerId then
+        AttributeHelp:LogAttrRemove(nPlayerId, "EquipJingZhu", table.unpack(self.tbGradeScoreInfo[nLevel][i]))
+      end
+    end
+  end
+end
+
+function EquipJingZhu:RefreshGradeScoreAttrib(pPlayer, nOrgLv, nNewLv)
+  self:RemoveGradeScoreAttrib(pPlayer.GetNpc(), nOrgLv, pPlayer.dwID)
+  self:ApplyGradeScoreAttrib(pPlayer.GetNpc(), nNewLv, pPlayer.dwID)
+end
+
+function EquipJingZhu:GetMinJingZhuLevel(pPlayer)
+  local nMinLevel
+  for _, nPos in ipairs(Item.tbSortToEquipPos) do
+    local nThisPosLevel = EquipJingZhu:GetJingZhuLevel(pPlayer, nPos)
+    if nil == nMinLevel then
+      nMinLevel = nThisPosLevel
+    else
+      nMinLevel = math.min(nMinLevel, nThisPosLevel)
+    end
+  end
+  return nMinLevel
+end
+
+AttributeModule:Register("EquipJingZhu", EquipJingZhu)
+
+function EquipJingZhu:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  local nJingZhuGradeScoreLevel = pPlayerAsync.GetJingZhuGradeScore()
+  if nJingZhuGradeScoreLevel and nJingZhuGradeScoreLevel > 0 then
+    self:ApplyGradeScoreAttrib(pNpc, nJingZhuGradeScoreLevel)
+  end
+end

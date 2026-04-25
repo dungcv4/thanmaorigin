@@ -1,0 +1,309 @@
+Require("CommonScript/Compose/Compose_Public.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.ComposeActivity)
+tbActivity.Protocol = {MakeByFormula = 1, GetExtraAward = 2}
+tbActivity.ComposeType = {High = 1, Middle = 2}
+tbActivity.DefaultMaxComposeNum = 20
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/ComposeActivity/ComposeActivityConfig.tab"
+  local tbLoadConfigs = Lib:EasyLoadTabFile(szFilepath, {"nConfigID"})
+  assert(tbLoadConfigs)
+  self.ACTIVITY_CONFIG = {}
+  for nConfigID, tbConfig in pairs(tbLoadConfigs) do
+    self.ACTIVITY_CONFIG[nConfigID] = tbConfig
+  end
+  szFilepath = "Setting/Activity/ComposeActivity/HandInExtraAward.tab"
+  local tbField = {
+    "nConfigID",
+    "nComposeType",
+    "nIndex",
+    "nSaveKeyID",
+    "nNeedNum",
+    "nAwardID",
+    "nAwardKey",
+    "szInfo"
+  }
+  tbLoadConfigs = Lib:LoadTabFileEx(szFilepath, "ddddddds", nil, tbField)
+  assert(tbLoadConfigs)
+  for _, tbConfig in pairs(tbLoadConfigs) do
+    self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbHandInCfg = self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbHandInCfg or {}
+    self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbHandInCfg[tbConfig.nComposeType] = self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbHandInCfg[tbConfig.nComposeType] or {}
+    self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbHandInCfg[tbConfig.nComposeType][tbConfig.nIndex] = tbConfig
+    if not self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbSaveIDMap then
+      self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbSaveIDMap = {}
+    end
+    self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbSaveIDMap[tbConfig.nSaveKeyID] = true
+  end
+  szFilepath = "Setting/Activity/ComposeActivity/ActivityFormula.tab"
+  tbField = {
+    "nConfigID",
+    "nComposeType",
+    "nFormulaID",
+    "nSaveKeyID",
+    "nMaxComposeCount",
+    "nMaxComposePerTimes",
+    "szCallBack1",
+    "szParam1",
+    "szCallBack2",
+    "szParam2",
+    "szTitle"
+  }
+  tbLoadConfigs = Lib:LoadTabFileEx(szFilepath, "ddddddsssss", nil, tbField)
+  assert(tbLoadConfigs)
+  for _, tbConfig in pairs(tbLoadConfigs) do
+    self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbFormula = self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbFormula or {}
+    self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbFormula[tbConfig.nComposeType] = tbConfig
+    if not self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbSaveIDMap then
+      self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbSaveIDMap = {}
+    end
+    self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbSaveIDMap[tbConfig.nSaveKeyID] = true
+  end
+  for _, tbConfig in pairs(self.ACTIVITY_CONFIG) do
+    for _, tbFormula in pairs(tbConfig.tbFormula) do
+      tbConfig.tbFormulaMaterial = tbConfig.tbFormulaMaterial or {}
+      tbConfig.tbFormulaMaterial[tbFormula.nComposeType] = Compose.FORMULA_CONFIG[tbFormula.nFormulaID]
+    end
+  end
+  szFilepath = "Setting/Activity/ComposeActivity/ComposeExtraAward.tab"
+  tbField = {
+    "nConfigID",
+    "nFormulaID",
+    "nPerComposeNum",
+    "nAwardID",
+    "nAwardKey",
+    "nMonthCardAwardKey"
+  }
+  tbLoadConfigs = Lib:LoadTabFileEx(szFilepath, "dddddd", nil, tbField)
+  assert(tbLoadConfigs)
+  for _, tbConfig in pairs(tbLoadConfigs) do
+    self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbComposeExtraAward = self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbComposeExtraAward or {}
+    self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbComposeExtraAward[tbConfig.nFormulaID] = tbConfig
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+  self.bLoadConfig = true
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  self.tbConfig = tbActCfg.Cfg
+  self.tbConfig.szDesc = i18n.Encode(self.tbConfig.szDesc)
+  self.tbConfig.szName = i18n.Encode(self.tbConfig.szName)
+  self.tbConfig.szShowTime = i18n.Encode(self.tbConfig.szShowTime)
+  for _, tbInfo in pairs(tbActCfg.HandInExtraAward or {}) do
+    tbInfo.szInfo = i18n.Encode(tbInfo.szInfo)
+    self.tbConfig.tbHandInCfg = self.tbConfig.tbHandInCfg or {}
+    self.tbConfig.tbHandInCfg[tbInfo.nComposeType] = self.tbConfig.tbHandInCfg[tbInfo.nComposeType] or {}
+    self.tbConfig.tbHandInCfg[tbInfo.nComposeType][tbInfo.nIndex] = tbInfo
+    self.tbConfig.tbSaveIDMap = self.tbConfig.tbSaveIDMap or {}
+    self.tbConfig.tbSaveIDMap[tbInfo.nSaveKeyID] = true
+  end
+  for _, tbInfo in pairs(tbActCfg.ActivityFormula) do
+    tbInfo.szTitle = i18n.Encode(tbInfo.szTitle)
+    self.tbConfig.tbFormula = self.tbConfig.tbFormula or {}
+    self.tbConfig.tbFormula[tbInfo.nComposeType] = tbInfo
+    self.tbConfig.tbSaveIDMap = self.tbConfig.tbSaveIDMap or {}
+    self.tbConfig.tbSaveIDMap[tbInfo.nSaveKeyID] = true
+  end
+  for _, tbFormula in pairs(self.tbConfig.tbFormula) do
+    self.tbConfig.tbFormulaMaterial = self.tbConfig.tbFormulaMaterial or {}
+    self.tbConfig.tbFormulaMaterial[tbFormula.nComposeType] = Compose.FORMULA_CONFIG[tbFormula.nFormulaID]
+  end
+  for _, tbInfo in pairs(tbActCfg.ComposeExtraAward or {}) do
+    self.tbConfig.tbComposeExtraAward = self.tbConfig.tbComposeExtraAward or {}
+    self.tbConfig.tbComposeExtraAward[tbInfo.nFormulaID] = tbInfo
+  end
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+end
+
+function tbActivity:CheckConfigValid()
+  return true
+end
+
+function tbActivity:GetLeftFormulaMaxComposeCount(pPlayer, nComposeType)
+  local nSaveKeyID = self:GetActivityFormula(nComposeType).nSaveKeyID
+  local nHasComposeCount = pPlayer.GetUserValue(self:GetSaveGroupID(), nSaveKeyID)
+  local nMaxCount = self.tbConfig.tbFormula[nComposeType].nMaxComposeCount
+  return nMaxCount - nHasComposeCount
+end
+
+function tbActivity:GetActivityFormula(nComposeType)
+  return self.tbConfig.tbFormula[nComposeType]
+end
+
+function tbActivity:GetSaveGroupID()
+  return self.nSaveGroupId
+end
+
+function tbActivity:GetFormulaID(nComposeType)
+  return self.tbConfig.tbFormula[nComposeType].nFormulaID
+end
+
+function tbActivity:GetLogReason(nConfigID)
+  return self.tbConfig.szLogWay
+end
+
+function tbActivity:GetExAwardCfg(nConfigId, nComposeType, nIndex)
+  if self.tbConfig.tbHandInCfg[nComposeType] then
+    return self.tbConfig.tbHandInCfg[nComposeType][nIndex]
+  end
+end
+
+function tbActivity:GetExAwardCfgByComposeType(nComposeType)
+  if self.tbConfig.tbHandInCfg and self.tbConfig.tbHandInCfg[nComposeType] then
+    return self.tbConfig.tbHandInCfg[nComposeType]
+  else
+    return {}
+  end
+end
+
+function tbActivity:GetAllExAwardCfg()
+  local nConfigId = self.nConfigId
+  if self.tbConfig.tbHandInCfg then
+    return self.tbConfig.tbHandInCfg
+  end
+end
+
+function tbActivity:GetFormula(nComposeType)
+  local tbConfig = self.tbConfig
+  if not tbConfig then
+    return {}
+  end
+  if not tbConfig.tbFormula then
+    return {}
+  end
+  local tbInfo = tbConfig.tbFormula[nComposeType]
+  if not tbInfo then
+    return {}
+  end
+  return Compose.FORMULA_CONFIG[tbInfo.nFormulaID] or {}
+end
+
+function tbActivity:GetAllFormula()
+  local tbConfig = self.tbConfig
+  if not tbConfig then
+    return {}
+  end
+  if not tbConfig.tbFormula then
+    return {}
+  end
+  return tbConfig.tbFormula
+end
+
+function tbActivity:GetFormulas()
+  return self.tbConfig.tbFormulaMaterial
+end
+
+function tbActivity:CanGetExtraAwardByComposeType(nComposeType)
+  local tbAllExtraAward = self:GetExAwardCfgByComposeType(nComposeType)
+  if not tbAllExtraAward then
+    LogErr("CanGetExtraAward data error")
+    return
+  end
+  for i, tbExtraAward in ipairs(tbAllExtraAward) do
+    if self:CanGetExtraAward(me, nComposeType, i) then
+      return true
+    end
+  end
+  return false
+end
+
+function tbActivity:GetMaxComposePerTimes(nComposeType)
+  local nMaxComposePerTimes = self:GetActivityFormula(nComposeType).nMaxComposePerTimes
+  if nMaxComposePerTimes <= 0 then
+    return self.DefaultMaxComposeNum
+  else
+    return nMaxComposePerTimes
+  end
+end
+
+function tbActivity:GetPlayerCanMakeNum(pPlayer, nComposeType)
+  local tbFormula = self:GetFormula(nComposeType)
+  local nMaxComposePerTimes = self:GetMaxComposePerTimes(nComposeType)
+  local nLeftComposeCount = self:GetLeftFormulaMaxComposeCount(pPlayer, nComposeType)
+  nMaxComposePerTimes = math.min(nMaxComposePerTimes, nLeftComposeCount)
+  if not next(tbFormula) then
+    LogErr("GetPlayerCanMakeNum formula nil ")
+    return 0
+  end
+  if not tbFormula.tbMaterials or Lib:CountTB(tbFormula.tbMaterials) <= 0 then
+    return nMaxComposePerTimes
+  end
+  local nMinCount = nMaxComposePerTimes
+  for _, tbItem in pairs(tbFormula.tbMaterials or {}) do
+    local nHaveCount = 0
+    local nAwardType = Player.AwardType[tbItem[1]]
+    local nNeedCount = 0
+    nHaveCount = Award:GetAwardCount(pPlayer, table.unpack(tbItem))
+    nNeedCount = tbItem[Player.AwardTypeCountIndex[nAwardType]]
+    local nCurCanMake = math.floor(nHaveCount / nNeedCount)
+    if 0 == nCurCanMake then
+      local bEnough, szInfo = Award:CheckIsEnough(pPlayer, 1, table.unpack(tbItem))
+      if not bEnough then
+        return 0, i18n.EasyGet(szInfo)
+      end
+    end
+    if nMinCount > nCurCanMake then
+      nMinCount = nCurCanMake
+    end
+  end
+  return nMinCount
+end
+
+function tbActivity:HasGetExtraAward(pPlayer, nComposeType, nIndex)
+  local tbExAwardCfg = self:GetExAwardCfg(self.nConfigId, nComposeType, nIndex)
+  local nSaveKeyID = tbExAwardCfg.nSaveKeyID
+  return pPlayer.GetUserValue(self:GetSaveGroupID(), nSaveKeyID) > 0
+end
+
+function tbActivity:CanGetExtraAward(pPlayer, nComposeType, nIndex)
+  if pPlayer.nLevel < self.tbConfig.nLevel then
+    return false, i18n.EasyGet("\231\142\169\229\174\182\231\173\137\231\186\167\228\184\141\232\182\179")
+  end
+  if not self:GetExAwardCfg(self.nConfigId, nComposeType, nIndex) then
+    Log("ComposeActivityServer: GetExtraAward failed, ExtraAward Config not exist, nPlayerID=%d, nComposeType=%d, nIndex=%d", nComposeType, nIndex)
+    pPlayer.CenterMsg(i18n.EasyGet("\229\165\150\229\138\177\228\184\141\229\173\152\229\156\168"))
+    return false
+  end
+  local bHasGetExtraAward = self:HasGetExtraAward(pPlayer, nComposeType, nIndex)
+  if bHasGetExtraAward then
+    return false, i18n.EasyGet("\230\130\168\229\183\178\233\162\134\229\143\150\232\191\135\232\175\165\229\165\150\229\138\177\239\188\129")
+  end
+  local bHandInEnough = self:HandInIsEnough(pPlayer, nComposeType, nIndex)
+  if not bHandInEnough then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\230\149\176\233\135\143\228\184\141\232\182\179\239\188\129")
+  end
+  return true
+end
+
+function tbActivity:HandInIsEnough(pPlayer, nComposeType, nIndex)
+  local nHandInSaveID = self:GetActivityFormula(nComposeType).nSaveKeyID
+  local tbExAwardCfg = self:GetExAwardCfg(self.nConfigId, nComposeType, nIndex)
+  local nSaveKeyID = tbExAwardCfg.nSaveKeyID
+  local nHandInIDCount = pPlayer.GetUserValue(self:GetSaveGroupID(), nHandInSaveID)
+  local nNeedCount = tbExAwardCfg.nNeedNum
+  return nHandInIDCount >= nNeedCount
+end
+
+function tbActivity:IsMaterial(nItemTemplateId, nComposeType)
+  local tbMaterials = self:GetFormula(nComposeType).tbMaterials or {}
+  for _, tbInfo in pairs(tbMaterials) do
+    if Player.AwardType[tbInfo[1]] ~= Player.award_type_money and tbInfo[2] == nItemTemplateId then
+      return true
+    end
+  end
+  return false
+end
+
+function tbActivity:GetComposeTypeByFormulaId(nSourceFormulaID)
+  for nComposeType, tbInfo in ipairs(self.tbConfig.tbFormula) do
+    if tbInfo.nFormulaID == nSourceFormulaID then
+      return nComposeType
+    end
+  end
+  return 1
+end

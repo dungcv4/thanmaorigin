@@ -1,0 +1,118 @@
+local tbWnd = Ui:CreateClass("UIPartnerNew_ZFLevelUp", "UIPanel")
+local tbControls = {
+  AfterAttr = "AttributeAfter",
+  BeforeTemplate = "AttributeBefore/attributeCell/txtAttributeTemplate",
+  AfterTemplate = "AttributeAfter/attributeCell/txtAttributeTemplate",
+  btnLevelUp = "btnLevelUp",
+  txtCondition = "txtCondition",
+  btnAdd = "costCell1/btnAdd",
+  txtCost = "costCell1/txtPotentialUpCost",
+  UIItemGrid = "costCell1/UIItemGrid",
+  costCell = "costCell1"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnLevelUp = function(self)
+    if PartnerZhenFa:GetCurWashRandomAttrCount(me) > 0 then
+      local function fnOk()
+        PartnerZhenFa:SendClientReq(PartnerZhenFa.Protocol.ReqZFLevelUp)
+      end
+      
+      local function fnCancel()
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\189\147\229\137\141\230\156\137\230\156\170\228\191\157\231\149\153\231\154\132\230\180\151\231\187\131\229\177\158\230\128\167\239\188\140\232\191\155\233\152\182\229\144\142\229\176\134\230\184\133\233\153\164\232\175\165\229\177\158\230\128\167\239\188\140\230\152\175\229\144\166\231\187\167\231\187\173\232\191\155\233\152\182"), {
+        {fnOk},
+        {fnCancel}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      })
+    else
+      PartnerZhenFa:SendClientReq(PartnerZhenFa.Protocol.ReqZFLevelUp)
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbAfterScrollView = Ui:NewScrollView(self, tbControls.AfterTemplate)
+  self.tbBeforeScrollView = Ui:NewScrollView(self, tbControls.BeforeTemplate)
+end
+
+function tbWnd:OnOpen()
+  self:UpdateView()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnLevelUp, {
+    RedPointMgr.EVENT.PartnerZFLevelUp
+  })
+end
+
+function tbWnd:OnClose()
+  self.tbAfterScrollView:Clear()
+  self.tbBeforeScrollView:Clear()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnLevelUp)
+end
+
+function tbWnd:UpdateView()
+  local nAttrCount = PartnerZhenFa:GetCurRandomAttrCount(me)
+  self.tbBeforeScrollView:Clear()
+  for nIndex = 1, nAttrCount do
+    self.tbBeforeScrollView:SetElement(nIndex, function(tbElement)
+      local szAttrDesc = PartnerZhenFa:GetRandomAttrDesc(nIndex)
+      tbElement.pPanel:Label_SetText("Main", szAttrDesc)
+    end)
+  end
+  local nCurZFLevel = me.GetUserValue(PartnerZhenFa.CommonSaveGroup, PartnerZhenFa.tbCommonSaveKey.nZFLevel)
+  local tbNextLevelCfg = PartnerZhenFa:GetZFLevelCfg(nCurZFLevel + 1)
+  if tbNextLevelCfg then
+    self.tbAfterScrollView:Clear()
+    local nAfterAttrCount = nAttrCount
+    if tbNextLevelCfg.nNewRandomAttr > 0 then
+      nAttrCount = nAttrCount + 1
+    end
+    for nIndex = 1, nAttrCount do
+      self.tbAfterScrollView:SetElement(nIndex, function(tbElement)
+        if nIndex <= nAfterAttrCount then
+          local szAttrDesc = PartnerZhenFa:GetRandomAttrDesc(nIndex, nCurZFLevel + 1)
+          tbElement.pPanel:Label_SetText("Main", szAttrDesc)
+        else
+          tbElement.pPanel:Label_SetColorByName("Main", "Red")
+          tbElement.pPanel:Label_SetText("Main", i18n.EasyGet("\232\191\155\233\152\182\229\144\142\232\142\183\229\190\151{0}\230\157\161\230\150\176\229\177\158\230\128\167", tbNextLevelCfg.nNewRandomAttr))
+        end
+      end)
+    end
+    self.pPanel:SetActive(tbControls.AfterAttr, true)
+    self.pPanel:SetActive(tbControls.costCell, true)
+    self.pPanel:SetActive(tbControls.btnLevelUp, true)
+    self.pPanel:Button_SetEnable(tbControls.btnLevelUp, 1 == GetTimeFrameState(tbNextLevelCfg.szOpenTimeFrame))
+    self.pPanel:Label_SetText(tbControls.txtCondition, i18n.EasyGet("{0}\229\143\175\232\191\155\233\152\182", Calendar:GetTimeframeName(tbNextLevelCfg.szOpenTimeFrame)))
+    self:UpdateCostShow(tbNextLevelCfg.nLevelUpCostId, tbNextLevelCfg.nLevelUpCostCount)
+  else
+    self.pPanel:SetActive(tbControls.AfterAttr, false)
+    self.pPanel:SetActive(tbControls.costCell, false)
+    self.pPanel:SetActive(tbControls.btnLevelUp, false)
+    self.pPanel:Label_SetText(tbControls.txtCondition, i18n.EasyGet("\229\183\178\229\141\135\232\135\179\229\189\147\229\137\141\230\156\128\233\171\152\233\152\182"))
+    return
+  end
+end
+
+function tbWnd:UpdateCostShow(nCostId, nNeedCount)
+  local nHasCount = me.GetItemCountByTypeInBag(nCostId)
+  if nNeedCount > nHasCount then
+    self.pPanel:Label_SetText(tbControls.txtCost, i18n.EasyGet("<color=#c50505>{0}/{1}</color>", nHasCount, nNeedCount))
+  else
+    self.pPanel:Label_SetText(tbControls.txtCost, i18n.EasyGet("{0}/{1}", nHasCount, nNeedCount))
+  end
+  local pGrid = Ui:NewExistItemGrid(self, tbControls.UIItemGrid)
+  pGrid:SetItemByTemplate(nCostId, 0)
+  pGrid:SetClickEnable(true)
+  Ui:Button_BindEvent(self.pPanel, tbControls.btnAdd, function()
+    local tbWindow = Ui:GetWindow("UIPartnerNew")
+    if tbWindow then
+      tbWindow:UpdateJumpToWnd(nCostId)
+    end
+  end)
+end
+
+function tbWnd:OnZhenFaRefresh()
+  self:UpdateView()
+end

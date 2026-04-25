@@ -1,0 +1,139 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+Require("CommonScript/Activity/ActivityMgrDef.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.ZhongQiuTuanYuan)
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/ZhongQiuActivity/ZhongQiuTuanYuan/ZhongQiuTuanYuanCfg.tab"
+  local tbActivityConfig = Lib:EasyLoadTabFile(szFilepath, {"nConfigId"})
+  if not tbActivityConfig then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  self.ACTIVITY_CONFIG = {}
+  for nConfigId, tbConfig in pairs(tbActivityConfig) do
+    self.ACTIVITY_CONFIG[nConfigId] = tbConfig
+  end
+  szFilepath = "Setting/Activity/ZhongQiuActivity/ZhongQiuTuanYuan/TuanYuanTableInfo.tab"
+  local tbTableInfo = Lib:EasyLoadTabFile(szFilepath)
+  if not tbTableInfo then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  for _, tbInfo in pairs(tbTableInfo) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("ZhongQiuTuanYuan: Load tbTableInfo failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTableInfo = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTableInfo or {}
+    table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTableInfo, tbInfo)
+  end
+  szFilepath = "Setting/Activity/ZhongQiuActivity/ZhongQiuTuanYuan/TableLocInfo.tab"
+  local tbTablePosFilePath = Lib:EasyLoadTabFile(szFilepath)
+  if not tbTablePosFilePath then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  for _, tbInfo in pairs(tbTablePosFilePath) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("ZhongQiuTuanYuan: Load tbTablePosFilePath failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTableLocInfo = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTableLocInfo or {}
+    local szFile = Map:GetMapPosFile(tbInfo.nMapTemplateId, tbInfo.szPosFilePath)
+    local tbPosList = Lib:LoadTabFileEx(szFile, "dd", nil, {"PosX", "PosY"}, nil, nil, true)
+    if tbPosList then
+      for _, tbPos in ipairs(tbPosList) do
+        tbPos.nMapTemplateId = tbInfo.nMapTemplateId
+        table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbTableLocInfo, tbPos)
+      end
+    end
+  end
+  szFilepath = "Setting/Activity/ZhongQiuActivity/ZhongQiuTuanYuan/WaiterLocInfo.tab"
+  local tbWaiterLocInfo = Lib:EasyLoadTabFile(szFilepath)
+  if not tbWaiterLocInfo then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  for _, tbInfo in pairs(tbWaiterLocInfo) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("ZhongQiuTuanYuan: Load tbWaiterLocInfo failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbWaiterLocInfo = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbWaiterLocInfo or {}
+    table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbWaiterLocInfo, tbInfo)
+  end
+  szFilepath = "Setting/Activity/ZhongQiuActivity/ZhongQiuTuanYuan/WishInfo.tab"
+  local tbWishInfo = Lib:EasyLoadTabFile(szFilepath)
+  for _, tbInfo in pairs(tbWishInfo) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("ZhongQiuTuanYuan: Load WishInfo failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbWishInfo = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbWishInfo or {}
+    table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbWishInfo, tbInfo)
+  end
+  szFilepath = "Setting/Activity/ZhongQiuActivity/ZhongQiuTuanYuan/DialogInfo.tab"
+  local tbDialogInfo = Lib:EasyLoadTabFile(szFilepath)
+  for _, tbInfo in pairs(tbDialogInfo) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("ZhongQiuTuanYuan: Load DialogInfo failed, nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbDialogInfo = tbInfo
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+  self.bLoadConfig = true
+end
+
+tbActivity.SaveID = {
+  LastJoinTime = 1,
+  HasEatNum = 2,
+  LastEatTime = 3,
+  bSendWishesToday = 4
+}
+tbActivity.Protocol = {ReqLightRedPoint = 1, ReqSendNotify = 2}
+tbActivity.TypeDef = {Tong = 1, City = 2}
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  self.tbConfig = tbActCfg.Cfg
+  self.tbConfig.tbTableInfo = {}
+  for _, tbInfo in pairs(tbActCfg.TableInfo) do
+    table.insert(self.tbConfig.tbTableInfo, tbInfo)
+  end
+  self.tbConfig.tbTableLocInfo = {}
+  for _, tbInfo in pairs(tbActCfg.TableLocInfo) do
+    local szFile = Map:GetMapPosFile(tbInfo.nMapTemplateId, tbInfo.szPosFilePath)
+    local tbPosList = Lib:LoadTabFileEx(szFile, "dd", nil, {"PosX", "PosY"}, nil, nil, true)
+    if tbPosList then
+      for _, tbPos in ipairs(tbPosList) do
+        tbPos.nMapTemplateId = tbInfo.nMapTemplateId
+        table.insert(self.tbConfig.tbTableLocInfo, tbPos)
+      end
+    end
+  end
+  self.tbConfig.tbWaiterLocInfo = {}
+  for _, tbInfo in pairs(tbActCfg.WaiterLocInfo) do
+    table.insert(self.tbConfig.tbWaiterLocInfo, tbInfo)
+  end
+  self.tbConfig.tbWishInfo = {}
+  for _, tbInfo in pairs(tbActCfg.WishInfo) do
+    if tbInfo.szMsg then
+      tbInfo.szMsg = i18n.Encode(tbInfo.szMsg)
+      table.insert(self.tbConfig.tbWishInfo, tbInfo)
+    end
+  end
+  self.tbConfig.tbDialogInfo = Lib:CopyTB(tbActCfg.DialogInfo)
+  self.tbConfig.tbDialogInfo.szTitle = i18n.Encode(self.tbConfig.tbDialogInfo.szTitle)
+  self.tbConfig.tbDialogInfo.szText = i18n.Encode(self.tbConfig.tbDialogInfo.szText)
+  self.tbConfig.tbDialogInfo.szProcessText = i18n.Encode(self.tbConfig.tbDialogInfo.szProcessText)
+  self.tbConfig.szDesc = i18n.Encode(self.tbConfig.szDesc)
+  self.tbConfig.szName = i18n.Encode(self.tbConfig.szName)
+  self.tbConfig.szShowTime = i18n.Encode(self.tbConfig.szShowTime)
+  self.tbConfig.szNotifyTitle = i18n.Encode(self.tbConfig.szNotifyTitle)
+  self.tbConfig.szNotifyContent = i18n.Encode(self.tbConfig.szNotifyContent)
+  self.tbConfig.szBoardcast = i18n.Encode(self.tbConfig.szBoardcast)
+  self.tbConfig.szAppearRollTip = i18n.Encode(self.tbConfig.szAppearRollTip)
+  self.tbConfig.szNotCdMsg = i18n.Encode(self.tbConfig.szNotCdMsg)
+  self.tbConfig.szTableDisappearMsg = i18n.Encode(self.tbConfig.szTableDisappearMsg)
+  self.tbConfig.szNoRemainNumMsg = i18n.Encode(self.tbConfig.szNoRemainNumMsg)
+  self.tbConfig.szBtnGoText = i18n.Encode(self.tbConfig.szBtnGoText)
+  self.tbConfig.txtSecondTittle = i18n.Encode(self.tbConfig.txtSecondTittle)
+  self.tbConfig.szSmallPanelText = i18n.Encode(self.tbConfig.szSmallPanelText)
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+  return true
+end
+
+function tbActivity:CheckConfigValid()
+  return true
+end

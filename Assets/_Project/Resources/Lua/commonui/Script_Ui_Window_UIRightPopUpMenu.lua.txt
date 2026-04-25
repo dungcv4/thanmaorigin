@@ -1,0 +1,248 @@
+Require("Script/Ui/Logic/MenuSettingDef.lua")
+local tbWnd = Ui:CreateWindow("UIRightPopUpMenu")
+local tbAllGroups = Ui:GetMenuSetting()
+local tbControls = {
+  PortraitObj = "MainPanel/playerInfo/PortraitObj",
+  PlayerInfo = "MainPanel/playerInfo",
+  BtnListScroll = "MainPanel/btnListScrollView",
+  ButtonListView = "MainPanel/btnListScrollView/Viewport/Content",
+  ButtonTemplate = "MainPanel/btnListScrollView/Viewport/Content/btnTemplate",
+  mainPanel = "MainPanel",
+  txtPlayerName = "MainPanel/playerInfo/txtPlayerName",
+  txtTongName = "MainPanel/playerInfo/txtTongName",
+  imgPortrait = "MainPanel/playerInfo/portrait/framebg/imgPortrait",
+  SecondButtonTemplate = "MainPanel/SecondBtnList/btnListView/btnTemplate",
+  SecondButtonList = "MainPanel/SecondBtnList",
+  TongPosBtnList = "MainPanel/TongPosBtnList",
+  btnTongPos1 = "MainPanel/TongPosBtnList/btnListView/btnElement1",
+  btnTongPos3 = "MainPanel/TongPosBtnList/btnListView/btnElement3",
+  btnTongPos4 = "MainPanel/TongPosBtnList/btnListView/btnElement4",
+  btnTongPos2 = "MainPanel/TongPosBtnList/btnListView/btnElement2"
+}
+tbWnd.tbControls = tbControls
+local tbBtn2Career = {
+  Kin.Def.Career_Master,
+  Kin.Def.Career_ViceMaster,
+  Kin.Def.Career_Command,
+  Kin.Def.Career_Mascot
+}
+
+function tbWnd:OnCreate()
+  self.tbPortraitObj = Ui:NewExistPortraitObjPanel(self, tbControls.PortraitObj)
+  self:SetClickEmptyToClose()
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.ButtonTemplate, function(self, nIndex, tbElement)
+    tbElement.fnOnClick(self)
+  end, false, true)
+  self.tbSecondScrollView = Ui:NewScrollView(self, tbControls.SecondButtonTemplate, nil, false, false)
+  self.tbTongPosBtnGroup = Ui:NewButtonGroup(self, {
+    [tbBtn2Career[1]] = tbControls.btnTongPos1,
+    [tbBtn2Career[2]] = tbControls.btnTongPos2,
+    [tbBtn2Career[3]] = tbControls.btnTongPos3,
+    [tbBtn2Career[4]] = tbControls.btnTongPos4
+  }, false, function(self, nIndex)
+  end)
+  self.mainPanelTransform = self.pPanel:GetRectTransform(tbControls.mainPanel)
+  self.BtnListScrollView = self.pPanel:GetScrollRect(tbControls.BtnListScroll)
+end
+
+function tbWnd:FlushButtonGroup()
+  local tbOrginGroup = tbAllGroups[self.tbData.szKind]
+  self.tbScrollView:Reset()
+  local nButtonCount = 0
+  for i, tbSetting in ipairs(tbOrginGroup) do
+    local bCanShow = tbSetting.fnAvaliable(self.tbData)
+    if bCanShow then
+      nButtonCount = nButtonCount + 1
+      table.insert(self.tbGroup, tbSetting)
+      self.tbScrollView:SetElement(nButtonCount, function(tbElement)
+        local pPanel = tbElement.pPanel
+        pPanel:Label_SetText("Text", tbSetting.fnName(self.tbData))
+        tbElement.fnOnClick = tbSetting.fnOnClick
+      end)
+    end
+  end
+end
+
+function tbWnd:OnOpen(szKind, tbData, parentWindow, anchoredPosX, anchoredPosY, tbNeedCloseUi)
+  self.BtnListScrollView.verticalNormalizedPosition = 1
+  self.tbNeedCloseUi = tbNeedCloseUi
+  tbData = Lib:CopyTB(tbData)
+  self.tbData = tbData
+  tbData.dwRoleId = tbData.dwRoleId or tbData.nMemberId or tbData.dwUnitID
+  tbData.dwID = tbData.dwRoleId or tbData.dwID
+  tbData.szKind = szKind
+  tbData.parentWindow = parentWindow
+  local gridLayoutGroup = self.pPanel:GetObject(tbControls.ButtonListView):GetComponent(Ui.GridLayoutGroup)
+  self.nButtonHeight = gridLayoutGroup.cellSize.y
+  self.nButtonPad = gridLayoutGroup.spacing.y
+  local rectTransform = self.pPanel:GetRectTransform(tbControls.PlayerInfo)
+  self.nPlayerInfoWidgetHeight = rectTransform.rect.height
+  if anchoredPosX and anchoredPosY then
+    self:SetAnchoredPos(anchoredPosX, anchoredPosY)
+  end
+  local szName = tbData.szName
+  local dwKinId = tbData.dwKinId
+  local dwTongId = tbData.dwTongId
+  if tbData.nNpcID then
+    local pNpc = KNpc.GetById(tbData.nNpcID)
+    if pNpc then
+      szName = szName or pNpc.szName
+      dwKinId = dwKinId or pNpc.dwKinId
+      dwTongId = dwTongId or pNpc.dwTongId
+      tbData.dwID = 0 ~= pNpc.nPlayerID and pNpc.nPlayerID or nil
+      tbData.dwTeamID = pNpc.dwTeamID
+      tbData.dwRoleId = tbData.dwID
+    end
+  end
+  local tbRoleInfo = FriendShip:GetFriendDataInfo(tbData.dwRoleId) or self:findChatTarget(tbData.dwRoleId)
+  if tbRoleInfo then
+    tbData.nLevel = tbData.nLevel or tbRoleInfo.nLevel
+  end
+  local bDataHaveTotalLevel = false
+  local bLevelIsMoreThan200 = false
+  local bHaveAsyncData = false
+  if tbData.nTotalLevel then
+    bDataHaveTotalLevel = true
+  end
+  if tbData.nLevel > GameSetting.MAX_PLAYER_LEVEL then
+    bLevelIsMoreThan200 = true
+  end
+  if bDataHaveTotalLevel then
+    tbData.nTotalLevel = tbData.nTotalLevel
+  elseif bLevelIsMoreThan200 then
+    tbData.nTotalLevel = tbData.nLevel
+  else
+    local nRoleId = tbData.dwRoleId or tbData.dwUnitID
+    local pAsyncPlayer = KPlayer.GetAsyncData(nRoleId)
+    local nZongShiLevel = pAsyncPlayer and pAsyncPlayer.GetZongShiLevel() or 0
+    tbData.nTotalLevel = tbData.nLevel + nZongShiLevel
+    if pAsyncPlayer then
+      bHaveAsyncData = true
+    end
+  end
+  if (not (szName and dwKinId) or not dwTongId) and tbRoleInfo then
+    dwKinId = dwKinId or tbRoleInfo.dwKinId
+    dwTongId = dwTongId or tbRoleInfo.dwTongId
+    szName = szName or tbRoleInfo.szName
+    tbData.dwID = tbRoleInfo.dwID
+  end
+  tbData.szName = szName or i18n.EasyGet("\229\175\185\230\150\185")
+  tbData.dwKinId = dwKinId
+  tbData.dwTongId = dwTongId
+  local tbGroup = {}
+  self.tbGroup = tbGroup
+  self:FlushButtonGroup()
+  self.pPanel:Label_SetText(tbControls.txtPlayerName, self.tbData.szName)
+  local szKinOrTongName
+  if self.tbData.dwTongId and self.tbData.dwTongId > 0 then
+    szKinOrTongName = i18n.Get(Tong.Cfg.Msg.TitlePrefix) .. self.tbData.szKinOrTongName
+  elseif self.tbData.dwKinId and self.tbData.dwKinId > 0 then
+    szKinOrTongName = i18n.Get(Kin.Cfg.Msg.TitlePrefix) .. self.tbData.szKinOrTongName
+  elseif self.tbData.szZoneTongName then
+    szKinOrTongName = tbData.szZoneTongName
+  else
+    szKinOrTongName = i18n.Get(ChatMgr.Terms.None)
+  end
+  self.pPanel:Label_SetText(tbControls.txtTongName, szKinOrTongName)
+  self.tbPortraitObj:SetLevel(tbData.nTotalLevel)
+  self.tbPortraitObj:SetFactionIcon(self.tbData.nFaction)
+  self.tbPortraitObj:SetRoleIcon(self.tbData.nPortrait)
+  if not bDataHaveTotalLevel and not bLevelIsMoreThan200 and not bHaveAsyncData and tbData.nTotalLevel == 200 then
+    self.tbPortraitObj:SetLevelActive(false)
+  end
+  self.pPanel:SetActive(tbControls.SecondButtonList, false)
+  self.pPanel:SetActive(tbControls.TongPosBtnList, false)
+  local nLine = math.min(math.ceil(#self.tbGroup / 2), 5.5)
+  self:SetHeight(self.nPlayerInfoWidgetHeight + (self.nButtonHeight + self.nButtonPad) * nLine + self.nButtonPad)
+  self.nTimer = Timer:Register(Env.GAME_FPS, self.CheckIfKeepOpen, self)
+end
+
+function tbWnd:CheckIfKeepOpen()
+  if self.tbData then
+    if self.tbData.dwID then
+      local tbMemberInfo, nIndex = TeamMgr:GetMember(self.tbData.dwID)
+      if tbMemberInfo then
+        return true
+      end
+    end
+    if self.tbData.nNpcID then
+      local pNpc = KNpc.GetById(self.tbData.nNpcID)
+      if pNpc then
+        local nDistance = me.GetNpc().GetDistance(pNpc.nId)
+        if nDistance <= Npc.PLAYER_ROLEHEADPOP_DISTANCE then
+          return true
+        end
+      end
+    else
+      return false
+    end
+  end
+  self:Close()
+  return false
+end
+
+function tbWnd:OnClose()
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  if self.tbData.parentWindow and self.tbData.parentWindow.RightPopUpMenuCloseCallBack then
+    self.tbData.parentWindow:RightPopUpMenuCloseCallBack()
+  end
+  self.tbNeedCloseUi = nil
+end
+
+function tbWnd:findChatTarget(dwRoleId)
+  local tbRecentPrivate = ChatMgr.RecentPrivateList
+  local tbRecentWantTo = ChatMgr.RecentWantToChatList.tbRoleInfo
+  for i, v in ipairs(tbRecentPrivate) do
+    if v.dwID == dwRoleId then
+      return v
+    end
+  end
+  for i, v in ipairs(tbRecentWantTo) do
+    if v.dwID == dwRoleId then
+      return v
+    end
+  end
+end
+
+function tbWnd:SetRectTransform(anchoredPosX, anchoredPosY, width, height)
+  self.mainPanelTransform.anchoredPosition3D = Ui.Vector3(anchoredPosX, anchoredPosY, 0)
+  self.mainPanelTransform.sizeDelta = Ui.Vector2(width, height)
+end
+
+function tbWnd:SetWidth(width)
+  self.mainPanelTransform.sizeDelta = Ui.Vector2(width, self.mainPanelTransform.rect.height)
+end
+
+function tbWnd:SetHeight(height)
+  self.mainPanelTransform.sizeDelta = Ui.Vector2(self.mainPanelTransform.rect.width, height)
+end
+
+function tbWnd:SetWidthAndHeight(width, height)
+  self.mainPanelTransform.sizeDelta = Ui.Vector2(width, height)
+end
+
+function tbWnd:SetAnchoredPos(anchoredPosX, anchoredPosY)
+  self.mainPanelTransform.anchoredPosition3D = Ui.Vector3(anchoredPosX, anchoredPosY, 0)
+end
+
+function tbWnd:SetPos(x, y)
+  local transform = self.pPanel:GetTransform(tbControls.mainPanel)
+  transform.position = Ui.Vector3(x, y, transform.position.z)
+end
+
+function tbWnd:CloseNeedUi()
+  if self.tbNeedCloseUi then
+    for _, szUi in ipairs(self.tbNeedCloseUi) do
+      if Ui:WindowVisible(szUi) then
+        Ui:CloseWindow(szUi)
+      end
+    end
+  end
+end
+
+function tbWnd:NotifyEvents()
+  return {}
+end

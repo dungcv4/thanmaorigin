@@ -1,0 +1,402 @@
+Require("Script/TreasureShop/TreasureShopUtils.lua")
+Require("Script/Ui/Common/RedPointMgr.lua")
+TreasureShop.ATTACH_TYPE = {
+  GIVEBACK = 1,
+  BUY = 2,
+  REQUIRE = 3
+}
+TreasureShop.ATTACH_TYPE_TO_REDPOINT = {
+  [TreasureShop.ATTACH_TYPE.GIVEBACK] = RedPointMgr.EVENT.TreasureShopAttachTypeGiveback,
+  [TreasureShop.ATTACH_TYPE.BUY] = RedPointMgr.EVENT.TreasureShopAttachTypeBuy,
+  [TreasureShop.ATTACH_TYPE.REQUIRE] = RedPointMgr.EVENT.TreasureShopAttachTypeRequire
+}
+TreasureShop.tbMyStallList = TreasureShop.tbMyStallList or {}
+TreasureShop.tbPubStallList = TreasureShop.tbPubStallList or {}
+TreasureShop.tbAvgPriceList = TreasureShop.tbAvgPriceList or {}
+TreasureShop.tbMailbox = TreasureShop.tbMailbox or {
+  tbWallet = {},
+  tbAttach = {
+    [TreasureShop.ATTACH_TYPE.GIVEBACK] = {},
+    [TreasureShop.ATTACH_TYPE.BUY] = {},
+    [TreasureShop.ATTACH_TYPE.REQUIRE] = {}
+  }
+}
+TreasureShop.tbPlayerInfo = TreasureShop.tbPlayerInfo or {nOperTime = 0}
+TreasureShop.tbBagWareList = TreasureShop.tbBagWareList or nil
+TreasureShop.tbPubStallCache = TreasureShop.tbPubStallCache or {}
+TreasureShop.bFirstQuery = TreasureShop.bFirstQuery or true
+
+function TreasureShop:SellReq(nItemId, nNum, nPrice)
+  local bRet, szErr = self:CanSell(me, nItemId, nNum, nPrice)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  RemoteServer.RequestTreasureShop("SellReq", nItemId, nNum, nPrice)
+end
+
+function TreasureShop:CanSell(pPlayer, nItemId, nNum, nPrice)
+  local pItem = pPlayer.GetItemInAllSpace(nItemId)
+  if not pItem then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\228\184\141\229\173\152\229\156\168")
+  end
+  local tbWareSetting = self:GetWareSettingByItemTid(pItem.dwTemplateId)
+  if not tbWareSetting then
+    return false, i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\141\229\143\175\228\184\138\230\158\182")
+  end
+  if Item:GetTimeOut(pItem) then
+    return false, i18n.EasyGet("\230\156\137\230\151\182\233\153\144\231\154\132\231\137\169\229\147\129\228\184\141\229\143\175\228\184\138\230\158\182")
+  end
+  if nNum > pItem.nCount then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\230\149\176\233\135\143\228\184\141\232\182\179")
+  end
+  if nNum < 1 or nNum > self.CFG.ITEM_NUM_LIMIT then
+    return false, i18n.EasyGet("\228\184\138\230\158\182\230\149\176\233\135\143\233\148\153\232\175\175")
+  end
+  if nPrice < tbWareSetting.nLowerPrice or nPrice > tbWareSetting.nUpperPrice then
+    return false, i18n.EasyGet("\228\184\138\230\158\182\229\148\174\228\187\183\233\148\153\232\175\175")
+  end
+  if #self.tbMyStallList >= self.CFG.STALL_NUM_LIMIT then
+    return false, i18n.EasyGet("\232\174\162\229\141\149\229\183\178\230\187\161")
+  end
+  return true
+end
+
+function TreasureShop:BuyReq(nWareId, nNum, nPrice)
+  local bRet, szErr, fnErr = self:CanBuy(me, nWareId, nNum, nPrice)
+  if not bRet then
+    if szErr then
+      me.CenterMsg(szErr)
+    end
+    if fnErr then
+      fnErr(me)
+    end
+    return
+  end
+  RemoteServer.RequestTreasureShop("BuyReq", nWareId, nNum, nPrice)
+end
+
+function TreasureShop:CanBuy(pPlayer, nWareId, nNum, nPrice)
+  local tbWareSetting = self:GetWareSettingByWareId(nWareId)
+  if not tbWareSetting then
+    return false, i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\141\229\143\175\232\180\173\228\185\176")
+  end
+  if nNum < 1 then
+    return false, i18n.EasyGet("\232\180\173\228\185\176\230\149\176\233\135\143\233\148\153\232\175\175")
+  end
+  if nPrice * nNum > pPlayer.GetMoney(tbWareSetting.szCurrency) then
+    local fnErr
+    if tbWareSetting.szCurrency == "Gold" then
+      function fnErr(pPlayer)
+        pPlayer.MsgBox(i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\229\133\133\229\128\188\239\188\159", Currency:GetName(tbWareSetting.szCurrency)), {
+          {
+            i18n.szOk,
+            
+            GainCurrency.JumpToRechargeGold,
+            GainCurrency
+          },
+          {
+            i18n.szCancel
+          }
+        })
+      end
+    end
+    return false, nil, fnErr
+  end
+  return true
+end
+
+function TreasureShop:CancelReq(szOrderId)
+  RemoteServer.RequestTreasureShop("CancelReq", szOrderId)
+end
+
+function TreasureShop:FetchMoneyReq(szCurrency, nNum)
+  local bRet, szErr = self:CanFetchMoney(me, szCurrency, nNum)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  RemoteServer.RequestTreasureShop("FetchMoneyReq", szCurrency, nNum)
+end
+
+function TreasureShop:CanFetchMoney(pPlayer, szCurrency, nTakeNum)
+  local nHasNum = self.tbMailbox.tbWallet[szCurrency] or 0
+  if nHasNum <= 0 then
+    return false, i18n.EasyGet("\232\180\167\229\184\129\230\149\176\233\135\143\228\184\141\232\182\179")
+  end
+  if nTakeNum < 1 or nTakeNum > nHasNum then
+    return false, i18n.EasyGet("\230\143\144\229\143\150\230\149\176\233\135\143\233\148\153\232\175\175")
+  end
+  return true
+end
+
+function TreasureShop:FetchItemReq(nAttachType, nItemTid)
+  local bRet, szErr = self:CanFetchItem(me, nAttachType, nItemTid)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  RemoteServer.RequestTreasureShop("FetchItemReq", nAttachType, nItemTid)
+end
+
+function TreasureShop:CanFetchItem(pPlayer, nAttachType, nItemTid)
+  local tbAttach = self.tbMailbox.tbAttach[nAttachType]
+  local nNum = tbAttach[nItemTid] and tbAttach[nItemTid].nNum or 0
+  if nNum <= 0 then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\230\149\176\233\135\143\228\184\141\232\182\179")
+  end
+  local nNeedBag = math.ceil(nNum / Item:GetItemBaseProp(nItemTid).nStackMax)
+  if nNeedBag > pPlayer.GetFreeBagCount() then
+    return false, i18n.EasyGet("\232\131\140\229\140\133\231\169\186\233\151\180\228\184\141\232\182\179")
+  end
+  return true
+end
+
+function TreasureShop:FetchAllItemReq()
+  local bRet, szErr = self:CanFetchAllItem(me)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  RemoteServer.RequestTreasureShop("FetchAllItemReq")
+end
+
+function TreasureShop:CanFetchAllItem(pPlayer)
+  local tbAttach = self.tbMailbox.tbAttach
+  local tbItemList = {}
+  for _, tbSubAttach in pairs(tbAttach) do
+    for nItemTid, tbInfo in pairs(tbSubAttach) do
+      tbItemList[nItemTid] = (tbItemList[nItemTid] or 0) + tbInfo.nNum
+    end
+  end
+  local nNeedBag = 0
+  for nItemTid, nNum in pairs(tbItemList) do
+    nNeedBag = math.ceil(nNum / Item:GetItemBaseProp(nItemTid).nStackMax)
+  end
+  if nNeedBag <= 0 then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\230\149\176\233\135\143\228\184\141\232\182\179")
+  end
+  if nNeedBag > pPlayer.GetFreeBagCount() then
+    return false, i18n.EasyGet("\232\131\140\229\140\133\231\169\186\233\151\180\228\184\141\232\182\179")
+  end
+  return true
+end
+
+function TreasureShop:QueryMyStallReq()
+  RemoteServer.RequestTreasureShop("QueryMyStallReq")
+end
+
+function TreasureShop:OnQueryMyStall(tbDataList)
+  self.tbMyStallList = tbDataList
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TREASURESHOP_SYNC_MY_STALL)
+end
+
+function TreasureShop:QueryPubStallReq(bForce)
+  if self.bFirstQuery or bForce then
+    self.tbPubStallCache = {}
+    RemoteServer.RequestTreasureShop("QueryPubStallReq")
+  end
+  self.bFirstQuery = false
+end
+
+function TreasureShop:OnQueryPubStall(nWareId, tbDataList, bFinish)
+  if nWareId and tbDataList then
+    self.tbPubStallCache[nWareId] = tbDataList
+  end
+  if not bFinish then
+    return
+  end
+  
+  local function fnCmp(tbInfoA, tbInfoB)
+    return tbInfoA.nPrice < tbInfoB.nPrice
+  end
+  
+  self.tbPubStallList = {}
+  for nWareId, tbInfo in pairs(self.tbPubStallCache) do
+    local tbWareSetting = self:GetWareSettingByWareId(nWareId)
+    if "" == tbWareSetting.szTimeFrame or 1 == GetTimeFrameState(tbWareSetting.szTimeFrame) then
+      self.tbPubStallList[nWareId] = {}
+      self.tbPubStallList[nWareId].nTotalNum = tbInfo[1]
+      self.tbPubStallList[nWareId].nLowerPrice = tbInfo[2]
+      local tbPriceList = {}
+      for nPrice, nNum in pairs(tbInfo[3]) do
+        table.insert(tbPriceList, {nPrice = nPrice, nNum = nNum})
+      end
+      table.sort(tbPriceList, fnCmp)
+      self.tbPubStallList[nWareId].tbPriceList = tbPriceList
+    end
+  end
+  self.tbPubStallCache = {}
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TREASURESHOP_SYNC_PUB_STALL)
+end
+
+function TreasureShop:QueryAvgPriceReq()
+  RemoteServer.RequestTreasureShop("QueryAvgPriceReq")
+end
+
+function TreasureShop:OnQueryAvgPrice(tbDataList)
+  self.tbAvgPriceList = tbDataList
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TREASURESHOP_SYNC_AVG_PRICE)
+end
+
+function TreasureShop:QueryMailboxReq()
+  RemoteServer.RequestTreasureShop("QueryMailboxReq")
+end
+
+function TreasureShop:OnQueryMailbox(tbMailbox)
+  self.tbMailbox = tbMailbox
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TREASURESHOP_SYNC_MAILBOX)
+end
+
+function TreasureShop:QueryPlayerInfoReq()
+  RemoteServer.RequestTreasureShop("QueryPlayerInfoReq")
+end
+
+function TreasureShop:OnQueryPlayerInfo(tbPlayerInfo)
+  self.tbPlayerInfo = tbPlayerInfo
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TREASURESHOP_SYNC_PLAYER_INFO)
+end
+
+function TreasureShop:OnChangeMailboxAttach(tbStock)
+  for nAttachType, nAttachNum in pairs(tbStock) do
+    if 0 ~= nAttachNum then
+      RedPointMgr:LightRedPoint(self.ATTACH_TYPE_TO_REDPOINT[nAttachType])
+    else
+      RedPointMgr:FadeRedPoint(self.ATTACH_TYPE_TO_REDPOINT[nAttachType])
+    end
+  end
+end
+
+function TreasureShop:OnExpireStall(nTimeoutNum)
+  if 0 ~= nTimeoutNum then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.TreasureShopStallTimeout)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.TreasureShopStallTimeout)
+  end
+end
+
+function TreasureShop:PrepareItem(szKind)
+  if not self.tbBagWareList then
+    local tbBagWareList = {}
+    local tbBagItemList = me.GetItemListInBag()
+    for _, pItem in ipairs(tbBagItemList) do
+      local tbWareSetting = self:GetWareSettingByItemTid(pItem.dwTemplateId)
+      local bHasTimeout = Item:GetTimeOut(pItem)
+      if tbWareSetting and not bHasTimeout then
+        local szKind = i18n.Parse(tbWareSetting.szKind)
+        tbBagWareList[szKind] = tbBagWareList[szKind] or {}
+        table.insert(tbBagWareList[szKind], pItem.dwId)
+      end
+    end
+    for _, tbSubBagWareList in pairs(tbBagWareList) do
+      table.sort(tbSubBagWareList, self.SortItem)
+    end
+    self.tbBagWareList = tbBagWareList
+  end
+  if szKind then
+    return self.tbBagWareList[szKind] or {}
+  end
+  local tbResultList = {}
+  for _, tbSubBagWareList in pairs(self.tbBagWareList) do
+    Lib:MergeTable(tbResultList, tbSubBagWareList)
+  end
+  return tbResultList
+end
+
+function TreasureShop.SortItem(nItemIdA, nItemIdB)
+  local pItemA = me.GetItemInAllSpace(nItemIdA)
+  local pItemB = me.GetItemInAllSpace(nItemIdB)
+  local nDetailTypeA = pItemA.nDetailType
+  local nDetailTypeB = pItemB.nDetailType
+  if nDetailTypeA ~= nDetailTypeB then
+    return nDetailTypeA < nDetailTypeB
+  end
+  local nSingleValueA = pItemA.GetSingleValue()
+  local nSingleValueB = pItemB.GetSingleValue()
+  if nSingleValueA ~= nSingleValueB then
+    return nSingleValueA > nSingleValueB
+  end
+  local nItemTidA = pItemA.dwTemplateId
+  local nItemTidB = pItemB.dwTemplateId
+  if nItemTidA ~= nItemTidB then
+    return nItemTidA < nItemTidB
+  end
+  return nItemIdA < nItemIdB
+end
+
+function TreasureShop:OnSyncItem(nSyncItemId)
+  local pItem, nPos = me.GetItemInAllSpace(nSyncItemId)
+  if not pItem then
+    return
+  end
+  if nPos ~= Item.EITEMPOS_BAG then
+    return
+  end
+  local tbWareSetting = self:GetWareSettingByItemTid(pItem.dwTemplateId)
+  local bHasTimeout = Item:GetTimeOut(pItem)
+  if not tbWareSetting or bHasTimeout then
+    return
+  end
+  if not self.tbBagWareList then
+    return
+  end
+  local szKind = i18n.Parse(tbWareSetting.szKind)
+  self.tbBagWareList[szKind] = self.tbBagWareList[szKind] or {}
+  local tbBagWareList = self.tbBagWareList[szKind]
+  local bFound = false
+  for nIndex, nItemId in pairs(tbBagWareList) do
+    if nItemId == nSyncItemId then
+      bFound = true
+      break
+    end
+  end
+  if not bFound then
+    table.insert(tbBagWareList, nSyncItemId)
+    table.sort(tbBagWareList, self.SortItem)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TREASURESHOP_UPDATE_BAG_WARE)
+end
+
+function TreasureShop:OnDelItem(nDelItemId, nDelItemTid)
+  local tbWareSetting = self:GetWareSettingByItemTid(nDelItemTid)
+  if not tbWareSetting then
+    return
+  end
+  if not self.tbBagWareList then
+    return
+  end
+  local tbBagWareList = self.tbBagWareList[i18n.Parse(tbWareSetting.szKind)] or {}
+  local bFound = false
+  for nIndex, nItemId in pairs(tbBagWareList) do
+    if nItemId == nDelItemId then
+      table.remove(tbBagWareList, nIndex)
+      bFound = true
+      break
+    end
+  end
+  if bFound then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_TREASURESHOP_UPDATE_BAG_WARE)
+  end
+end
+
+function TreasureShop:OnLogout()
+  self.tbMyStallList = {}
+  self.tbMailbox = {
+    tbWallet = {},
+    tbAttach = {
+      [self.ATTACH_TYPE.GIVEBACK] = {},
+      [self.ATTACH_TYPE.BUY] = {},
+      [self.ATTACH_TYPE.REQUIRE] = {}
+    }
+  }
+  self.tbPlayerInfo = {nOperTime = 0}
+  self.tbBagWareList = nil
+  self.bFirstQuery = true
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, TreasureShop)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_DEL_ITEM, TreasureShop)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, TreasureShop)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, TreasureShop.OnSyncItem, TreasureShop)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_DEL_ITEM, TreasureShop.OnDelItem, TreasureShop)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, TreasureShop.OnLogout, TreasureShop)

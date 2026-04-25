@@ -1,0 +1,370 @@
+Require("CommonScript/KeYiMen/KeYiMenDef.lua")
+KeYiMen.Com = KeYiMen.Com or {}
+
+function KeYiMen.Com:IsEntranceMap(nMapTID)
+  return nMapTID == KeYiMen.Def.nEntranceMapTID
+end
+
+function KeYiMen.Com:IsKeYiMenMap(nMapTID)
+  for _, v in pairs(KeYiMen.Def.tbMapTIDArr) do
+    if v == nMapTID then
+      return true
+    end
+  end
+  return false
+end
+
+function KeYiMen.Com:GetMapJoinCamp(nMapTID)
+  return KeYiMen.Def.tbMapCampSet[nMapTID]
+end
+
+function KeYiMen.Com:GetKinOrTongKey(nTongId, nKinId)
+  local szKey
+  if nTongId and nTongId > 0 then
+    szKey = "Tong_" .. nTongId
+  elseif nKinId and nKinId > 0 then
+    szKey = "Kin_" .. nKinId
+  end
+  return szKey
+end
+
+function KeYiMen.Com:LayerIndex2MapTID(nLayerIndex)
+  nLayerIndex = nLayerIndex or 1
+  return KeYiMen.Def.tbMapTIDArr[nLayerIndex]
+end
+
+function KeYiMen.Com:MapTID2LayerIndex(nMapTID)
+  nMapTID = nMapTID or KeYiMen.Def.nEntranceMapTID
+  for i, v in ipairs(KeYiMen.Def.tbMapTIDArr) do
+    if v == nMapTID then
+      return i
+    end
+  end
+end
+
+function KeYiMen.Com:GetSkillList()
+  local tbSkillList = self.tbSkillList
+  if not tbSkillList then
+    tbSkillList = {}
+    local szFilePath = "Setting/KeYiMen/Skill.tab"
+    local tbField = {
+      "nSkillId",
+      "szDesc",
+      "szIconAltlas",
+      "nSortInUI",
+      "CastType"
+    }
+    local tbFile = Lib:LoadTabFileEx(szFilePath, "dssdd", nil, tbField, nil, nil, true)
+    if not tbFile then
+      LogErr("fail to load file:", szFilePath)
+      return
+    end
+    for _, tbInfo in ipairs(tbFile) do
+      table.insert(tbSkillList, {
+        SkillId = tbInfo.nSkillId,
+        SortInUI = tbInfo.nSortInUI,
+        szDesc = tbInfo.szDesc,
+        szIconAltlas = tbInfo.szIconAltlas,
+        CastType = tbInfo.CastType
+      })
+    end
+    table.sort(tbSkillList, function(a, b)
+      return a.SortInUI < b.SortInUI
+    end)
+    tbSkillList = SetReadOnly(tbSkillList)
+    self.tbSkillList = tbSkillList
+  end
+  return tbSkillList
+end
+
+function KeYiMen.Com:GetPlayerOneSkillInfoWithoutConfig(pPlayer, nSortInUI)
+  local tbSkillList = self:GetSkillList()
+  local tbInfo = tbSkillList[nSortInUI]
+  if not tbInfo then
+    LogErr("fail to get skill info by nSortInUI: ", nSortInUI, #tbSkillList)
+    return
+  end
+  local nSkillId = tbInfo.SkillId
+  local nSkillLevel = pPlayer.GetSkillLevel(nSkillId)
+  local nSkillInfoLevel = nSkillLevel
+  if not nSkillInfoLevel or nSkillInfoLevel <= 0 then
+    nSkillInfoLevel = 1
+  end
+  local tbSkillInfo = FightSkill:GetSkillSetting(nSkillId, nSkillInfoLevel)
+  local nMaxSkillLevel = 1
+  local bMax = nSkillLevel >= nMaxSkillLevel
+  local szCurMagicDesc, szNextMagicDesc, szClassName = FightSkill:FormatMagicDesc(nSkillId, nSkillLevel)
+  local tbSkillResultInfo = {
+    nId = nSkillId,
+    nLevel = nSkillLevel,
+    nMaxLevel = nMaxSkillLevel,
+    bMax = bMax,
+    szName = tbSkillInfo.SkillName or "",
+    szDesc = tbSkillInfo.Desc or "",
+    szProperty = tbSkillInfo.Property or "",
+    nCD = tbSkillInfo.TimePerCast or 0,
+    bPassive = tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_passivity or tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_inst_missile,
+    nRadius = tbSkillInfo.AttackRadius or 0,
+    nSort = tbInfo.SortInUI,
+    szIconAltlas = tbInfo.szIconAltlas,
+    szCurMagicDesc = szCurMagicDesc or "",
+    szNextMagicDesc = szNextMagicDesc or "",
+    szClassName = szClassName or "",
+    bNotNextInfo = bMax
+  }
+  if tbSkillResultInfo.IsAura then
+    tbSkillResultInfo.bPassive = true
+  end
+  return tbSkillResultInfo
+end
+
+function KeYiMen.Com:GetBossCfgSet()
+  local tbBossCfgSet = self.tbBossCfgSet
+  if not tbBossCfgSet then
+    tbBossCfgSet = {}
+    local szFile = "Setting/KeYiMen/Main.tab"
+    local tbFile = Lib:LoadTabFile(szFile)
+    if not tbFile then
+      LogErr("fail to load file: ", szFile)
+    else
+      for _, v in pairs(tbFile) do
+        local nBossTID = tonumber(v.BossId)
+        local tbBossCfg = {
+          nBossTID = nBossTID,
+          szName = v.Desc,
+          nCamp = tonumber(v.Camp),
+          tbPosIDArr = Lib:SplitStr2Num(v.PosIDs, ","),
+          nAwardId = tonumber(v.AwardId),
+          nTongAwardId = tonumber(v.TongAwardId)
+        }
+        tbBossCfgSet[nBossTID] = tbBossCfg
+      end
+    end
+    tbBossCfgSet = SetReadOnly(tbBossCfgSet)
+    self.tbBossCfgSet = tbBossCfgSet
+  end
+  return tbBossCfgSet
+end
+
+function KeYiMen.Com:GetBossPosCfgSet()
+  local tbBossPosCfgSet = self.tbBossPosCfgSet
+  if not tbBossPosCfgSet then
+    tbBossPosCfgSet = {}
+    local szFile = "Setting/KeYiMen/PosList.tab"
+    local tbFile = Lib:LoadTabFile(szFile)
+    if not tbFile then
+      LogErr("fail to load file: ", szFile)
+    else
+      for _, v in pairs(tbFile) do
+        local nPosID = tonumber(v.PosID)
+        local tbPos = {
+          nPosID = nPosID,
+          nMapTID = tonumber(v.MapID),
+          szName = v.MapName,
+          tbXYZArr = Lib:SplitStr2Num(v.Pos, ","),
+          nTrapIndex = tonumber(v.TrapIndex)
+        }
+        tbBossPosCfgSet[nPosID] = tbPos
+      end
+    end
+    tbBossPosCfgSet = SetReadOnly(tbBossPosCfgSet)
+    self.tbBossPosCfgSet = tbBossPosCfgSet
+  end
+  return tbBossPosCfgSet
+end
+
+function KeYiMen.Com:GetBossPosCfgByPosID(nPosID)
+  local tbBossPosCfgSet = self:GetBossPosCfgSet()
+  if tbBossPosCfgSet then
+    return tbBossPosCfgSet[nPosID]
+  end
+end
+
+function KeYiMen.Com:GetIndexByPosID(nPosID)
+  local tbPos = self:GetBossPosCfgByPosID(nPosID)
+  if tbPos then
+    local nIndexBaseZero = tbPos.nTrapIndex - 1
+    local nGroupIndex = math.floor(nIndexBaseZero / KeYiMen.Def.nTrapCountPerTrapGroup)
+    local nPointIndex = nIndexBaseZero - nGroupIndex * KeYiMen.Def.nTrapCountPerTrapGroup
+    local nMapIndex = math.floor((nPosID - 1) / KeYiMen.Def.nTrapCountPerMap)
+    return nMapIndex + 1, nGroupIndex + 1, nPointIndex + 1
+  end
+end
+
+function KeYiMen.Com:GetPosCfgArrByMapTID(nMapTID)
+  local tbBossPosCfgSet = self:GetBossPosCfgSet()
+  local tbPosCfgArr = {}
+  for _, tbPosCfg in pairs(tbBossPosCfgSet) do
+    if tbPosCfg.nMapTID == nMapTID then
+      table.insert(tbPosCfgArr, tbPosCfg)
+    end
+  end
+  table.sort(tbPosCfgArr, function(a, b)
+    return a.nTrapIndex < b.nTrapIndex
+  end)
+  return tbPosCfgArr
+end
+
+function KeYiMen.Com:GetMinimapCfgSet()
+  local tbMinimapCfgSet = self.tbMinimapCfgSet
+  if not tbMinimapCfgSet then
+    tbMinimapCfgSet = {}
+    local szFile = "Setting/KeYiMen/MiniMap.tab"
+    local tbFile = Lib:LoadTabFile(szFile)
+    if not tbFile then
+      LogErr("fail to load file: ", szFile)
+    else
+      for _, v in pairs(tbFile) do
+        tbMinimapCfgSet[v.szKey] = v
+      end
+    end
+    tbMinimapCfgSet = SetReadOnly(tbMinimapCfgSet)
+    self.tbMinimapCfgSet = tbMinimapCfgSet
+  end
+  return tbMinimapCfgSet
+end
+
+function KeYiMen.Com:GetMinimapCfgByKey(szKey)
+  local tbMinimapCfgSet = self:GetMinimapCfgSet()
+  if tbMinimapCfgSet then
+    return tbMinimapCfgSet[szKey]
+  end
+end
+
+function KeYiMen.Com:GetState()
+  if MODULE_GAMESERVER then
+    return KeYiMen.S:GetState()
+  else
+    return KeYiMen.C:GetState()
+  end
+end
+
+function KeYiMen.Com:IsOpen()
+  local nState = self:GetState()
+  return nState ~= KeYiMen.Def.STATE_INIT
+end
+
+function KeYiMen.Com:SendWorldNotify(szMsg)
+  if not Lib:IsEmptyStr(szMsg) then
+    KPlayer.SendWorldNotify(1, 999, szMsg, ChatMgr.SystemMsgType.System, 1)
+  end
+end
+
+function KeYiMen.Com:GetHurtBossScoreByRank(nRank)
+  for _, v in ipairs(KeYiMen.Def.tbHurtBossScore) do
+    if nRank <= v[1] then
+      return v[2]
+    end
+  end
+end
+
+function KeYiMen.Com:GetKeepTargetScoreByRank(nRank)
+  for _, v in ipairs(KeYiMen.Def.tbKeepTargetScore) do
+    if nRank <= v[1] then
+      return v[2]
+    end
+  end
+end
+
+function KeYiMen.Com:GetRemainTime(szTodayTime)
+  local nRemain = Lib:ParseTodayTime(szTodayTime) - Lib:GetTodaySec()
+  return math.max(nRemain, 0)
+end
+
+function KeYiMen.Com:GetPlayerTongID(pPlayer)
+  if pPlayer then
+    local nTongId = pPlayer.dwTongId
+    if nTongId and nTongId > 0 then
+      return nTongId
+    end
+  end
+end
+
+function KeYiMen.Com:GetPlayerKinID(pPlayer)
+  if pPlayer then
+    local nKinId = pPlayer.dwKinId
+    if nKinId and nKinId > 0 then
+      return nKinId
+    end
+  end
+end
+
+function KeYiMen.Com:GetTrapPosCfgs()
+  local tbTrapPosCfgs = self.tbTrapPosCfgs
+  if not tbTrapPosCfgs then
+    local szFile = "Setting/KeYiMen/transport.tab"
+    tbTrapPosCfgs = Lib:LoadTabFile(szFile)
+    if not tbTrapPosCfgs then
+      LogErr("fail to load file:", szFile)
+      return
+    end
+    tbTrapPosCfgs = SetReadOnly(tbTrapPosCfgs)
+    self.tbTrapPosCfgs = tbTrapPosCfgs
+  end
+  return tbTrapPosCfgs
+end
+
+function KeYiMen.Com:GetTrapPosData(nFromMapTID, nToMapTID)
+  local tbTrapPosCfgs = self:GetTrapPosCfgs()
+  if tbTrapPosCfgs then
+    for _, tbTrapPos in pairs(tbTrapPosCfgs) do
+      if tonumber(tbTrapPos.FromMapID) == nFromMapTID and tonumber(tbTrapPos.ToMapID) == nToMapTID then
+        return tbTrapPos
+      end
+    end
+  end
+  LogErr("fail to GetTrapPosData:", nFromMapTID, nToMapTID)
+end
+
+function KeYiMen.Com:GetTrapPosDataByName(szTrapName)
+  local tbTrapPosCfgs = self:GetTrapPosCfgs()
+  for _, tbTrapPos in pairs(tbTrapPosCfgs) do
+    if string.find(szTrapName, tbTrapPos.Name) then
+      return tbTrapPos
+    end
+  end
+end
+
+function KeYiMen.Com:GetCurrentScriptData()
+  return ScriptData:GetValue(KeYiMen.Def.SCRIPTDATA_NAME, 0)
+end
+
+function KeYiMen.Com:GetNpcLevelFaction()
+  local tbKeYiMenData = self:GetCurrentScriptData() or {}
+  local nNpcLevelFaction = tbKeYiMenData.nNpcLevelFaction or 0
+  return nNpcLevelFaction
+end
+
+function KeYiMen.Com:SetNpcLevelFaction(nValue)
+  local tbKeYiMenData = self:GetCurrentScriptData() or {}
+  local nCur = tbKeYiMenData.nNpcLevelFaction or 0
+  Log("[KeYiMen] SetNpcLevelFaction ", nCur, nValue)
+  tbKeYiMenData.nNpcLevelFaction = nValue
+  ScriptData:SaveValue(KeYiMen.Def.SCRIPTDATA_NAME, 0, tbKeYiMenData)
+  return tbKeYiMenData
+end
+
+function KeYiMen.Com:IsReachOpenTimeFrame()
+  return 1 == GetTimeFrameState(KeYiMen.Def.szOpenTimeFrame)
+end
+
+function KeYiMen.Com:IsDiffDay(szOffset, nTime1, nTime2)
+  local nOffset = Lib:ParseTodayTime(szOffset)
+  return Lib:IsDiffDay(nOffset, nTime1, nTime2)
+end
+
+function KeYiMen.Com:IsPlayerDeath(pPlayer)
+  if pPlayer then
+    local pNpc = pPlayer.GetNpc()
+    if pNpc then
+      return pNpc.IsDeath()
+    end
+  end
+  return true
+end
+
+KeYiMen.Com:GetMinimapCfgSet()
+KeYiMen.Com:GetTrapPosCfgs()
+KeYiMen.Com:GetBossPosCfgSet()
+KeYiMen.Com:GetBossCfgSet()
+KeYiMen.Com:GetSkillList()

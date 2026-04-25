@@ -1,0 +1,317 @@
+local tbWnd = {}
+Ui:SetClass("UIItemGridScrollView", tbWnd)
+
+function Ui:NewItemGridScrollView(tbOwner, ...)
+  local tbClass = Ui:NewClass(Ui:GetClass("UIItemGridScrollView"))
+  tbClass.tbOwner = tbOwner
+  tbClass:OnCreate(...)
+  return tbClass
+end
+
+function tbWnd:OnCreate(szItemTemplateKey, nItemCountPerLine, nMinLine, szOpt)
+  self.szItemTemplateKey = szItemTemplateKey
+  self.ItemTemplateObj = self.tbOwner.pPanel:GetObject(self.szItemTemplateKey)
+  self.tbOwner.pPanel:SetActive(self.szItemTemplateKey, false)
+  self.nItemCountPerLine = nItemCountPerLine
+  self.nMinLine = nMinLine
+  self.szOpt = szOpt
+  self.tbGridList = {}
+  self.tbCacheGrid = {}
+  self.tbItemId2GridIndex = {}
+  self.nMinGridCount = nItemCountPerLine * nMinLine
+  self.nItemCount = 0
+  for i = 1, self.nMinGridCount do
+    local tbGrid, szItemKey = self:CreateGrid()
+    tbGrid:SetActive(false)
+    self.tbGridList[i] = {tbGrid, szItemKey}
+  end
+end
+
+function tbWnd:CreateGrid()
+  local tbGrid, szItemKey
+  local n = #self.tbCacheGrid
+  if n > 0 then
+    local tbGridGroup = self.tbCacheGrid[#self.tbCacheGrid]
+    tbGrid = tbGridGroup[1]
+    szItemKey = tbGridGroup[2]
+    table.remove(self.tbCacheGrid, #self.tbCacheGrid)
+    tbGrid.transform.parent.gameObject:SetActive(true)
+  else
+    szItemKey = self.tbOwner.pPanel:CloneObject(self.szItemTemplateKey)
+    local szGridPath = szItemKey .. "/UIItemGrid"
+    tbGrid = Ui:NewExistItemGrid(self.tbOwner, szGridPath)
+  end
+  tbGrid:SetEmpty()
+  return tbGrid, szItemKey
+end
+
+function tbWnd:DeleteGrid(tbGrid, szItemKey)
+  if #self.tbCacheGrid + #self.tbGridList > me.GetMaxCountInBag() then
+    tbGrid:UnInitPanel()
+    self.tbOwner.pPanel:DeleteObject(szItemKey)
+  else
+    tbGrid:SetEmpty()
+    local itemObj = self.tbOwner.pPanel:GetObject(szItemKey)
+    tbGrid.transform.parent.gameObject:SetActive(false)
+    table.insert(self.tbCacheGrid, {tbGrid, szItemKey})
+  end
+end
+
+function tbWnd:SetMinLine(nMinLine)
+  self.nMinLine = nMinLine
+  self.nMinGridCount = self.nItemCountPerLine * nMinLine
+end
+
+function tbWnd:UpdateGenericItem(tbItemList, bEnableClick)
+  self.tbItemId2GridIndex = {}
+  local nItemCount = #tbItemList
+  self.nItemCount = nItemCount
+  self:AdjustGridCount(self.nItemCount)
+  for i = 1, nItemCount do
+    local tbData = tbItemList[i]
+    self:SetGenericItem(i, tbData, bEnableClick, nil)
+    local szKey = self.tbGridList[i][2] .. "/txtRate"
+    local pTransform = self.tbOwner.pPanel:GetTransform("Main")
+    if pTransform and pTransform:Find(szKey) then
+      if Lib:IsInteger(tbData.nRandRate) and tbData.nRandRate < 100 then
+        self.tbOwner.pPanel:SetActive(szKey, true)
+        self.tbOwner.pPanel:Label_SetText(szKey, string.format("%d%%", tbData.nRandRate))
+        self.tbOwner.pPanel:Label_SetColorByName(szKey, "Red")
+      else
+        self.tbOwner.pPanel:SetActive(szKey, false)
+      end
+    end
+  end
+  self:ResetFrom(nItemCount + 1)
+end
+
+function tbWnd:SetGenericItem(nIndex, tbData, bEnableClick, funcClickFunc)
+  local tbGrid = self.tbGridList[nIndex][1]
+  tbGrid.szItemOpt = self.szOpt
+  tbGrid:SetActive(true)
+  tbGrid:SetGenericItem(tbData)
+  tbGrid:SetClickEnable(bEnableClick, funcClickFunc)
+  return tbGrid
+end
+
+function tbWnd:UpdateView(tbItemList)
+  self.tbItemId2GridIndex = {}
+  local nItemCount = #tbItemList
+  self.nItemCount = nItemCount
+  self:AdjustGridCount(self.nItemCount)
+  for i = 1, nItemCount do
+    local tbItem = tbItemList[i]
+    local nItemId = tbItem and tbItem.nItemId
+    local nShowCount = tbItem and tbItem.nShowCount
+    local fnItemClick = tbItem and tbItem.fnItemClick
+    self:SetItem(i, nItemId, nShowCount, nil, true, fnItemClick, {bShowTip = true})
+  end
+  self:ResetFrom(nItemCount + 1)
+end
+
+function tbWnd:AdjustGridCount(nItemCount)
+  local nGridCount = #self.tbGridList
+  if nItemCount <= self.nMinGridCount then
+    for i = nGridCount, self.nMinGridCount + 1, -1 do
+      local tbGrid = self.tbGridList[i]
+      self:DeleteGrid(tbGrid[1], tbGrid[2])
+      self.tbGridList[i] = nil
+    end
+  elseif nItemCount > nGridCount then
+    local nNeedCount = math.ceil((nItemCount - nGridCount) / self.nItemCountPerLine) * self.nItemCountPerLine
+    for i = 1, nNeedCount do
+      local tbGrid, szItemKey = self:CreateGrid()
+      self.tbGridList[i + nGridCount] = {tbGrid, szItemKey}
+    end
+  end
+end
+
+function tbWnd:Reset()
+  for i = 1, #self.tbGridList do
+    self.tbGridList[i][1]:SetActive(false)
+  end
+end
+
+function tbWnd:ResetFrom(nStartIndex)
+  for i = nStartIndex, #self.tbGridList do
+    self.tbGridList[i][1]:SetActive(false)
+  end
+end
+
+function tbWnd:ResetParent()
+  for i = 1, self.nItemCount do
+    self.tbGridList[i][1].transform.parent.gameObject:SetActive(true)
+  end
+  for i = self.nItemCount + 1, #self.tbGridList do
+    self.tbGridList[i][1].transform.parent.gameObject:SetActive(false)
+  end
+end
+
+function tbWnd:SetItem(nIndex, nItemId, nShowCount, nTemplateId, bEnableClick, funcClickFunc, tbControlFlag, ...)
+  local tbGrid = self.tbGridList[nIndex][1]
+  tbGrid.szItemOpt = self.szOpt
+  tbGrid:SetActive(true)
+  tbGrid:SetItem(nItemId, nTemplateId, tbControlFlag, nil, nil, nil, nil, nShowCount)
+  if nItemId then
+    self.tbItemId2GridIndex[nItemId] = nIndex
+  end
+  tbGrid:SetClickEnable(bEnableClick, funcClickFunc, ...)
+  return tbGrid
+end
+
+function tbWnd:SetItemByTemplate(nIndex, nItemId, nShowCount, nTemplateId, bEnableClick, funcClickFunc, tbControlFlag, ...)
+  local tbGrid = self.tbGridList[nIndex][1]
+  tbGrid.szItemOpt = self.szOpt
+  tbGrid:SetActive(true)
+  tbGrid:SetItemByTemplate(nTemplateId, nShowCount, me.nFaction, me.nFactionSect, tbControlFlag)
+  if nItemId then
+    self.tbItemId2GridIndex[nItemId] = nIndex
+  end
+  tbGrid:SetClickEnable(bEnableClick, funcClickFunc, ...)
+  return tbGrid
+end
+
+function tbWnd:UpdateGrid(nItemId)
+  local nIndex = self.tbItemId2GridIndex[nItemId]
+  if nIndex then
+    self:SetItem(nIndex, nItemId, nil, nil, true, nil, {bShowTip = true})
+    return
+  end
+  self.nItemCount = self.nItemCount + 1
+  self:AdjustGridCount(self.nItemCount)
+  self:SetItem(self.nItemCount, nItemId, nil, nil, true, nil, {bShowTip = true})
+end
+
+function tbWnd:UpdateBagGrid(nItemId)
+  local nIndex = self.tbItemId2GridIndex[nItemId]
+  if nIndex then
+    self:SetItem(nIndex, nItemId, nil, nil, true, nil, {bShowTip = true})
+    return
+  end
+  self.nItemCount = self.nItemCount + 1
+  self:AdjustBagGridCount(self.nItemCount)
+  self:SetItem(self.nItemCount, nItemId, nil, nil, true, nil, {bShowTip = true})
+end
+
+function tbWnd:UpdateBagView(tbItemList, bShowSeries)
+  self.tbItemId2GridIndex = {}
+  local nItemCount = #tbItemList
+  self.nItemCount = nItemCount
+  self:AdjustBagGridCount(self.nItemCount)
+  for i = 1, nItemCount do
+    local tbItem = tbItemList[i]
+    local nItemId = tbItem and tbItem.nItemId
+    local nShowCount = tbItem and tbItem.nShowCount
+    self:SetItem(i, nItemId, nShowCount, nil, true, nil, {bShowTip = true, bShowSeries = bShowSeries})
+  end
+  self:ResetFrom(nItemCount + 1)
+end
+
+function tbWnd:UpdateItemList(tbItemList)
+  self.tbItemId2GridIndex = {}
+  local nItemCount = #tbItemList
+  self.nItemCount = nItemCount
+  self:AdjustBagGridCount(self.nItemCount)
+  for i = 1, nItemCount do
+    local tbItem = tbItemList[i]
+    local nItemId = tbItem.nItemId
+    local nShowCount = tbItem.nShowCount
+    local bEnableClick = tbItem.bEnableClick
+    local fnClick = tbItem.fnClick
+    local tbControlFlag = tbItem.tbControlFlag or {}
+    local tbClickParam = tbItem.tbClickParam or {}
+    self:SetItem(i, nItemId, nShowCount, bEnableClick, true, fnClick, tbControlFlag, table.unpack(tbClickParam))
+  end
+  self:ResetFrom(nItemCount + 1)
+end
+
+function tbWnd:Clean()
+  self.tbItemId2GridIndex = {}
+  self.nItemCount = 0
+  self:Reset()
+end
+
+function tbWnd:AdjustBagGridCount(nItemCount)
+  local nGridCount = #self.tbGridList
+  if nItemCount <= self.nMinGridCount then
+    if nGridCount > self.nMinGridCount then
+      for i = nGridCount, self.nMinGridCount + 1, -1 do
+        local tbGrid = self.tbGridList[i]
+        self:DeleteGrid(tbGrid[1], tbGrid[2])
+        self.tbGridList[i] = nil
+      end
+    elseif nGridCount < self.nMinGridCount then
+      for i = 1, self.nMinGridCount - nGridCount do
+        local tbGrid, szItemKey = self:CreateGrid()
+        self.tbGridList[i + nGridCount] = {tbGrid, szItemKey}
+      end
+    end
+  elseif nItemCount <= me.GetMaxCountInBag() and nGridCount > me.GetMaxCountInBag() then
+    for i = nGridCount, me.GetMaxCountInBag() + 1, -1 do
+      local tbGrid = self.tbGridList[i]
+      self:DeleteGrid(tbGrid[1], tbGrid[2])
+      self.tbGridList[i] = nil
+    end
+  elseif nItemCount > nGridCount then
+    local nNeedCount = math.ceil((nItemCount - nGridCount) / self.nItemCountPerLine) * self.nItemCountPerLine
+    if nGridCount + nNeedCount >= me.GetMaxCountInBag() then
+      nNeedCount = me.GetMaxCountInBag() - nGridCount
+    end
+    if nItemCount > me.GetMaxCountInBag() then
+      nNeedCount = nItemCount - nGridCount
+    end
+    for i = 1, nNeedCount do
+      local tbGrid, szItemKey = self:CreateGrid()
+      self.tbGridList[i + nGridCount] = {tbGrid, szItemKey}
+    end
+  end
+end
+
+function tbWnd:GetItemObject(nIdx)
+  if nIdx <= self.nItemCount and nIdx > 0 then
+    return self.tbOwner.pPanel:GetObject(self.tbGridList[nIdx][2])
+  end
+  return nil
+end
+
+function tbWnd:FindItemObjectByTempID(nItemTempleteID)
+  for i = 1, #self.tbGridList do
+    local tbGrid = self.tbGridList[i][1]
+    if tbGrid and tbGrid.nTemplate == nItemTempleteID then
+      return self.tbOwner.pPanel:GetObject(self.tbGridList[i][2])
+    end
+  end
+  return nil
+end
+
+function tbWnd:SetSeriesTipActive(tbItemList, bShowSeries)
+  local nItemCount = #tbItemList
+  for i = 1, nItemCount do
+    local tbItem = tbItemList[i]
+    local nItemId = tbItem and tbItem.nItemId
+    local tbGrid = self.tbGridList[i][1]
+    tbGrid:SetItem(nItemId, nil, {bShowTip = true, bShowSeries = bShowSeries})
+  end
+end
+
+function tbWnd:SetBoxItemActive(tbItemList, bShowTag, bShowHigher)
+  local nItemCount = #tbItemList
+  for i = 1, nItemCount do
+    local tbGrid = self.tbGridList[i][1]
+    tbGrid:SetTagTipActive(bShowTag)
+    tbGrid:SetHigherActive(bShowHigher)
+  end
+end
+
+function tbWnd:SetDoubleClick(funcClickFunc, ...)
+  local tbParams = {
+    ...
+  }
+  for nIndex, tbGridInfo in pairs(self.tbGridList) do
+    local szKey = string.format("%s/%s", tbGridInfo[2], "UIItemGrid/ItemLayer")
+    self.tbOwner.pPanel:SetDoubleClick(szKey, funcClickFunc, nIndex, table.unpack(tbParams))
+  end
+end
+
+function tbWnd:OnDestroy()
+end

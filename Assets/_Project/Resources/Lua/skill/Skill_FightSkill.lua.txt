@@ -1,0 +1,1128 @@
+Require("CommonScript/Skill/Define.lua")
+FightSkill.SKILL_SAVE_GROUP = GetGroupKey("SkillPoint")
+FightSkill.SKILL_POINT = 1
+FightSkill.TOTAL_COST_POINT = 2
+FightSkill.SKILL_EXTEND_GROUP = GetGroupKey("SkillLevelExtend")
+
+function FightSkill:GetTotalCostSkillPointCount(pPlayer)
+  return pPlayer.GetUserValue(self.SKILL_SAVE_GROUP, 2)
+end
+
+if not FightSkill.tbClassBase then
+  FightSkill.tbClassBase = {}
+  FightSkill.tbClass = {
+    [""] = FightSkill.tbClassBase,
+    default = FightSkill.tbClassBase
+  }
+end
+FightSkill.nDefLockRange = Lib:Map2Logic(600)
+FightSkill.nAutoFightSkillGroup = GetGroupKey("AutoFightSkill")
+FightSkill.HRS_SAVE_KEY = GetGroupKey("HudRightSkill")
+FightSkill.HRS_SUBTYPE_ID = 1
+FightSkill.HRS_SKILL_ID_LIST = {
+  2,
+  3,
+  4,
+  5,
+  6
+}
+FightSkill.HRS_CAST_TYPE_LIST = {
+  7,
+  8,
+  9,
+  10,
+  11
+}
+FightSkill.HRS_SUBTYPE_LIST = {
+  FactionSkill = 0,
+  DragonBoatRace = 1,
+  DynamicSkill = 2,
+  KeYiMenSkill = 3,
+  TongBattle1 = 4,
+  TongBattle2 = 5,
+  CustomSkill = 6
+}
+
+function FightSkill:ResetSkillPointFightPower()
+  local nTotalFightPower = 0
+  local nTotalAttributePower = 0
+  local nSkillPoint = 0
+  while true do
+    nSkillPoint = nSkillPoint + 1
+    local tbInfo = self.tbSkillPointFightPower[nSkillPoint]
+    if not tbInfo then
+      return
+    end
+    self.nMaxSkillPoint = nSkillPoint
+    nTotalFightPower = nTotalFightPower + tbInfo.FightPower
+    nTotalAttributePower = nTotalAttributePower + tbInfo.AttributePower
+    tbInfo.nTotalFightPower = nTotalFightPower
+    tbInfo.nTotalAttributePower = nTotalAttributePower
+  end
+end
+
+function FightSkill:LoadSetting()
+  local tbSkillIniSet = Lib:LoadIniFile("Setting/Skill/SkillSetting.ini")
+  self.tbSkillIniSet = {}
+  self.tbSkillIniSet.nFullAnger = tonumber(tbSkillIniSet.Mix.FullAnger)
+  self.tbSkillIniSet.nBaseAttackFrame = tonumber(tbSkillIniSet.Mix.BaseAttackFrame)
+  self.tbSkillIniSet.nBaseAttackParam1 = tonumber(tbSkillIniSet.Mix.BaseAttackParam1)
+  self.tbSkillIniSet.nStealLifeMax = math.floor(tonumber(tbSkillIniSet.Mix.StealLifeMax) / 100)
+  self.tbSkillIniSet.nStealManaMax = math.floor(tonumber(tbSkillIniSet.Mix.StealManaMax) / 100)
+  local tbSkillUpgradeSetting = Lib:LoadTabFileEx("Setting/Skill/SkillLevelUp.tab", "dddddddddsdd", nil, {
+    "GroupId",
+    "SkillLevel",
+    "ReqLevel",
+    "Coin",
+    "Exp",
+    "FightPower",
+    "SkillPoint",
+    "KinContrib",
+    "bNeedExtend",
+    "szExtendTimeFrame",
+    "nExtendItemId",
+    "nExtendCost"
+  })
+  assert(tbSkillUpgradeSetting)
+  self.tbSkillMaxLevelList = {}
+  self.tbSkillDefaultMaxLevelList = {}
+  self.tbSkillLevelUpGroup = {}
+  self.tbSkillExtendSetting = {}
+  for _, v in pairs(tbSkillUpgradeSetting) do
+    self.tbSkillLevelUpGroup[v.GroupId] = self.tbSkillLevelUpGroup[v.GroupId] or {}
+    self.tbSkillLevelUpGroup[v.GroupId][v.SkillLevel] = {
+      v.ReqLevel,
+      v.Coin,
+      v.Exp,
+      v.FightPower,
+      v.SkillPoint,
+      v.KinContrib
+    }
+    self.tbSkillMaxLevelList[v.GroupId] = self.tbSkillMaxLevelList[v.GroupId] or 0
+    self.tbSkillDefaultMaxLevelList[v.GroupId] = self.tbSkillDefaultMaxLevelList[v.GroupId] or 0
+    self.tbSkillExtendSetting[v.GroupId] = self.tbSkillExtendSetting[v.GroupId] or {}
+    self.tbSkillExtendSetting[v.GroupId][v.SkillLevel] = {
+      bNeedExtend = v.bNeedExtend,
+      szExtendFrame = v.szExtendTimeFrame,
+      nExtendItemId = v.nExtendItemId,
+      nExtendCost = v.nExtendCost
+    }
+    if self.tbSkillMaxLevelList[v.GroupId] < v.SkillLevel then
+      self.tbSkillMaxLevelList[v.GroupId] = v.SkillLevel
+    end
+    if self.tbSkillDefaultMaxLevelList[v.GroupId] < v.SkillLevel and (not v.bNeedExtend or 0 == v.bNeedExtend) then
+      self.tbSkillDefaultMaxLevelList[v.GroupId] = v.SkillLevel
+    end
+  end
+  local tbAllSkillTB = Lib:LoadTabFileEx("Setting/Skill/Skill.tab", "dssdddddddddsd", nil, {
+    "SkillId",
+    "SkillName",
+    "IconAtlas",
+    "LockRange",
+    "AttackRadius",
+    "StartSkillID",
+    "HitSkillID",
+    "CollisionSkillId",
+    "FlySkillId",
+    "VanishedSkillId",
+    "CostType",
+    "CostValue",
+    "Desc",
+    "IsPeaceCanUse"
+  })
+  assert(tbAllSkillTB)
+  self.tbAllSkillSetting = {}
+  for _, tbSkillInfo in ipairs(tbAllSkillTB) do
+    self.tbAllSkillSetting[tbSkillInfo.SkillId] = {
+      nSkillId = tbSkillInfo.SkillId,
+      szSkillName = tbSkillInfo.SkillName,
+      szIconAtlas = tbSkillInfo.IconAtlas,
+      nLockRange = Lib:Map2Logic(tbSkillInfo.LockRange) or self.nDefLockRange,
+      nAttackRadius = tbSkillInfo.AttackRadius or 0,
+      nStartSkillID = tbSkillInfo.StartSkillID,
+      nHitSkillID = tbSkillInfo.HitSkillID,
+      nCollisionSkillId = tbSkillInfo.CollisionSkillId,
+      nFlySkillId = tbSkillInfo.FlySkillId,
+      nVanishedSkillId = tbSkillInfo.VanishedSkillId,
+      nCostType = tbSkillInfo.CostType,
+      nCostValue = tbSkillInfo.CostValue,
+      szDesc = tbSkillInfo.Desc
+    }
+  end
+  local tbFactionSkill = Lib:LoadTabFile("Setting/Skill/FactionSkill.tab", {
+    Faction = 1,
+    FactionSect = 1,
+    SkillId = 1,
+    SortInUI = 1,
+    IsAnger = 1,
+    LevelUpGroup = 1,
+    GainLevel = 1,
+    SkillGroup = 1,
+    CastType = 0
+  }, nil, false)
+  assert(tbFactionSkill)
+  self.tbFactionSkillSetting = {}
+  self.tbLevelUpGroup2Skill = {}
+  for _, tbSkillInfo in ipairs(tbFactionSkill) do
+    local nFactionId = tbSkillInfo.Faction
+    local nFactionSect = tbSkillInfo.FactionSect
+    self.tbFactionSkillSetting[nFactionId] = self.tbFactionSkillSetting[nFactionId] or {}
+    self.tbFactionSkillSetting[nFactionId][nFactionSect] = self.tbFactionSkillSetting[nFactionId][nFactionSect] or {}
+    table.insert(self.tbFactionSkillSetting[nFactionId][nFactionSect], tbSkillInfo)
+    local nLevelUpGroup = tbSkillInfo.LevelUpGroup
+    self.tbLevelUpGroup2Skill[nLevelUpGroup] = self.tbLevelUpGroup2Skill[nLevelUpGroup] or {}
+    self.tbLevelUpGroup2Skill[nLevelUpGroup][nFactionId] = self.tbLevelUpGroup2Skill[nLevelUpGroup][nFactionId] or {}
+    self.tbLevelUpGroup2Skill[nLevelUpGroup][nFactionId][nFactionSect] = tbSkillInfo.SkillId
+  end
+  local tbSkillPublic = Lib:LoadTabFile("Setting/Skill/SkillPublic.tab", {SkillId = 1, PublicCd = 1})
+  assert(tbSkillPublic)
+  self.tbFactionSkillPublicCd = {}
+  for _, tbSkillInfo in ipairs(tbSkillPublic) do
+    self.tbFactionSkillPublicCd[tbSkillInfo.SkillId] = tbSkillInfo.PublicCd
+  end
+  local tbFactionSkillTB = Lib:LoadTabFileEx("Setting/Skill/FactionSkill.tab", "dddsssdddd", "SkillId", {
+    "Faction",
+    "FactionSect",
+    "SkillId",
+    "BtnName",
+    "BtnIcon",
+    "IconAltlas",
+    "SortInUI",
+    "IsAnger",
+    "LevelUpGroup",
+    "GainLevel"
+  })
+  assert(tbFactionSkillTB)
+  self.tbSkillLevelUp = {}
+  for _, v in pairs(tbFactionSkillTB) do
+    if v.LevelUpGroup and 0 ~= v.LevelUpGroup then
+      self.tbSkillLevelUp[v.SkillId] = self.tbSkillLevelUpGroup[v.LevelUpGroup]
+    end
+  end
+  self.tbAllFactionSkill = tbFactionSkillTB
+  self.tbSkillMaxLevel = {}
+  for nSkillId, tbSkillData in pairs(self.tbSkillLevelUp) do
+    local nMaxLevel = 0
+    for k, v in pairs(tbSkillData) do
+      if k > nMaxLevel then
+        nMaxLevel = k
+      end
+    end
+    self.tbSkillMaxLevel[nSkillId] = nMaxLevel
+  end
+  self.tbSkillPointFightPower = Lib:LoadTabFileEx("Setting/Skill/SkillPointFightPower.tab", "ddd", "SkillPoint", {
+    "SkillPoint",
+    "FightPower",
+    "AttributePower"
+  }, nil, nil, false)
+  self.nMaxSkillPoint = 0
+  self:ResetSkillPointFightPower()
+  self.tbAutoSkill = Lib:LoadTabFileEx("Setting/Skill/AutoSkill.tab", "ddsdddddddds", "AutoId", {
+    "AutoId",
+    "AutoType",
+    "CastPercent",
+    "CastSkillId",
+    "CastSkillLevel",
+    "ParentSkillId",
+    "RelativeSkillStyle",
+    "RelativeSkillId1",
+    "RelativeSkillId2",
+    "RelativeSkillId3",
+    "MinPerCastTime",
+    "MaxCastCount"
+  })
+  self.tbSkillIniSet = SetReadOnly(self.tbSkillIniSet)
+  self.tbAllFactionSkill = SetReadOnly(self.tbAllFactionSkill)
+  self.tbSkillLevelUpGroup = SetReadOnly(self.tbSkillLevelUpGroup)
+  self.tbAllSkillSetting = SetReadOnly(self.tbAllSkillSetting)
+  self.tbFactionSkillSetting = SetReadOnly(self.tbFactionSkillSetting)
+  self.tbFactionSkillPublicCd = SetReadOnly(self.tbFactionSkillPublicCd)
+  self.tbSkillLevelUp = SetReadOnly(self.tbSkillLevelUp)
+  self.tbSkillMaxLevel = SetReadOnly(self.tbSkillMaxLevel)
+  self.tbSkillPointFightPower = SetReadOnly(self.tbSkillPointFightPower)
+  self.tbAutoSkill = SetReadOnly(self.tbAutoSkill)
+end
+
+FightSkill:LoadSetting()
+
+function FightSkill:GetSkillLevelUpGroupCfg(nGroupID, nLevel)
+  return self.tbSkillLevelUpGroup[nGroupID][nLevel] or {
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  }
+end
+
+function FightSkill:GetSkillLevelUpGroupId(nSkillId)
+  return self.tbAllFactionSkill[nSkillId].LevelUpGroup
+end
+
+function FightSkill:GetSkillName(nSkillId)
+  return self.tbAllSkillSetting[nSkillId].szSkillName
+end
+
+function FightSkill:GetSkillIconAtlas(nSkillId)
+  return self.tbAllSkillSetting[nSkillId].szIconAtlas
+end
+
+function FightSkill:IsPeaceCanUse(nSkillId)
+  return 1 == self.tbAllSkillSetting[nSkillId].IsPeaceCanUse
+end
+
+function FightSkill:GetSkillLockRange(nSkillId)
+  if not nSkillId or nSkillId <= 0 then
+    return self.nDefLockRange
+  end
+  local tbSkillSetting = self.tbAllSkillSetting[nSkillId]
+  if not tbSkillSetting then
+    return self.nDefLockRange
+  end
+  return tbSkillSetting.nLockRange
+end
+
+function FightSkill:GetSkillPublicCd(nSkillId)
+  if self.tbFactionSkillPublicCd and self.tbFactionSkillPublicCd[nSkillId] then
+    return self.tbFactionSkillPublicCd[nSkillId]
+  end
+  return 0
+end
+
+function FightSkill:IsSelfSkill(nSkillId)
+  local tbSkillInfo = self:GetSkillSetting(nSkillId)
+  return tbSkillInfo.TargetSelf
+end
+
+function FightSkill:GetSkillPointFightPower(nSkillPoint, bIsAttribute)
+  if nSkillPoint <= 0 then
+    return 0
+  end
+  local tbInfo = self:GetSkillPointPowerInfo(nSkillPoint)
+  if bIsAttribute then
+    return tbInfo.nTotalAttributePower or 0
+  end
+  return tbInfo.nTotalFightPower or 0
+end
+
+function FightSkill:GetSkillPointPowerInfo(nSkillPoint)
+  local tbInfo = self.tbSkillPointFightPower[nSkillPoint]
+  if tbInfo then
+    return tbInfo
+  end
+  local tbCurInfo = self.tbSkillPointFightPower[self.nMaxSkillPoint]
+  local nTotalFightPower = tbCurInfo.nTotalFightPower
+  local nTotalAttributePower = tbCurInfo.nTotalAttributePower
+  for nI = self.nMaxSkillPoint + 1, nSkillPoint do
+    local tbFightPowerInfo = {}
+    tbFightPowerInfo.SkillPoint = nI
+    tbFightPowerInfo.FightPower = tbCurInfo.FightPower
+    tbFightPowerInfo.AttributePower = tbCurInfo.AttributePower
+    nTotalFightPower = nTotalFightPower + tbFightPowerInfo.FightPower
+    nTotalAttributePower = nTotalAttributePower + tbFightPowerInfo.AttributePower
+    tbFightPowerInfo.nTotalFightPower = nTotalFightPower
+    tbFightPowerInfo.nTotalAttributePower = nTotalAttributePower
+    self.tbSkillPointFightPower[nI] = tbFightPowerInfo
+  end
+  self.nMaxSkillPoint = nSkillPoint
+  return self.tbSkillPointFightPower[nSkillPoint]
+end
+
+function FightSkill:GetAttackRadius(nSkillId)
+  local tbSkillInfo = self:GetSkillSetting(nSkillId)
+  return tbSkillInfo.AttackRadius
+end
+
+function FightSkill:GetSkillLevelUpNeed(nSkillId, nLevel)
+  nLevel = nLevel + 1
+  if self.tbSkillLevelUp[nSkillId] and self.tbSkillLevelUp[nSkillId][nLevel] then
+    local tbSkill = self.tbSkillLevelUp[nSkillId][nLevel]
+    return tbSkill[1], tbSkill[2], tbSkill[3], tbSkill[5], tbSkill[6]
+  else
+    return 0, 0, 0, 0, 0
+  end
+end
+
+function FightSkill:GetSkillUpInfo(nSkillId, nLevel)
+  local tbSkillInfo = self.tbSkillLevelUp[nSkillId]
+  if not tbSkillInfo then
+    return
+  end
+  return tbSkillInfo[nLevel]
+end
+
+function FightSkill:GetSkillFightPower(nSkillId, nLevel)
+  if self.tbSkillLevelUp[nSkillId] and self.tbSkillLevelUp[nSkillId][nLevel] then
+    local tbSkill = self.tbSkillLevelUp[nSkillId][nLevel]
+    return tbSkill[4]
+  else
+    return 0
+  end
+end
+
+function FightSkill:GetSkillMaxLevel(pPlayer, nSkillId)
+  if self.tbAllFactionSkill[nSkillId] then
+    local nGroupId = self:GetSkillLevelUpGroupId(nSkillId)
+    return self:GetDefaultSkillMaxLevel(nGroupId) + self:GetExtendSkillMaxLevel(pPlayer, nGroupId)
+  end
+  return self.tbSkillMaxLevel[nSkillId] or 15
+end
+
+function FightSkill:GetAsyncSkillMaxLevel(pAsyncRole, nSkillId)
+  local nGroupId = self:GetSkillLevelUpGroupId(nSkillId)
+  local nExtendLevel = 0
+  if pAsyncRole then
+    nExtendLevel = pAsyncRole.GetPlayerSkillExtendLevel(nGroupId) or 0
+  end
+  return self:GetDefaultSkillMaxLevel(nGroupId) + nExtendLevel
+end
+
+function FightSkill:GetDefaultSkillMaxLevel(nGroupId)
+  return self.tbSkillDefaultMaxLevelList[nGroupId] or 0
+end
+
+function FightSkill:GetExtendSkillMaxLevel(pPlayer, nGroupId)
+  local nExtendSKillLevel = pPlayer.GetUserValue(self.SKILL_EXTEND_GROUP, nGroupId)
+  return nExtendSKillLevel or 0
+end
+
+function FightSkill:GetTrueSkillMaxLevel(nUpGroupID)
+  return self.tbSkillMaxLevelList[nUpGroupID] or 15
+end
+
+function FightSkill:GetSkillLevel(pPlayer, nSkillID)
+  return pPlayer.GetSkillLevel(nSkillID)
+end
+
+function FightSkill:CheckSkillLeveUp(pPlayer, nSkillId)
+  if pPlayer.IsMaskPlayerFactSkill() then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\230\151\160\230\179\149\229\138\160\231\130\185")
+  end
+  local _, nBaseLevel = pPlayer.GetSkillLevel(nSkillId)
+  if nBaseLevel < 0 then
+    return false, i18n.EasyGet("\230\178\161\230\156\137\232\142\183\229\190\151\232\175\165\230\138\128\232\131\189")
+  end
+  local nFactionLimit = KFightSkill.GetFactionLimit(nSkillId)
+  if pPlayer.nFaction ~= nFactionLimit and nFactionLimit > 0 then
+    return false, i18n.EasyGet("\233\151\168\230\180\190\228\184\141\231\172\166\229\144\136")
+  end
+  local tbSkillUpInfo = FightSkill:GetSkillUpInfo(nSkillId, nBaseLevel + 1)
+  if not tbSkillUpInfo then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\230\156\128\229\164\167\231\173\137\231\186\167!")
+  end
+  local nReqLevel, _, _, nNeedPoint = FightSkill:GetSkillLevelUpNeed(nSkillId, nBaseLevel)
+  local nSkillPoint = pPlayer.GetSkillPoint()
+  if nNeedPoint > nSkillPoint then
+    return false, i18n.EasyGet("\230\138\128\232\131\189\231\130\185\228\184\141\232\182\179")
+  end
+  if nReqLevel > pPlayer.nLevel then
+    return false, i18n.EasyGet("\228\184\187\232\167\146\232\190\190\229\136\176{0}\231\186\167\239\188\140\230\137\141\229\143\175\231\187\167\231\187\173\229\141\135\231\186\167\230\173\164\230\138\128\232\131\189", nReqLevel)
+  end
+  if nBaseLevel >= FightSkill:GetSkillMaxLevel(pPlayer, nSkillId) then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\230\156\128\229\164\167\231\173\137\231\186\167")
+  end
+  return true, "", nBaseLevel, nNeedPoint
+end
+
+function FightSkill:CheckSkillBatchLevelUp(pPlayer, nSkillId, nAddLevel)
+  if pPlayer.IsMaskPlayerFactSkill() then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\230\151\160\230\179\149\229\138\160\231\130\185")
+  end
+  local _, nBaseLevel = pPlayer.GetSkillLevel(nSkillId)
+  if nBaseLevel < 0 then
+    return false, i18n.EasyGet("\230\178\161\230\156\137\232\142\183\229\190\151\232\175\165\230\138\128\232\131\189")
+  end
+  local nFactionLimit = KFightSkill.GetFactionLimit(nSkillId)
+  if pPlayer.nFaction ~= nFactionLimit and nFactionLimit > 0 then
+    return false, i18n.EasyGet("\233\151\168\230\180\190\228\184\141\231\172\166\229\144\136")
+  end
+  if nBaseLevel >= FightSkill:GetSkillMaxLevel(pPlayer, nSkillId) then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\230\156\128\229\164\167\231\173\137\231\186\167")
+  end
+  local nFinalLevel = nBaseLevel + nAddLevel
+  if nFinalLevel > FightSkill:GetSkillMaxLevel(pPlayer, nSkillId) then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\230\156\128\229\164\167\231\173\137\231\186\167")
+  end
+  local tbSkillUpInfo = FightSkill:GetSkillUpInfo(nSkillId, nFinalLevel)
+  if not tbSkillUpInfo then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\230\156\128\229\164\167\231\173\137\231\186\167!")
+  end
+  local nMaxReqLevel = 0
+  local nTotalNeedPoint = 0
+  for nAdd = 1, nAddLevel do
+    local nReqLevel, _, _, nNeedPoint = FightSkill:GetSkillLevelUpNeed(nSkillId, nBaseLevel + nAdd - 1)
+    nTotalNeedPoint = nTotalNeedPoint + nNeedPoint
+    nMaxReqLevel = math.max(nMaxReqLevel, nReqLevel)
+  end
+  local nSkillPoint = pPlayer.GetSkillPoint()
+  if nTotalNeedPoint > nSkillPoint then
+    return false, i18n.EasyGet("\230\138\128\232\131\189\231\130\185\228\184\141\232\182\179")
+  end
+  if nMaxReqLevel > pPlayer.nLevel then
+    return false, i18n.EasyGet("\228\184\187\232\167\146\232\190\190\229\136\176{0}\231\186\167\239\188\140\230\137\141\229\143\175\231\187\167\231\187\173\229\141\135\231\186\167\230\173\164\230\138\128\232\131\189", nMaxReqLevel)
+  end
+  return true, "", nBaseLevel, nTotalNeedPoint
+end
+
+function FightSkill:GetSkillShowInfo(nSkillId)
+  local tbSkillInfo = self:GetSkillSetting(nSkillId)
+  if not tbSkillInfo then
+    return
+  end
+  local szAtlas = tbSkillInfo.IconAtlas
+  if Lib:IsEmptyStr(szAtlas) then
+    szAtlas = "UI/Atlas/SkillIcon/SkillIcon.prefab"
+  end
+  local tbIcon = {
+    szIconAtlas = szAtlas,
+    szIconSprite = tbSkillInfo.Icon or "Skill3"
+  }
+  return tbIcon, tbSkillInfo.SkillName
+end
+
+function FightSkill:GetFactionSkill(nFaction, nFactionSect)
+  if self.tbFactionSkillSetting and self.tbFactionSkillSetting[nFaction] then
+    return self.tbFactionSkillSetting[nFaction][nFactionSect]
+  end
+end
+
+function FightSkill:GetFactionSkillInfo(nFaction, nFactionSect, nSkillId)
+  local tbFactionSkill = self:GetFactionSkill(nFaction, nFactionSect)
+  if not tbFactionSkill then
+    return
+  end
+  for k, tbSkillInfo in pairs(tbFactionSkill) do
+    if tbSkillInfo.SkillId == nSkillId then
+      return tbSkillInfo
+    end
+  end
+end
+
+function FightSkill:IsFactionSkill(nSkillId, nFactionSect, nFaction)
+  local tbFactionSkill = FightSkill:GetFactionSkill(nFaction, nFactionSect)
+  if tbFactionSkill then
+    for k, tbSkillInfo in pairs(tbFactionSkill) do
+      if tbSkillInfo.SkillId == nSkillId then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function FightSkill:GetSortInUI(nFaction, nFactionSect, nSkillId)
+  local tbFactionSkill = self:GetFactionSkill(nFaction, nFactionSect)
+  if not tbFactionSkill then
+    return -1
+  end
+  for k, tbSkillInfo in pairs(tbFactionSkill) do
+    if tbSkillInfo.SkillId == nSkillId then
+      return tbSkillInfo.SortInUI
+    end
+  end
+  return -1
+end
+
+function FightSkill:GetFactionSkillNotCommonLimitLevel(nFaction, nFactionSect, nLevel)
+  self.tbFactionSkillNotCommonLimitLevel = self.tbFactionSkillNotCommonLimitLevel or {}
+  self.tbFactionSkillNotCommonLimitLevel[nFaction] = self.tbFactionSkillNotCommonLimitLevel[nFaction] or {}
+  self.tbFactionSkillNotCommonLimitLevel[nFaction][nFactionSect] = self.tbFactionSkillNotCommonLimitLevel[nFaction][nFactionSect] or {}
+  if not self.tbFactionSkillNotCommonLimitLevel[nFaction][nFactionSect][nLevel] then
+    self.tbFactionSkillNotCommonLimitLevel[nFaction][nFactionSect][nLevel] = {}
+    local tbFactionSkill = FightSkill:GetFactionSkill(nFaction, nFactionSect)
+    for _, tbSkillInfo in pairs(tbFactionSkill) do
+      if nLevel >= tbSkillInfo.GainLevel then
+        table.insert(self.tbFactionSkillNotCommonLimitLevel[nFaction][nFactionSect][nLevel], tbSkillInfo.SkillId)
+      end
+    end
+  end
+  return self.tbFactionSkillNotCommonLimitLevel[nFaction][nFactionSect][nLevel]
+end
+
+function FightSkill:GetFactionSkillNotCommon(nFaction, nFactionSect)
+  self.tbFactionSkillNotCommon = self.tbFactionSkillNotCommon or {}
+  self.tbFactionSkillNotCommon[nFaction] = self.tbFactionSkillNotCommon[nFaction] or {}
+  if not self.tbFactionSkillNotCommon[nFaction][nFactionSect] then
+    self.tbFactionSkillNotCommon[nFaction][nFactionSect] = {}
+    local tbFactionSkill = FightSkill:GetFactionSkill(nFaction, nFactionSect)
+    for k, tbSkillInfo in pairs(tbFactionSkill) do
+      table.insert(self.tbFactionSkillNotCommon[nFaction][nFactionSect], tbSkillInfo.SkillId)
+    end
+  end
+  return self.tbFactionSkillNotCommon[nFaction][nFactionSect]
+end
+
+function FightSkill:IsSkillInFactionNotCommon(nFaction, nFactionSect, nSkillId)
+  local tbSkillId = FightSkill:GetFactionSkillNotCommon(nFaction, nFactionSect)
+  for k, v in pairs(tbSkillId) do
+    if v == nSkillId then
+      return true
+    end
+  end
+  return false
+end
+
+function FightSkill:ChangeFactionSkill(nOldFaction, nOldFactionSect, nNewFaction, nNewFactionSect)
+  local tbOldSkills = self:GetFactionSkill(nOldFaction, nOldFactionSect)
+  for k, v in pairs(tbOldSkills) do
+    me.GetNpc().RemoveSkill(v.SkillId)
+  end
+  me.CheckFactionSkill()
+end
+
+function FightSkill:GetSkillFactionInfo(nSkillId)
+  return self.tbAllFactionSkill[nSkillId]
+end
+
+function FightSkill:GetSkillIdByBtnName(nFaction, nFactionSect)
+  local nSubType = self:GetHRSSubType(me)
+  if nSubType == FightSkill.HRS_SUBTYPE_LIST.FactionSkill then
+    local tbShowSkill = FightSkill:GetFactionSkill(nFaction, nFactionSect)
+    if not tbShowSkill then
+      return
+    end
+    for k, v in pairs(tbShowSkill) do
+      if 1 == v.SortInUI then
+        return v.SkillId
+      end
+    end
+  else
+    local nSkillId = me.GetUserValue(FightSkill.HRS_SAVE_KEY, FightSkill.HRS_SKILL_ID_LIST[1])
+    if 0 == nSkillId then
+      return nil
+    end
+    return nSkillId
+  end
+end
+
+function FightSkill:GetFakePlayerSkillList(nFaction, nFactionSect, nPlayerLevel)
+  local tbResult = {}
+  local tbSkillList = self.tbFactionSkillSetting[nFaction][nFactionSect]
+  for _, tbInfo in ipairs(tbSkillList) do
+    local nSkillId = tbInfo.SkillId
+    if nSkillId > 0 and self.tbSkillLevelUp[nSkillId] then
+      local nMaxLevel = 0
+      for nLevel, tbUpdateGradeInfo in ipairs(self.tbSkillLevelUp[nSkillId]) do
+        if nPlayerLevel < tbUpdateGradeInfo[1] then
+          break
+        end
+        nMaxLevel = nLevel
+      end
+      if nMaxLevel > 0 then
+        table.insert(tbResult, {nSkillId, nMaxLevel})
+      end
+    end
+  end
+  return tbResult
+end
+
+function FightSkill:GetSkillSetting(nSkillId, nLevel)
+  local tbSkillInfo = KFightSkill.GetSkillInfo(nSkillId, nLevel or 1)
+  return tbSkillInfo
+end
+
+function FightSkill:GetClass(szClassName, bNotCreate)
+  local tbSkill = self.tbClass[szClassName]
+  if not tbSkill and 1 ~= bNotCreate then
+    tbSkill = Lib:NewClass(self.tbClassBase)
+    self.tbClass[szClassName] = tbSkill
+  end
+  return tbSkill
+end
+
+function FightSkill:GetLevelData(szSkillName, nLevel)
+  assert(szSkillName and nLevel)
+  if not self.tbClass[szSkillName] then
+    print(string.format("[ERROR][skill error]\226\128\152%s\226\128\153 not found, className not found \239\188\129\239\188\129\239\188\129\239\188\129\239\188\129\239\188\129", szSkillName))
+    return {}
+  end
+  local tbSkill = assert(self.tbClass[szSkillName], "[ERROR]Skill{" .. tostring(szSkillName) .. "} not found!")
+  local tbRet = {}
+  if 0 ~= #tbSkill.tbMagics then
+    for _, tbMagic in ipairs(tbSkill.tbMagics) do
+      if type(tbMagic) ~= "table" then
+        Log("[ERROR][skill error]", szSkillName, nLevel)
+      end
+      local tbData = {
+        szName = tbMagic.szMagicName
+      }
+      local tbProp = {}
+      for nI = 1, self.MAGIC_VALUE_NUM do
+        tbData["nV" .. nI] = 0
+      end
+      if type(tbMagic.tbValue) == "function" then
+        tbProp = tbMagic.tbValue(nLevel)
+      else
+        for i = 1, self.MAGIC_VALUE_NUM do
+          local nTemp = Lib.Calc:Link(nLevel, tbMagic.tbValue[i], true)
+          tbProp[i] = math.floor(nTemp * 100)
+        end
+      end
+      for nI, nValue in pairs(tbProp) do
+        tbData["nV" .. nI] = nValue
+      end
+      tbRet[#tbRet + 1] = tbData
+    end
+  else
+    for szMagicName, tbMagicProp in pairs(tbSkill.tbMagics) do
+      if "skill_desc" ~= szMagicName then
+        local tbData = {szName = szMagicName}
+        local tbProp = {}
+        for nI = 1, self.MAGIC_VALUE_NUM do
+          tbData["nV" .. nI] = 0
+        end
+        if type(tbMagicProp) == "function" then
+          tbProp = tbMagicProp(nLevel)
+        else
+          for i = 1, self.MAGIC_VALUE_NUM do
+            local nTemp = Lib.Calc:Link(nLevel, tbMagicProp[i], true)
+            tbProp[i] = math.floor(nTemp * 100)
+          end
+        end
+        for nI, nValue in pairs(tbProp) do
+          tbData["nV" .. nI] = nValue
+        end
+        tbRet[#tbRet + 1] = tbData
+      end
+    end
+  end
+  return tbRet
+end
+
+FightSkill.tbAutoSkillTittle = Lib:LoadTabFileEx("Setting/Skill/AutoSkillTittle.tab", "dsss", "nType", {
+  "nType",
+  "szFnName",
+  "szDesc1",
+  "szDesc2"
+})
+FightSkill.tbEventSkillTittle = Lib:LoadTabFileEx("Setting/Skill/EventSkillTittle.tab", "ss", "szSkillType", {
+  "szSkillType",
+  "szTittle"
+})
+
+function FightSkill:GetSubSkillDesc(nCurSkillId, nLevel)
+  assert(nCurSkillId and nLevel)
+  local tbMagicDesc = {}
+  if 1 == FightSkill.tbSkillDesc[nCurSkillId].bShowStartSkill then
+    local nNextSkillId = self.tbAllSkillSetting[nCurSkillId].nStartSkillID
+    local szTittle = i18n.Parse(self.tbEventSkillTittle.StartSkill.szTittle)
+    local szPSkillName = i18n.Parse(self.tbAllSkillSetting[nCurSkillId].szSkillName)
+    szTittle = i18n.Get(szTittle, szPSkillName)
+    local szDesc = szTittle .. "\n" .. self:GetSkillMagicDescEx(nNextSkillId, nLevel, nil, nCurSkillId)
+    table.insert(tbMagicDesc, szDesc)
+  end
+  if 1 == FightSkill.tbSkillDesc[nCurSkillId].bShowHitSkill then
+    local nNextSkillId = self.tbAllSkillSetting[nCurSkillId].nHitSkillID
+    local szTittle = i18n.Parse(self.tbEventSkillTittle.HitSkill.szTittle)
+    local szPSkillName = i18n.Parse(self.tbAllSkillSetting[nCurSkillId].szSkillName)
+    szTittle = i18n.Get(szTittle, szPSkillName)
+    local szDesc = szTittle .. "\n" .. self:GetSkillMagicDescEx(nNextSkillId, nLevel, nil, nCurSkillId)
+    table.insert(tbMagicDesc, szDesc)
+  end
+  if 1 == FightSkill.tbSkillDesc[nCurSkillId].bShowFlySkill then
+    local nNextSkillId = self.tbAllSkillSetting[nCurSkillId].nFlySkillId
+    local szTittle = i18n.Parse(self.tbEventSkillTittle.FlySkill.szTittle)
+    local szPSkillName = i18n.Parse(self.tbAllSkillSetting[nCurSkillId].szSkillName)
+    szTittle = i18n.Get(szTittle, szPSkillName)
+    local szDesc = szTittle .. "\n" .. self:GetSkillMagicDescEx(nNextSkillId, nLevel, nil, nCurSkillId)
+    table.insert(tbMagicDesc, szDesc)
+  end
+  if 1 == FightSkill.tbSkillDesc[nCurSkillId].bShowCollisionSkill then
+    local nNextSkillId = self.tbAllSkillSetting[nCurSkillId].nCollisionSkillId
+    local szTittle = i18n.Parse(self.tbEventSkillTittle.CollisionSkill.szTittle)
+    local szPSkillName = i18n.Parse(self.tbAllSkillSetting[nCurSkillId].szSkillName)
+    szTittle = i18n.Get(szTittle, szPSkillName)
+    local szDesc = szTittle .. "\n" .. self:GetSkillMagicDescEx(nNextSkillId, nLevel, nil, nCurSkillId)
+    table.insert(tbMagicDesc, szDesc)
+  end
+  if 1 == FightSkill.tbSkillDesc[nCurSkillId].bShowVanishedSkill then
+    local nNextSkillId = self.tbAllSkillSetting[nCurSkillId].nVanishedSkillId
+    local szTittle = i18n.Parse(self.tbEventSkillTittle.VanishedSkill.szTittle)
+    local szPSkillName = i18n.Parse(self.tbAllSkillSetting[nCurSkillId].szSkillName)
+    szTittle = i18n.Get(szTittle, szPSkillName)
+    local szDesc = szTittle .. "\n" .. self:GetSkillMagicDescEx(nNextSkillId, nLevel, nil, nCurSkillId)
+    table.insert(tbMagicDesc, szDesc)
+  end
+  return table.concat(tbMagicDesc, "\n")
+end
+
+function FightSkill:GetMinPerDesc(nCurSkillId, nLevel)
+  local nType = self.tbAutoSkill[nCurSkillId].AutoType
+  local szTittle = i18n.Parse(self.tbAutoSkillTittle[nType].szDesc1)
+  local nValue = string.format("%.1f", FightSkill:GetSkillMinPerCastTime(nCurSkillId) / Env.GAME_FPS)
+  szTittle = i18n.Get(szTittle, nValue)
+  return szTittle
+end
+
+function FightSkill:GetMaxCastDesc(nCurSkillId, nLevel)
+  local szDesc
+  local szMaxCast = self.tbAutoSkill[nCurSkillId].MaxCastCount
+  local nType = self.tbAutoSkill[nCurSkillId].AutoType
+  local tbRelativeSkill = {}
+  for i = 1, 3 do
+    local nRelativeSkillId = self.tbAutoSkill[nCurSkillId]["RelativeSkillId" .. i]
+    if 0 ~= nRelativeSkillId then
+      table.insert(tbRelativeSkill, i18n.Parse(FightSkill.tbAllSkillSetting[nRelativeSkillId].szSkillName))
+    end
+  end
+  local szRelativeSkill = table.concat(tbRelativeSkill, "\239\188\140")
+  if szMaxCast and "-1" ~= szMaxCast then
+    szDesc = szRelativeSkill .. i18n.Parse(self.tbAutoSkillTittle[nType].szDesc2)
+    local tbMaxCast = FightSkill:GetFormatPoint(szMaxCast)
+    local nValue = Lib.Calc:Link(nLevel, tbMaxCast, false)
+    szDesc = i18n.Get(szDesc, nValue)
+    return szDesc
+  else
+    szDesc = szRelativeSkill .. i18n.Parse(self.tbAutoSkillTittle[nType].szDesc1)
+    szDesc = i18n.Get(szDesc, FightSkill:GetAutoSkillInfo(nCurSkillId, nLevel, true))
+    return szDesc
+  end
+end
+
+function FightSkill:GetPassiveSkillvalue(nLevel, szKey1, szKey2, nKey3, bFloat)
+  assert(szKey1 and nLevel)
+  if not self.tbClass[szKey1] then
+    print(string.format("[ERROR][skill error]\226\128\152%s\226\128\153 not found, className not found\239\188\129\239\188\129\239\188\129\239\188\129\239\188\129\239\188\129", szKey1))
+    return ""
+  end
+  local tbSkill = assert(self.tbClass[szKey1], "[ERROR]Skill{" .. tostring(szKey1) .. "} not found!")
+  local nValue = Lib.Calc:Link(nLevel, tbSkill.tbMagics[szKey2][nKey3], bFloat)
+  if bFloat then
+    local nTemp = math.floor(nValue * 100)
+    nValue = nTemp / 100
+  end
+  return nValue
+end
+
+function FightSkill:GetAutoSkillInfo(nSkillId, nLevel, bFloat)
+  local tbAutoSkill = self.tbAutoSkill[nSkillId]
+  local tbCastPercent = FightSkill:GetFormatPoint(tbAutoSkill.CastPercent)
+  local nValue = Lib.Calc:Link(nLevel, tbCastPercent, bFloat)
+  if bFloat then
+    local nTemp = math.floor(nValue * 100)
+    nValue = nTemp / 100
+  end
+  return nValue
+end
+
+function FightSkill:GetSkillMinPerCastTime(nSkillId)
+  return self.tbAutoSkill[nSkillId].MinPerCastTime
+end
+
+function FightSkill:GetSingleMagicValue(szSkillMagic, nLevel)
+  local tbMagic = load("return " .. szSkillMagic)()
+  local tbRet = {}
+  for i = 1, self.MAGIC_VALUE_NUM do
+    tbRet["nV" .. i] = 0
+  end
+  for i = 1, self.MAGIC_VALUE_NUM do
+    tbRet["nV" .. i] = Lib.Calc:Link(nLevel, tbMagic[i])
+  end
+  return tbRet
+end
+
+function FightSkill:GetFormatValue(szFormat, nLevel)
+  local fnData = load("return " .. szFormat)
+  if not fnData then
+    error(string.format("load failed! FMT = %s, Level = %d", szFormat, nLevel))
+  end
+  local tbPoint = {
+    fnData()
+  }
+  if #tbPoint <= 1 then
+    local varValue = tbPoint[1]
+    if "string" == type(varValue) then
+      return self:GetFormatValue(varValue, nLevel)
+    elseif type(varValue) == "number" then
+      return varValue
+    else
+      error("format error!")
+    end
+  end
+  return Lib.Calc:Link(nLevel, tbPoint)
+end
+
+function FightSkill:GetFormatPoint(szFormat)
+  szFormat = string.gsub(szFormat, "\"", "")
+  local fnData = load("return " .. szFormat)
+  if not fnData then
+    error(string.format("load failed! GetFormatPoint = %s", szFormat))
+  end
+  local tbPoint = {
+    fnData()
+  }
+  if #tbPoint <= 1 then
+    local varValue = tbPoint[1]
+    if type(varValue) == "number" then
+      return varValue
+    end
+  end
+  return tbPoint
+end
+
+function FightSkill:GetPointValue(tbPoint, nLevel)
+  if #tbPoint <= 1 then
+    local varValue = tbPoint[1]
+    if type(varValue) == "string" then
+      return self:GetFormatValue(varValue, nLevel)
+    elseif type(varValue) == "number" then
+      return varValue
+    else
+      error("format error!")
+    end
+  end
+  return Lib.Calc:Link(nLevel, tbPoint)
+end
+
+function FightSkill:AddMagicData(tbMagicDatas)
+  local isSaveSkillName = false
+  if tbMagicDatas.luaName then
+    isSaveSkillName = true
+    self.tbLuaNameClass = self.tbLuaNameClass or {}
+    self.tbLuaNameClass[tbMagicDatas.luaName] = {}
+  end
+  for szSkillName, tbMagics in pairs(tbMagicDatas) do
+    if isSaveSkillName then
+      table.insert(self.tbLuaNameClass[tbMagicDatas.luaName], szSkillName)
+    end
+    self:GetClass(szSkillName).tbMagics = tbMagics
+  end
+end
+
+function FightSkill:GetAllSkillIdByLuaName(szLuaName)
+  if not self.tbSkillIdClass then
+    local tbSkill = Lib:LoadTabFile("Setting/Skill/Skill.tab", {SkillId = 1})
+    self.tbSkillIdClass = {}
+    for k, v in pairs(tbSkill) do
+      self.tbSkillIdClass[v.ClassName] = self.tbSkillIdClass[v.ClassName] or {}
+      table.insert(self.tbSkillIdClass[v.ClassName], v.SkillId)
+    end
+  end
+  local tbSkillId = {}
+  if self.tbLuaNameClass then
+    local tbSingleLuaNameClass = self.tbLuaNameClass[szLuaName]
+    if tbSingleLuaNameClass then
+      for k, skillName in pairs(tbSingleLuaNameClass) do
+        local tbSkillNameClas = self.tbSkillIdClass[skillName]
+        if tbSkillNameClas then
+          tbSkillId = Lib:MergeTable(tbSkillId, tbSkillNameClas)
+        end
+      end
+    elseif me then
+      me.CenterMsg("not found luaName:" .. szLuaName)
+    end
+  end
+  self.tbSkillIdClass = SetReadOnly(self.tbSkillIdClass)
+  return tbSkillId
+end
+
+function FightSkill:GetConflictingSkillList(nSkillId)
+  return FightSkill.tbStateReplaceRegular:GetConflictingSkillList(nSkillId)
+end
+
+function FightSkill:GetStateGroupReplaceType(nSkillId)
+  return FightSkill.tbStateReplaceRegular:GetStateGroupReplaceType(nSkillId)
+end
+
+function FightSkill:CheckCanSkillQuickLvUp(pPlayer)
+  local nCurrentSkillPoint = pPlayer.GetSkillPoint()
+  if nCurrentSkillPoint <= 0 then
+    return false
+  end
+  local tbFactionSkill = FightSkill:GetFactionSkill(pPlayer.nFaction, pPlayer.nFactionSect)
+  for i, v in pairs(tbFactionSkill) do
+    local nSkillId = v.SkillId
+    local isCan, _, _, _ = FightSkill:CheckSkillLeveUp(pPlayer, nSkillId)
+    if true == isCan then
+      return true
+    end
+  end
+  return false
+end
+
+function FightSkill:IsActiveSkill(nIndex)
+  return nIndex >= 2 and nIndex <= 5
+end
+
+function FightSkill:IsFactionSkillStatus(pPlayer, nSubType)
+  return (nSubType or pPlayer.GetUserValue(self.HRS_SAVE_KEY, self.HRS_SUBTYPE_ID)) == self.HRS_SUBTYPE_LIST.FactionSkill
+end
+
+function FightSkill:IsDragonBoatSkillStatus(nSubType)
+  return nSubType == self.HRS_SUBTYPE_LIST.DragonBoatRace
+end
+
+function FightSkill:IsKeYiMenSkillStatus(nSubType)
+  return nSubType == self.HRS_SUBTYPE_LIST.KeYiMenSkill
+end
+
+function FightSkill:IsTongBattleSkillStatus(nSubType)
+  return nSubType == self.HRS_SUBTYPE_LIST.TongBattle1 or nSubType == self.HRS_SUBTYPE_LIST.TongBattle2
+end
+
+function FightSkill:IsDynamicSkillStatus(nSubType)
+  return nSubType == self.HRS_SUBTYPE_LIST.DynamicSkill
+end
+
+function FightSkill:IsCustomSkillStatus(pPlayer, nSubType)
+  return (nSubType or pPlayer.GetUserValue(self.HRS_SAVE_KEY, self.HRS_SUBTYPE_ID)) == self.HRS_SUBTYPE_LIST.CustomSkill
+end
+
+function FightSkill:IsSpecialSkillStatus(nSubType)
+  return self:IsDragonBoatSkillStatus(nSubType) or self:IsKeYiMenSkillStatus(nSubType) or self:IsTongBattleSkillStatus(nSubType) or self:IsDynamicSkillStatus(nSubType)
+end
+
+function FightSkill:GetHRSSubType(pPlayer)
+  return pPlayer.GetUserValue(self.HRS_SAVE_KEY, self.HRS_SUBTYPE_ID)
+end
+
+function FightSkill:GetDynamicPlayerOneSkillWithoutConfig(nSortInUI)
+  local nSkillId = me.GetUserValue(self.HRS_SAVE_KEY, self.HRS_SKILL_ID_LIST[nSortInUI])
+  local nSkillLevel = me.GetSkillLevel(nSkillId)
+  local nSkillInfoLevel = nSkillLevel
+  if not nSkillInfoLevel or nSkillInfoLevel <= 0 then
+    nSkillInfoLevel = 1
+  end
+  local tbSkillInfo = self:GetSkillSetting(nSkillId, nSkillInfoLevel)
+  local nMaxSkillLevel = self:GetSkillMaxLevel(me, nSkillId)
+  local bMax = nSkillLevel >= nMaxSkillLevel
+  local szCurMagicDesc, szNextMagicDesc, szClassName = FightSkill:FormatMagicDesc(nSkillId, nSkillLevel)
+  local tbSkillResultInfo = {
+    nId = nSkillId,
+    nLevel = nSkillLevel,
+    nMaxLevel = nMaxSkillLevel,
+    bMax = bMax,
+    szName = tbSkillInfo.SkillName or "",
+    szDesc = tbSkillInfo.Desc or "",
+    szProperty = tbSkillInfo.Property or "",
+    nCD = tbSkillInfo.TimePerCast or 0,
+    bPassive = tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_passivity or tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_inst_missile,
+    nRadius = tbSkillInfo.AttackRadius or 0,
+    nSort = nSortInUI,
+    szIconAltlas = FightSkill.tbAllSkillSetting[nSkillId].szIconAtlas,
+    szCurMagicDesc = szCurMagicDesc or "",
+    szNextMagicDesc = szNextMagicDesc or "",
+    szClassName = szClassName or "",
+    bNotNextInfo = bMax
+  }
+  if tbSkillResultInfo.IsAura then
+    tbSkillResultInfo.bPassive = true
+  end
+  return tbSkillResultInfo
+end
+
+function FightSkill:GetCustomSkillWithoutConfig(nSortInUI)
+  local nSkillId = me.GetUserValue(self.HRS_SAVE_KEY, self.HRS_SKILL_ID_LIST[nSortInUI])
+  local nSkillLevel = me.GetSkillLevel(nSkillId)
+  local nSkillInfoLevel = nSkillLevel
+  if not nSkillInfoLevel or nSkillInfoLevel <= 0 then
+    nSkillInfoLevel = 1
+  end
+  local tbSkillInfo = self:GetSkillSetting(nSkillId, nSkillInfoLevel)
+  local nMaxSkillLevel = self:GetSkillMaxLevel(me, nSkillId)
+  local bMax = nSkillLevel >= nMaxSkillLevel
+  local szCurMagicDesc, szNextMagicDesc, szClassName = FightSkill:FormatMagicDesc(nSkillId, nSkillLevel)
+  local tbSkillResultInfo = {
+    nId = nSkillId,
+    nLevel = nSkillLevel,
+    nMaxLevel = nMaxSkillLevel,
+    bMax = bMax,
+    szName = tbSkillInfo.SkillName or "",
+    szDesc = tbSkillInfo.Desc or "",
+    szProperty = tbSkillInfo.Property or "",
+    nCD = tbSkillInfo.TimePerCast or 0,
+    bPassive = tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_passivity or tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_inst_missile,
+    nRadius = tbSkillInfo.AttackRadius or 0,
+    nSort = nSortInUI,
+    szIconAltlas = FightSkill.tbAllSkillSetting[nSkillId].szIconAtlas,
+    szCurMagicDesc = szCurMagicDesc or "",
+    szNextMagicDesc = szNextMagicDesc or "",
+    szClassName = szClassName or "",
+    bNotNextInfo = bMax
+  }
+  if tbSkillResultInfo.IsAura then
+    tbSkillResultInfo.bPassive = true
+  end
+  return tbSkillResultInfo
+end
+
+function FightSkill:GetSkillExtendCost(pPlayer, nSkillId)
+  local nMaxSkillLevel = self:GetSkillMaxLevel(pPlayer, nSkillId)
+  local nGroupId = self:GetSkillLevelUpGroupId(nSkillId)
+  local tbSkillExtendSetting = self.tbSkillExtendSetting[nGroupId][nMaxSkillLevel + 1]
+  return tbSkillExtendSetting.nExtendItemId, tbSkillExtendSetting.nExtendCost
+end
+
+function FightSkill:GetSkillExtendTimeFrame(pPlayer, nSkillId)
+  local nMaxSkillLevel = self:GetSkillMaxLevel(pPlayer, nSkillId)
+  local nGroupId = self:GetSkillLevelUpGroupId(nSkillId)
+  return self.tbSkillExtendSetting[nGroupId][nMaxSkillLevel + 1].szExtendFrame
+end
+
+function FightSkill:GetSkillLevelExtendLimit(nSkillId)
+  local nGroupId = self:GetSkillLevelUpGroupId(nSkillId)
+  return self.tbSkillMaxLevelList[nGroupId]
+end
+
+function FightSkill:CheckSkillExtendTimeFrame(pPlayer, nSkillId)
+  local szTimeFrame = self:GetSkillExtendTimeFrame(pPlayer, nSkillId)
+  if not szTimeFrame or 1 == GetTimeFrameState(tostring(szTimeFrame)) then
+    return true
+  end
+  return false
+end
+
+function FightSkill:CanSkillLevelExtend(pPlayer, nSkillId)
+  if pPlayer.IsMaskPlayerFactSkill() then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\230\151\160\230\179\149\230\137\169\229\177\149\230\138\128\232\131\189")
+  end
+  local bRet, szRet = self:CheckSkillLevelExtendOpen(pPlayer, nSkillId)
+  if not bRet then
+    return bRet, szRet
+  end
+  local nItemId, nCostNum = self:GetSkillExtendCost(pPlayer, nSkillId)
+  local nItemCountInBag = pPlayer.GetItemCountInBags(nItemId)
+  if nCostNum > nItemCountInBag then
+    return false, i18n.EasyGet("\231\188\186\229\176\145{0}", KItem.GetItemShowInfo(nItemId))
+  end
+  return true, ""
+end
+
+function FightSkill:CheckSkillLevelExtendOpen(pPlayer, nSkillId)
+  if not pPlayer then
+    return false, i18n.EasyGet("\231\142\169\229\174\182\228\184\141\229\173\152\229\156\168")
+  end
+  if not nSkillId then
+    return false, i18n.EasyGet("\230\138\128\232\131\189\228\184\141\229\173\152\229\156\168")
+  end
+  local _, nBaseLevel = pPlayer.GetSkillLevel(nSkillId)
+  if nBaseLevel < 0 then
+    return false, i18n.EasyGet("\230\178\161\230\156\137\232\142\183\229\190\151\232\175\165\230\138\128\232\131\189")
+  end
+  local bSameFactionSect = self:IsFactionSkill(nSkillId, pPlayer.nFactionSect, pPlayer.nFaction)
+  if not bSameFactionSect then
+    return false, i18n.EasyGet("\233\151\168\230\180\190\232\183\175\231\186\191\228\184\141\231\172\166\229\144\136")
+  end
+  local nFactionLimit = KFightSkill.GetFactionLimit(nSkillId)
+  if pPlayer.nFaction ~= nFactionLimit and nFactionLimit > 0 then
+    return false, i18n.EasyGet("\233\151\168\230\180\190\228\184\141\231\172\166\229\144\136")
+  end
+  local nSkillLevelExtendLimit = self:GetSkillLevelExtendLimit(nSkillId)
+  local nMaxSkillLevel = self:GetSkillMaxLevel(pPlayer, nSkillId)
+  if nSkillLevelExtendLimit <= nMaxSkillLevel then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\230\138\128\232\131\189\229\183\178\231\187\143\230\137\169\229\177\149\229\136\176\228\184\138\233\153\144")
+  end
+  if not self:CheckSkillExtendTimeFrame(pPlayer, nSkillId) then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\230\151\182\233\151\180\232\189\180\230\156\170\229\188\128\230\148\190")
+  end
+  return true, ""
+end
+
+function FightSkill:GetSkillGainLevel(nSkillId)
+  return self.tbAllFactionSkill[nSkillId].GainLevel
+end
+
+function FightSkill:GetSkillIdByLevelUpGroup(pPlayer, nGroupId)
+  return self.tbLevelUpGroup2Skill[nGroupId][pPlayer.nFaction][pPlayer.nFactionSect]
+end

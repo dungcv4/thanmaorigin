@@ -1,0 +1,431 @@
+Require("CommonScript/Item/EquipLianHua/EquipLianHuaCfg.lua")
+Require("CommonScript/AttributeModule/AttributeModule.lua")
+local EquipLianHua = Item.EquipLianHua
+EquipLianHua.ATTR_NUM_LIMIT = 2
+EquipLianHua.nSecretAddSkillLevel = 1
+EquipLianHua.nPartnerProtectAddSkillLevel = 1
+EquipLianHua.SAVE_LIANHUA_GROUP = GetGroupKey("EquipLianHua")
+
+function EquipLianHua:InitSuitEquipNum()
+  self.tbSuit2EquipNum = {}
+  for i, v in ipairs(self.SuitAttrValue) do
+    self.tbSuit2EquipNum[i] = {
+      1,
+      2,
+      #v[0]
+    }
+  end
+end
+
+EquipLianHua:InitSuitEquipNum()
+
+function EquipLianHua:GetLianHuaScoreCfg()
+  local tbInfoCfg
+  for _, tbInfo in ipairs(Item.EquipLianHua.tbGradeScoreInfo) do
+    if 1 == GetTimeFrameState(tbInfo.szTimeFrame) then
+      tbInfoCfg = tbInfo
+    else
+      break
+    end
+  end
+  return tbInfoCfg
+end
+
+function EquipLianHua:GetLianHuaLevel(pPlayer, nEquipPos)
+  if nEquipPos < Item.EQUIPPOS_HELM or nEquipPos > Item.EQUIPPOS_AMULET then
+    return 0
+  end
+  return pPlayer.GetUserValue(self.SAVE_LIANHUA_GROUP, nEquipPos + 1)
+end
+
+function EquipLianHua:CheckIsOpen()
+  if 1 == GetTimeFrameState("OpenLevel59") then
+    return true
+  end
+  return false
+end
+
+function EquipLianHua:CheckEquipLevel(nEquipPos, nLevel)
+  if not self.LianHuaInfo[nEquipPos] then
+    return false
+  end
+  if not self.LianHuaInfo[nEquipPos][nLevel] then
+    return false
+  end
+  return true
+end
+
+function EquipLianHua:GetLianHuaConsumeInfo(nCurLevel, nTargetLevel, nEquipPos)
+  if not self.LianHuaInfo[nEquipPos] then
+    return 0
+  end
+  local tbCfg = self.LianHuaInfo[nEquipPos][nTargetLevel]
+  if not tbCfg then
+    return 0
+  end
+  if self.tbLianHuaConsumeCount[nCurLevel] and self.tbLianHuaConsumeCount[nCurLevel][nTargetLevel - 3] then
+    local nNeedNum = self.tbLianHuaConsumeCount[nCurLevel][nTargetLevel - 3]
+    return tbCfg[1], tbCfg[2], tbCfg[4], nNeedNum
+  else
+    return tbCfg[1], tbCfg[2], tbCfg[4], tbCfg[3]
+  end
+end
+
+function EquipLianHua:CanLianHua(pPlayer, nEquipPos)
+  if not self:CheckIsOpen() then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\229\176\154\230\156\170\229\188\128\229\144\175")
+  end
+  if nEquipPos < 0 or nEquipPos > Item.EQUIPPOS_AMULET then
+    return false, i18n.EasyGet("\232\163\133\229\164\135\228\184\139\230\160\135\229\143\130\230\149\176\233\148\153\232\175\175")
+  end
+  local pEquip = pPlayer.GetEquipByPos(nEquipPos)
+  if not pEquip then
+    return false, i18n.EasyGet("\232\163\133\229\164\135\230\156\170\231\169\191\230\136\180")
+  end
+  local nCurLevel = self:GetLianHuaLevel(pPlayer, nEquipPos)
+  local nEquipLevel = pEquip.nLevel
+  if nCurLevel >= nEquipLevel then
+    return false, i18n.EasyGet("\229\183\178\231\130\188\229\140\150\232\135\179\229\189\147\229\137\141\230\156\128\233\171\152\231\186\167\239\188\140\230\155\180\230\141\162\230\155\180\233\171\152\233\152\182\232\163\133\229\164\135\229\143\175\231\187\167\231\187\173\231\130\188\229\140\150")
+  end
+  local nMinLevelLimit = self.tbMinLeveLimit[nEquipPos]
+  if nEquipLevel < nMinLevelLimit then
+    return false, i18n.EasyGet("")
+  end
+  local nItemId, nNum, nCoin, nMaterialNum = self:GetLianHuaConsumeInfo(nCurLevel, nEquipLevel, nEquipPos)
+  if nItemId <= 0 then
+    return false, i18n.EasyGet("\231\130\188\229\140\150\230\182\136\232\128\151\233\129\147\229\133\183\233\148\153\232\175\175")
+  end
+  local nCurItemNum = pPlayer.GetItemCountByTypeInBag(nItemId)
+  local nCurMaterialNum = pPlayer.GetItemCountByTypeInBag(self.nLianHuaMaterialId)
+  if nNum > nCurItemNum or nMaterialNum > nCurMaterialNum then
+    return false, i18n.EasyGet("\230\157\144\230\150\153\228\184\141\232\182\179")
+  elseif nCoin > pPlayer.GetMoney("Coin") then
+    return false, i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179")
+  end
+  return true
+end
+
+function EquipLianHua:ApplyAttrib(pPlayer, pEquip, nLianHuaLevel)
+  if nLianHuaLevel ~= pEquip.nLevel then
+    return
+  end
+  local tbAttrib = self:GetLianHuaBaseAttrib(pEquip)
+  for i, v in ipairs(tbAttrib) do
+    pPlayer.ApplyMagicAttrib(table.unpack(v))
+    AttributeHelp:LogAttrApply(pPlayer.dwID, "EquipLianHua", table.unpack(v))
+  end
+  self:UpdatePerEquipAttr(pPlayer.GetNpc(), Item.EquipForge:GetAttr(pEquip), pEquip.GetSeries(), pEquip.nEquipPos, pEquip.nLevel, true, pPlayer.dwID)
+end
+
+function EquipLianHua:RemoveAttrib(pPlayer, pEquip)
+  local nLianHuaLevel = self:GetLianHuaLevel(pPlayer, pEquip.nEquipPos)
+  if nLianHuaLevel ~= pEquip.nLevel then
+    return
+  end
+  local tbAttrib = self:GetLianHuaBaseAttrib(pEquip)
+  for i, v in ipairs(tbAttrib) do
+    pPlayer.RemoveMagicAttrib(table.unpack(v))
+    AttributeHelp:LogAttrRemove(pPlayer.dwID, "EquipLianHua", table.unpack(v))
+  end
+  self:UpdatePerEquipAttr(pPlayer.GetNpc(), Item.EquipForge:GetAttr(pEquip), pEquip.GetSeries(), pEquip.nEquipPos, pEquip.nLevel, false, pPlayer.dwID)
+end
+
+function EquipLianHua:GetLianHuaBaseAttrib(pEquip)
+  if not pEquip then
+    return {}
+  end
+  local tbAttrib = pEquip.GetBaseAttrib()
+  local tbRet = {}
+  local nAddPercent = self.tbAddPercent[1]
+  for i, v in ipairs(tbAttrib) do
+    tbRet[i] = {}
+    tbRet[i][1] = v.szName
+    tbRet[i][2] = math.ceil(v.tbValue[1] * nAddPercent / 100)
+    tbRet[i][3] = math.ceil(v.tbValue[2] * nAddPercent / 100)
+    tbRet[i][4] = math.ceil(v.tbValue[3] * nAddPercent / 100)
+  end
+  return tbRet
+end
+
+function EquipLianHua:CheckCanAddLianHuaSeeriesAttr(nColor)
+  if nColor >= 5 then
+    return true
+  end
+  return false
+end
+
+function EquipLianHua:FindSuitCfgByEquipPos(nEquipPos)
+  for k, v in ipairs(self.SuitAttrValue) do
+    for i = 1, #v[0] do
+      if v[0][i] == nEquipPos then
+        return k, v
+      end
+    end
+  end
+end
+
+function EquipLianHua:GetLianHuaSuitName(nSuitIndex)
+  return self.SuitAttrValue[nSuitIndex].szSuitName
+end
+
+function EquipLianHua:GetLianHuaSuitEquipName(nSuitIndex)
+  local tbRet = {}
+  for i, v in ipairs(self.SuitAttrValue[nSuitIndex][0]) do
+    local nItemType = Item.EQUIPPOS_TYPE[v]
+    local szName = i18n.Get(Item:GetNotExtEquipName(nItemType))
+    tbRet[i] = szName
+  end
+  return tbRet
+end
+
+function EquipLianHua:GetSuitAttriActivePosTb(pPlayer, nEquipPos)
+  local _, tbSuitCfg = self:FindSuitCfgByEquipPos(nEquipPos)
+  if not tbSuitCfg then
+    return {}
+  end
+  local tbRet = {}
+  for i, v in ipairs(tbSuitCfg[0]) do
+    local nLianHuaLevel = 0
+    if pPlayer.GetLianHua then
+      nLianHuaLevel = pPlayer.GetLianHua(v + 1)
+    else
+      nLianHuaLevel = self:GetLianHuaLevel(pPlayer, v)
+    end
+    if nLianHuaLevel > 0 then
+      tbRet[i] = v
+    end
+  end
+  return tbRet
+end
+
+function EquipLianHua:OnLianHuaActive(pPlayer, nEquipPos)
+  if pPlayer.IsMaskPlayerAttr() then
+    return
+  end
+  local nIndex, tbSuitCfg = self:FindSuitCfgByEquipPos(nEquipPos)
+  if not tbSuitCfg then
+    return
+  end
+  local nCurCount = 0
+  for i, v in ipairs(tbSuitCfg[0]) do
+    local nLianHuaLevel = self:GetLianHuaLevel(pPlayer, v)
+    if nLianHuaLevel > 0 then
+      nCurCount = nCurCount + 1
+    end
+  end
+  for i, v in ipairs(self.tbSuit2EquipNum[nIndex]) do
+    if v <= nCurCount and v > nCurCount - 1 then
+      pPlayer.ApplyMagicAttrib(table.unpack(tbSuitCfg[i]))
+      AttributeHelp:LogAttrApply(pPlayer.dwID, "EquipLianHua", table.unpack(tbSuitCfg[i]))
+    end
+  end
+end
+
+function EquipLianHua:LoadSuitAttr(pPlayer)
+  for k, v in ipairs(self.SuitAttrValue) do
+    local nAllCount = #v[0]
+    local nCurCount = 0
+    for i = 1, nAllCount do
+      local nLianHuaLevel = self:GetLianHuaLevel(pPlayer, v[0][i])
+      if nLianHuaLevel > 0 then
+        nCurCount = nCurCount + 1
+      end
+    end
+    for i, v1 in ipairs(self.tbSuit2EquipNum[k]) do
+      if v1 <= nCurCount then
+        pPlayer.ApplyMagicAttrib(table.unpack(v[i]))
+        AttributeHelp:LogAttrApply(pPlayer.dwID, "EquipLianHua", table.unpack(v[i]))
+      end
+    end
+  end
+end
+
+function EquipLianHua:RemoveSelfSuitAttr()
+  self:RemoveSuitAttr(me)
+end
+
+function EquipLianHua:CheckCanAddGradeScoreEffect(szTimeFrame, nAllLevel)
+  local bCanAddSecretBook = false
+  local bCanAddPartner = false
+  for index, tbInfo in ipairs(Item.EquipLianHua.tbGradeScoreInfo) do
+    if tbInfo.szTimeFrame == szTimeFrame then
+      if nAllLevel >= tbInfo.nSecBookNeedLevel then
+        bCanAddSecretBook = true
+      end
+      if nAllLevel >= tbInfo.nPartnerNeedLevel then
+        bCanAddPartner = true
+      end
+      break
+    end
+  end
+  return bCanAddSecretBook, bCanAddPartner
+end
+
+function EquipLianHua:GetLianHuaLevelCount(pPlayer)
+  local nAllLevel = 0
+  for nEquipPos = Item.EQUIPPOS_HELM, Item.EQUIPPOS_AMULET do
+    local nLevel = self:GetLianHuaLevel(pPlayer, nEquipPos)
+    nAllLevel = nAllLevel + nLevel
+  end
+  return nAllLevel
+end
+
+function EquipLianHua:RemoveSuitAttr(pPlayer)
+  for k, v in ipairs(self.SuitAttrValue) do
+    local nAllCount = #v[0]
+    local nCurCount = 0
+    for i = 1, nAllCount do
+      local nLianHuaLevel = self:GetLianHuaLevel(pPlayer, v[0][i])
+      if nLianHuaLevel > 0 then
+        nCurCount = nCurCount + 1
+      end
+    end
+    for i, v1 in ipairs(self.tbSuit2EquipNum[k]) do
+      if v1 <= nCurCount then
+        pPlayer.RemoveMagicAttrib(table.unpack(v[i]))
+        AttributeHelp:LogAttrRemove(pPlayer.dwID, "EquipLianHua", table.unpack(v[i]))
+      end
+    end
+  end
+end
+
+function EquipLianHua:OnEquip(pPlayer)
+  self:LoadSuitAttr(pPlayer)
+end
+
+function EquipLianHua:OnUnEquip(pPlayer)
+  self:RemoveSuitAttr(pPlayer)
+end
+
+function EquipLianHua:UpdateAllEquipAttr(pNpc, tbEquipList, bIsApply, tbLianhuaLevel, nPlayerId)
+  for i = Item.EQUIPPOS_HELM, Item.EQUIPPOS_AMULET do
+    local pEquip = tbEquipList[i]
+    if pEquip and tbLianhuaLevel and tbLianhuaLevel[i] and tbLianhuaLevel[i] == pEquip.nLevel then
+      local nEquipSeries = pEquip.GetSeries()
+      local tbAttrList = Item.EquipForge:GetAttr(pEquip)
+      self:UpdatePerEquipAttr(pNpc, tbAttrList, nEquipSeries, pEquip.nEquipPos, pEquip.nLevel, bIsApply, nPlayerId)
+    end
+  end
+end
+
+function EquipLianHua:UpdatePerEquipAttr(pNpc, tbAttrList, nEquipSeries, nEquipPos, nEquipLevel, bIsApply, nPlayerId)
+  local nAddPercent = self.tbAddPercent[2]
+  for k, v in ipairs(tbAttrList) do
+    local nGroupId, nLv = table.unpack(v)
+    local _, nColor = Item.EquipForge:ColorAttr(nEquipPos, nEquipLevel, nLv)
+    local tbSetting = FightSkill:GetExternAttrib(nGroupId, nLv)
+    if tbSetting then
+      for _, tbInfo in ipairs(tbSetting) do
+        local szMagic = tbInfo.szAttribName
+        szMagic = Item.EquipForge.ATTR_CONVERT[szMagic] and Item.EquipForge.ATTR_CONVERT[szMagic][nEquipSeries] or szMagic
+        if self:CheckCanAddLianHuaSeeriesAttr(nColor) then
+          local tbV = {}
+          for key, value in ipairs(tbInfo.tbValue) do
+            tbV[key] = math.ceil(value * nAddPercent / 100)
+          end
+          if bIsApply then
+            pNpc.ApplyMagicAttrib(szMagic, table.unpack(tbV))
+            if nPlayerId then
+              AttributeHelp:LogAttrApply(nPlayerId, "EquipLianHua", szMagic, table.unpack(tbV))
+            end
+          else
+            pNpc.RemoveMagicAttrib(szMagic, table.unpack(tbV))
+            if nPlayerId then
+              AttributeHelp:LogAttrRemove(nPlayerId, "EquipLianHua", szMagic, table.unpack(tbV))
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+AttributeModule:Register("EquipLianHua", EquipLianHua)
+
+function EquipLianHua:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  for k, v in ipairs(Item.EquipLianHua.SuitAttrValue) do
+    local nAllCount = #v[0]
+    local nCurCount = 0
+    for i = 1, nAllCount do
+      local nLianHuaLevel = pPlayerAsync.GetLianHua(v[0][i] + 1)
+      if nLianHuaLevel and nLianHuaLevel > 0 then
+        nCurCount = nCurCount + 1
+      end
+    end
+    for i, v1 in ipairs(Item.EquipLianHua.tbSuit2EquipNum[k]) do
+      if v1 <= nCurCount then
+        pNpc.ApplyMagicAttrib(table.unpack(v[i]))
+      end
+    end
+  end
+end
+
+function EquipLianHua:onApplyRobotNpcEquip(pPlayerAsync, pNpc, pEquip)
+  if pPlayerAsync.GetLianHua(pEquip.nEquipPos + 1) ~= pEquip.nLevel then
+    return
+  end
+  local tbAttrib = self:GetLianHuaBaseAttrib(pEquip)
+  for i, v in ipairs(tbAttrib) do
+    pNpc.ApplyMagicAttrib(table.unpack(v))
+  end
+  self:UpdatePerEquipAttr(pNpc, Item.EquipForge:GetAttr(pEquip), pEquip.GetSeries(), pEquip.nEquipPos, pEquip.nLevel, true)
+end
+
+function EquipLianHua:onApplyEquip(pPlayer, pEquip)
+  self:ApplyAttrib(pPlayer, pEquip, self:GetLianHuaLevel(pPlayer, pEquip.nEquipPos))
+end
+
+function EquipLianHua:onRemoveEquip(pPlayer, pEquip)
+  self:RemoveAttrib(pPlayer, pEquip, self:GetLianHuaLevel(pPlayer, pEquip.nEquipPos))
+end
+
+Item:RegisterEquipModule({
+  Item.EQUIPPOS_HELM,
+  Item.EQUIPPOS_ARMOR,
+  Item.EQUIPPOS_BELT,
+  Item.EQUIPPOS_CUFF,
+  Item.EQUIPPOS_BOOTS,
+  Item.EQUIPPOS_WEAPON,
+  Item.EQUIPPOS_NECKLACE,
+  Item.EQUIPPOS_RING,
+  Item.EQUIPPOS_PENDANT,
+  Item.EQUIPPOS_AMULET
+}, "EquipLianHua", EquipLianHua)
+
+function EquipLianHua:LoadFightPowerSetting()
+  self.tbEquipLianHuaSetting = {}
+  local nMaterialVal = KItem.GetBaseValue(self.nLianHuaMaterialId)
+  for nPos, tbLianHuaInfo in pairs(self.LianHuaInfo) do
+    self.tbEquipLianHuaSetting[nPos] = {}
+    self.tbEquipLianHuaSetting[nPos][0] = 0
+    for nLevel, tbV in pairs(tbLianHuaInfo) do
+      local nItemId, nNum, _, _ = self:GetLianHuaConsumeInfo(0, nLevel, nPos)
+      if nItemId > 0 then
+        local nMaterialNum = tbV[3]
+        self.tbEquipLianHuaSetting[nPos][nLevel] = KItem.GetBaseValue(nItemId) * nNum + nMaterialVal * nMaterialNum
+      else
+        self.tbEquipLianHuaSetting[nPos][nLevel] = 0
+      end
+    end
+  end
+end
+
+function EquipLianHua:CalcFightPower(pPlayer, szType)
+  local nEquipLianHuaFightPower = 0
+  for nPos = Item.EQUIPPOS_HELM, Item.EQUIPPOS_AMULET do
+    nEquipLianHuaFightPower = nEquipLianHuaFightPower + self:GetEquipLianHuaPower(pPlayer, nPos)
+  end
+  return nEquipLianHuaFightPower
+end
+
+function EquipLianHua:GetEquipLianHuaPower(pPlayer, nPos)
+  if not nPos or not self.tbEquipLianHuaSetting[nPos] then
+    return 0
+  end
+  local nLevel = self:GetLianHuaLevel(pPlayer, nPos)
+  return math.floor(self.tbEquipLianHuaSetting[nPos][nLevel] / FightPower.Cfg.nItemValue2Power)
+end
+
+FightPower:RegisterFPSystemModule({
+  "EquipLianHua"
+}, EquipLianHua)

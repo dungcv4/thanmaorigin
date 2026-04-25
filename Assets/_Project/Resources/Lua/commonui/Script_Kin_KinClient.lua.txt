@@ -1,0 +1,1486 @@
+Kin.GatherState = {
+  Question = 1,
+  Run = 2,
+  Task = 3
+}
+
+function Kin:GetCareerMaxCount(nCareer)
+  local nLevel = Kin:GetLevel()
+  return Kin:GetMaxMember(nLevel or 1, nCareer)
+end
+
+Kin._CacheData = Kin._CacheData or {}
+Kin.nJoinKinTime = Kin.nJoinKinTime or 0
+
+function Kin:CacheData(szKey, tbData, nVersion)
+  Kin._CacheData[szKey] = {tbData = tbData, nVersion = nVersion}
+end
+
+function Kin:GetData(szKey)
+  local tbCache = Kin._CacheData[szKey]
+  if tbCache then
+    return tbCache.tbData, tbCache.nVersion
+  end
+end
+
+function Kin:GetLevel()
+  local tbBuildingData = Kin:GetBuildingData(Kin.Def.Building_Main)
+  if tbBuildingData then
+    return tbBuildingData.nLevel
+  end
+  local tbBaseInfo = Kin:GetData("BaseInfo") or {}
+  return tbBaseInfo.nLevel or 1
+end
+
+function Kin:GetBuildingOpenLevel(nBuildingId)
+  if nBuildingId == Kin.Def.Building_Main then
+    return Kin:GetMainBuildingOpenLevel()
+  else
+    local nMaxLevel = Kin:GetBuildingMaxLevel(nBuildingId)
+    if 1 == nMaxLevel then
+      return 1
+    end
+    local nMainLevel = Kin:GetLevel()
+    local nNextLevel = Kin:GetBuildingLevel(nBuildingId) + 1
+    local bCanLevelup, nMainBuildeRequre = Kin:CanLevelUp(nBuildingId, nNextLevel, nMainLevel)
+    return bCanLevelup and nNextLevel or nNextLevel - 1
+  end
+end
+
+function Kin:GetBuildingData(nBuildingId)
+  local tbBuilding = Kin:GetAllBuildingData() or {}
+  return tbBuilding[nBuildingId]
+end
+
+function Kin:GetBuildingNextLevelCost(nBuildingType, bCanUp)
+  local nBuildingLevel = self:GetBuildingLevel(nBuildingType)
+  local nMaxLevel = not bCanUp and self:GetCurMaxBuildingLevel(nBuildingType) or self:GetBuildingMaxLevel(nBuildingType)
+  if nBuildingLevel >= nMaxLevel then
+    return 0
+  end
+  local tbLevelInfo = Kin:GetBuildingInfo(nBuildingType, nBuildingLevel + 1)
+  if not tbLevelInfo then
+    return 0
+  end
+  local nMaxMainLevel = self:GetCurMaxBuildingLevel(Kin.Def.Building_Main)
+  local nDiscount = self:GetBuildingUpGradeDiscount(nBuildingType, nMaxMainLevel - nBuildingLevel)
+  return math.ceil(tbLevelInfo.nLevelUpCost * nDiscount)
+end
+
+function Kin:OnSyncBuildingData(tbBuildingData, nVersion, bLevelUp)
+  Kin:CacheData("BuildingData", tbBuildingData, nVersion)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, "Building", bLevelUp)
+  self:CheckBuildingLevelUp()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_KINSKILL_SYNC_DATA)
+end
+
+function Kin:GetFund()
+  local tbBaseInfo = self:GetBaseInfo()
+  return tbBaseInfo and tbBaseInfo.nFund or 0
+end
+
+function Kin:GetAllBuildingData()
+  return Kin:GetData("BuildingData") or {}
+end
+
+function Kin:UpdateBuildingData()
+  if not Kin:HasKin() then
+    return
+  end
+  local _, nVersion = Kin:GetAllBuildingData()
+  RemoteServer.OnKinRequest("SyncBuildingData", nVersion)
+end
+
+function Kin:BuildingUpgrade(nBuildingId)
+  RemoteServer.OnKinRequest("UpgradeBuilding", nBuildingId)
+end
+
+function Kin:FakeKinBuildingRedPoint()
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinBuilding)
+end
+
+function Kin:CheckBuildingLevelUp()
+  local nCareer = self:GetMyCareer()
+  if not nCareer or nCareer > Kin.Def.Career_ViceMaster then
+    self:FakeKinBuildingRedPoint()
+    return
+  end
+  local nBuildingType = Kin.Def.Building_Main
+  local nCurLevel = self:GetBuildingLevel(nBuildingType)
+  local nMaxLevel = self:GetCurMaxBuildingLevel(nBuildingType)
+  if nCurLevel >= nMaxLevel then
+    self:FakeKinBuildingRedPoint()
+    return
+  end
+  local tbLevelInfo = self:GetBuildingInfo(nBuildingType, nCurLevel + 1)
+  local nMainLevel = self:GetBuildingLevel(Kin.Def.Building_Main)
+  if nMainLevel < tbLevelInfo.nMainBuildingRequire then
+    self:FakeKinBuildingRedPoint()
+    return
+  end
+  local nMaxMainLevel = self:GetCurMaxBuildingLevel(Kin.Def.Building_Main)
+  local nDiscount = self:GetBuildingUpGradeDiscount(nBuildingType, nMaxMainLevel - nCurLevel)
+  local nFund = self:GetFund()
+  if nFund < math.ceil(tbLevelInfo.nLevelUpCost * nDiscount) then
+    self:FakeKinBuildingRedPoint()
+    return
+  end
+  RedPointMgr:LightRedPoint(RedPointMgr.EVENT.KinBuilding)
+end
+
+function Kin:GetKinSkillLimitedValue()
+  local nBuildingLevel = self:GetBuildingLevel(Kin.Def.Building_Skill)
+  local tbUpCfg = Kin:GetBuildUpgradeSetting(Kin.Def.Building_Skill)
+  return tbUpCfg[nBuildingLevel].nLimitedValue
+end
+
+function Kin:ClearCache()
+  Kin._CacheData = {}
+end
+
+function Kin:HasKin()
+  return 0 ~= me.dwKinId
+end
+
+function Kin:IsSameKin(nKinId)
+  return 0 ~= me.dwKinId and me.dwKinId == nKinId
+end
+
+function Kin:GetCreateTime()
+  local tbBase = self:GetBaseInfo()
+  return tbBase and tbBase.nCreateTime
+end
+
+function Kin:GetKinName()
+  if not self:HasKin() then
+    return ""
+  end
+  local tbBase = self:GetBaseInfo()
+  return tbBase and tbBase.szName
+end
+
+function Kin:GetKinNameByNpcID(nNpcID)
+  if me.dwID == nNpcID then
+    return self:GetKinName()
+  end
+  local pNpc = KNpc.GetById(nNpcID)
+  if not pNpc then
+    return ""
+  end
+  if not pNpc.szKinTitle then
+    return ""
+  end
+  return pNpc.szKinTitle
+end
+
+function Kin:OnKinJoined(nKinId, szKinTitle, bLeader)
+  if Ui:WindowVisible("UITongList") then
+    Ui:CloseWindow("UITongList")
+    Ui:CloseWindow("UICreateTong")
+    Ui:OpenWindow("UITong")
+  end
+  LocalData:SetRoleBoolean("FirstJoinKin", true)
+  me.dwKinId = nKinId
+  me.szKinTitle = szKinTitle
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, "New", bLeader)
+  Kin:ClearKinJoinGuide()
+  self:UpdateBaseInfo()
+  self:UpdateBuildingData()
+  self:UpdateRedPoint(true)
+  KinFreightTask:OnCheckRedPoint()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_JOIN_KIN)
+end
+
+function Kin:GetMyMemberData()
+  return self:GetMemberData(me.dwID)
+end
+
+function Kin:GetMyCareer()
+  if not Kin:HasKin() then
+    return
+  end
+  local myMemberData = Kin:GetMyMemberData()
+  if not myMemberData then
+    local tbBaseInfo = self:GetBaseInfo()
+    return tbBaseInfo and tbBaseInfo.nCareer
+  else
+    return myMemberData.nCareer
+  end
+end
+
+function Kin:CheckCanChatInCommand()
+  local authority = Kin.Def.Authority_CommanderChat
+  local nCareer
+  if Kin:AmIMaster() then
+    nCareer = Kin.Def.Career_Master
+  else
+    local myMemberData = Kin:GetMyMemberData()
+    if myMemberData and myMemberData.tbAuthority and myMemberData.tbAuthority[authority] then
+      return true
+    end
+    nCareer = self:GetMyCareer()
+  end
+  if not nCareer then
+    return false
+  end
+  local careerAuthority = Kin.Def.Career_Authority[nCareer] or {}
+  return careerAuthority[authority]
+end
+
+function Kin:CheckMyAuthority(authority)
+  local nCareer
+  if Kin:AmIMaster() then
+    nCareer = Kin.Def.Career_Master
+  else
+    nCareer = self:GetMyCareer()
+  end
+  if not nCareer then
+    return
+  end
+  local careerAuthority = Kin.Def.Career_Authority[nCareer] or {}
+  if careerAuthority[authority] then
+    return true
+  end
+  return false
+end
+
+function Kin:CheckCanKickOut(nCareer)
+  if not Kin:CheckMyAuthority(Kin.Def.Authority_KickOut) then
+    return false
+  end
+  if not nCareer then
+    return false
+  end
+  local nMyCareer = self:GetMyCareer()
+  if nMyCareer ~= Kin.Def.Career_Master and nCareer < Kin.Def.Career_Elite then
+    return false
+  end
+  return true
+end
+
+function Kin:KickOutMember(nMemberId)
+  local tbData = Kin:GetMemberData(nMemberId)
+  if not tbData or not tbData.nCareer then
+    return
+  end
+  if not self:CheckCanKickOut(tbData.nCareer) then
+    return
+  end
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\231\161\174\232\174\164\229\176\134\231\142\169\229\174\182{0}\232\184\162\229\135\186\229\174\182\230\151\143\229\144\151\239\188\159", tbData.szName), {
+    {
+      function()
+        RemoteServer.OnKinRequest("KickOutMember", nMemberId)
+      end
+    },
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function Kin:ClearKinJoinGuide()
+end
+
+function Kin:OnSyncChatForbid(tbChatForbid)
+  Kin:CacheData("ChatForbid", tbChatForbid)
+end
+
+function Kin:GetChatForbid()
+  return Kin:GetData("ChatForbid")
+end
+
+function Kin:CheckCanChatForbid(nMemberId, nCareer)
+  if nMemberId == me.dwID then
+    return false
+  end
+  if not self:CheckMyAuthority(Kin.Def.Authority_ChatForbid) then
+    return false
+  end
+  local nMyCareer = self:GetMyCareer()
+  if not (nCareer and nMyCareer) or nCareer <= nMyCareer then
+    return false
+  end
+  local tbChatForbid = self:GetChatForbid()
+  if tbChatForbid and tbChatForbid[nMemberId] then
+    return false
+  end
+  return true
+end
+
+function Kin:ChatForbid(nMemberId)
+  local tbData = self:GetMemberData(nMemberId)
+  if not tbData or not tbData.nCareer then
+    return
+  end
+  if not self:CheckCanChatForbid(tbData.nMemberId, tbData.nCareer) then
+    return
+  end
+  RemoteServer.OnKinRequest("ChatForbid", nMemberId)
+end
+
+function Kin:CheckCanChatUnforbid(nMemberId, nCareer)
+  if nMemberId == me.dwID then
+    return false
+  end
+  if not self:CheckMyAuthority(Kin.Def.Authority_ChatForbid) then
+    return false
+  end
+  local nMyCareer = self:GetMyCareer()
+  if not (nCareer and nMyCareer) or nCareer <= nMyCareer then
+    return false
+  end
+  local tbChatForbid = self:GetChatForbid()
+  if not tbChatForbid or not tbChatForbid[nMemberId] then
+    return false
+  end
+  return true
+end
+
+function Kin:ChatUnforbid(nMemberId)
+  local tbData = self:GetMemberData(nMemberId)
+  if not tbData or not tbData.nCareer then
+    return
+  end
+  if not self:CheckCanChatUnforbid(tbData.nMemberId, tbData.nCareer) then
+    return
+  end
+  RemoteServer.OnKinRequest("ChatUnforbid", nMemberId)
+end
+
+function Kin:Create(szKinName, szAddDeclare)
+  if Kin:HasKin() then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.AlreadyJoinKin))
+    return false
+  end
+  if me.nLevel < Kin.Cfg.nLevelLimit then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.LevelLimit, Kin.Cfg.nLevelLimit))
+    return false
+  end
+  if not szKinName or "" == szKinName then
+    me.CenterMsg(i18n.EasyGet("\232\175\183\232\190\147\229\133\165\229\174\182\230\151\143\229\144\141\229\173\151"))
+    return false
+  end
+  szKinName = ChatMgr:Filter4CharString(szKinName)
+  if string.find(szKinName, "%s") then
+    me.CenterMsg(i18n.EasyGet("\229\174\182\230\151\143\229\144\141\229\189\147\228\184\173\228\184\141\229\143\175\229\144\171\230\156\137\231\169\186\230\160\188"))
+    return false
+  end
+  if ReplaceLimitWords(szKinName) then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.IllegalChar))
+    return false
+  end
+  local nNameLen = Lib:StrLen(szKinName)
+  if nNameLen > Kin.Cfg.nMaxKinNameLength or nNameLen < Kin.Cfg.nMinKinNameLength then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.KinNameLengthLimit, Kin.Cfg.nMinKinNameLength, Kin.Cfg.nMaxKinNameLength))
+    return false
+  end
+  if "" ~= szAddDeclare and ReplaceLimitWords(szAddDeclare) then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.IllegalChar))
+    return false
+  end
+  local bOk, nMin, nMax = Lib:CheckLength(szAddDeclare, i18n.CurrentLanguageCode(), 0, Kin.Cfg.nMaxAddDeclareLength)
+  if not bOk then
+    me.CenterMsg(i18n.EasyGet("\229\174\182\230\151\143\229\174\163\232\168\128\232\182\133\232\191\135\228\186\134\230\156\128\229\164\167{0}\228\184\170\229\173\151\230\149\176\231\154\132\233\153\144\229\136\182", nMax))
+    return false
+  end
+  if me.GetMoney("YuanBao") < Kin.Cfg.nCreateKinNeedYuanBao then
+    me.CenterMsg(i18n.EasyGet("\229\133\131\229\174\157\228\184\141\232\182\179{0}", Kin.Cfg.nCreateKinNeedYuanBao))
+    return false
+  end
+  RemoteServer.OnKinRequest("Create", szKinName, szAddDeclare)
+  return true
+end
+
+function Kin:ChangeName(szKinName, bFree)
+  if not Kin:HasKin() then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.NoJoinKin))
+    return false
+  end
+  if not self:CheckMyAuthority(Kin.Def.Authority_ChangeName) then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.PermissionDenied))
+    return false
+  end
+  if not szKinName or "" == szKinName then
+    return false
+  end
+  szKinName = ChatMgr:Filter4CharString(szKinName)
+  if string.find(szKinName, "%s") then
+    me.CenterMsg(i18n.EasyGet("\229\174\182\230\151\143\229\144\141\229\189\147\228\184\173\228\184\141\229\143\175\229\144\171\230\156\137\231\169\186\230\160\188"))
+    return false
+  end
+  if ReplaceLimitWords(szKinName) then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.IllegalChar))
+    return false
+  end
+  local nNameLen = Lib:StrLen(szKinName)
+  if nNameLen > Kin.Cfg.nMaxKinNameLength or nNameLen < Kin.Cfg.nMinKinNameLength then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.KinNameLengthLimit, Kin.Cfg.nMinKinNameLength, Kin.Cfg.nMaxKinNameLength))
+    return false
+  end
+  if not bFree and me.GetMoney("YuanBao") < Kin.Cfg.nChangNameCost then
+    me.CenterMsg(i18n.EasyGet("\229\133\131\229\174\157\228\184\141\232\182\179{0}", Kin.Cfg.nChangNameCost))
+    return false
+  end
+  RemoteServer.OnKinRequest("ChangeName", szKinName)
+  return true
+end
+
+function Kin:Invite(nPlayerId)
+  assert(nPlayerId)
+  if not Kin:HasKin() then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.NoJoinKin))
+    return
+  end
+  RemoteServer.OnKinRequest("Invite", nPlayerId)
+end
+
+function Kin:OnInvited(szInviter, szKinName, nKinId)
+  if self:HasKin() then
+    return
+  end
+  Ui:SynNotifyMsg({
+    szType = "KinInvited",
+    nTimeOut = GetTime() + 300,
+    szInviter = szInviter,
+    szKinName = szKinName,
+    nKinId = nKinId
+  })
+end
+
+function Kin:AgreeInvite(nKinId)
+  RemoteServer.OnKinRequest("AgreeInvite", nKinId)
+end
+
+function Kin:SetMemberState(tbOnlineMembers)
+  Kin:CacheData("OnlineMembers", tbOnlineMembers)
+end
+
+function Kin:GetMemberState()
+  return Kin:GetData("OnlineMembers")
+end
+
+function Kin:SetMemberCareer(tbMemberCareer, nVersion)
+  Kin:CacheData("MemberCareer", tbMemberCareer, nVersion)
+end
+
+function Kin:GetMemberCareer()
+  return Kin:GetData("MemberCareer")
+end
+
+function Kin:UpdateMemberCareer()
+  local _, nVersion = Kin:GetMemberCareer()
+  RemoteServer.OnKinRequest("SyncKinCareer", nVersion)
+end
+
+function Kin:GetMemberCareerCount(nCareer)
+  local tbMemberList = self:GetMemberList() or {}
+  
+  local function fnEqual(tbMember, nCareer)
+    return tbMember.nCareer == nCareer
+  end
+  
+  return Lib:GetCountInTable(tbMemberList, fnEqual, nCareer)
+end
+
+function Kin:GetMemberCareerInfo(nCareer)
+  local tbMemberList = self:GetMemberList() or {}
+  
+  local function fnEqual(tbMember, nCareer)
+    return tbMember.nCareer == nCareer
+  end
+  
+  local nCount = 0
+  local tbCareerPos = {}
+  for _, tbItem in pairs(tbMemberList) do
+    if fnEqual(tbItem, nCareer) then
+      nCount = nCount + 1
+      if tbItem.nCareerPos then
+        tbCareerPos[tbItem.nCareerPos] = tbItem.nMemberId
+      end
+    end
+  end
+  return nCount, tbCareerPos
+end
+
+function Kin:OnSyncBaseInfo(tbBaseInfo, nVersion, nCareer)
+  tbBaseInfo.nCareer = nCareer
+  Kin:CacheData("BaseInfo", tbBaseInfo, nVersion)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, "BaseInfo")
+  self:CheckBuildingLevelUp()
+end
+
+function Kin:GetBaseInfo()
+  return Kin:GetData("BaseInfo")
+end
+
+function Kin:UpdateBaseInfo()
+  if not Kin:HasKin() then
+    return
+  end
+  local _, nVersion = Kin:GetBaseInfo()
+  RemoteServer.OnKinRequest("SyncKinBaseInfo", nVersion)
+end
+
+function Kin:GetMasterId()
+  local tbBaseInfo = self:GetBaseInfo()
+  return tbBaseInfo and tbBaseInfo.nMasterId
+end
+
+function Kin:AmIMaster()
+  return self:GetMasterId() == me.dwID
+end
+
+function Kin:AmICareer(nCareer)
+  if not self:HasKin() then
+    return
+  end
+  local tbMember = self:GetMemberData(me.dwID)
+  if not tbMember then
+    return
+  end
+  return tbMember.nCareer == nCareer
+end
+
+function Kin:GetMemberData(nId)
+  local tbMemberList = Kin:GetData("MemberList") or {}
+  for _, tbData in pairs(tbMemberList) do
+    if tbData.nMemberId == nId then
+      return tbData
+    end
+  end
+end
+
+function Kin:InsertClientMember(tbCacheMember, tbCacheMap, tbMember)
+  if tbCacheMap[tbMember.nMemberId] then
+    for k, v in pairs(tbCacheMember) do
+      if v.nMemberId == tbMember.nMemberId then
+        table.remove(tbCacheMember, k)
+        break
+      end
+    end
+  end
+  table.insert(tbCacheMember, tbMember)
+  tbCacheMap[tbMember.nMemberId] = tbMember
+end
+
+function Kin:DeleteClientMember(tbCacheMember, tbCacheMap, tbMember)
+  if tbCacheMap[tbMember.nMemberId] then
+    for k, v in pairs(tbCacheMember) do
+      if v.nMemberId == tbMember.nMemberId then
+        table.remove(tbCacheMember, k)
+        break
+      end
+    end
+  end
+  tbCacheMap[tbMember.nMemberId] = nil
+end
+
+function Kin:OnSyncMemberList(tbMemberList)
+  local tbCacheMember, nVersion, tbCacheMap = self:GetMemberList()
+  local tbOnlineMembers = self:GetMemberState() or {}
+  tbCacheMember = tbCacheMember or {}
+  nVersion = nVersion or 0
+  tbCacheMap = tbCacheMap or {}
+  for _, tbMember in pairs(tbMemberList) do
+    if not tbMember.bDelete then
+      self:InsertClientMember(tbCacheMember, tbCacheMap, tbMember)
+      tbOnlineMembers[tbMember.nMemberId] = 1 == tbMember.nIsOnLine and true or nil
+    else
+      self:DeleteClientMember(tbCacheMember, tbCacheMap, tbMember)
+      tbOnlineMembers[tbMember.nMemberId] = nil
+    end
+  end
+  Kin:CacheData("MemberList", tbCacheMember, nVersion)
+  Kin:CacheData("MemberMap", tbCacheMap, 0)
+  self:SetMemberState(tbOnlineMembers)
+end
+
+function Kin:OnSyncMemberListEnd(nSyncVersion)
+  local tbCacheMember, _ = self:GetMemberList()
+  Kin:CacheData("MemberList", tbCacheMember, nSyncVersion)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, "MemberList")
+  self:NotifySalaryRedPoint()
+  self:CheckBuildingLevelUp()
+end
+
+function Kin:GetMemberList()
+  local tbCacheMember, nVersion = Kin:GetData("MemberList")
+  local tbCacheMap, nMapVersion = Kin:GetData("MemberMap")
+  return tbCacheMember, nVersion, tbCacheMap, nMapVersion
+end
+
+function Kin:UpdateMemberList(bForceUpdate)
+  self.nKinMemberListLastUpdateTime = self.nKinMemberListLastUpdateTime or 0
+  local nCurTime = GetTime()
+  local bForce = bForceUpdate or false
+  if not bForce and nCurTime - self.nKinMemberListLastUpdateTime < 1 then
+    return
+  else
+    self.nKinMemberListLastUpdateTime = nCurTime
+  end
+  local _, nVersion = Kin:GetMemberList()
+  if bForceUpdate then
+    nVersion = nil
+  end
+  RemoteServer.OnKinRequest("SyncKinMemberInfo", nVersion)
+end
+
+function Kin:ClearUpdateTime()
+  self.nKinMemberListLastUpdateTime = 0
+end
+
+function Kin:GetMemberMaxLevel()
+  local tbMembers = self:GetMemberList()
+  local nMaxLevel = 0
+  for _, member in pairs(tbMembers or {}) do
+    if nMaxLevel < member.nLevel then
+      nMaxLevel = member.nLevel
+    end
+  end
+  return nMaxLevel
+end
+
+function Kin:RequestChangeMaster(nMemberId)
+  local function fnChangeCareer()
+    RemoteServer.OnKinRequest("RequestChangeMaster", nMemberId)
+  end
+  
+  local function fnNoticeChange()
+    local szTip = i18n.EasyGet("\228\189\160\230\152\175\229\144\166\232\166\129\229\176\134<color=#ffff0e> \230\151\143\233\149\191 </color>\232\129\140\228\189\141\228\188\160\228\189\141\231\187\153\229\136\171\228\186\186\239\188\159\n\228\188\160\228\189\141\229\144\142\228\189\160\229\176\134\230\136\144\228\184\186\230\153\174\233\128\154\230\136\144\229\145\152\227\128\130\239\188\136\228\188\160\228\189\141\230\151\182\239\188\140\229\133\182\228\187\150\228\187\187\229\145\189\229\176\134\230\151\160\230\149\136\227\128\130\239\188\137")
+    me.MsgBox(szTip, {
+      {
+        i18n.szOk,
+        function()
+          fnChangeCareer()
+        end
+      },
+      {
+        i18n.szCancel
+      }
+    })
+  end
+  
+  fnNoticeChange()
+end
+
+function Kin:ChangeCareers(tbCancelMember, tbSetCareerMember)
+  RemoteServer.OnKinRequest("ChangeCareers", tbCancelMember, tbSetCareerMember)
+end
+
+function Kin:ApplyKin(nKinId)
+  if 0 ~= me.dwKinId then
+    me.CenterMsg(i18n.EasyGet("\229\183\178\229\138\160\229\133\165\229\174\182\230\151\143"))
+    return false
+  end
+  if me.nLevel < Kin.Cfg.nLevelLimit then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.LevelLimit, Kin.Cfg.nLevelLimit))
+    return false
+  end
+  RemoteServer.OnKinRequest("Apply", nKinId)
+  return true
+end
+
+function Kin:ApplyApplyer(nPlayerId)
+  if 0 ~= me.dwKinId then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.AlreadyJoinKin))
+    return false
+  end
+  if me.nLevel < Kin.Cfg.nLevelLimit then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.LevelLimit, Kin.Cfg.nLevelLimit))
+    return false
+  end
+  RemoteServer.OnKinRequest("ApplyPlayer", nPlayerId)
+end
+
+function Kin:AgreeApply(nApplyerId)
+  RemoteServer.OnKinRequest("AgreeApply", nApplyerId)
+end
+
+function Kin:DisAgreeApply(nApplyerId)
+  RemoteServer.OnKinRequest("DisagreeApply", nApplyerId)
+end
+
+function Kin:CleanApplyList()
+  RemoteServer.OnKinRequest("CleanApplyerList")
+  Kin:CacheData("ApplyList", {})
+  self:NotifyApplyRefresh()
+end
+
+function Kin:OnSyncApplyerList(tbApplyList, nVersion)
+  Kin:CacheData("ApplyList", tbApplyList, nVersion)
+  self:NotifyApplyRefresh()
+end
+
+function Kin:GetApplyerList()
+  return Kin:GetData("ApplyList")
+end
+
+function Kin:UpdateApplyInfo(bManual)
+  if not Kin:CheckMyAuthority(Kin.Def.Authority_Recruit) then
+    return
+  end
+  local _, nVersion = Kin:GetApplyerList()
+  RemoteServer.OnKinRequest("SyncApplyerList", nVersion, bManual)
+end
+
+function Kin:NotifyApplyRefresh()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_KIN_NEW_APPLYER)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, "ApplyList")
+  local bEnable = false
+  if self:CheckMyAuthority(Kin.Def.Authority_Recruit) and not Lib:IsEmptyTB(self:GetApplyerList()) then
+    bEnable = true
+  end
+  self:NotifyApplyRedPoint(bEnable)
+end
+
+function Kin:NotifyApplyRedPoint(bEnable)
+  if bEnable then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.KinApply)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinApply)
+  end
+end
+
+function Kin:OnClickQuitKin()
+  if self:IsInLeaderQuitTime() then
+    Kin:Quit()
+    return
+  end
+  if me.nLevel <= Kin.Cfg.nLevelIgnoreTime then
+    local function fnQuitKin()
+      Kin:Quit()
+      
+      Ui:CloseWindow("UIKin")
+    end
+    
+    local szTip = i18n.EasyGet("\228\189\160\231\154\132\231\173\137\231\186\167\226\137\164{0}\231\186\167\239\188\140\233\128\128\229\174\182\230\151\143\229\144\142\229\134\141\229\133\165\229\174\182\230\151\143<color=#c56d05>\230\178\161\230\156\137\230\151\182\233\151\180\233\153\144\229\136\182</color>\239\188\140\230\152\175\229\144\166\233\128\128\229\135\186\229\174\182\230\151\143\239\188\159", Kin.Cfg.nLevelIgnoreTime)
+    me.MsgBox(szTip, {
+      {
+        i18n.szOk,
+        function()
+          fnQuitKin()
+        end
+      },
+      {
+        i18n.szCancel
+      }
+    })
+  else
+    RemoteServer.OnKinRequest("ReqQuitInfo")
+  end
+end
+
+function Kin:OnSyncQuitInfo(nJoinKinTime)
+  local function fnQuitKin()
+    Kin:Quit()
+    
+    Ui:CloseWindow("UIKin")
+  end
+  
+  local szTip = ""
+  if GetTime() - nJoinKinTime < 86400 then
+    local nDateTime = 86400 - (GetTime() - nJoinKinTime)
+    szTip = i18n.EasyGet("\233\128\128\229\174\182\230\151\143\229\144\142\229\134\141\229\133\165\229\174\182\230\151\143\233\156\128\232\166\129<color=#c56d05>\231\173\137\229\190\133{0}</color>\239\188\140\230\152\175\229\144\166\233\128\128\229\135\186\229\174\182\230\151\143\239\188\159", Lib:TimeDesc8(nDateTime))
+  else
+    szTip = i18n.EasyGet("\233\128\128\229\174\182\230\151\143\229\144\142\229\134\141\229\133\165\229\174\182\230\151\143<color=#c56d05>\230\178\161\230\156\137\230\151\182\233\151\180\233\153\144\229\136\182</color>\239\188\140\230\152\175\229\144\166\233\128\128\229\135\186\229\174\182\230\151\143\239\188\159")
+  end
+  me.MsgBox(szTip, {
+    {
+      i18n.szOk,
+      function()
+        fnQuitKin()
+      end
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function Kin:Quit()
+  RemoteServer.OnKinRequest("Quit")
+end
+
+function Kin:OnQuit(bKickOut)
+  Kin:ClearCache()
+  me.dwKinId = 0
+  me.szKinTitle = ""
+  if bKickOut then
+    me.CenterMsg(i18n.EasyGet("\228\189\160\229\183\178\232\162\171\232\184\162\229\135\186\229\174\182\230\151\143"))
+  else
+    me.CenterMsg(i18n.EasyGet("\228\189\160\229\183\178\230\136\144\229\138\159\233\128\128\229\135\186\229\174\182\230\151\143"))
+  end
+  self.nKinMemberListLastUpdateTime = 0
+  Tong.nTongMemberListLastUpdateTime = 0
+  self.tbGatherData = nil
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, "Quit")
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinSalary)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinCostRedBag)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinYuanBaoRedBagRecv)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinYuanBaoRedBagSend)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinGiftGain)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinApply)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinShop)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinFreightTask)
+end
+
+function Kin:OnSyncRecruit(tbRecruitSetting, nVersion)
+  Kin:CacheData("RecruitSetting", tbRecruitSetting, nVersion)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, "RecruitSetting")
+end
+
+function Kin:GetRecruitSetting()
+  return Kin:GetData("RecruitSetting")
+end
+
+function Kin:UpdateRecruitSetting()
+  local _, nVersion = Kin:GetRecruitSetting()
+  RemoteServer.OnKinRequest("SyncRecruiSetting", nVersion)
+end
+
+function Kin:SetRecruitSetting(bAutoJoin, nFightValue)
+  RemoteServer.OnKinRequest("SetRecruitSetting", bAutoJoin, nFightValue)
+end
+
+function Kin:UpdateJoinKinsData(nPage, bSortByLToSLevel)
+  RemoteServer.OnKinRequest("SyncKins2Join", nPage, bSortByLToSLevel)
+end
+
+function Kin:OnSyncJoinInfo(tbJoinKinsData, nPage, nMaxPage)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, "JoinKins", tbJoinKinsData, nPage, nMaxPage)
+end
+
+function Kin:ChangePublicDeclare(szDeclare)
+  szDeclare = ReplaceLimitWords(szDeclare) or szDeclare
+  RemoteServer.OnKinRequest("ChangePublicDeclare", szDeclare, i18n.CurrentLanguageCode())
+end
+
+function Kin:ChangeAddDeclare(szAddDeclare)
+  szAddDeclare = ReplaceLimitWords(szAddDeclare) or szAddDeclare
+  RemoteServer.OnKinRequest("ChangeAddDeclare", szAddDeclare, i18n.CurrentLanguageCode())
+end
+
+function Kin:OnSyncDeclare(szDeclare)
+  local tbBaseInfo = Kin:GetBaseInfo()
+  if tbBaseInfo then
+    tbBaseInfo.szPublicDeclare = szDeclare
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, "Declare")
+end
+
+function Kin:SetKinTitleCheck(tbChangeTitles)
+  for i = 1, #tbChangeTitles do
+    if tbChangeTitles[i].szTitle ~= "" and ReplaceLimitWords(tbChangeTitles[i].szTitle) then
+      return false, Kin.Cfg.Msg.IllegalChar
+    end
+    if Lib:StrLen(tbChangeTitles[i].szTitle) > Kin.Cfg.nMaxKinTitleLen then
+      return false, Kin.Cfg.Msg.OutOfLengthLimit
+    end
+  end
+  RemoteServer.OnKinRequest("SetKinTitle", tbChangeTitles)
+  return true
+end
+
+function Kin:UpdateTitle()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_KIN_TITLE_UPDATE)
+end
+
+function Kin:GetDonationData()
+  return DegreeCtrl:GetDegree(me, "DonationCount"), DegreeCtrl:GetMaxDegree("DonationCount", me)
+end
+
+function Kin:Donate(nCount)
+  local nCurDonateCount = Kin:GetDonationData()
+  RemoteServer.OnKinRequest("Donate", nCurDonateCount, nCount)
+end
+
+function Kin:UpdateDonationRecord()
+  local _, nVersion = Kin:GetDonationRecord()
+  RemoteServer.OnKinRequest("SyncDonationRecord", nVersion)
+end
+
+function Kin:GetDonationRecord()
+  return Kin:GetData("DonationRecord")
+end
+
+function Kin:OnSyncDonationRecord(tbRecord, nVersion)
+  Kin:CacheData("DonationRecord", tbRecord, nVersion)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, "DonationRecord")
+end
+
+function Kin:BuyGiftBox()
+  local nTongbao = me.GetMoney("KinContrib")
+  if nTongbao < Kin.Def.nGiftBoxCost then
+    me.CenterMsg(i18n.EasyGet("\233\162\134\229\143\150\229\164\177\232\180\165\239\188\140\232\180\161\231\140\174\228\184\141\232\182\179"))
+    return
+  end
+  RemoteServer.OnKinRequest("BuyGiftBox")
+end
+
+function Kin:OnUpdateGiftBoxData()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, "GiftBox")
+  Kin:UpdateGiftRedPoint()
+  self:UpdateKinGiftBox()
+end
+
+function Kin:GetGiftBoxData()
+  local nNextBuyTime = me.GetUserValue(Kin.Def.SAVE_GROUP, Kin.Def.GIFT_KEY_NEXT_BUY_TIME)
+  local nLeftCount = DegreeCtrl:GetDegree(me, "ExChangeKinBoxCount") or 0
+  return nLeftCount, nNextBuyTime
+end
+
+function Kin:CanGetKinGift()
+  if not Kin:HasKin() then
+    return false
+  end
+  local nNow = GetTime()
+  local nLeftCount, nNextBuyTime = self:GetGiftBoxData()
+  local nContrib = me.GetMoney("KinContrib")
+  return nLeftCount > 0 and nNow > nNextBuyTime and nContrib >= Kin.Def.nGiftBoxCost
+end
+
+function Kin:UpdateGiftRedPoint()
+  if self:CanGetKinGift() then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.KinGiftGain)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinGiftGain)
+  end
+end
+
+function Kin:UpdateRedPoint(bFirstLogin)
+  if bFirstLogin and Kin:HasKin() then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.KinShop)
+  end
+  self:UpdateGiftRedPoint()
+end
+
+function Kin:GetKinSalary()
+  RemoteServer.OnKinRequest("GetLastWeekSalary")
+end
+
+function Kin:OnSyncGetKinSalary(nSalary)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, "GetKinSalary", nSalary)
+  self:NotifySalaryRedPoint(nSalary)
+end
+
+function Kin:UpdateMailInfo()
+  local nMailCount = Kin:GetLeftMailCount()
+  RemoteServer.OnKinRequest("SyncMailCount", nMailCount)
+end
+
+function Kin:GetLeftMailCount()
+  return Kin:GetData("MailCount")
+end
+
+function Kin:OnSyncMailCount(nCount)
+  Kin:CacheData("MailCount", nCount)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_MAIL_COUNT)
+end
+
+function Kin:SendMail(szContent)
+  if not Kin:CheckMyAuthority(Kin.Def.Authority_Mail) then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.PermissionDenied))
+    return false
+  end
+  local nLeftMailCount = Kin:GetLeftMailCount()
+  if nLeftMailCount <= 0 then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.MailCountLimit))
+    return false
+  end
+  local bOk, nErr = Kin:CheckMailContent(szContent)
+  if not bOk then
+    me.CenterMsg(Kin:GetErrorMsg(nErr))
+    return false
+  end
+  RemoteServer.OnKinRequest("SendKinMail", szContent)
+  return true
+end
+
+local SortFunction = {
+  Default = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      if a.nMemberId == me.dwID then
+        return true
+      end
+      if b.nMemberId == me.dwID then
+        return false
+      end
+      local bOnlineA = 1 == a.nIsOnLine
+      local bOnlineB = 1 == b.nIsOnLine
+      if bOnlineA == bOnlineB then
+        if a.nCareer == b.nCareer then
+          return a.nTotalContribution > b.nTotalContribution
+        else
+          return a.nCareer < b.nCareer
+        end
+      else
+        return bOnlineA
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByFaction = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      if a.nFaction == b.nFaction then
+        local aString = a.szName or ""
+        local bString = b.szName or ""
+        if bIsDown then
+          return aString > bString
+        else
+          return aString < bString
+        end
+      elseif bIsDown then
+        return a.nFaction > b.nFaction
+      else
+        return a.nFaction < b.nFaction
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByRank = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      if a.nHonorStarLevel == b.nHonorStarLevel then
+        local aString = a.szName or ""
+        local bString = b.szName or ""
+        if bIsDown then
+          return aString > bString
+        else
+          return aString < bString
+        end
+      elseif bIsDown then
+        return a.nHonorStarLevel > b.nHonorStarLevel
+      else
+        return a.nHonorStarLevel < b.nHonorStarLevel
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByName = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      local aString = a.szName or ""
+      local bString = b.szName or ""
+      if bIsDown then
+        return aString > bString
+      else
+        return aString < bString
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByLevel = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      if a.nLevel == b.nLevel then
+        local aString = a.szName or ""
+        local bString = b.szName or ""
+        if bIsDown then
+          return aString > bString
+        else
+          return aString < bString
+        end
+      elseif bIsDown then
+        return a.nLevel > b.nLevel
+      else
+        return a.nLevel < b.nLevel
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByCareer = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      if a.nCareer == b.nCareer then
+        local aString = a.szName or ""
+        local bString = b.szName or ""
+        if bIsDown then
+          return aString > bString
+        else
+          return aString < bString
+        end
+      elseif bIsDown then
+        return a.nCareer > b.nCareer
+      else
+        return a.nCareer < b.nCareer
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByContribution = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      if a.nTotalContribution == b.nTotalContribution then
+        local aString = a.szName or ""
+        local bString = b.szName or ""
+        if bIsDown then
+          return aString > bString
+        else
+          return aString < bString
+        end
+      elseif bIsDown then
+        return a.nTotalContribution > b.nTotalContribution
+      else
+        return a.nTotalContribution < b.nTotalContribution
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByOffline = function(tbMemberList, bIsDown)
+    local tbOnlineMembers = Kin:GetMemberState() or {}
+    table.sort(tbMemberList, function(a, b)
+      if bIsDown then
+        if tbOnlineMembers[a.nMemberId] and not tbOnlineMembers[b.nMemberId] then
+          return true
+        elseif not tbOnlineMembers[a.nMemberId] and tbOnlineMembers[b.nMemberId] then
+          return false
+        end
+        if a.nLastOnlineTime == b.nLastOnlineTime then
+          local aString = a.szName or ""
+          local bString = b.szName or ""
+          if bIsDown then
+            return aString > bString
+          else
+            return aString < bString
+          end
+        else
+          return a.nLastOnlineTime > b.nLastOnlineTime
+        end
+      else
+        if tbOnlineMembers[a.nMemberId] and not tbOnlineMembers[b.nMemberId] then
+          return false
+        elseif not tbOnlineMembers[a.nMemberId] and tbOnlineMembers[b.nMemberId] then
+          return true
+        end
+        if a.nLastOnlineTime == b.nLastOnlineTime then
+          local aString = a.szName or ""
+          local bString = b.szName or ""
+          if bIsDown then
+            return aString > bString
+          else
+            return aString < bString
+          end
+        else
+          return a.nLastOnlineTime < b.nLastOnlineTime
+        end
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByActivity = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      if a.nWeekActive == b.nWeekActive then
+        local aString = a.szName or ""
+        local bString = b.szName or ""
+        if bIsDown then
+          return aString > bString
+        else
+          return aString < bString
+        end
+      elseif bIsDown then
+        return a.nWeekActive > b.nWeekActive
+      else
+        return a.nWeekActive < b.nWeekActive
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByHelp = function(tbMemberList, bIsDown)
+    table.sort(tbMemberList, function(a, b)
+      local aHelp = a.nFreightTask == KinFreightTask.tbSeekHelpStatus.SHS_HELP and a.nMemberId ~= me.dwID and 1 or 0
+      local bHelp = b.nFreightTask == KinFreightTask.tbSeekHelpStatus.SHS_HELP and b.nMemberId ~= me.dwID and 1 or 0
+      if aHelp ~= bHelp then
+        return aHelp > bHelp
+      end
+      local aString = a.szName or ""
+      local bString = b.szName or ""
+      if bIsDown then
+        return aString > bString
+      else
+        return aString < bString
+      end
+    end)
+    return tbMemberList
+  end,
+  SortByChuanGong = function(tbMemberList, bIsDown)
+    local function _IsCanChuangong(tbMemberData)
+      local tbChuanGong = tbMemberData.tbChuanGong
+      
+      if tbChuanGong and 1 == tbMemberData.nIsOnLine then
+        local tbStatus = ChuanGong:CheckStatusFromOtherData(tbMemberData.nLevel, tbMemberData.nVipLevel, tbChuanGong.nRecieveTimes > 0, tbChuanGong.nSendTimes > 0, tbChuanGong.nLastSendTime)
+        return ChuanGong:StatusCanSendOrGet(tbStatus)
+      end
+      return false
+    end
+    
+    local function _IsCanChuangongCdOK(tbMemberData)
+      local tbChuanGong = tbMemberData.tbChuanGong
+      if tbChuanGong and 1 == tbMemberData.nIsOnLine then
+        local tbStatus = ChuanGong:CheckStatusFromOtherData(tbMemberData.nLevel, tbMemberData.nVipLevel, tbChuanGong.nRecieveTimes > 0, tbChuanGong.nSendTimes > 0, tbChuanGong.nLastSendTime)
+        return ChuanGong:IsCdSuffice(tbStatus, ChuanGong.tbRelationType.Recieve) or ChuanGong:IsCdSuffice(tbStatus, ChuanGong.tbRelationType.Send)
+      end
+      return false
+    end
+    
+    table.sort(tbMemberList, function(a, b)
+      local aCanChuanGong = _IsCanChuangong(a) and a.nMemberId ~= me.dwID and 1 or 0
+      local bCanChuanGong = _IsCanChuangong(b) and b.nMemberId ~= me.dwID and 1 or 0
+      if aCanChuanGong ~= bCanChuanGong then
+        return aCanChuanGong > bCanChuanGong
+      end
+      local aCDOK = _IsCanChuangongCdOK(a) and a.nMemberId ~= me.dwID and 1 or 0
+      local bCDOK = _IsCanChuangongCdOK(b) and b.nMemberId ~= me.dwID and 1 or 0
+      if aCDOK ~= bCDOK then
+        return aCDOK > bCDOK
+      end
+      local aString = a.szName or ""
+      local bString = b.szName or ""
+      if bIsDown then
+        return aString > bString
+      else
+        return aString < bString
+      end
+    end)
+    return tbMemberList
+  end
+}
+
+function Kin:GetSortFunction(szFunName)
+  return SortFunction[szFunName]
+end
+
+function Kin:OnLogin(bConnect)
+  if Kin:HasKin() then
+    Kin:UpdateApplyInfo()
+    Kin:UpdateMemberList()
+    Kin:UpdateRedPoint(false)
+    Kin:UpdateKinGiftBox()
+  end
+  Kin:UpdateJoinKinTimeC()
+end
+
+function Kin:UpdateJoinKinTimeC()
+  RemoteServer.OnKinRequest("SyncJoinKinTime")
+end
+
+function Kin:OnSyncJoinKinTime(nTime)
+  Kin.nJoinKinTime = nTime
+end
+
+function Kin:IsKinSKillUnlock()
+  return self.nJoinKinTime > 0 or me.dwKinId > 0
+end
+
+function Kin:IsKinVoiceManager()
+  local nMngCareer = Kin.Def.tbVoiceManagerCareer[Kin:GetMyCareer()]
+  return nil ~= nMngCareer and 1 == nMngCareer
+end
+
+function Kin:SetVoiceUpper(nMemberId, bUpper)
+  RemoteServer.OnKinRequest("SetVoiceUpper", nMemberId, bUpper)
+end
+
+function Kin:UpdateAllVoiceUpper(tbVoiceUpper)
+  self:CacheData("VoiceUpper", tbVoiceUpper)
+  EventNotify.OnNotify(EventNotify.emREALTIME_KIN_CANSPEAKER_CHANGE)
+end
+
+function Kin:UpdateVoiceUpper(nMemberId, bUpper)
+  local tbVoiceUpper = self:GetData("VoiceUpper") or {}
+  tbVoiceUpper[nMemberId] = bUpper
+  Kin:CacheData("VoiceUpper", tbVoiceUpper)
+  EventNotify.OnNotify(EventNotify.emREALTIME_KIN_CANSPEAKER_CHANGE, nMemberId)
+end
+
+function Kin:GetMemberVoiceUpper(nMemberId)
+  local tbVoiceUpper = self:GetData("VoiceUpper")
+  return tbVoiceUpper and tbVoiceUpper[nMemberId]
+end
+
+function Kin:OpenKinWindow(tbParams)
+  if Ui.bInZone then
+    me.CenterMsg(i18n.EasyGet("\232\183\168\230\156\141\228\184\173\230\151\160\230\179\149\232\191\155\232\161\140\229\189\147\229\137\141\230\147\141\228\189\156"))
+    return false
+  end
+  if me.nLevel < Kin.Cfg.nLevelLimit then
+    me.CenterMsg(i18n.Get(Kin.Cfg.Msg.LevelLimit, Kin.Cfg.nLevelLimit))
+    return false
+  end
+  if not Kin:HasKin() then
+    if not Ui:WindowVisible("UIKinList") then
+      Ui:OpenWindow("UIKinList")
+    end
+    return
+  elseif Ui:WindowVisible("UIKinList") then
+    Ui:CloseWindow("UIKinList")
+    Ui:CloseWindow("UICreateKin")
+  end
+  Ui:OpenWindow("UIKin", tbParams and tbParams[1])
+end
+
+local tbMsgCode2Msg = {
+  [Kin.Def.tbMsgCode.DuplicateKinName] = Kin.Cfg.Msg.DuplicateKinName,
+  [Kin.Def.tbMsgCode.KinNameIllegal] = Kin.Cfg.Msg.KinNameIllegal,
+  [Kin.Def.tbMsgCode.PermissionDenied] = Kin.Cfg.Msg.PermissionDenied,
+  [Kin.Def.tbMsgCode.NoJoinKin] = Kin.Cfg.Msg.NoJoinKin,
+  [Kin.Def.tbMsgCode.KinNonExist] = Kin.Cfg.Msg.KinNonExist,
+  [Kin.Def.tbMsgCode.AlreadyJoinKin] = Kin.Cfg.Msg.AlreadyJoinKin,
+  [Kin.Def.tbMsgCode.NormalMemberFull] = Kin.Cfg.Msg.NormalMemberFull,
+  [Kin.Def.tbMsgCode.NotInSameKin] = Kin.Cfg.Msg.NotInSameKin,
+  [Kin.Def.tbMsgCode.JoinKinFail] = Kin.Cfg.Msg.JoinKinFail,
+  [Kin.Def.tbMsgCode.CoolingTime] = Kin.Cfg.Msg.CoolingTime,
+  [Kin.Def.tbMsgCode.NoChange] = Kin.Cfg.Msg.NoChange,
+  [Kin.Def.tbMsgCode.MemberNonExist] = Kin.Cfg.Msg.MemberNonExist,
+  [Kin.Def.tbMsgCode.ItHasJoinedKin] = Kin.Cfg.Msg.ItHasJoinedKin,
+  [Kin.Def.tbMsgCode.ItHasNotJoinedKin] = Kin.Cfg.Msg.ItHasNotJoinedKin,
+  [Kin.Def.tbMsgCode.TraineeCannotChangeCareer] = Kin.Cfg.Msg.TraineeCannotChangeCareer,
+  [Kin.Def.tbMsgCode.ItIsNotTrainee] = Kin.Cfg.Msg.ItIsNotTrainee,
+  [Kin.Def.tbMsgCode.CareerMemberFull] = Kin.Cfg.Msg.CareerMemberFull,
+  [Kin.Def.tbMsgCode.CanNotKickOutYouself] = Kin.Cfg.Msg.CanNotKickOutYouself,
+  [Kin.Def.tbMsgCode.CantContainSpace] = Kin.Cfg.Msg.CantContainSpace,
+  [Kin.Def.tbMsgCode.NotInApplyList] = Kin.Cfg.Msg.NotInApplyList,
+  [Kin.Def.tbMsgCode.MasterCannotQuit] = Kin.Cfg.Msg.MasterCannotQuit,
+  [Kin.Def.tbMsgCode.CanNotAppointYourself] = Kin.Cfg.Msg.CanNotAppointYourself,
+  [Kin.Def.tbMsgCode.SetRecruitSuccess] = Kin.Cfg.Msg.SetRecruitSuccess,
+  [Kin.Def.tbMsgCode.JoinCdHM] = Kin.Cfg.Msg.JoinCdHM,
+  [Kin.Def.tbMsgCode.JoinCdM] = Kin.Cfg.Msg.JoinCdM,
+  [Kin.Def.tbMsgCode.LevelLimit] = Kin.Cfg.Msg.LevelLimit,
+  [Kin.Def.tbMsgCode.InviteSuccess] = Kin.Cfg.Msg.InviteSuccess,
+  [Kin.Def.tbMsgCode.ApplyListRefresh] = Kin.Cfg.Msg.ApplyListRefresh,
+  [Kin.Def.tbMsgCode.KickOutSuccess] = Kin.Cfg.Msg.KickOutSuccess,
+  [Kin.Def.tbMsgCode.PleaseEnterName] = Kin.Cfg.Msg.PleaseEnterName,
+  [Kin.Def.tbMsgCode.KinNameLengthLimit] = Kin.Cfg.Msg.KinNameLengthLimit,
+  [Kin.Def.tbMsgCode.ChangeKinNameSuccess] = Kin.Cfg.Msg.ChangeKinNameSuccess,
+  [Kin.Def.tbMsgCode.JoinKinSuccess] = Kin.Cfg.Msg.JoinKinSuccess,
+  [Kin.Def.tbMsgCode.ApplyKinSuccess] = Kin.Cfg.Msg.ApplyKinSuccess,
+  [Kin.Def.tbMsgCode.ItIsFighting] = Kin.Cfg.Msg.ItIsFighting,
+  [Kin.Def.tbMsgCode.ChangeCareerSuccess] = Kin.Cfg.Msg.ChangeCareerSuccess,
+  [Kin.Def.tbMsgCode.OutOfLengthLimit] = Kin.Cfg.Msg.OutOfLengthLimit,
+  [Kin.Def.tbMsgCode.IllegalChar] = Kin.Cfg.Msg.IllegalChar,
+  [Kin.Def.tbMsgCode.NotModified] = Kin.Cfg.Msg.NotModified,
+  [Kin.Def.tbMsgCode.ModificationConflict] = Kin.Cfg.Msg.ModificationConflict,
+  [Kin.Def.tbMsgCode.JoinCdHMSelf] = Kin.Cfg.Msg.JoinCdHMSelf,
+  [Kin.Def.tbMsgCode.JoinCdMSelf] = Kin.Cfg.Msg.JoinCdMSelf,
+  [Kin.Def.tbMsgCode.PleaseEnterContent] = Kin.Cfg.Msg.PleaseEnterContent,
+  [Kin.Def.tbMsgCode.MailCountLimit] = Kin.Cfg.Msg.MailCountLimit,
+  [Kin.Def.tbMsgCode.NotEnoughMoney] = Kin.Cfg.Msg.NotEnoughMoney,
+  [Kin.Def.tbMsgCode.DomainBattlePhaseLimit] = Kin.Cfg.Msg.DomainBattlePhaseLimit,
+  [Kin.Def.tbMsgCode.KinFundToMaxLimit] = Kin.Cfg.Msg.KinFundToMaxLimit,
+  [Kin.Def.tbMsgCode.KinBuyGiftBoxCant] = Kin.Cfg.Msg.KinBuyGiftBoxCant,
+  [Kin.Def.tbMsgCode.TongLeaderLimit] = Kin.Cfg.Msg.TongLeaderLimit,
+  [Kin.Def.tbMsgCode.DissolveLimit] = Kin.Cfg.Msg.DissolveLimit,
+  [Kin.Def.tbMsgCode.BuildingIsClosed] = Kin.Cfg.Msg.BuildingIsClosed,
+  [Kin.Def.tbMsgCode.HasBeenMaxBuildingLevel] = Kin.Cfg.Msg.HasBeenMaxBuildingLevel,
+  [Kin.Def.tbMsgCode.BeLimitedByMainBuilding] = Kin.Cfg.Msg.BeLimitedByMainBuilding,
+  [Kin.Def.tbMsgCode.FundIsNotEnough] = Kin.Cfg.Msg.FundIsNotEnough,
+  [Kin.Def.tbMsgCode.TieFuChengPhaseLimit] = Kin.Cfg.Msg.TieFuChengPhaseLimit,
+  [Kin.Def.tbMsgCode.UnknownError] = Kin.Cfg.Msg.UnknownError,
+  [Kin.Def.tbMsgCode.TwoAreaBattlePhaseLimit] = Kin.Cfg.Msg.TwoAreaBattlePhaseLimit,
+  [Kin.Def.tbMsgCode.KinQuitXiaKeDao] = Kin.Cfg.Msg.KinQuitXiaKeDao,
+  [Kin.Def.tbMsgCode.KinKickXiaKeDao] = Kin.Cfg.Msg.KinKickXiaKeDao,
+  [Kin.Def.tbMsgCode.KinJoinXiaKeDao] = Kin.Cfg.Msg.KinJoinXiaKeDao,
+  [Kin.Def.tbMsgCode.KinAcceptFailedXiaKeDao] = Kin.Cfg.Msg.KinAcceptFailedXiaKeDao
+}
+
+function Kin:GetErrorMsg(MsgCode)
+  local szMsg = ""
+  if type(MsgCode) == "table" then
+    MsgCode[1] = tbMsgCode2Msg[MsgCode[1]]
+    if MsgCode[1] then
+      szMsg = i18n.Get(table.unpack(MsgCode))
+    else
+      error("Kin:OnServerResult  Unknow MsgCode")
+    end
+  else
+    szMsg = tbMsgCode2Msg[MsgCode]
+    if szMsg then
+      szMsg = i18n.Get(szMsg)
+    else
+      error("Kin:OnServerResult  Unknow MsgCode")
+    end
+  end
+  return szMsg
+end
+
+function Kin:OnServerResult(szRequestType, bSuccess, MsgCode)
+  if MsgCode then
+    local szMsg = Kin:GetErrorMsg(MsgCode)
+    if szMsg then
+      me.CenterMsg(szMsg)
+    end
+    if "Apply" == szRequestType and bSuccess then
+      Timer:Register(Env.GAME_FPS * 1, function()
+        Kin:OpenKinWindow()
+      end)
+    end
+  end
+end
+
+function Kin:NotifySalaryRedPoint(nGotSalary)
+  local nLastWeekSalary = 0
+  local myMemberData = self:GetMyMemberData()
+  if myMemberData and myMemberData.nLastWeekSalary then
+    nLastWeekSalary = myMemberData.nLastWeekSalary
+  end
+  if nGotSalary then
+    nLastWeekSalary = nLastWeekSalary - nGotSalary
+  end
+  if nLastWeekSalary > 0 then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.KinSalary)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinSalary)
+  end
+end
+
+function Kin:UpdateKinGiftBox()
+  local nNow = GetTime()
+  local nLeftCount, nNextBuyTime = Kin:GetGiftBoxData()
+  nLeftCount = nLeftCount or 0
+  nNextBuyTime = nNextBuyTime or nNow
+  if self.nGiftBoxCountDownTimer then
+    Timer:Close(self.nGiftBoxCountDownTimer)
+    self.nGiftBoxCountDownTimer = nil
+  end
+  self.nGiftBoxCountDownTimer = Timer:Register(Env.GAME_FPS, function()
+    local nLeftTime = nNextBuyTime - GetTime()
+    if Ui:WindowVisible("UIKin") then
+      EventNotify.OnNotify(EventNotify.emNOTIFY_UPDATE_KIN_GIFTBOX, nLeftTime, nLeftCount)
+    end
+    if nLeftTime < 0 or nLeftCount <= 0 then
+      self:UpdateGiftRedPoint()
+      self.nGiftBoxCountDownTimer = nil
+      return false
+    end
+    return true
+  end)
+end
+
+function Kin:OnBreakSwitchKinMapProgressCallBack(szFunc, ...)
+  Kin[szFunc](Kin, ...)
+end
+
+function Kin:OnJoinKinChallange()
+  TongChallenge:OnJoinTongChallange()
+end
+
+function Kin:OnSyncLeaderQuitTime(nQuitTime)
+  self.tbQuitTime = self.tbQuitTime or {}
+  self.tbQuitTime[me.dwID] = nQuitTime
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LEADER_QUIT)
+end
+
+function Kin:IsInLeaderQuitTime()
+  if not self.tbQuitTime then
+    return false
+  end
+  if not self.tbQuitTime[me.dwID] then
+    return false
+  end
+  if self.tbQuitTime[me.dwID] < GetTime() then
+    return false
+  end
+  return true
+end
+
+function Kin:AskMonitorUI(bMonitor)
+  RemoteServer.OnKinRequest("RegistUpdatePlayerMemberListUI", bMonitor)
+end
+
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, Kin.UpdateGiftRedPoint, Kin)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Kin.ClearUpdateTime, Kin)

@@ -1,0 +1,313 @@
+local tbWnd = Ui:CreateWindow("UIPKCompetitionTeam")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_DINGFENGPK_SYNC_TEAM,
+      self.UpdateTeamPage,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_DINGFENGPK_SYNC_STATE,
+      self.UpdateBottomInfo,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_DINGFENGPK_SYNC_QUALIFICATION,
+      self.UpdateTeamPage,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnSyncItem,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  txtTeamName = "node/imgBG/Content/imgTeamNameBg/txtTeamName",
+  info = "node/imgBG/Content/info",
+  Member = "node/imgBG/Content/info/Team/Member",
+  Member1 = "node/imgBG/Content/info/Team/Member1",
+  Member2 = "node/imgBG/Content/info/Team/Member2",
+  Member3 = "node/imgBG/Content/info/Team/Member3",
+  NpcModel = "node/imgBG/Content/info/Team/Member%d/info/imgModel",
+  btnExit = "node/imgBG/Content/info/btnExit",
+  btnRecruit = "node/imgBG/Content/info/B/btnRecruit",
+  btnRank = "node/imgBG/Content/info/B/btnRank",
+  btnRule = "node/imgBG/Content/info/B/btnRule",
+  txtProgress = "node/imgBG/Content/info/B/reportCell/txtProgress",
+  txtState = "node/imgBG/Content/info/B/reportCell/txtState",
+  txtContent = "node/imgBG/Content/info/B/reportCell/info/txtContent",
+  txtResultDefeat = "node/imgBG/Content/info/B/reportCell/info/txtResultDefeat",
+  txtResultWin = "node/imgBG/Content/info/B/reportCell/info/txtResultWin",
+  txtinfoProgress = "node/imgBG/Content/info/B/reportCell/info/txtProgress",
+  txtEnemy = "node/imgBG/Content/info/B/reportCell/info/txtEnemy",
+  create = "node/imgBG/Content/create",
+  btnCreate = "node/imgBG/Content/create/btnCreate",
+  btnGet = "node/imgBG/Content/create/btnGet",
+  Condition2 = "node/imgBG/Content/create/Condition2",
+  btnItem = "node/imgBG/Content/create/Condition2/btnItem",
+  szBtnItem = "node/imgBG/Content/create/Condition2/btnItem/txt",
+  txtCondition2 = "node/imgBG/Content/create/Condition2/txt1",
+  txtNumber = "node/imgBG/Content/create/Condition2/txtNumber",
+  empty = "node/imgBG/Content/empty",
+  txtCondition1 = "node/imgBG/Content/create/txtCondition1"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbMember = {
+  tbControls.Member1,
+  tbControls.Member2,
+  tbControls.Member3
+}
+tbWnd.MAX_MEMBER = 3
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnRule = function(self)
+    Ui:OpenWindow("UIGeneralWebView", DingFengPK.Website.szRuleWeb, 0, 0)
+  end,
+  btnRank = function(self)
+    if GetTime() < Lib:ParseConfigDateTime(tostring(DingFengPK.TimeCfg.MID_START)) then
+      Ui:OpenWindow("UIPKCompetitionReport1", DingFengPK.OPEN_TYPE.PRE)
+    elseif GetTime() < Lib:ParseConfigDateTime(tostring(DingFengPK.TimeCfg.MID_END)) then
+      Ui:OpenWindow("UIPKCompetitionReport1", DingFengPK.OPEN_TYPE.MID)
+    elseif Lib:GetLocalDay(GetTime()) <= Lib:GetLocalDay(Lib:ParseConfigDateTime(tostring(DingFengPK.TimeCfg.FINAL_2))) then
+      Ui:OpenWindow("UIGeneralWebView", DingFengPK.Website.szFinalWeb, 0, 0)
+    else
+      Ui:OpenWindow("UIPKCompetitionReport2")
+    end
+  end,
+  btnRecruit = function(self)
+    self:SendChatRecruit()
+  end,
+  btnExit = function(self)
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\231\161\174\229\174\154\233\128\128\229\135\186\233\152\159\228\188\141"), {
+      {
+        DingFengPK.SendProtocolLeaveTeam,
+        DingFengPK
+      },
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    }, nil, nil, true)
+  end,
+  btnCreate = function(self)
+    Ui:OpenWindow("UICreateBattleTeam", "DingFengPK")
+  end,
+  btnGet = function(self)
+    Shop:OpenShopBuyWidDefault(DingFengPK.Cfg.QUALIFICATION_ID)
+  end,
+  btnItem = function(self)
+    Ui:OpenWindow("UIItemTips", "Item", nil, DingFengPK.Cfg.QUALIFICATION_ID)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbModelList = {}
+  for nIndex = 1, self.MAX_MEMBER do
+    local pObj = self.pPanel:GetObject(string.format(tbControls.NpcModel, nIndex))
+    local pModel = pObj:GetComponent(Ui.UINpcModel)
+    self.tbModelList[nIndex] = pModel
+  end
+end
+
+function tbWnd:OnClose()
+  for _, pModel in ipairs(self.tbModelList) do
+    pModel:Release()
+  end
+end
+
+function tbWnd:OnOpen(nOtherTeamId)
+  DingFengPK.tbTeamInfo = nil
+  self.pPanel:SetActive(tbControls.btnHelp, false)
+  if nOtherTeamId then
+    DingFengPK:RequestTeamInfo(nOtherTeamId)
+    return
+  end
+  self:UpdateTeamPage()
+  DingFengPK:RequestTeamInfo()
+  DingFengPK:RequestGameState()
+end
+
+function tbWnd:UpdateTeamPage()
+  self.m_tbTeamInfo = DingFengPK.tbTeamInfo
+  self.pPanel:Label_SetText(tbControls.txtCondition1, i18n.EasyGet("\231\173\137\231\186\167\233\156\128\230\177\130\239\188\154{0}", DingFengPK.Cfg.MIN_LEVEL))
+  if not self.m_tbTeamInfo or Lib:IsEmptyTB(self.m_tbTeamInfo) then
+    self.pPanel:SetActive(tbControls.info, false)
+    if GetTime() < Lib:ParseConfigDateTime(tostring(DingFengPK.TimeCfg.PRE_END)) then
+      self.pPanel:SetActive(tbControls.create, true)
+      self.pPanel:SetActive(tbControls.empty, false)
+      local szItemName = Item:GetName(DingFengPK.Cfg.QUALIFICATION_ID, me)
+      self.pPanel:Label_SetText(tbControls.szBtnItem, szItemName)
+      self.pPanel:Label_SetText(tbControls.txtCondition2, i18n.EasyGet("\233\156\128\230\177\130\232\181\132\230\160\188\239\188\154"))
+      if DingFengPK:CheckQualification(me) then
+        self.pPanel:Label_SetText(tbControls.txtNumber, "1/1")
+        self.pPanel:SetActive(tbControls.btnGet, false)
+        self.pPanel:SetActive(tbControls.btnCreate, true)
+      else
+        self.pPanel:Label_SetText(tbControls.txtNumber, "0/1")
+        self.pPanel:SetActive(tbControls.btnGet, true)
+        self.pPanel:SetActive(tbControls.btnCreate, false)
+      end
+    else
+      self.pPanel:SetActive(tbControls.create, false)
+      self.pPanel:SetActive(tbControls.empty, true)
+    end
+    self.pPanel:Label_SetText(tbControls.txtTeamName, i18n.EasyGet("\230\136\152\233\152\159\229\144\141\231\167\176"))
+  else
+    self.pPanel:SetActive(tbControls.create, false)
+    self.pPanel:SetActive(tbControls.empty, false)
+    self.pPanel:SetActive(tbControls.info, true)
+    self.bShowSelf = self.m_tbTeamInfo[DingFengPK.TEAM_ID] == DingFengPK:GetBattleTeamId(me.dwID)
+    self.pPanel:SetActive(tbControls.btnExit, self.bShowSelf and 0 == #self.m_tbTeamInfo[DingFengPK.WIN_COUNT])
+    local nStartTime = Lib:ParseConfigDateTime(tostring(DingFengPK.TimeStageCfg[3].szTimeStart))
+    if nStartTime <= GetTime() then
+      self.pPanel:SetActive(tbControls.btnRecruit, false)
+    else
+      self.pPanel:SetActive(tbControls.btnRecruit, self.bShowSelf)
+    end
+    self:UpdateBottomInfo()
+    self:UpdateTeamInfo()
+  end
+end
+
+function tbWnd:CleanTeamMember()
+  for i = 1, self.MAX_MEMBER do
+    self.pPanel:Button_SetEnable(self.tbMember[i], false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/imgAdd", false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/info/txtName", false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/info/HonorTitle", false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/info/imgFaction", false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/info/imgModel", false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/info/txtLV", false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/info/txtFightPower", false)
+  end
+end
+
+function tbWnd:UpdateBottomInfo()
+  self.pPanel:Label_SetText(tbControls.txtProgress, DingFengPK:GetStageShow())
+  self.pPanel:SetActive(tbControls.txtState, DingFengPK.nGameState == DingFengPK.GAME_STATE.OPEN)
+  if not self.m_tbTeamInfo then
+    return
+  end
+  local nWin = DingFengPK.DingFengTeam:GetWinCount(self.m_tbTeamInfo)
+  local nFail = DingFengPK.DingFengTeam:GetFailCount(self.m_tbTeamInfo)
+  local nDraw = DingFengPK.DingFengTeam:GetDrawCount(self.m_tbTeamInfo)
+  local nAll = #self.m_tbTeamInfo[DingFengPK.WIN_COUNT]
+  local nWinRate = 50
+  if nAll > 0 then
+    nWinRate = math.floor(nWin / nAll * 100)
+  end
+  local nTime = GetTime()
+  local nTotalCnt = DingFengPK.PreCfg.TOTAL_COUNT
+  if nTime >= Lib:ParseConfigDateTime(tostring(DingFengPK.TimeCfg.PRE_START)) and nTime <= Lib:ParseConfigDateTime(tostring(DingFengPK.TimeCfg.PRE_END)) then
+    nTotalCnt = DingFengPK.PreCfg.PRE_TOTAL_COUNT
+  elseif nTime >= Lib:ParseConfigDateTime(tostring(DingFengPK.TimeCfg.MID_START)) and nTime <= Lib:ParseConfigDateTime(tostring(DingFengPK.TimeCfg.MID_END)) then
+    nTotalCnt = DingFengPK.PreCfg.TOTAL_COUNT
+  end
+  local szText = i18n.EasyGet("\230\142\146\232\161\140\239\188\154{0}  \231\167\175\229\136\134\239\188\154{1}  \229\183\178\229\143\130\229\138\160\239\188\154{2}/{3} \232\131\156\231\142\135\239\188\154{4}% {5}\232\131\156{6}\232\180\159{7}\229\185\179", self.m_tbTeamInfo[DingFengPK.RANK], self.m_tbTeamInfo[DingFengPK.SCORE], nAll, nTotalCnt, nWinRate, nWin, nFail, nDraw)
+  self.pPanel:Label_SetText(tbControls.txtContent, szText)
+end
+
+function tbWnd:UpdateTeamInfo()
+  self.pPanel:Label_SetText(tbControls.txtTeamName, self.m_tbTeamInfo[DingFengPK.TEAM_NAME])
+  self:CleanTeamMember()
+  local tbPlayerIndex = {}
+  for _, tbInfo in pairs(self.m_tbTeamInfo[DingFengPK.MEMBER]) do
+    local i = tbInfo.nPosition
+    tbPlayerIndex[i] = true
+    self.pPanel:Button_SetEnable(self.tbMember[i], false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/imgAdd", false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/info/txtName", true)
+    self.pPanel:SetActive(self.tbMember[i] .. "/info/HonorTitle", true)
+    self.pPanel:SetActive(self.tbMember[i] .. "/info/imgFaction", true)
+    self.pPanel:SetActive(self.tbMember[i] .. "/info/imgModel", true)
+    self.pPanel:SetActive(self.tbMember[i] .. "/info/txtLV", true)
+    self.pPanel:SetActive(self.tbMember[i] .. "/info/txtFightPower", true)
+    self.pPanel:Label_SetText(self.tbMember[i] .. "/info/txtName", tbInfo.szPlayerName)
+    self.pPanel:Label_SetText(self.tbMember[i] .. "/info/txtLV", i18n.EasyGet("\231\173\137\231\186\167\239\188\154{0}", tbInfo.nLevel))
+    self.pPanel:Label_SetText(self.tbMember[i] .. "/info/txtFightPower", i18n.EasyGet("\230\136\152\229\138\155\239\188\154{0}", tbInfo.nFight))
+    local szHonorName, szHonorColor = HonorLevel:GetHonorNameByStarLevel(tbInfo.nHonorStarLevel, false)
+    local obj = self.pPanel:GetObject(self.tbMember[i] .. "/info/HonorTitle")
+    if obj then
+      local pHonorTitle = obj:GetComponent(Ui.UIHonorTitle)
+      if pHonorTitle then
+        pHonorTitle:SetHonorTitle(i18n.Parse(szHonorName), szHonorColor)
+      end
+    end
+    self.pPanel:Sprite_SetSprite(self.tbMember[i] .. "/info/imgFaction", Faction:GetIcon(tbInfo.nFaction))
+    self:ShowModel(i, tbInfo.nPlayerId)
+  end
+  local nStartTime = Lib:ParseConfigDateTime(tostring(DingFengPK.TimeStageCfg[3].szTimeStart))
+  if nStartTime > GetTime() then
+    for i = 1, DingFengPK.TeamCfg.MAX_LEAGUE_MEMBER do
+      if not tbPlayerIndex[i] then
+        local nCurMember = Lib:CountTB(self.m_tbTeamInfo[DingFengPK.MEMBER])
+        if self.bShowSelf and nCurMember < DingFengPK.TeamCfg.MAX_LEAGUE_MEMBER then
+          self.pPanel:Button_SetEnable(self.tbMember[i], true)
+          Ui:Button_BindEvent(self.pPanel, self.tbMember[i], function()
+            Ui:OpenWindow("UITeamInviteWuLin", "DingFengPK")
+          end)
+          self.pPanel:SetActive(self.tbMember[i] .. "/imgAdd", true)
+        else
+          self.pPanel:Button_SetEnable(self.tbMember[i], false)
+          self.pPanel:SetActive(self.tbMember[i] .. "/imgAdd", false)
+        end
+        self.pPanel:SetActive(self.tbMember[i] .. "/info/txtName", false)
+        self.pPanel:SetActive(self.tbMember[i] .. "/info/HonorTitle", false)
+        self.pPanel:SetActive(self.tbMember[i] .. "/info/imgFaction", false)
+        self.pPanel:SetActive(self.tbMember[i] .. "/info/imgModel", false)
+        self.pPanel:SetActive(self.tbMember[i] .. "/info/txtLV", false)
+        self.pPanel:SetActive(self.tbMember[i] .. "/info/txtFightPower", false)
+      end
+    end
+  end
+end
+
+function tbWnd:ShowModel(i, nPlayerId)
+  if self.m_tbTeamInfo[DingFengPK.MEMBER] then
+    for nIdx, tbData in pairs(self.m_tbTeamInfo[DingFengPK.MEMBER]) do
+      if nPlayerId == tbData.nPlayerId and tbData.tbFeature then
+        self.tbModelList[i]:ShowModel(tbData.tbFeature.nSex, 1, tbData.tbFeature.nBodyResID, tbData.tbFeature.nWeaponResID, tbData.tbFeature.nMantleResID, 0, tbData.tbFeature.nHeadResID, tbData.tbFeature.nWindID, tbData.tbFeature.nWeaponEffectResID or 0)
+        return
+      end
+    end
+  end
+end
+
+function tbWnd:SendChatRecruit()
+  local tbCondition = {
+    [DingFengPK.emMsgNeedBattleTeam] = 1
+  }
+  if not DingFengPK:ChkConditionAndSendMsg(me, tbCondition) then
+    return false
+  end
+  local nTeamSize = DingFengPK.TeamCfg.MAX_LEAGUE_MEMBER
+  local nCurMember = Lib:CountTB(self.m_tbTeamInfo[DingFengPK.MEMBER])
+  if nTeamSize <= nCurMember then
+    me.CenterMsg(i18n.EasyGet("\230\136\152\233\152\159\228\186\186\230\149\176\229\183\178\232\190\190\229\136\176\230\156\172\232\181\155\229\173\163\231\187\132\233\152\159\228\186\186\230\149\176\233\153\144\229\136\182"))
+    return
+  end
+  Ui:CloseWindow(self.ClassName)
+  Ui:OpenWindowWithCallback("UIChat", function(_, tbWnd)
+    tbWnd:AddDingFengPKRecruit(self.m_tbTeamInfo[DingFengPK.TEAM_ID], self.m_tbTeamInfo[DingFengPK.TEAM_NAME], nCurMember, nTeamSize)
+  end, nil, ChatMgr.ChannelType.Public)
+end
+
+function tbWnd:OnSyncItem(nItemId, bNewItem, nAddCount)
+  if nItemId then
+    local pItem = KItem.GetItemObj(nItemId)
+    if not pItem then
+      return false
+    end
+    if pItem.dwTemplateId == DingFengPK.Cfg.QUALIFICATION_ID then
+      self:UpdateTeamPage()
+    end
+  end
+end

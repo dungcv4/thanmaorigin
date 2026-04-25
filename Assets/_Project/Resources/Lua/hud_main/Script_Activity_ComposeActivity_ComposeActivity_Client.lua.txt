@@ -1,0 +1,208 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.ComposeActivity)
+
+function tbActivity:ServerRequest(szFuncName, ...)
+  if not self[szFuncName] then
+    return
+  end
+  self[szFuncName](self, ...)
+end
+
+function tbActivity:InitExtraData()
+  self.nSaveGroupId = GetGroupKey(self.tbConfig.szSaveKey)
+end
+
+function tbActivity:MakeByFormula(nComposeType, nMakeNum)
+  ActivityMgr:CallServerScript(self.nId, tbActivity.Protocol.MakeByFormula, nComposeType, nMakeNum)
+end
+
+function tbActivity:GetRedPointEventId()
+  return {
+    RedPointMgr.EVENT[self.tbConfig.szHighRedPoint],
+    RedPointMgr.EVENT[self.tbConfig.szMiddleRedPoint],
+    RedPointMgr.EVENT[self.tbConfig.szExtraRedPoint]
+  }
+end
+
+function tbActivity:GetRedPointEventList()
+  return self:GetRedPointEventId()
+end
+
+function tbActivity:CloseSyncTimer()
+  if self.nSyncItem then
+    Timer:Close(self.nSyncItem)
+    self.nSyncItem = nil
+  end
+end
+
+function tbActivity:OnItemUpdate()
+  if not self.nSyncItem then
+    self.nSyncItem = Timer:Register(Env.GAME_FPS * MathRandom(1, 3), self.TryLightRedPoint, self)
+  end
+end
+
+function tbActivity:TryLightRedPoint()
+  self:CloseSyncTimer()
+  local bCanGetHighExtraAward = self:CanGetExtraAwardByComposeType(self.ComposeType.High)
+  local bCanGetMiddleExtraAward = false
+  if self.tbConfig.tbFormula[self.ComposeType.Middle] then
+    bCanGetMiddleExtraAward = self:CanGetExtraAwardByComposeType(self.ComposeType.Middle) or false
+  end
+  if bCanGetHighExtraAward or bCanGetMiddleExtraAward then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT[self.tbConfig.szExtraRedPoint])
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT[self.tbConfig.szExtraRedPoint])
+  end
+  if self:GetPlayerCanMakeNum(me, self.ComposeType.High) > 0 and self:GetLeftFormulaMaxComposeCount(me, self.ComposeType.High) > 0 then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT[self.tbConfig.szHighRedPoint])
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT[self.tbConfig.szHighRedPoint])
+  end
+  if self.tbConfig.tbFormula[self.ComposeType.Middle] then
+    if self:GetPlayerCanMakeNum(me, self.ComposeType.Middle) > 0 and self:GetLeftFormulaMaxComposeCount(me, self.ComposeType.Middle) > 0 then
+      RedPointMgr:LightRedPoint(RedPointMgr.EVENT[self.tbConfig.szMiddleRedPoint])
+    else
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT[self.tbConfig.szMiddleRedPoint])
+    end
+  end
+end
+
+function tbActivity:S2CRefreshData(nComposeType)
+  self:TryLightRedPoint()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_COMPOSEACTIVITY_UPDATE)
+  if not self.bInit then
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.OnItemUpdate, self)
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, self.OnItemUpdate, self)
+    self.bInit = true
+  end
+  if Ui:WindowVisible("UIReward_Newyear") then
+    self:UpdateList(Ui:GetWindow("UIReward_Newyear"), nComposeType)
+  end
+end
+
+function tbActivity:OnMakeByFormula()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_COMPOSEACTIVITY_UPDATE)
+end
+
+function tbActivity:GetExtraAward(nComposeType, nIndex)
+  ActivityMgr:CallServerScript(self.nId, tbActivity.Protocol.GetExtraAward, nComposeType, nIndex)
+end
+
+function tbActivity:DoCommonJump(szJumpType)
+  Ui:OpenWindow("UITemporaryActivityCompose", self.nId)
+end
+
+function tbActivity:GetExtraAwardList(tbExtraAwardList)
+  local tbList = {}
+  local tbCurList = {}
+  for nIndex, tbInfo in ipairs(tbExtraAwardList or {}) do
+    tbCurList[tbInfo.nComposeType] = tbCurList[tbInfo.nComposeType] or self:GetCurSubmissionNum(me, tbInfo)
+    table.insert(tbList, {
+      nIndex = nIndex,
+      szInfo = i18n.Parse(tbInfo.szInfo),
+      nNeedNum = tbInfo.nNeedNum,
+      bSuccess = me.GetUserValue(self:GetSaveGroupID(), tbInfo.nSaveKeyID) > 0,
+      nCurNum = tbCurList[tbInfo.nComposeType],
+      tbAward = Award:GetAward(tbInfo.nAwardID, tbInfo.nAwardKey)
+    })
+  end
+  table.sort(tbList, function(tbFirst, tbSecond)
+    if tbFirst.bSuccess ~= tbSecond.bSuccess then
+      return not tbFirst.bSuccess
+    end
+    return tbFirst.nNeedNum < tbSecond.nNeedNum
+  end)
+  return tbList
+end
+
+function tbActivity:GetCurSubmissionNum(pPlayer, tbInfo)
+  local tbActivityFormula = self:GetActivityFormula(tbInfo.nComposeType)
+  return pPlayer.GetUserValue(self:GetSaveGroupID(), tbActivityFormula.nSaveKeyID)
+end
+
+function tbActivity:AllExtraAwardHasGet(nComposeType)
+  local tbAllExtraAward = self:GetExAwardCfgByComposeType(nComposeType)
+  if not tbAllExtraAward then
+    LogErr("AllExtraAwardHasGet data error")
+    return
+  end
+  for i, tbExtraAward in ipairs(tbAllExtraAward) do
+    if not self:HasGetExtraAward(me, nComposeType, tbExtraAward.nIndex) then
+      return false
+    end
+  end
+  return true
+end
+
+function tbActivity:OnUiEvent(tbWnd, szEvent, nActId, nComposeType)
+  if tbWnd.ClassName ~= "UIReward_Newyear" then
+    return
+  end
+  if "OnOpen" == szEvent then
+    self:UpdateList(tbWnd, nComposeType)
+    self:UpdateOtherInfo(tbWnd)
+  end
+end
+
+function tbActivity:UpdateList(tbWnd, nComposeType)
+  local tbExtraAwardList = self:GetExAwardCfgByComposeType(nComposeType)
+  local nIndex = 1
+  local nCount = me.GetUserValue(self:GetSaveGroupID(), self:GetActivityFormula(nComposeType).nSaveKeyID)
+  for nOriIndex, tbInfo in ipairs(tbExtraAwardList) do
+    local bCompleted = nCount >= tbInfo.nNeedNum
+    local bSuccess = me.GetUserValue(self:GetSaveGroupID(), tbInfo.nSaveKeyID) > 0
+    if not bCompleted or not bSuccess then
+      self:SetElement(tbWnd, nIndex, tbInfo, nComposeType, nCount, nOriIndex)
+      nIndex = nIndex + 1
+    end
+  end
+  for nOriIndex, tbInfo in ipairs(tbExtraAwardList) do
+    local bCompleted = nCount >= tbInfo.nNeedNum
+    local bSuccess = me.GetUserValue(self:GetSaveGroupID(), tbInfo.nSaveKeyID) > 0
+    if bCompleted and bSuccess then
+      self:SetElement(tbWnd, nIndex, tbInfo, nComposeType, nCount, nOriIndex)
+      nIndex = nIndex + 1
+    end
+  end
+end
+
+function tbActivity:SetElement(tbWnd, nIndex, tbInfo, nComposeType, nCount, nOriIndex)
+  tbWnd.tbLevelList:SetElement(nIndex, function(tbElement)
+    local tbAward = Award:GetAward(tbInfo.nAwardID, tbInfo.nAwardKey)
+    tbElement.tbAwardScrollView = tbElement.tbAwardScrollView or Ui:NewItemGridScrollView(tbElement, tbWnd.tbTemplateElement.reward, 1, 1)
+    tbElement.tbAwardScrollView:UpdateGenericItem(tbAward, true)
+    tbElement.pPanel:Label_SetText(tbWnd.tbTemplateElement.txtNumber, i18n.Parse(tbInfo.szInfo))
+    local bCompleted = nCount >= tbInfo.nNeedNum
+    tbElement.pPanel:SetActive(tbWnd.tbTemplateElement.Prg, not bCompleted)
+    tbElement.pPanel:SetActive(tbWnd.tbTemplateElement.imgBar, not bCompleted)
+    tbElement.pPanel:SetActive(tbWnd.tbTemplateElement.txtPrg, not bCompleted)
+    if not bCompleted then
+      tbElement.pPanel:Label_SetText(tbWnd.tbTemplateElement.txtPrg, string.format("%d/%d", nCount, tbInfo.nNeedNum))
+      tbElement.pPanel:Sprite_SetFillAmount(tbWnd.tbTemplateElement.imgBar, 0, nCount / tbInfo.nNeedNum, 1, true)
+      tbElement.pPanel:SetActive(tbWnd.tbTemplateElement.btnGet, false)
+      tbElement.pPanel:SetActive(tbWnd.tbTemplateElement.imgComplete, false)
+    else
+      local bSuccess = me.GetUserValue(self:GetSaveGroupID(), tbInfo.nSaveKeyID) > 0
+      if bSuccess then
+        tbElement.pPanel:SetActive(tbWnd.tbTemplateElement.imgComplete, true)
+        tbElement.pPanel:SetActive(tbWnd.tbTemplateElement.btnGet, false)
+        tbElement.pPanel:Label_SetText(tbWnd.tbTemplateElement.CompleteText, i18n.EasyGet("\229\183\178\233\162\134\229\143\150"))
+      else
+        tbElement.pPanel:SetActive(tbWnd.tbTemplateElement.btnGet, true)
+        tbElement.pPanel:SetActive(tbWnd.tbTemplateElement.imgComplete, false)
+        Ui:Button_BindEvent(tbElement.pPanel, tbWnd.tbTemplateElement.btnGet, self.GetExtraAward, self, nComposeType, nOriIndex)
+      end
+    end
+  end)
+end
+
+function tbActivity:UpdateOtherInfo(tbWnd)
+  tbWnd.pPanel:Label_SetText(tbWnd.txtTitleReward, i18n.EasyGet("\229\165\150\229\138\177"))
+  tbWnd.pPanel:Label_SetText(tbWnd.txtTitleNumber, i18n.EasyGet("\229\144\136\230\136\144\230\149\176\233\135\143"))
+  tbWnd.pPanel:Label_SetText(tbWnd.txtTitlePrg, i18n.EasyGet("\232\191\155\229\186\166"))
+  tbWnd.pPanel:SetActive(tbWnd.szMineNumber, false)
+  tbWnd.pPanel:SetActive(tbWnd.szTongNumber, false)
+  tbWnd.pPanel:SetActive(tbWnd.txtInfo, false)
+  tbWnd.pPanel:SetActive(tbWnd.btnHelp, false)
+  tbWnd.pPanel:SetActive(tbWnd.btnGo, false)
+end

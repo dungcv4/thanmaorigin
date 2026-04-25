@@ -1,0 +1,280 @@
+local tbFunCheckSend = {
+  [ChatMgr.ChannelType.Color] = function(...)
+    local bHasCount = ChatMgr:GetColorChatLeftCount(me) > 0
+    return bHasCount, i18n.Get(ChatMgr.Terms.ColorCountLacked)
+  end,
+  [ChatMgr.ChannelType.Team] = function()
+    local bHasTeam = TeamMgr:HasTeam()
+    return bHasTeam, i18n.Get(ChatMgr.Terms.TeamNeeded)
+  end,
+  [ChatMgr.ChannelType.Kin] = function()
+    local bHasKin = Kin:HasKin()
+    return bHasKin, i18n.Get(ChatMgr.Terms.KinNeeded)
+  end,
+  [ChatMgr.ChannelType.Public] = function()
+    local bHasCount = ChatMgr:GetPublicChatLeftCount(me) > 0
+    if not bHasCount then
+      local nWareId = Shop:GetWareIDByItemID(ChatMgr.nSpeakerPublicItemId)
+      local tbWare = Shop:GetAWare(nWareId)
+      local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+      Ui:OpenWindow("UIShopBuy", tbWare, true, nRemainCount)
+    end
+    return bHasCount, i18n.Get(ChatMgr.Terms.PublicCountLacked)
+  end,
+  [ChatMgr.ChannelType.Private] = function()
+    return true
+  end,
+  [ChatMgr.ChannelType.Friend] = function()
+    return true
+  end,
+  [ChatMgr.ChannelType.Nearby] = function()
+    if Map:CanNearbyChat(me.nMapTemplateId) then
+      return true
+    else
+      return false, i18n.Get(ChatMgr.Terms.NearbyMapLimited)
+    end
+  end,
+  [ChatMgr.ChannelType.Hawk] = function()
+    local bHasCount = ChatMgr:GetPublicChatLeftCount(me) > 0
+    if not bHasCount then
+      Ui:OpenWindow("UIShop", Shop.ShopType2ViewIndex.YuanBao, ChatMgr.nSpeakerPublicItemId)
+    end
+    return bHasCount, i18n.Get(ChatMgr.Terms.PublicCountLacked)
+  end,
+  [ChatMgr.ChannelType.Faction] = function()
+    if me.HasFaction() then
+      return true
+    else
+      return false, i18n.Get(ChatMgr.Terms.FactionNeeded)
+    end
+  end,
+  [ChatMgr.ChannelType.Zone] = function()
+    local bHasCount = ChatMgr:GetZoneChatLeftCount(me) > 0
+    if bHasCount then
+      return true
+    end
+    if not Ui.bInZone then
+      local nWareId = Shop:GetWareIDByItemID(ChatMgr.nSpeakerZoneItemId)
+      local tbWare = Shop:GetAWare(nWareId)
+      local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+      Ui:OpenWindow("UIShopBuy", tbWare, true, nRemainCount)
+      return false, i18n.Get(ChatMgr.Terms.ZoneCountLackedInWorld)
+    else
+      return false, i18n.Get(ChatMgr.Terms.ZoneCountLackedInZone)
+    end
+  end,
+  [ChatMgr.ChannelType.Zone_Legion] = function()
+    if me.HasLegion() then
+      return true
+    else
+      return false, i18n.Get(ChatMgr.Terms.LegionNeeded)
+    end
+  end
+}
+
+function ChatMgr:GetKey2GetCd(nChannelType, nChannelExtra)
+  local nCdKey = nChannelExtra and nChannelExtra * 1000 + nChannelType or nChannelType
+  return nCdKey
+end
+
+function ChatMgr:GetCd(nChannelType, nChannelExtra)
+  if nChannelType == ChatMgr.nChannelFriendName then
+    nChannelType = ChatMgr.ChannelType.Private
+  end
+  if nChannelType == ChatMgr.ChannelType.Public and nChannelExtra and nChannelExtra == ChatMgr.ChannelType.Hawk then
+    nChannelType = ChatMgr.ChannelType.Hawk
+  end
+  if not me.tbLastChatCDTimes then
+    me.tbLastChatCDTimes = {}
+  end
+  local nCdKey = self:GetKey2GetCd(nChannelType, nChannelExtra)
+  local now = GetTime()
+  if not me.tbLastChatCDTimes[nCdKey] then
+    return 0
+  end
+  local nLeftTime = me.tbLastChatCDTimes[nCdKey] - now
+  return nLeftTime
+end
+
+function ChatMgr:CheckChannelLevel(nChannelType)
+  local bPass = false
+  local tbChannelSetting = self.tbChannelSetting[nChannelType]
+  if tbChannelSetting and tbChannelSetting.nLevel > 0 then
+    bPass = bPass or me.nLevel >= tbChannelSetting.nLevel
+  end
+  if tbChannelSetting and tbChannelSetting.nVip > 0 then
+    bPass = bPass or me.GetVipLevel() >= tbChannelSetting.nVip
+  end
+  if tbChannelSetting and not bPass then
+    return false, tbChannelSetting.nLevel, tbChannelSetting.nVip
+  end
+  local tbDynamicInfo = self.tbDynamicChannel[nChannelType]
+  if tbDynamicInfo and me.nLevel < tbDynamicInfo.nLevel then
+    return false, tbDynamicInfo.nLevel
+  end
+  return true
+end
+
+local function GoRecharge()
+  GainCurrency:JumpToRechargeGold()
+end
+
+function ChatMgr:CheckSendMsg(nChannelType, nExtra, szMsg, bOnlyCheck, szVoiceFileId, nVoiceTime)
+  if nChannelType == ChatMgr.nChannelFriendName then
+    nChannelType = ChatMgr.ChannelType.Private
+  end
+  if nChannelType == ChatMgr.ChannelType.Public and nExtra and nExtra == ChatMgr.ChannelType.Hawk then
+    nChannelType = ChatMgr.ChannelType.Hawk
+  end
+  local tbChannelSetting = self.tbChannelSetting[nChannelType]
+  local tbDynamicInfo = self.tbDynamicChannel[nChannelType]
+  if not tbChannelSetting and nChannelType < self.nDynChannelBegin then
+    LogErr("Wrong channel Id:", nChannelType, szMsg)
+    return false
+  end
+  if HanWuYiJi:IsInFubenMap(me) and nChannelType ~= ChatMgr.ChannelType.Team then
+    return false
+  end
+  if nVoiceTime and nVoiceTime < 1000 then
+    LogErr("CheckSendMsg--", nVoiceTime)
+    me.CenterMsg(i18n.Get(self.Terms.VoiceTimeTooShort))
+    return false
+  end
+  if (not szMsg or "" == szMsg) and not szVoiceFileId then
+    me.CenterMsg(i18n.Get(self.Terms.ContentIsEmpty))
+    return false
+  end
+  local bPass = false
+  if tbChannelSetting and tbChannelSetting.nLevel > 0 then
+    bPass = bPass or me.nLevel >= tbChannelSetting.nLevel
+  end
+  if tbChannelSetting and tbChannelSetting.nVip > 0 then
+    bPass = bPass or me.GetVipLevel() >= tbChannelSetting.nVip
+  end
+  if tbChannelSetting and not bPass then
+    if tbChannelSetting.nVip <= 0 then
+      me.CenterMsg(i18n.Get(self.Terms.ChannelOpenByLevel, tbChannelSetting.nLevel, i18n.Get(tbChannelSetting.szChannelName)))
+    else
+      local szSay
+      if tbChannelSetting.nLevel > 0 then
+        szSay = i18n.Get(self.Terms.ChannelOpenByVipOrLevel, tbChannelSetting.nVip, tbChannelSetting.nLevel, i18n.Get(tbChannelSetting.szChannelName))
+      else
+        szSay = i18n.Get(self.Terms.ChannelOpenByVip, tbChannelSetting.nVip, tbChannelSetting.szChannelName)
+      end
+      Ui:OpenWindow("UIMessageBox", szSay, {
+        {GoRecharge},
+        {}
+      }, {
+        i18n.Get(self.Terms.Goto),
+        i18n.szCancel
+      })
+    end
+    return false
+  end
+  if tbDynamicInfo and me.nLevel < tbDynamicInfo.nLevel then
+    me.CenterMsg(i18n.Get(self.Terms.ChannelOpenByLevel, tbDynamicInfo.nLevel, i18n.Get(tbDynamicInfo.szName)))
+    return false
+  end
+  if Lib:StrLen(szMsg) > ChatMgr.nMaxMsgLengh then
+    me.CenterMsg(i18n.Get(self.Terms.ContentTooLong))
+    return false
+  end
+  local nLeftTime = self:GetCd(nChannelType, nExtra)
+  if nLeftTime > 0 then
+    me.CenterMsg(i18n.Get(self.Terms.ChatCD, i18n.Get(tbChannelSetting.szChannelName), nLeftTime))
+    return false
+  end
+  local bRet = true
+  local szReason = ""
+  if tbFunCheckSend[nChannelType] then
+    bRet, szReason = tbFunCheckSend[nChannelType](nExtra)
+  end
+  if not bRet then
+    me.CenterMsg(szReason)
+  elseif not bOnlyCheck then
+    local nCd = tbChannelSetting and tbChannelSetting.nCd or tbDynamicInfo and tbDynamicInfo.nMinCd or 2
+    if nChannelType == ChatMgr.ChannelType.Public then
+      nCd = nCd - Vip.tbSetting[me.GetVipLevel()].nPublicChatCD
+      if nCd < 0 then
+        nCd = 0
+      end
+    end
+    me.tbLastChatCDTimes[self:GetKey2GetCd(nChannelType, nExtra)] = GetTime() + nCd
+  end
+  return bRet
+end
+
+local tbFunCheckLink = {
+  [ChatMgr.LinkType.Item] = function(szMsg, nItemId)
+    local szItemName = string.match(szMsg, "%<(.+)%>")
+    local pItem = KItem.GetItemObj(nItemId)
+    local szName = pItem and pItem.GetItemShowInfo(me.nFaction, me.nFactionSect) or ""
+    return szItemName == i18n.Parse(szName)
+  end,
+  [ChatMgr.LinkType.Position] = function(szMsg, linkParam)
+    local szMapName, nPosX, nPosY = string.match(szMsg, "%<(.+)%((%d+),(%d+)%)%>")
+    local nMapTemplateId = type(linkParam) == "table" and linkParam[4]
+    return nMapTemplateId and szMapName == Map:GetMapName(nMapTemplateId)
+  end,
+  [ChatMgr.LinkType.Team] = function(szMsg, linkParam)
+    local szTeamInfo = string.match(szMsg, "^%<(.+)%>")
+    return szTeamInfo and linkParam[2] == TeamMgr:GetTeamId()
+  end,
+  [ChatMgr.LinkType.Achievement] = function(szMsg, nParam)
+    local szParam = string.match(szMsg, "^%<(.+)%>")
+    if not szParam then
+      return
+    end
+    local nId = math.floor(nParam / 100)
+    local nLevel = math.floor(nParam % 100)
+    local szKind = Achievement:GetKindById(nId)
+    if not szKind then
+      return
+    end
+  end,
+  [ChatMgr.LinkType.RandomNum] = function(szMsg, nParam)
+    return nParam and ChatMgr.RandomNumType2Num[nParam] ~= nil
+  end,
+  [ChatMgr.LinkType.Color] = function(szMsg, linkParam)
+    if linkParam[1] > 1048576000 then
+      return
+    end
+    return true
+  end,
+  [ChatMgr.LinkType.EmotionBig] = function(szMsg, nEmotionBigId)
+    local tbEmotionBig = nEmotionBigId and ChatMgr.EmotionBig:GetEmotionBig(nEmotionBigId)
+    if nil == tbEmotionBig then
+      return false
+    end
+    return szMsg == i18n.EasyGet("[\232\161\168\230\131\133\239\188\154{0}]", tbEmotionBig.Name)
+  end,
+  [ChatMgr.LinkType.OpenWindow] = function(szMsg, linkParam)
+    local szWindowInfo = string.match(szMsg, "%<(.+)%>")
+    return szWindowInfo and nil ~= linkParam[1]
+  end,
+  [ChatMgr.LinkType.MultiLink] = function(szMsg, nValue)
+    local szTeamInfo = string.match(szMsg, "^%<(.+)%>")
+    return szTeamInfo and nValue == MultiPvP:GetBattleTeamId(me.dwID)
+  end,
+  [ChatMgr.LinkType.WuLinDaHuiLink] = function(szMsg, nValue)
+    local szTeamInfo = string.match(szMsg, "^%<(.+)%>")
+    return szTeamInfo and nValue == WuLinDaHui:GetBattleTeamId(me.dwID)
+  end,
+  [ChatMgr.LinkType.DingFengPKLink] = function(szMsg, nValue)
+    local szTeamInfo = string.match(szMsg, "^%<(.+)%>")
+    return szTeamInfo and nValue == DingFengPK:GetBattleTeamId(me.dwID)
+  end,
+  [ChatMgr.LinkType.AvenueOfStarsSpeak] = function(szMsg, nTargetID)
+    return nTargetID == me.dwID
+  end
+}
+
+function ChatMgr:CheckLinkAvailable(szMsg, nLinkType, linkParam)
+  if nLinkType == ChatMgr.LinkType.LuaCustom then
+    return self:CheckLinkAvailable(szMsg, table.unpack(linkParam))
+  end
+  if not tbFunCheckLink[nLinkType] then
+    return false
+  end
+  return tbFunCheckLink[nLinkType](szMsg, linkParam)
+end

@@ -1,0 +1,307 @@
+MasterPrentice.nQueryInterval = 5
+MasterPrentice.lastQueryInfo = 0
+
+function MasterPrentice:OnSyncMPInfo(masterCtrl)
+  self.MPInfo = masterCtrl
+  if Ui:WindowVisible("UISocial") == true then
+    local tbWnd = Ui:GetWindow("UISocial")
+    if tbWnd.szCurPanel == "panelTeacher" then
+      local pPanel = Ui:GetPanelByName("UISocial_TeacherPanel")
+      if pPanel then
+        pPanel:UpdateView()
+      end
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNoTIFY_MASTERPRENTICE_SyncMPInfo)
+end
+
+function MasterPrentice:GetMPInfo()
+  return self.MPInfo or {}
+end
+
+function MasterPrentice:QueryDismissApply(nFromId, nToId)
+  RemoteServer.MasterPrentictRequest("DoQueryDismissApply", nFromId, nToId)
+end
+
+function MasterPrentice:OnSyncDissmissApply(tbApply)
+  EventNotify.OnNotify(EventNotify.emNoTIFY_MASTERPRENTICE_SyncDismissApply, tbApply)
+end
+
+function MasterPrentice:SendDismissMsg()
+  RemoteServer.MasterPrentictRequest("DoSendDismissMsg", me.dwID)
+end
+
+function MasterPrentice:SyncRedPoint()
+  RemoteServer.MasterPrentictRequest("DoUpdateTaskRedPoint", me.dwID)
+end
+
+function MasterPrentice:Register(bMaster, szAnnouncement)
+  RemoteServer.MasterPrentictRequest("DoRegister", bMaster, szAnnouncement)
+end
+
+function MasterPrentice:Unregister(bMaster)
+  RemoteServer.MasterPrentictRequest("DoUnregister", bMaster)
+end
+
+function MasterPrentice:SearchRegisterInfo(bMaster, nPage)
+  if self.nRequestTimer then
+    Timer:Close(self.nRequestTimer)
+    self.nRequestTimer = nil
+  end
+  
+  local function fnCall()
+    RemoteServer.MasterPrentictRequest("DoSearchRegisterInfo", bMaster, nPage)
+  end
+  
+  self.nRequestTimer = Timer:Register(9, fnCall)
+end
+
+function MasterPrentice:OnSyncRegisterInfo(bMaster, tbRegisterInfo, nPage)
+  if 1 == bMaster then
+    self.RegisterInfo.tbMasters = tbRegisterInfo
+    self.RegisterInfo.nMasterPage = nPage
+  else
+    self.RegisterInfo.tbPrentices = tbRegisterInfo
+    self.RegisterInfo.nPrenticePage = nPage
+  end
+  EventNotify.OnNotify(EventNotify.emNoTIFY_MASTERPRENTICE_SyncRegisterInfo)
+end
+
+function MasterPrentice:SetAnnouncement(bMaster, szAnnouncement)
+  RemoteServer.MasterPrentictRequest("DoSetAnnouncement", bMaster, szAnnouncement)
+end
+
+function MasterPrentice:ApplyApprentice(nToId, bMaster)
+  RemoteServer.MasterPrentictRequest("DoApplyApprentice", nToId, bMaster)
+end
+
+function MasterPrentice:AgreeApprentice(nApplyId)
+  RemoteServer.MasterPrentictRequest("DoAgreeApprentice", nApplyId)
+  if Ui:WindowVisible("UITeacherApply") == true then
+    Ui:CloseWindow("UITeacherApply")
+  end
+end
+
+function MasterPrentice:DisagreeApprentice(nApplyId)
+  RemoteServer.MasterPrentictRequest("DoDisagreeApprentice", nApplyId)
+end
+
+function MasterPrentice:DisagreeAllApprentice()
+  RemoteServer.MasterPrentictRequest("DoDisagreeAllApprentice")
+end
+
+MasterPrentice.lastQueryApply = 0
+
+function MasterPrentice:QueryMyApplies()
+  local now = GetTime()
+  if now - self.lastQueryApply < self.nQueryInterval then
+    return
+  end
+  self.lastQueryApply = now
+  RemoteServer.MasterPrentictRequest("DoQueryMyApplies")
+end
+
+function MasterPrentice:OnSyncAllApplies(tbApplies)
+  self.Applies = tbApplies
+  if Ui:WindowVisible("UITeacherApply") == true then
+    Ui:GetClass("UITeacherApply"):Refresh(tbApplies)
+  end
+end
+
+function MasterPrentice:GetApplies()
+  self:QueryMyApplies()
+end
+
+function MasterPrentice:OnSyncApply(tbApply)
+  local nApplyId = tbApply.nApplyId
+  self.Applies = self.Applies or {}
+  self.Applies[nApplyId] = tbApply
+  if Ui:WindowVisible("UITeacherApply") == true then
+    Ui:GetClass("UITeacherApply"):OnOpenEnd()
+  else
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.MP_TeacherApply)
+  end
+end
+
+function MasterPrentice:OnSyncDeleteApply(nApplyId)
+  for k, v in pairs(self.Applies or {}) do
+    if v[1] == nApplyId then
+      self.Applies[k] = nil
+    end
+  end
+  if Ui:WindowVisible("UITeacherApply") == true then
+    Ui:GetClass("UITeacherApply"):OnOpenEnd()
+  end
+end
+
+function MasterPrentice:GetAllApply()
+  return self.Applies
+end
+
+function MasterPrentice:DoApplyDismiss(dwRoleId, bMaster)
+  RemoteServer.MasterPrentictRequest("DoApplyDismiss", dwRoleId, bMaster)
+end
+
+MasterPrentice.MPData = MasterPrentice.MPData or {}
+MasterPrentice._CacheTable = MasterPrentice._CacheTable or {}
+
+function MasterPrentice:OnSyncMPData(nMasterId, nPrenticeId, tbMPData, tbPlayerInfo)
+  self.MPData[nMasterId] = self.MPData[nMasterId] or {}
+  self.MPData[nMasterId][nPrenticeId] = tbMPData
+  if tbPlayerInfo then
+    self._CacheTable[tbPlayerInfo.dwRoleId] = tbPlayerInfo
+  end
+  EventNotify.OnNotify(EventNotify.emNoTIFY_MASTERPRENTICE_SyncMPData)
+end
+
+function MasterPrentice:OnGoalCompleted(masterId)
+  local tbInfo = FriendShip:GetFriendDataInfo(masterId)
+  if tbInfo and 2 == tbInfo.nState then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.MP_GoalReport)
+  end
+  self.tbGoalComlated = self.tbGoalComlated or {}
+  self.tbGoalComlated[masterId] = true
+end
+
+function MasterPrentice:OnGoalReported(masterId)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.MP_GoalReport)
+  self.tbGoalComlated = self.tbGoalComlated or {}
+  self.tbGoalComlated[masterId] = false
+end
+
+function MasterPrentice:OnTaskCompleted(masterId)
+  local tbInfo = FriendShip:GetFriendDataInfo(masterId)
+  if tbInfo and 2 == tbInfo.nState then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.MP_TaskReport)
+  end
+  self.tbTaskComlated = self.tbTaskComlated or {}
+  self.tbTaskComlated[masterId] = true
+end
+
+function MasterPrentice:OnTaskReported(masterId)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.MP_TaskReport)
+  self.tbTaskComlated = self.tbTaskComlated or {}
+  self.tbTaskComlated[masterId] = false
+end
+
+function MasterPrentice:ReportGoal(nMasterId)
+  RemoteServer.MasterPrentictRequest("DoReportGoal", nMasterId)
+end
+
+function MasterPrentice:SetMPTask(nPrenticeId, tbTask)
+  RemoteServer.MasterPrentictRequest("DoSetMPTask", nPrenticeId, tbTask)
+end
+
+function MasterPrentice:AskMPTask(nMasterId)
+  RemoteServer.MasterPrentictRequest("DoAskMPTask", nMasterId)
+end
+
+function MasterPrentice:ReportTask(nMasterId)
+  RemoteServer.MasterPrentictRequest("DoReportTask", nMasterId)
+end
+
+function MasterPrentice:DoListStudent(dwRoleId)
+  RemoteServer.MasterPrentictRequest("DoListStudent", dwRoleId)
+end
+
+function MasterPrentice:OnSyncStudentList(tbStudentList)
+  self.tbStudentList = tbStudentList
+  if Ui:WindowVisible("UISocial") == true then
+    Ui:GetClass("panelTeacher"):UpdateStudentList()
+  end
+end
+
+function MasterPrentice:GetStudentList()
+  return self.tbStudentList or {}
+end
+
+function MasterPrentice:SetTitle(szTitle)
+  me:GetNpc().SetTitle(szTitle)
+end
+
+function MasterPrentice:SendGift(dwRoleId, nItemId)
+  RemoteServer.MasterPrentictRequest("DoSendGift", dwRoleId, nItemId)
+end
+
+function MasterPrentice:OnGiftRespond(dwRoleId)
+  local tbMPData = MasterPrentice:GetMPData(me.dwID, dwRoleId)
+  if tbMPData then
+    tbMPData.bGift = true
+  end
+  EventNotify.OnNotify(EventNotify.emNoTIFY_MASTERPRENTICE_SENDGIFTSUCCESS)
+end
+
+function MasterPrentice:CheckMPInfo()
+  RemoteServer.MasterPrentictRequest("DoCheckMPInfo")
+end
+
+function MasterPrentice:OnPlayerLevelUpC(nNewLevel)
+  local bNotShow = me.GetUserValue(self.Def.nGroupKey, self.Def.nNoShowId)
+  if 0 == bNotShow then
+    local function fnAgree()
+      Ui:OpenWindow("UISocial", 2)
+      
+      Ui:OpenWindow("UITeacherFind")
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\233\151\175\232\141\161\230\177\159\230\185\150\233\149\191\232\183\175\230\188\171\230\188\171\239\188\140\229\176\145\228\190\160\230\152\175\229\144\166\233\156\128\232\166\129\229\175\187\230\137\190\229\184\136\231\136\182\239\188\159"), {
+      {fnAgree},
+      {}
+    }, {
+      i18n.EasyGet("\233\156\128\232\166\129"),
+      i18n.EasyGet("\228\184\141\233\156\128\232\166\129")
+    }, "TeacherFind", nil, i18n.EasyGet("\228\187\165\229\144\142\228\184\141\229\134\141\230\143\144\233\134\146"))
+  end
+end
+
+function MasterPrentice:SetNotShowValue(bValue)
+  RemoteServer.MasterPrentictRequest("DoSetNotShowValue", bValue and 1 or 0)
+end
+
+function MasterPrentice:CheckPopUpMenuCanUse(dwRoleId, nLevel, nOtherVipLevel)
+  if not dwRoleId then
+    return false
+  end
+  local Relation = self:GetRelation(me, dwRoleId)
+  if Relation > 0 then
+    return false
+  end
+  local nDiffLevel = self:GetMinLevelDiff(me.GetVipLevel())
+  local nOtherDiffLevel = self:GetMinLevelDiff(nOtherVipLevel or 0)
+  nDiffLevel = math.min(nDiffLevel, nOtherDiffLevel)
+  if nDiffLevel <= me.nTotalLevel - nLevel then
+    local tbLimitLevel = self.Cfg.MASTER_LEVEL
+    local nLimitLevel = 0
+    for szOpenTime, nLevel in pairs(tbLimitLevel) do
+      if 1 == GetTimeFrameState(szOpenTime) then
+        nLimitLevel = math.max(nLimitLevel, nLevel)
+      end
+    end
+    if nLimitLevel > me.nTotalLevel then
+      return false
+    end
+    local masterCtrl = self:GetMPInfo()
+    if masterCtrl and masterCtrl.tbMyPrentices and #masterCtrl.tbMyPrentices[1] >= self.Def.MAX_PRENTICE_COUNT then
+      return false
+    end
+    return true
+  elseif nDiffLevel <= nLevel - me.nTotalLevel then
+    if me.nTotalLevel < self.Cfg.PRENTICE_LEVEL then
+      return false
+    end
+    local masterCtrl = self:GetMPInfo()
+    if masterCtrl and masterCtrl.tbMyMaster and #masterCtrl.tbMyMaster >= self.Def.MAX_MASTER_COUNT then
+      return false
+    end
+    return true
+  end
+  return false
+end
+
+function MasterPrentice:ClearData()
+  self.tbTaskComlated = {}
+  self.tbGoalComlated = {}
+end
+
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, MasterPrentice.ClearData, MasterPrentice)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, MasterPrentice.SyncRedPoint, MasterPrentice)

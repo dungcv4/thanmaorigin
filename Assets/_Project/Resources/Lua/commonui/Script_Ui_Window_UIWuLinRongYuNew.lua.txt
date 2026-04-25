@@ -1,0 +1,267 @@
+local tbWnd = Ui:CreateWindow("UIWuLinRongYuNew")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_PLAYER_DATA_END,
+      self.OnChangeMoney,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_WULINHONO_RISEGRADEAWARD_SYNC,
+      self.OnGainRiseGradeAward,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnInfo = "node/imgBG/Content/txtTitle/btnInfo",
+  btnClose = "node/imgBG/Content/Right/RightIcon/btnClose",
+  UIMoneyPanel = "node/imgBG/Content/UIMoneyPanel",
+  btnActivityTemplate = "node/imgBG/Content/Left/LeftBtn/Viewport/Content/btnReputation",
+  centerRankTemplate = "node/imgBG/Content/Center/Viewport/Content/Template",
+  rightAwardTemplate = "node/imgBG/Content/Right/RightAward/Award/Scroll ViewItem/Viewport/Content/ItemTemplate",
+  txtGradeTitle = "node/imgBG/Content/Right/RightAward/Award/TxtTittle",
+  txtAwardTitle = "node/imgBG/Content/Right/RightAward/Award/txtMainTittle",
+  btnGainAward = "node/imgBG/Content/Right/RightAward/Award/btnGo",
+  btnMonth = "node/imgBG/Content/Right/RightIcon/btnMonth",
+  btnMonthAward = "node/imgBG/Content/Right/RightIcon/btnAward",
+  imgAwardIcon = "node/imgBG/Content/Right/RightAward/Award/ImgIcon",
+  imgGradeIcon = "node/imgBG/Content/Right/RightAward/Award/ImgIcon/Medal/00",
+  wndMonth = "wndMonth",
+  btnMonthHelp = "wndMonth/imgBg/btnInfo",
+  txtMonthTitle = "wndMonth/imgBg/txtTitle",
+  txtMonthAwardTitle = "wndMonth/imgBg/txtMainTittle3",
+  txtMonthDetails1 = "wndMonth/imgBg/txtDetails1",
+  txtMonthDetails2 = "wndMonth/imgBg/txtDetails2",
+  wndMonthAwardTemplate = "wndMonth/imgBg/Scroll ViewItem/Viewport/Content/ItemTemplate"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnInfo = function(self)
+    Ui:OnHelpClicked("WuLinRongYu")
+  end,
+  btnClose = function(self)
+    for _, tbElement in pairs(self.tbActivityScrollView.tbElementList) do
+      self.pPanel:ButtonGroup_SetSelect(tbElement.szKey, false)
+    end
+    self:Close()
+  end,
+  btnMonth = function(self)
+    self:OnclickMonth()
+  end,
+  btnMonthHelp = function(self)
+    Ui:OnHelpClicked(self.szMonthHelpKey)
+  end,
+  btnMonthAward = function(self)
+    Ui:OpenWindow("UIWuLinRongYuAward", self.nActivityId)
+  end,
+  btnGainAward = function(self)
+    self:OnClickGainAward()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, tbControls.UIMoneyPanel)
+  self.tbActivityScrollView = Ui:NewScrollView(self, tbControls.btnActivityTemplate, function(self, nIndex)
+    self:OnLeftBtnClick(nIndex)
+  end)
+  self.tbCenterScrollView = Ui:NewScrollView(self, tbControls.centerRankTemplate)
+  self.tbRightAwardScrollView = Ui:NewItemGridView(self, tbControls.rightAwardTemplate)
+  self.tbwndMonthAwardScrollView = Ui:NewItemGridView(self, tbControls.wndMonthAwardTemplate)
+  self:SetClickEmptyCallback(tbControls.wndMonth)
+end
+
+function tbWnd:OnOpen()
+  self.tbMoneyPanel:SetMoneyValue()
+  self.tbMoneyPanel:SetIconsShow()
+  self:InitLefBtnSV()
+end
+
+function tbWnd:InitLefBtnSV()
+  self.tbActivityScrollView:Reset()
+  self.tbActivityScrollView:GoTop()
+  local tbActivityData = WuLinHonor:GetHonorActivityData()
+  for index, tbData in ipairs(tbActivityData) do
+    self.tbActivityScrollView:SetElement(index, function(tbElement)
+      self.pPanel:Label_SetText(tbElement.szKey .. "/Text", tbData.szText)
+      self.pPanel:Sprite_SetSprite(tbElement.szKey .. "/imgIcon", tbData.szIcon)
+      self.pPanel:ButtonGroup_SetSprite(tbElement.szKey, 1, tbData.szIcon, tbData.szIcon)
+      self.pPanel:ButtonGroup_SetSelect(tbElement.szKey, false)
+    end)
+  end
+  self:AutoSelectLeftBtn()
+  self:CheckRedPoint()
+end
+
+function tbWnd:AutoSelectLeftBtn()
+  local nTargetIndex = 1
+  self.pPanel:ButtonGroup_SetSelect(self.tbActivityScrollView.tbElementList[nTargetIndex].szKey, true)
+  self:OnLeftBtnClick(nTargetIndex)
+end
+
+function tbWnd:OnChangeMoney()
+  self.tbMoneyPanel:SetMoneyValue()
+end
+
+function tbWnd:OnLeftBtnClick(nIndex)
+  local tbActivityData = WuLinHonor:GetHonorActivityData()
+  local tbData = tbActivityData[nIndex]
+  self.nActivityId = tbData.nActivityId
+  self:UpdateActivityInfo()
+  self:UpdateRankInfo()
+  self:UpdateGradeAwardInfo()
+  local tbActivityIdList = WuLinHonor:GetRedPointList()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnGainAward)
+  if tbActivityIdList[self.nActivityId] then
+    RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnGainAward, {
+      tbActivityIdList[self.nActivityId]
+    })
+    RedPointMgr:LightRedPoint(tbActivityIdList[self.nActivityId])
+  end
+end
+
+function tbWnd:UpdateActivityInfo()
+  if not self.nActivityId or 0 == self.nActivityId then
+    return
+  end
+  self.pPanel:SetActive(tbControls.btnMonth, WuLinHonor:HasMonthActOpened(self.nActivityId))
+  if not WuLinHonor:HasMonthQualificationGotten(self.nActivityId) then
+    self.pPanel:Sprite_SetColorByName(tbControls.btnMonth, "Gray")
+  else
+    self.pPanel:Sprite_SetColorByName(tbControls.btnMonth, "White")
+  end
+end
+
+function tbWnd:UpdateRankInfo()
+  local nCurgrade = WuLinHonor:GetGrade(me, self.nActivityId)
+  for nGrade, tbInfo in pairs(WuLinHonor.tbRankInfo[self.nActivityId] or {}) do
+    self:UpdateGradeInfo(nGrade, tbInfo, nCurgrade)
+  end
+  if 0 == nCurgrade then
+    self.pPanel:Label_SetText(tbControls.txtGradeTitle, i18n.EasyGet("<color=#{0}>\230\154\130\230\151\160\232\141\163\232\170\137\230\174\181\228\189\141</color>", WuLinHonor.szTextNoGradeColor))
+    self.pPanel:SetActive(tbControls.imgAwardIcon, false)
+  else
+    self.pPanel:SetActive(tbControls.imgAwardIcon, true)
+    self.pPanel:Label_SetText(tbControls.txtGradeTitle, i18n.Get(WuLinHonor.tbEachGradeCfg[nCurgrade].szText))
+    self.pPanel:Label_SetColorByName(tbControls.txtGradeTitle, WuLinHonor.tbEachGradeCfg[nCurgrade].szTextColor)
+    for index = 1, Lib:CountTB(WuLinHonor.tbActivityGroup) do
+      self.pPanel:SetActive(tbControls.imgGradeIcon .. index, index == nCurgrade)
+    end
+  end
+end
+
+function tbWnd:UpdateGradeInfo(nGrade, tbInfo, nCurgrade)
+  self.tbCenterScrollView:SetElement(nGrade, function(tbElement)
+    self.pPanel:Label_SetText(tbElement.szKey .. "/Content/TxtTittle", i18n.Get(WuLinHonor.tbEachGradeCfg[nGrade].szText))
+    local tbConditionDesc = {}
+    local nMaxConditionNum = 4
+    local tbTriggerInfo
+    local nConditionNum = 0
+    local nConditionDoneNum = 0
+    for i = 1, nMaxConditionNum do
+      tbTriggerInfo = tbInfo[i]
+      if tbTriggerInfo then
+        nConditionNum = nConditionNum + 1
+        table.insert(tbConditionDesc, WuLinHonor:GetConditionDesc(self.nActivityId, nGrade, tbTriggerInfo.nType, tbTriggerInfo.nTriggerId, nCurgrade))
+        local nCurNum = WuLinHonor:GetConditionCurNum(self.nActivityId, nGrade, tbTriggerInfo.nType, tbTriggerInfo.nTriggerId)
+        local nMaxNum = WuLinHonor:GetConditionMaxNum(self.nActivityId, nGrade, tbTriggerInfo.nType, tbTriggerInfo.nTriggerId)
+        if nCurNum >= nMaxNum then
+          nConditionDoneNum = nConditionDoneNum + 1
+        end
+      end
+    end
+    self.pPanel:Label_SetText(tbElement.szKey .. "/Content/TxtCont01", table.concat(tbConditionDesc, "\n"))
+    self.pPanel:Label_SetText(tbElement.szKey .. "/Content/TxtNow", string.format("%s (%d/%d)", i18n.EasyGet("\232\191\155\229\186\166"), nConditionDoneNum, nConditionNum))
+    if nGrade == nCurgrade then
+      self.pPanel:SetActive(tbElement.szKey .. "/Content/ImgSelect", true)
+    else
+      self.pPanel:SetActive(tbElement.szKey .. "/Content/ImgSelect", false)
+    end
+  end)
+end
+
+function tbWnd:UpdateGradeAwardInfo()
+  local nGrade = WuLinHonor:GetGrade(me, self.nActivityId)
+  local nAwardGrade = WuLinHonor:GetAwardGrade(me, self.nActivityId)
+  local nMaxGrade = Lib:CountTB(WuLinHonor.tbGradeGroup)
+  local nAwardGradeShow = math.min(nAwardGrade + 1, nMaxGrade)
+  self.pPanel:Label_SetText(tbControls.txtAwardTitle, i18n.EasyGet("{0}\230\153\139\229\141\135\229\165\150\229\138\177", i18n.Get(WuLinHonor.tbEachGradeCfg[nAwardGradeShow].szText)))
+  local tbAwardList = WuLinHonor:GetRiseGradeAward(nAwardGradeShow)
+  for i = 1, #tbAwardList do
+    self.tbRightAwardScrollView:SetItem(i, tbAwardList[i], true)
+  end
+  self.tbRightAwardScrollView:ResetFrom(#tbAwardList + 1)
+  self.pPanel:Button_SetEnable(tbControls.btnGainAward, nGrade ~= nAwardGrade)
+  self.pPanel:Label_SetText(tbControls.btnGainAward .. "/Text", Lib:IIF(nMaxGrade == nAwardGrade, i18n.EasyGet("\229\183\178\233\162\134\229\143\150"), i18n.EasyGet("\233\162\134\229\143\150")))
+end
+
+function tbWnd:OnclickMonth()
+  if not WuLinHonor:HasMonthActOpened(self.nActivityId) then
+    me.CenterMsg(i18n.EasyGet("{0}\230\156\136\229\186\166\232\181\155\230\154\130\230\156\170\229\188\128\230\148\190", WuLinHonor:GetNameByActivityType(self.nActivityId)))
+    return
+  end
+  local szCondition = WuLinHonor:GetMonthDesc(self.nActivityId)
+  if Lib:IsEmptyStr(szCondition) then
+    return
+  end
+  self.pPanel:SetActive(tbControls.wndMonth, true)
+  self.pPanel:Label_SetText(tbControls.txtMonthDetails2, szCondition)
+  local nMonthActivityId = WuLinHonor:GetMonthId(self.nActivityId)
+  if not nMonthActivityId then
+    LogErr("[WuLinHonor] Error, Not Found Month Activity's nMonth")
+    return
+  end
+  local szKey, szType, szDesc, szMonthHelpKey = Calendar:GetActivityDetail(nMonthActivityId)
+  local tbActInfo = Calendar:GetActInfo(nMonthActivityId)
+  if not (szKey and szType and szDesc) or Lib:IsEmptyTB(tbActInfo) then
+    Log("[ActivityTip OnOpen] Error, Not Found This Activity's Tip >>>>", nMonthActivityId)
+    return
+  end
+  self.pPanel:Label_SetText(tbControls.txtMonthTitle, i18n.Parse(tbActInfo.szName))
+  if szMonthHelpKey and "" ~= szMonthHelpKey then
+    self.szMonthHelpKey = szMonthHelpKey
+    self.pPanel:SetActive(tbControls.btnMonthHelp, true)
+  else
+    self.pPanel:SetActive(tbControls.btnMonthHelp, false)
+  end
+  szDesc = string.gsub(i18n.Parse(szDesc), "\\n", "\n")
+  self.pPanel:Label_SetText(tbControls.txtMonthDetails1, szDesc)
+  local tbRewards = Calendar:GetActivityReward(nMonthActivityId)
+  self.pPanel:SetActive(tbControls.txtMonthAwardTitle, not Lib:IsEmptyTB(tbRewards))
+  for i = 1, #tbRewards do
+    self.tbwndMonthAwardScrollView:SetItem(i, tbRewards[i], true)
+  end
+end
+
+function tbWnd:OnClickGainAward()
+  WuLinHonor:TryGainRiseGradeAwardC(self.nActivityId)
+end
+
+function tbWnd:OnGainRiseGradeAward()
+  self:UpdateGradeAwardInfo()
+end
+
+function tbWnd:CheckRedPoint()
+  local tbActivityIdList = WuLinHonor:GetRedPointList()
+  local tbActivityData = WuLinHonor:GetHonorActivityData()
+  local szActivityBtnKey
+  for index, tbData in pairs(tbActivityData) do
+    if index <= #self.tbActivityScrollView.tbElementList then
+      szActivityBtnKey = self.tbActivityScrollView.tbElementList[index].szKey
+      RedPointMgr:DynamicUnRegist(self.pPanel, szActivityBtnKey)
+      if tbActivityIdList[tbData.nActivityId] then
+        RedPointMgr:DynamicRegisteRedPoint(self.pPanel, szActivityBtnKey, {
+          tbActivityIdList[tbData.nActivityId]
+        })
+        RedPointMgr:LightRedPoint(tbActivityIdList[tbData.nActivityId])
+      end
+    end
+  end
+end
+
+function tbWnd:OnClickEmptyClose()
+  self.tbwndMonthAwardScrollView:Clear()
+  self.pPanel:SetActive(tbControls.wndMonth, false)
+end

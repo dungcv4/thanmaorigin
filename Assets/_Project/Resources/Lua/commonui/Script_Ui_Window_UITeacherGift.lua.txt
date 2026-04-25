@@ -1,0 +1,122 @@
+local TeacherGiftPanel = Ui:CreateWindow("UITeacherGift")
+local ITEM_PER_LINE = 5
+local MIN_LINE = 3
+
+function TeacherGiftPanel:NotifyEvents()
+  local tbRegEvent = {
+    {
+      EventNotify.emNoTIFY_MASTERPRENTICE_SENDGIFTSUCCESS,
+      self.OnSendSuccess,
+      self
+    }
+  }
+  return tbRegEvent
+end
+
+TeacherGiftPanel.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnGive = "node/imgBG/Content/GiftObj/btnGive"
+}
+
+function TeacherGiftPanel:OnCreate()
+  self.BagItemTemplate = "node/imgBG/Content/BagPanel/bagBackground/maskView/imgInventory/Item"
+  self.tbBagScrollView = Ui:NewItemGridScrollView(self, self.BagItemTemplate, ITEM_PER_LINE, MIN_LINE, "Teacher")
+  self.itemGrid = Ui:NewExistItemGrid(self, "node/imgBG/Content/GiftObj/UIItemGrid")
+end
+
+function TeacherGiftPanel:OnOpenEnd(dwRoleId)
+  self.dwRoleId = dwRoleId
+  self:InitGiftInfo()
+  self:RefreshUi()
+end
+
+function TeacherGiftPanel:InitGiftInfo()
+  local tbAllItems = {}
+  local tbEquips = me.GetEquips(1)
+  for _, nTempId in ipairs(MasterPrentice.Cfg.tbGiftIds) do
+    local tbItems = me.GetItemListInBag(nTempId) or {}
+    for _, item in pairs(tbItems) do
+      if tbEquips[item.nEquipPos] ~= item.dwId then
+        table.insert(tbAllItems, {
+          nItemId = item.dwId,
+          nCount = item.nCount,
+          nTempId = nTempId
+        })
+      end
+    end
+  end
+  self.tbAllItems = tbAllItems
+  self.tbSelectedItem = {}
+end
+
+function TeacherGiftPanel:RefreshUi()
+  self:UpdateGiftInfo()
+  self:UpdateGiftList()
+end
+
+function TeacherGiftPanel:UpdateGiftInfo()
+  local nItemId = self.tbSelectedItem and self.tbSelectedItem.nItemId
+  local pItem = nItemId and KItem.GetItemObj(nItemId)
+  if not pItem then
+    self.pPanel:SetActive("node/imgBG/Content/txtTip1", true)
+    self.pPanel:SetActive("node/imgBG/Content/GiftObj", false)
+    return
+  end
+  self.pPanel:SetActive("node/imgBG/Content/txtTip1", false)
+  self.pPanel:SetActive("node/imgBG/Content/GiftObj", true)
+  self.pPanel:Label_SetText("node/imgBG/Content/GiftObj/txtTitle", i18n.Parse(pItem.szName))
+  self.itemGrid:SetItemByTemplate(self.tbSelectedItem.nTempId)
+  self.itemGrid:SetClickEnable(false)
+  local tbInfo = Item:GetItemBaseProp(pItem.dwTemplateId)
+  local szIntro2 = tbInfo and i18n.Parse(tbInfo.szIntro) or ""
+  szIntro2 = string.gsub(szIntro2, "\\n", "\n")
+  self.pPanel:Label_SetText("node/imgBG/Content/GiftObj/ItemTipObj/txtItemTip", szIntro2)
+  self.pPanel:Button_SetEnable(self.btnGive, true)
+end
+
+function TeacherGiftPanel:UpdateGiftList()
+  if not self.tbAllItems or not next(self.tbAllItems) then
+    self.pPanel:SetActive("node/imgBG/Content/txtTip2", true)
+    self.tbAllItems = {}
+  else
+    self.pPanel:SetActive("node/imgBG/Content/txtTip2", false)
+  end
+  
+  local function fnSelect(tbGridItem)
+    self.tbSelectedItem = tbGridItem
+    self:UpdateGiftInfo()
+  end
+  
+  for i = 1, Lib:CountTB(self.tbAllItems) do
+    local tbItem = self.tbAllItems[i]
+    local nItemId = tbItem and tbItem.nItemId
+    local tbGridParams = {bShowTip = true}
+    self.tbBagScrollView:SetItemByTemplate(i, nItemId, 0, tbItem.nTempId, true, fnSelect, tbGridParams, tbItem)
+  end
+end
+
+function TeacherGiftPanel:OnSendSuccess()
+  self.pPanel:SetActive(self.btnGive, false)
+  Ui:CloseWindow("UITeacherGift")
+end
+
+TeacherGiftPanel.tbOnClick = TeacherGiftPanel.tbOnClick or {}
+TeacherGiftPanel.tbOnClick = {
+  btnClose = function(self)
+    Ui:CloseWindow("UITeacherGift")
+  end,
+  btnGive = function(self)
+    print("give")
+    me.MsgBox(i18n.EasyGet("\229\184\136\229\190\146\229\135\186\229\184\136\231\164\188\231\137\169\228\187\133\230\156\1371\230\172\161\232\181\160\233\128\129\230\156\186\228\188\154\239\188\140\230\152\175\229\144\166\231\161\174\232\174\164\232\181\160\233\128\129\239\188\159\n"), {
+      {
+        i18n.EasyGet("\231\161\174\232\174\164"),
+        function()
+          MasterPrentice:SendGift(self.dwRoleId, self.tbSelectedItem.nItemId)
+        end
+      },
+      {
+        i18n.EasyGet("\229\143\150\230\182\136")
+      }
+    })
+  end
+}

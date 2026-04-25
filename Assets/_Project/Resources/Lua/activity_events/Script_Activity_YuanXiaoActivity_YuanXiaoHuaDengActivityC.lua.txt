@@ -1,0 +1,83 @@
+Require("CommonScript/Activity/ActivityMgrDef.lua")
+Require("CommonScript/Activity/YuanXiaoActivity/YuanXiaoHuaDengActivityComm.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.YuanXiaoHuaDeng)
+local Protocol = {
+  [tbActivity.Protocol.OnYuanXiaoSyncQuestionId] = "OnSyncQuestionId",
+  [tbActivity.Protocol.ReqYuanXiaoLightRedPoint] = "OnCheckRedPoint",
+  [tbActivity.Protocol.ReqYuanXiaoAnswerQuestionBeack] = "SCQuestionRsp",
+  [tbActivity.Protocol.ReqQuestionIdBaeck] = "ReqQuestionIdBaeck"
+}
+
+function tbActivity:OnClose()
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.FestiveHuaDeng)
+end
+
+function tbActivity:OnOpen()
+  self.nSaveGroupID = GetGroupKey(self.tbConfig.szSaveKey)
+  self:OnCheckRedPoint()
+end
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    LogErr("[LaborHonor] ServerRequest protocol is wrong", nProtocol)
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:OnSyncQuestionId(nQuestionId)
+  self.nAnswerTimer = GetTime() + self:GetQuestionTime()
+  Ui:OpenWindow("UIKinFlagAnswer", false, nQuestionId, self.nId, 1)
+end
+
+function tbActivity:GetQuestionData(nQuestionId)
+  if self.tbConfig.tbQuestion[nQuestionId] ~= nil then
+    return self.tbConfig.tbQuestion[nQuestionId]
+  end
+  return nil
+end
+
+function tbActivity:GetQuestionCfg()
+  return self.tbConfig
+end
+
+function tbActivity:GetAnswerTime(nQuestionId)
+  return self.nAnswerTimer
+end
+
+function tbActivity:SCQuestionRsp(bIsRight, nAnswerId)
+  if Ui:WindowVisible("UIKinFlagAnswer") then
+    Ui:GetWindow("UIKinFlagAnswer"):NextActivityQuiz(bIsRight, nAnswerId)
+  end
+end
+
+function tbActivity:ReqAnswerQuestion(nAnswerId)
+  ActivityMgr:CallServerScriptV2(self.nId, tbActivity.Protocol.ReqYuanXiaoAnswerQuestion, nAnswerId)
+end
+
+function tbActivity:ReqQuestionId()
+  ActivityMgr:CallServerScriptV2(self.nId, tbActivity.Protocol.ReqQuestionId)
+end
+
+function tbActivity:ReqQuestionIdBaeck(nQuestionId)
+  if Ui:WindowVisible("UIKinFlagAnswer") then
+    self.nAnswerTimer = GetTime() + self:GetQuestionTime()
+    Ui:GetWindow("UIKinFlagAnswer"):UpdateQuestion(nQuestionId)
+  end
+end
+
+function tbActivity:OnCheckRedPoint()
+  if me.nLevel < self.tbConfig.nJoinLevel then
+    return
+  end
+  local nAnswerNum = self:GetAnswerNum(me)
+  if nAnswerNum >= self.tbConfig.nDailyAnswerNum then
+    if RedPointMgr:CheckEvent(RedPointMgr.EVENT.FestiveHuaDeng) then
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.FestiveHuaDeng)
+    end
+    return
+  end
+  if not RedPointMgr:CheckEvent(RedPointMgr.EVENT.FestiveHuaDeng) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.FestiveHuaDeng)
+  end
+end

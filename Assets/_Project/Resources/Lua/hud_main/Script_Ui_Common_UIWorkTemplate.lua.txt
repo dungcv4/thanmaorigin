@@ -1,0 +1,286 @@
+local tbWnd = Ui:CreateClass("UIWorkTemplate", "UIPanel")
+local tbControls = {
+  btnHelp = "Tex/txtTitle/btnHelp",
+  txtTitle = "Tex/txtTitle",
+  btnGo = "B/btnGo",
+  btnIconTemplate = "B/btnIconTemplate",
+  AwardPreviewTemplate = "List01/List/Viewport/Content/Template",
+  txtTime = "Tex/txtCell/txtTime01",
+  txtLv = "Tex/txtCell/txtLV",
+  Progress = "Progress",
+  txtAwardTittle = "List01/txtSecondTittle",
+  txtPersonSubmitInfo = "txtInfo01",
+  txtProgressTittle = "txtSecondTittle",
+  txtActivityDesc = "B/txtInfo",
+  txtOwnSubmitItemNum = "B/CostItem/txtNum",
+  btnAdd = "B/CostItem/btnAdd",
+  UIItemGrid = "B/CostItem/UIItemGrid",
+  txtMark0 = "Progress/Grid_Mark/imgMark0/txt0",
+  txtMark600 = "Progress/Grid_Mark/imgMark600/txt600",
+  txtMark1200 = "Progress/Grid_Mark/imgMark1200/txt1200",
+  txtMark2000 = "Progress/Grid_Mark/imgMark2000/txt2000",
+  txtMark3000 = "Progress/Grid_Mark/imgMark3000/txt3000",
+  txtMark6000 = "Progress/Grid_Mark/imgMark6000/txt6000",
+  imgMark0 = "Progress/Grid_Mark/imgMark0",
+  imgMark600 = "Progress/Grid_Mark/imgMark600",
+  imgMark1200 = "Progress/Grid_Mark/imgMark1200",
+  imgMark2000 = "Progress/Grid_Mark/imgMark2000",
+  imgMark3000 = "Progress/Grid_Mark/imgMark3000",
+  imgMark6000 = "Progress/Grid_Mark/imgMark6000",
+  TrailEffect = "Progress/TrailEffect"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.szHelpKey)
+  end,
+  btnGo = function(self)
+    self:GotoSubmission()
+  end,
+  btnAdd = function(self)
+    local fn = ActivityMgr.tbJumpFunc[self.szPlusCallBack]
+    local tbParam = Lib:SplitStrTry2Num(self.szPlusParam or "", "|")
+    if fn and tbParam and #tbParam > 0 then
+      fn(self.tbActivityList[self.nIndex].nId, table.unpack(tbParam))
+      if self.szPlusCallBack == "GotoPos" or self.szPlusCallBack == "GotoNPC" then
+        Ui:CloseWindow("UIActivityTemplate")
+      end
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbMarkTxtList = {
+    tbControls.txtMark600,
+    tbControls.txtMark1200,
+    tbControls.txtMark2000,
+    tbControls.txtMark3000,
+    tbControls.txtMark6000
+  }
+  self.tbMarkImgList = {
+    tbControls.imgMark600,
+    tbControls.imgMark1200,
+    tbControls.imgMark2000,
+    tbControls.imgMark3000,
+    tbControls.imgMark6000
+  }
+  self.tbAwardSV = Ui:NewItemGridView(self, tbControls.AwardPreviewTemplate)
+  self.tbSubmitItemGrid = Ui:NewExistItemGrid(self, tbControls.UIItemGrid)
+  self.btnTemplateListView = Ui:NewScrollView(self, tbControls.btnIconTemplate)
+end
+
+function tbWnd:OnOpen(nEntranceIndex, nIndex)
+  self.nEntranceIndex = nEntranceIndex or self.nEntranceIndex
+  if self.nEntranceIndex then
+    self:UpdateInfo(self.nEntranceIndex, nIndex)
+  end
+  if not self.bRegist then
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_HANDINAUCTION_DATA_SYNC, self.UpdateActivityInfo, self)
+    self.bRegist = true
+  end
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnGo, {
+    RedPointMgr.EVENT.HandInAuction
+  })
+end
+
+function tbWnd:UpdateInfo(nEntranceIndex, nIndex)
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(nEntranceIndex)
+  local tbInfo = self.tbActivityList[nIndex]
+  if not tbInfo then
+    return 0
+  end
+  self.pInstance = ActivityMgr:GetInstanceById(tbInfo.nId)
+  if not self.pInstance then
+    self.pInstance = ActivityMgr.EntranceSchedule:BuildInstance(tbInfo.nId, tbInfo.szClassName)
+  end
+  local tbExtraData = ActivityMgr.EntranceSchedule:GetExtraData(nEntranceIndex, nIndex) or {}
+  self.nIndex = nIndex
+  self.szHelpKey = tbInfo.szHelpKey
+  self.szPlusCallBack = tbExtraData[1] and tbExtraData[1].szPlusCallBack or ""
+  self.szPlusParam = tbExtraData[1] and tbExtraData[1].szPlusParam or ""
+  self:UpdateActivityInfo(true)
+  self:UpdateBtnTemplateListView(tbInfo)
+end
+
+function tbWnd:OnClose()
+  if self.tbAwardSV then
+    self.tbAwardSV:Clear()
+  end
+  if self.bRegist then
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_HANDINAUCTION_DATA_SYNC, self)
+    self.bRegist = false
+  end
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnGo)
+end
+
+function tbWnd:UpdateActivityInfo(bSync)
+  if bSync then
+    self.pInstance:ReqSyncData()
+  end
+  local tbInfo = self.pInstance:GetShowInfo()
+  if self.pInstance.nStartTime > GetTime() then
+    local nDiff = self.pInstance.nStartTime - GetTime()
+    self.pPanel:Label_SetText(tbControls.txtTime, i18n.EasyGet("<color=#1FFB24>{0}</color> {1}\229\144\142\229\188\128\229\144\175", i18n.Parse(self.pInstance.tbConfig.szShowTime), Lib:TimeDesc2(nDiff)))
+  else
+    local nRestTime = self.pInstance:GetEndTime() - GetTime()
+    self.pPanel:Label_SetText(tbControls.txtTime, i18n.EasyGet("<color=#1FFB24>{0}</color> {1}\229\144\142\231\187\147\230\157\159", i18n.Parse(self.pInstance.tbConfig.szShowTime), Lib:TimeDesc2(nRestTime)))
+  end
+  self.pPanel:Label_SetText(tbControls.txtTitle, tbInfo.szTitle)
+  self.pPanel:Label_SetText(tbControls.txtPersonSubmitInfo, i18n.EasyGet("\228\189\160\229\156\168\230\156\172\229\184\174\228\188\154\230\143\144\228\186\164\230\128\187\230\149\1760-{0}\230\156\159\233\151\180\231\154\132\230\143\144\228\186\164\228\184\170\230\149\176\239\188\154{1}", Lib:IIF(tbInfo.nMax >= tbInfo.nTotalNum, tbInfo.nMax, tbInfo.nTotalNum), tbInfo.nCurNum))
+  self.pPanel:Sprite_SetFillAmount(tbControls.Progress .. "/imgBarBg/imgBar", tbInfo.fBarRatio, tbInfo.fBarRatio)
+  self.pPanel:Label_SetText(tbControls.txtActivityDesc, tbInfo.szDetailDesc)
+  self.pPanel:Label_SetText(tbControls.txtProgressTittle, i18n.EasyGet("\230\143\144\228\186\164\232\191\155\229\186\166"))
+  self.pPanel:Label_SetText(tbControls.txtLv, i18n.EasyGet("\231\173\137\231\186\167\233\153\144\229\136\182\239\188\154{0}", tbInfo.nJoinLevel))
+  self:MoveDonkey(tbInfo)
+  self.pPanel:Label_SetText(tbControls.txtMark0, 0)
+  for nIndex, szTxtPath in ipairs(self.tbMarkTxtList) do
+    if tbInfo.tbLevel[nIndex] then
+      self.pPanel:SetActive(self.tbMarkImgList[nIndex], true)
+      self.pPanel:Label_SetText(szTxtPath, tbInfo.tbLevel[nIndex])
+    else
+      self.pPanel:SetActive(self.tbMarkImgList[nIndex], false)
+    end
+  end
+  self.tbAwardSV:Clear()
+  for nIndex, tbAward in ipairs(tbInfo.tbAward) do
+    self.tbAwardSV:SetItem(nIndex, tbAward, true)
+    local szItemKey = self.tbAwardSV:GetItemKey(nIndex)
+    self.pPanel:Label_SetText(szItemKey .. "/txtActivityName", i18n.Parse(self:GetAwardName(tbAward, false)))
+  end
+  self.pPanel:Label_SetText(tbControls.txtAwardTittle, i18n.EasyGet("\229\189\147\229\137\141\229\184\174\228\188\154\230\143\144\228\186\164\232\191\155\229\186\166\239\188\154{0}", tbInfo.nTotalNum))
+  self:UpdateCostItem(tbInfo)
+end
+
+function tbWnd:UpdateCostItem(tbInfo)
+  self.tbSubmitItemGrid:SetItemByTemplate(tbInfo.nSubmitTemplateId)
+  self.tbSubmitItemGrid:SetClickEnable(true)
+  self.pPanel:Label_SetText(tbControls.txtOwnSubmitItemNum, i18n.EasyGet("\230\139\165\230\156\137\239\188\154{0}", tbInfo.nHasSubmitItemCount))
+end
+
+function tbWnd:MoveDonkey(tbInfo)
+  local nBegin, nEnd = -380, 380
+  self.pPanel:Object_SetLocalPosition(tbControls.TrailEffect, Ui.Vector3(nBegin, 0, 0))
+  local pDonkeyObj = self.pPanel:GetObject(tbControls.TrailEffect)
+  if not pDonkeyObj:GetComponent(Ui.UIDoTweenAnimation) then
+    pDonkeyObj:AddComponent(Ui.UIDoTweenAnimation)
+  end
+  local effect = pDonkeyObj:GetComponent(Ui.UIDoTweenAnimation)
+  local rt = self.pPanel:GetTransform(tbControls.TrailEffect)
+  effect:Init(rt, false, false)
+  local tweener = effect:DOLocalMove(tbInfo.fBarRatio * (nEnd - nBegin) + nBegin, 0, 1, 0.3)
+  effect:Append(tweener)
+end
+
+function tbWnd:GotoSubmission()
+  if not self.pInstance:IsOpen() then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return
+  end
+  local tbConfig = self.pInstance:GetConfig()
+  if me.dwTongId <= 0 then
+    local function fnJoinOK()
+      Ui:OpenWindow("UITongList")
+    end
+    
+    local function fnJoinCancel()
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\228\189\160\232\191\152\230\178\161\230\156\137\229\184\174\228\188\154\239\188\140\230\152\175\229\144\166\229\137\141\229\142\187\229\138\160\229\133\165\229\184\174\228\188\154\239\188\159"), {
+      {fnJoinOK},
+      {fnJoinCancel}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  else
+    ActivityMgr:GotoNpc(tbConfig.nNpcTemplateId, tbConfig.nMapTemplateId)
+    if Ui:GetWindow("UIActivityTemplate") then
+      Ui:CloseWindow("UIActivityTemplate")
+    end
+  end
+end
+
+function tbWnd:GetAwardName(tbAward, bNeedCount)
+  local nAwardType = Player.AwardType[tbAward[1]]
+  local szName = ""
+  if 3 == Player.AwardTypeCountIndex[nAwardType] then
+    szName = Item:GetName(tbAward[2], me)
+  elseif nAwardType == Player.award_type_money then
+    szName = Currency:GetName(tbAward[1])
+  end
+  if Lib:IsEmptyStr(szName) then
+    return ""
+  end
+  if bNeedCount then
+    szName = string.format("%sx%s", szName, Player:GetAwardValue(tbAward))
+  end
+  return szName
+end
+
+function tbWnd:UpdateBtnTemplateListView(tbInfo)
+  local tbExtraBtnList = ActivityMgr.EntranceSchedule:GetExtraBtnList(self.nEntranceIndex, tbInfo.nIndex)
+  self.btnTemplateListView:Clear()
+  for nIndex, tbBtnInfo in ipairs(tbExtraBtnList) do
+    self.btnTemplateListView:SetElement(nIndex, function(tbElement, nIndex)
+      self:UpdateBtnListElement(tbElement, nIndex, tbBtnInfo)
+    end)
+  end
+end
+
+function tbWnd:UpdateBtnListElement(tbElement, nIndex, tbBtnInfo)
+  tbElement.pPanel:Label_SetText("Text", i18n.Get(tbBtnInfo.szBtnName))
+  tbElement.pPanel:Sprite_SetSprite("imgIcon", tbBtnInfo.szImgInfo)
+  tbElement.pPanel:Button_BindEvent("Main", self.OnClickBtn, self, tbBtnInfo.szCallBack, tbBtnInfo.szParam)
+  if tbBtnInfo.szRedPoint and tbBtnInfo.szRedPoint ~= "" then
+    RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, "Main", ActivityMgr:GenRedPointEventIdList(Lib:SplitStr(tbBtnInfo.szRedPoint, "|")))
+  end
+end
+
+function tbWnd:OnClickBtn(szCallBack, szParam)
+  self:OnGoBtnClick(szCallBack, szParam)
+end
+
+function tbWnd:OnGoBtnClick(szCallBack, szParam)
+  local fn = ActivityMgr.tbJumpFunc[szCallBack]
+  local tbParam = Lib:SplitStrTry2Num(szParam or "", "|")
+  if fn and tbParam and #tbParam > 0 then
+    fn(self.tbActivityList[self.nIndex].nId, table.unpack(tbParam))
+    if "GotoPos" == szCallBack or "GotoNPC" == szCallBack then
+      Ui:CloseWindow("UIGiftTemplate")
+    end
+  end
+end
+
+function tbWnd:BindFindPath()
+  self.pPanel:SetActive(tbControls.NumCell, false)
+  if not self.pInstance.tbConfig.szBtnGetText then
+    self.pPanel:SetActive(tbControls.btnGet, false)
+  else
+    self.pPanel:SetActive(tbControls.btnGet, true)
+    self.pPanel:Label_SetText(tbControls.szGetText, i18n.Parse(self.pInstance.tbConfig.szBtnGetText))
+    RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnGet, ActivityMgr:GenRedPointEventIdList(Lib:SplitStr(self.pInstance.tbConfig.szGetBtnRedPoint or "", "|")))
+  end
+  if self.pInstance.tbConfig.nIsYanHua and 1 == self.pInstance.tbConfig.nIsYanHua then
+    Ui:Button_BindEvent(self.pPanel, tbControls.btnGo, self.GoTo, self)
+    return
+  end
+  if not self.pInstance.GetJumpMapList or not self.pInstance:GetJumpMapList() then
+    Ui:Button_BindEvent(self.pPanel, tbControls.btnGo, self.OnGoBtnClick, self, self.pInstance.tbConfig.szJumpType, self.pInstance.tbConfig.szJumpParam)
+  else
+    Ui:Button_BindEvent(self.pPanel, tbControls.btnGo, self.OnRecommendBtnClicked, self)
+  end
+end
+
+function tbWnd:GoTo()
+  if self.bTimeOut then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\229\183\178\231\187\147\230\157\159"))
+    return
+  end
+  self.pInstance:DoCommonJump()
+end
+
+function tbWnd:OnRecommendBtnClicked()
+  if Ui:WindowVisible("UIActivityTemplate") == true then
+    Ui:GetWindow("UIActivityTemplate"):OnOpenWndJumpTo(self.pInstance.nId)
+  end
+end

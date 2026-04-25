@@ -1,0 +1,259 @@
+Require("CommonScript/Item/EquipWuLian/EquipWuLianCfg.lua")
+local EquipWuLian = Item.EquipWuLian
+EquipWuLian.SAVE_WULIAN_GROUP = GetGroupKey("EquipWuLian")
+EquipWuLian.IS_SYS_OPEN = true
+
+function EquipWuLian:GetLimitLevelAndTimeframe(nLevel)
+  for _, tbV in ipairs(self.WULIAN_LV) do
+    if nLevel >= tbV.LV_MIN and nLevel <= tbV.LV_MAX then
+      return tbV.LV_REQ, tbV.TIMEFRAME_REQ
+    end
+  end
+end
+
+function EquipWuLian:GetEquipWuLianLevel(pPlayer, nPos)
+  if nPos < Item.EQUIPPOS_HELM or nPos > Item.EQUIPPOS_AMULET then
+    return 0
+  end
+  return pPlayer.GetUserValue(self.SAVE_WULIAN_GROUP, nPos + 1)
+end
+
+function EquipWuLian:CheckIsOpen()
+  if 1 ~= GetTimeFrameState(self.WULIAN_LV[1].TIMEFRAME_REQ) then
+    return false
+  end
+  return self.IS_SYS_OPEN
+end
+
+function EquipWuLian:GetEquipMaxWuLianLevel(nEquipLevel)
+  local nRet = 1
+  for _, tbInfo in ipairs(self.WULIAN_LV) do
+    if nEquipLevel >= tbInfo.LV_REQ then
+      nRet = tbInfo.LV_MAX
+    else
+      break
+    end
+  end
+  return nRet
+end
+
+function EquipWuLian:CanWuLianWithReminderWindow(pPlayer, nPos, tbItemList)
+  local bRet, szErrMsg, param = EquipWuLian:CanWuLian(pPlayer, nPos, tbItemList)
+  if bRet then
+    return bRet
+  elseif szErrMsg and szErrMsg == i18n.EasyGet("{0}\228\184\141\232\182\179", Currency:GetName(Item.EquipEnhance.MONEY_TYPE)) then
+    GainCurrency:ReadyForJump(Item.EquipEnhance.MONEY_TYPE)
+    return bRet
+  else
+    return bRet, szErrMsg
+  end
+end
+
+function EquipWuLian:CanWuLian(pPlayer, nPos, tbItemList)
+  if not self.IS_SYS_OPEN then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  local pEquip = pPlayer.GetEquipByPos(nPos)
+  if not pEquip then
+    return false, i18n.EasyGet("\232\163\133\229\164\135\228\184\141\229\173\152\229\156\168")
+  end
+  if not self.WULIAN_ATTR_VAL[nPos] then
+    return false, i18n.EasyGet("\232\175\165\232\163\133\229\164\135\228\184\141\229\143\175\230\173\166\231\130\188")
+  end
+  if DegreeCtrl:GetDegree(pPlayer, Item.EquipEnhance.POS_2_DEGREE[nPos]) <= 0 then
+    return false, i18n.EasyGet("\232\175\165\233\131\168\228\189\141\229\189\147\229\164\169\230\173\166\231\130\188\230\172\161\230\149\176\229\183\178\231\148\168\229\174\140")
+  end
+  local tbItemMap = {}
+  for _, nLv in ipairs(tbItemList) do
+    if not Item.EquipEnhance.XUANJING_ITEM[nLv] then
+      return false, i18n.EasyGet("\231\142\132\230\153\182\228\184\141\229\173\152\229\156\168")
+    end
+    tbItemMap[nLv] = (tbItemMap[nLv] or 0) + 1
+  end
+  for nLv, nNum in pairs(tbItemMap) do
+    if nNum > pPlayer.GetItemCountInBags(Item.EquipEnhance.XUANJING_ITEM[nLv]) then
+      return false, i18n.EasyGet("\231\142\132\230\153\182\230\149\176\233\135\143\228\184\141\232\182\179")
+    end
+  end
+  if 0 == #tbItemList then
+    return false, i18n.EasyGet("\231\142\132\230\153\182\230\149\176\233\135\143\228\184\141\232\182\179")
+  end
+  if #tbItemList > Item.EquipEnhance.ENHANCE_NUM_LIMIT then
+    return false, i18n.EasyGet("\231\142\132\230\153\182\230\149\176\233\135\143\232\182\133\229\135\186\233\153\144\229\136\182")
+  end
+  local nOrgLv = self:GetEquipWuLianLevel(pPlayer, pEquip.nEquipPos)
+  if nOrgLv >= self:GetWuLianLvLimit(pEquip) then
+    return false, pPlayer.CenterMsg(i18n.EasyGet("\229\183\178\232\190\190\230\173\166\231\130\188\228\184\138\233\153\144"))
+  end
+  local nUseVal, nReqVal, nNewLv, nPercent = self:CalcWuLianRate(nPos, nOrgLv, tbItemList, pEquip, pPlayer)
+  if not nNewLv then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\230\173\166\231\130\188\228\184\138\233\153\144")
+  end
+  local nLV_REQ, TIMEFRAME_REQ = self:GetLimitLevelAndTimeframe(nNewLv)
+  if nLV_REQ > pEquip.nLevel or 1 ~= GetTimeFrameState(TIMEFRAME_REQ) then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\230\173\166\231\130\188\228\184\138\233\153\144")
+  end
+  if nNewLv > self:GetWuLianLvLimit(pEquip) then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\230\173\166\231\130\188\228\184\138\233\153\144")
+  end
+  if nPercent / 100 < Item.EquipEnhance.ENHANCE_SUCCESS_RATE_REQ / Item.EquipEnhance.RATE_BASE then
+    return false, i18n.EasyGet("\230\166\130\231\142\135\229\164\170\228\189\142\239\188\140\230\151\160\230\179\149\230\173\166\231\130\188")
+  end
+  local nCost = math.floor(nReqVal * Item.EquipEnhance.ENHANCE_COST_XUANJING_TO_COIN / Item.EquipEnhance.RATE_BASE)
+  if nCost > pPlayer.GetMoney(Item.EquipEnhance.MONEY_TYPE) then
+    return false, i18n.EasyGet("{0}\228\184\141\232\182\179", Currency:GetName(Item.EquipEnhance.MONEY_TYPE))
+  end
+  return true
+end
+
+function EquipWuLian:CalcWuLianRate(nPos, nWuLianLv, tbItemList, pEquip, pPlayer)
+  local nUseVal = 0
+  for _, nLv in ipairs(tbItemList) do
+    nUseVal = nUseVal + KItem.GetBaseValue(Item.EquipEnhance.XUANJING_ITEM[nLv])
+  end
+  for nLv = nWuLianLv + 1, #self.WULIAN_ATTR_VAL[nPos] do
+    local nReqVal = 0
+    for nCount = nWuLianLv + 1, nLv do
+      nReqVal = nReqVal + self.WULIAN_ATTR_VAL[nPos][nCount][3]
+    end
+    local nPercent = math.floor(nUseVal / nReqVal * 100)
+    if nPercent <= 100 then
+      return nUseVal, nReqVal, nLv, nPercent
+    end
+    if not self.WULIAN_ATTR_VAL[nPos][nLv + 1][3] or nLv + 1 > self:GetWuLianLvLimit(pEquip) then
+      return nUseVal, nReqVal, nLv, nPercent
+    end
+    local nNextReqVal = nReqVal + self.WULIAN_ATTR_VAL[nPos][nLv + 1][3]
+    local nNextPercent = math.floor(nUseVal / nNextReqVal * 100)
+    if nNextPercent <= 100 then
+      return nUseVal, nReqVal, nLv, nPercent
+    end
+  end
+  return nUseVal
+end
+
+function EquipWuLian:CalcWuLianCost(pPlayer, pEquip, nCurWuLianLv)
+  local nPos = pEquip.nEquipPos
+  local nTgtWuLianLv = nCurWuLianLv + 1
+  if not self.WULIAN_ATTR_VAL[nPos][nTgtWuLianLv] then
+    return
+  end
+  local nLV_REQ, TIMEFRAME_REQ = self:GetLimitLevelAndTimeframe(nTgtWuLianLv)
+  if 1 ~= GetTimeFrameState(TIMEFRAME_REQ) or nTgtWuLianLv > self:GetWuLianLvLimit(pEquip) then
+    return
+  end
+  local nReqVal = self.WULIAN_ATTR_VAL[nPos][nTgtWuLianLv][3]
+  local nReqMoney = math.floor(nReqVal * Item.EquipEnhance.ENHANCE_COST_XUANJING_TO_COIN / Item.EquipEnhance.RATE_BASE)
+  return nReqVal, nReqMoney
+end
+
+function EquipWuLian:ApplyAttrib(pNpc, pEquip, nLv, nPlayerId)
+  if pEquip.nEquipPos < Item.EQUIPPOS_HELM or pEquip.nEquipPos > Item.EQUIPPOS_AMULET then
+    return
+  end
+  local tbBaseAttrList = pEquip.GetBaseAttrib()
+  local tbWuLianAttrVal = self.WULIAN_ATTR_VAL[pEquip.nEquipPos]
+  if tbWuLianAttrVal then
+    for nId, tbBaseAttr in ipairs(tbBaseAttrList) do
+      if 1 == tbBaseAttr.bActive then
+        local tbVal = tbWuLianAttrVal[nLv] and tbWuLianAttrVal[nLv][nId] or nil
+        if tbVal then
+          pNpc.ApplyMagicAttrib(tbBaseAttr.szName, table.unpack(tbVal))
+          if nPlayerId then
+            AttributeHelp:LogAttrApply(nPlayerId, "EquipWuLian", tbBaseAttr.szName, table.unpack(tbVal))
+          end
+        end
+      end
+    end
+  end
+end
+
+function EquipWuLian:RemoveAttrib(pPlayer, pEquip, nLv)
+  if pEquip.nEquipPos < Item.EQUIPPOS_HELM or pEquip.nEquipPos > Item.EQUIPPOS_AMULET then
+    return
+  end
+  nLv = nLv or self:GetEquipWuLianLevel(pPlayer, pEquip.nEquipPos)
+  local tbBaseAttrList = pEquip.GetBaseAttrib()
+  local tbWuLianAttrVal = self.WULIAN_ATTR_VAL[pEquip.nEquipPos]
+  if tbWuLianAttrVal then
+    for nId, tbBaseAttr in ipairs(tbBaseAttrList) do
+      if 1 == tbBaseAttr.bActive then
+        local tbVal = tbWuLianAttrVal[nLv] and tbWuLianAttrVal[nLv][nId] or nil
+        if tbVal then
+          pPlayer.RemoveMagicAttrib(tbBaseAttr.szName, table.unpack(tbVal))
+          AttributeHelp:LogAttrRemove(pPlayer.dwID, "EquipWuLian", tbBaseAttr.szName, table.unpack(tbVal))
+        end
+      end
+    end
+  end
+end
+
+function EquipWuLian:RefreshAttrib(pPlayer, nPos, nOrgLv, nNewLv)
+  local pEquip = pPlayer.GetEquipByPos(nPos)
+  if not pEquip then
+    return
+  end
+  if pPlayer.IsMaskPlayerAttr() then
+    return
+  end
+  self:RemoveAttrib(pPlayer, pEquip, nOrgLv)
+  self:ApplyAttrib(pPlayer.GetNpc(), pEquip, nNewLv, pPlayer.dwID)
+end
+
+function EquipWuLian:GetWuLianLvLimit(varEquip)
+  if varEquip then
+    local nEquipLv
+    if type(varEquip) == "userdata" then
+      nEquipLv = varEquip.nLevel
+    else
+      nEquipLv = Item:GetItemBaseProp(varEquip).nLevel
+    end
+    local nMaxWuLianLv = self:GetEquipMaxWuLianLevel(nEquipLv)
+    return nMaxWuLianLv
+  else
+    return 0
+  end
+end
+
+function EquipWuLian:GetAttrib(pEquip, nLv)
+  local nPos = pEquip.nEquipPos
+  if nPos < Item.EQUIPPOS_HELM or nPos > Item.EQUIPPOS_AMULET then
+    return
+  end
+  return self.WULIAN_ATTR_VAL[nPos] and self.WULIAN_ATTR_VAL[nPos][nLv] or nil
+end
+
+function EquipWuLian:LoadFightPowerSetting()
+  self.tbEquipWuLianSetting = {}
+  for nPos, tbList in pairs(Item.EquipWuLian.WULIAN_ATTR_VAL) do
+    local nTotalVal = 0
+    local nTotalFightPower = 0
+    self.tbEquipWuLianSetting[nPos] = {}
+    self.tbEquipWuLianSetting[nPos][0] = 0
+    for nLevel, tbV in pairs(tbList) do
+      nTotalVal = nTotalVal + tbV[3]
+      nTotalFightPower = math.ceil(nTotalVal / FightPower.Cfg.nXuanJingValue2Power)
+      self.tbEquipWuLianSetting[nPos][nLevel] = nLevel <= nTotalFightPower and nTotalFightPower or nLevel
+    end
+  end
+end
+
+function EquipWuLian:CalcFightPower(pPlayer, szType)
+  local nEquipWuLianFightPower = 0
+  for nPos = Item.EQUIPPOS_HELM, Item.EQUIPPOS_AMULET do
+    nEquipWuLianFightPower = nEquipWuLianFightPower + self:GetEquipWuLianPower(pPlayer, nPos)
+  end
+  return nEquipWuLianFightPower
+end
+
+function EquipWuLian:GetEquipWuLianPower(pPlayer, nPos)
+  if not nPos or not self.tbEquipWuLianSetting[nPos] then
+    return 0
+  end
+  local nWuLianLv = self:GetEquipWuLianLevel(pPlayer, nPos)
+  return self.tbEquipWuLianSetting[nPos][nWuLianLv]
+end
+
+FightPower:RegisterFPSystemModule({
+  "EquipWuLian"
+}, EquipWuLian)

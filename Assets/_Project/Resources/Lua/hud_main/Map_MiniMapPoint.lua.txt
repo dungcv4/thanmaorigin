@@ -1,0 +1,134 @@
+Require("CommonScript/Map/Map.lua")
+Map.tbCfgMiniMapPoints = Map.tbCfgMiniMapPoints or {}
+Map.tbDynMiniMapPoints = Map.tbDynMiniMapPoints or {}
+Map.tbPointsSetting = Map.tbPointsSetting or {}
+
+function Map:InitMiniMapPoints()
+  self.tbPointsSetting = Lib:LoadTabFileEx("Setting/Map/MiniMapPoint.tab", "dsdddsss", nil, {
+    "nMapTId",
+    "szType",
+    "nPosX",
+    "nPosY",
+    "nTemplateId",
+    "szTextColor",
+    "szName",
+    "szResName"
+  })
+  for _, v in pairs(self.tbPointsSetting) do
+    self.tbCfgMiniMapPoints[v.nMapTId] = self.tbCfgMiniMapPoints[v.nMapTId] or {}
+    local tbPoint = {
+      nMapTId = v.nMapTId,
+      szType = v.szType,
+      tbPos = {
+        x = v.nPosX,
+        y = v.nPosY
+      },
+      nTemplateId = v.nTemplateId,
+      szTextColor = v.szTextColor,
+      szName = v.szName,
+      szResName = v.szResName,
+      bIsPosMultiple = 0 == v.nPosX and 0 == v.nPosY
+    }
+    table.insert(self.tbCfgMiniMapPoints[v.nMapTId], tbPoint)
+  end
+  self.tbPointsSetting = SetReadOnly(self.tbPointsSetting)
+end
+
+function Map:GetMapPointSetting(nMapTemplateId)
+  local tbRetPoints = {}
+  local tbCfgPoints = self.tbCfgMiniMapPoints[nMapTemplateId]
+  if tbCfgPoints then
+    Lib:MergeTable(tbRetPoints, tbCfgPoints)
+  end
+  local tbDynPoints = self.tbDynMiniMapPoints[nMapTemplateId]
+  local nNowTime = GetTime()
+  if tbDynPoints and nNowTime < tbDynPoints.nTimeout then
+    Lib:MergeTable(tbRetPoints, tbDynPoints.tbPoints)
+  end
+  return tbRetPoints
+end
+
+function Map:ChangeMapPosToUI()
+  for _, tbPoints in pairs(self.tbCfgMiniMapPoints) do
+    for _, tbPoint in ipairs(tbPoints) do
+      if tbPoint.bIsPosMultiple then
+        local tbPos = Map:GetUIPosByTemplateId(tbPoint.nMapTId, tbPoint.nTemplateId, tbPoint.szName)
+        tbPoint.tbPos = tbPos
+      end
+    end
+  end
+end
+
+function Map:GetUIPosByTemplateId(nMapTemplateId, nNpcTemplateId, szName)
+  local tbNpcInfo = Map:GetMapNpcInfoByNpcTemplate(nMapTemplateId, nNpcTemplateId)
+  if not tbNpcInfo then
+    return {}
+  end
+  local tbUIPos = {}
+  for _, tbInfo in ipairs(tbNpcInfo) do
+    local tbMapPos = {
+      tbInfo.XPos,
+      tbInfo.YPos
+    }
+    local tbPos = self:ChangeUIPos(nMapTemplateId, tbMapPos)
+    tbPos.szName = szName
+    table.insert(tbUIPos, tbPos)
+  end
+  return tbUIPos
+end
+
+function Map:ChangeUIPos(nMapTemplateId, tbMapPos)
+  local _, _, tbMiniMapRawInfo = Map:GetMiniMapInfo(nMapTemplateId)
+  return {
+    x = tbMapPos[1] / tbMiniMapRawInfo.RawScale / 8,
+    y = tbMapPos[2] / tbMiniMapRawInfo.RawScale / 16
+  }
+end
+
+function Map:SyncDynMapPoint(nMapTemplateId, tbPoints, nTimeout)
+  for _, tbPoint in pairs(tbPoints) do
+    tbPoint.tbPos = self:ChangeUIPos(nMapTemplateId, {
+      tbPoint.nPosX,
+      tbPoint.nPosY
+    })
+    tbPoint.nPosX = nil
+    tbPoint.nPosY = nil
+  end
+  self.tbDynMiniMapPoints[nMapTemplateId] = {tbPoints = tbPoints, nTimeout = nTimeout}
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_MAP_POINT, nMapTemplateId)
+end
+
+function Map:SyncDynMapPointIncrement(nMapTemplateId, tbPoints, nTimeout, bRefreshAll)
+  if bRefreshAll then
+    self.tbDynMiniMapPoints[nMapTemplateId] = {
+      tbPoints = {},
+      nTimeout = nTimeout
+    }
+  else
+    self.tbDynMiniMapPoints[nMapTemplateId] = self.tbDynMiniMapPoints[nMapTemplateId] or {
+      tbPoints = {},
+      nTimeout = nTimeout
+    }
+  end
+  for _, tbPoint in pairs(tbPoints) do
+    tbPoint.tbPos = self:ChangeUIPos(nMapTemplateId, {
+      tbPoint.nPosX,
+      tbPoint.nPosY
+    })
+    tbPoint.nPosX = nil
+    tbPoint.nPosY = nil
+    local nDelIndex = 0
+    for nIndex, tbPointInfo in pairs(self.tbDynMiniMapPoints[nMapTemplateId].tbPoints) do
+      if tbPointInfo.nId and tbPointInfo.nId == tbPoint.nId then
+        nDelIndex = nIndex
+      end
+    end
+    if nDelIndex > 0 then
+      table.remove(self.tbDynMiniMapPoints[nMapTemplateId].tbPoints, nDelIndex)
+    end
+    table.insert(self.tbDynMiniMapPoints[nMapTemplateId].tbPoints, tbPoint)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_MAP_POINT, nMapTemplateId)
+end
+
+Map:InitMiniMapPoints()

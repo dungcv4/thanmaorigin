@@ -1,0 +1,147 @@
+Require("Script/AvenueOfStars/AvenueOfStars_Information.lua")
+Require("Script/Ui/Common/RedPointMgr.lua")
+local tbWnd = Ui:CreateWindow("UIWuLin102Reward")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnKindTemplate = "node/imgBG/Content/toggleList/KindTemplate",
+  txtRewardTime = "node/imgBG/Content/txtTime",
+  goRewardTemplate = "node/imgBG/Content/Scroll View/Viewport/list/Template"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+tbWnd.PAGE_SETTING = {
+  {
+    fnTitle = function()
+      return i18n.EasyGet("\233\162\132\233\128\137\232\181\155")
+    end,
+    nPhase = AvenueOfStars.PHASE_PRE,
+    nRedPoint = RedPointMgr.EVENT.AvenueOfStarsRewardSemi
+  },
+  {
+    fnTitle = function()
+      return i18n.EasyGet("\229\134\179\232\181\155")
+    end,
+    nPhase = AvenueOfStars.PHASE_SEMI,
+    nRedPoint = RedPointMgr.EVENT.AvenueOfStarsRewardFinal
+  }
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_AVENUEOFSTARS_SYNC_VOTE_LEVEL,
+      self.OnSyncVoteLevel
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.tbKindScroll = Ui:NewScrollView(self, tbControls.btnKindTemplate, self.OnClickKind, true)
+  for nIndex, tbSetting in ipairs(self.PAGE_SETTING) do
+    self.tbKindScroll:SetElement(nIndex, function(tbElement)
+      tbElement.pPanel:Label_SetText("Text", tbSetting.fnTitle())
+      RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, "Main", {
+        tbSetting.nRedPoint
+      })
+    end)
+  end
+  self.tbAwardScroll = Ui:NewScrollView(self, tbControls.goRewardTemplate)
+end
+
+function tbWnd:OnOpen(nPhase)
+  nPhase = nPhase or AvenueOfStars.PHASE_PRE
+  self.nPageIndex = 1
+  for nIndex, tbSetting in ipairs(self.PAGE_SETTING) do
+    if nPhase == tbSetting.nPhase then
+      self.tbKindScroll:SelectElement(nIndex)
+    end
+  end
+  AvenueOfStars:QueryVoteLevel_C()
+end
+
+function tbWnd:ShowAward(nPhase)
+  local tbAwardSetting = AvenueOfStars.USE_VOTE_LEVEL_AWARD[nPhase]
+  if not tbAwardSetting then
+    return
+  end
+  self.tbAwardScroll:Reset()
+  local tbRedPointList = {}
+  for nIndex, tbAward in ipairs(tbAwardSetting.tbAward) do
+    self.tbAwardScroll:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtRank", tbAward[1])
+      if not tbElement.tbItemGridView then
+        tbElement.tbItemGridView = Ui:NewItemGridView(self, tbElement.szKey .. "/rewardList/reward")
+      end
+      local tbItemGridView = tbElement.tbItemGridView
+      local tbItemList = Award:GetAward(tbAward[2][1], tbAward[2][2])
+      for nItemIndex, tbItemInfo in pairs(tbItemList) do
+        tbItemGridView:SetItem(nItemIndex, tbItemInfo, true)
+      end
+      local nItemNum = #tbItemList
+      tbItemGridView:ShowRange(1, nItemNum)
+      tbItemGridView:HideRange(nItemNum + 1)
+      local nFlag = me.GetUserValue(AvenueOfStars.SAVE_GROUP, AvenueOfStars.USE_VOTE_LEVEL_AWARD_FLAG[nPhase])
+      if 0 ~= Lib:LoadBits(nFlag, nIndex - 1, nIndex - 1) then
+        pPanel:SetActive("btnGet", false)
+        pPanel:SetActive("prg", false)
+        pPanel:SetActive("imgComplete", true)
+      else
+        local nVoteLevel = AvenueOfStars.tbVoteLevel[nPhase] or 0
+        if nVoteLevel < tbAward[1] then
+          pPanel:SetActive("btnGet", false)
+          pPanel:SetActive("prg", true)
+          pPanel:SetActive("imgComplete", false)
+          pPanel:Label_SetText("prg/txtPrg", string.format("%d/%d", nVoteLevel, tbAward[1]))
+          pPanel:Sprite_SetFillAmount("prg/imgBar", 0, nVoteLevel / tbAward[1], 1, true)
+        else
+          pPanel:SetActive("btnGet", true)
+          pPanel:SetActive("prg", false)
+          pPanel:SetActive("imgComplete", false)
+          Ui:Button_BindEvent(pPanel, "btnGet", function()
+            self.OnClickGetAward(self, nPhase, nIndex)
+          end)
+          tbRedPointList[nIndex] = true
+        end
+      end
+    end)
+  end
+  for nIndex, _ in pairs(tbRedPointList) do
+    RedPointMgr:ForceLightRedPoint(self.tbAwardScroll:GetElement(nIndex).pPanel, "btnGet")
+  end
+end
+
+function tbWnd:ShowTime(nPhase)
+  local tbDate = AvenueOfStars.USE_VOTE_LEVEL_SETTLE_DATE[nPhase] or nil
+  if not tbDate then
+    return
+  end
+  self.pPanel:Label_SetText(tbControls.txtRewardTime, i18n.EasyGet("\231\187\147\231\174\151\230\151\182\233\151\180\239\188\154{0}-{1}", tbDate[1], tbDate[2]))
+end
+
+function tbWnd:OnClickKind(nIndex)
+  local tbPageSetting = self.PAGE_SETTING[nIndex]
+  if not tbPageSetting then
+    return
+  end
+  self.nPageIndex = nIndex
+  self:ShowAward(tbPageSetting.nPhase)
+  self:ShowTime(tbPageSetting.nPhase)
+end
+
+function tbWnd:OnClickGetAward(nPhase, nIndex)
+  AvenueOfStars:GetVoteLevelAward_C(nPhase, nIndex)
+end
+
+function tbWnd:OnSyncVoteLevel()
+  local nPhase = self.PAGE_SETTING[self.nPageIndex] and self.PAGE_SETTING[self.nPageIndex].nPhase or nil
+  if not nPhase then
+    return
+  end
+  self:ShowAward(nPhase)
+  self:ShowTime(nPhase)
+end

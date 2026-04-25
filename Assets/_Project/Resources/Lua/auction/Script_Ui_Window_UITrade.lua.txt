@@ -1,0 +1,516 @@
+local tbWnd = Ui:CreateWindow("UITrade")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnSyncItem
+    },
+    {
+      EventNotify.emNOTIFY_DEL_ITEM,
+      self.OnDelItem
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TRADE_MONEY_CHANGE,
+      self.OnMoneyChange
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TRADE_CANCEL,
+      self.OnTradeCancel
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TRADE_STATE_CHANGE,
+      self.OnTradeStateChange
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TRADE_CHANGE_ITEM,
+      self.OnTradeItemChange
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TRADE_FINISH,
+      self.OnTradeFinish
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.RefreshMoney
+    },
+    {
+      EventNotify.emNOTIFY_SERVER_CONNECT_LOST,
+      self.OnServerConnectLost
+    }
+  }
+end
+
+local tbToggle = {
+  TogNormal = 1,
+  TogEquip = 2,
+  TogAll = 3
+}
+local tbKey2Classify = Ui.tbKey2Classify
+local tbMapToggle = {
+  [Ui.tbToggle.TogNormal] = tbToggle.TogNormal,
+  [Ui.tbToggle.TogEquip] = tbToggle.TogEquip
+}
+local _SORT_KEY = {
+  Item.EQUIP_EX,
+  Item.EQUIP_WEAPON,
+  Item.EQUIP_ARMOR,
+  Item.EQUIP_RINGDOWN,
+  Item.EQUIP_NECKLACE,
+  Item.EQUIP_RINGUP,
+  Item.EQUIP_BOOTS,
+  Item.EQUIP_BELT,
+  Item.EQUIP_HELM,
+  Item.EQUIP_CUFF,
+  Item.EQUIP_PENDANT,
+  Item.EQUIP_HORSE,
+  Item.EQUIP_SHIWU,
+  Item.EQUIP_MASK,
+  Item.EQUIP_YINJIAN,
+  Item.EQUIP_MANTLE,
+  Item.ITEM_SCRIPT
+}
+local SORT_KEY = {}
+for nIdx, nType in ipairs(_SORT_KEY) do
+  SORT_KEY[nType] = nIdx + 100
+end
+local tbControls = {
+  MoneyPanel = "node/UIMoneyPanel",
+  txtChangeNotice = "node/imgBG/Content/Notice/BG/txtTradeRoleInfo",
+  txtItemCount = "node/imgBG/Content/BagPanel/txtItemGroup/txtItemCountValue",
+  btnItemKindNormal = "node/imgBG/Content/BagPanel/btnItemKindNormal",
+  btnItemKindEquip = "node/imgBG/Content/BagPanel/btnItemKindEquip",
+  btnItemKindTotal = "node/imgBG/Content/BagPanel/btnItemKindTotal",
+  toggleQuickWithdraw = "node/imgBG/Content/BagPanel/toggleQuickWithdraw",
+  SelfTradeItemTemplate = "node/imgBG/Content/SelfTradePanel/bagBackground/maskView/imgInventory/Item",
+  txtChangeCoinNumOfSelfTradePanel = "node/imgBG/Content/SelfTradePanel/Gold/imgGoldNum/UIAddAndSubGroup/btnInput/txtInput",
+  txtRoleNameOfSelfTradePanel = "node/imgBG/Content/SelfTradePanel/RoleInfo/BG/txtRoleName",
+  imgLockOfSelfTradePanel = "node/imgBG/Content/SelfTradePanel/imgLock",
+  OtherTradeItemTemplate = "node/imgBG/Content/OtherTradePanel/bagBackground/maskView/imgInventory/Item",
+  txtChangeCoinNumOfOtherTradePanel = "node/imgBG/Content/OtherTradePanel/Gold/imgGoldNum/txtGoldNum",
+  txtRoleNameOfOtherTradePanel = "node/imgBG/Content/OtherTradePanel/RoleInfo/BG/txtRoleName",
+  imgLockOfOtherTradePanel = "node/imgBG/Content/OtherTradePanel/imgLock",
+  btnLockTrade = "node/imgBG/Content/btnLockTrade",
+  btnCancelLockTrade = "node/imgBG/Content/btnCancelLockTrade",
+  btnConfirmTrade = "node/imgBG/Content/btnConfirmTrade",
+  btnClose = "node/imgBG/btnClose",
+  bagItemSV = "node/imgBG/Content/BagPanel/bagItemSV",
+  goItemCell = "node/imgBG/Content/BagPanel/bagItemSV/Viewport/imgInventory/ItemCell"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    Trade:DoCancelTrade()
+    self:Close()
+  end,
+  btnLockTrade = function(self)
+    self:StartWaitServerCallBack()
+    Trade:MakeTradeDecision(Trade.STATE.LOCK)
+  end,
+  btnCancelLockTrade = function(self)
+    self:StartWaitServerCallBack()
+    Trade:MakeTradeDecision(Trade.STATE.EXCHANGING)
+  end,
+  btnConfirmTrade = function(self)
+    self:StartWaitServerCallBack()
+    Trade:MakeTradeDecision(Trade.STATE.CONFIRM)
+  end
+}
+tbWnd.tbOnToggleClick = {
+  toggleQuickWithdraw = function(self, isOn)
+    self.bQuickWithdraw = isOn
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, tbControls.MoneyPanel)
+  self.nOriginBagTradableCount = 0
+  self.tbItemKindGroup = Ui:NewButtonGroup(self, {
+    [1] = tbControls.btnItemKindNormal,
+    [2] = tbControls.btnItemKindEquip,
+    [3] = tbControls.btnItemKindTotal
+  }, true, function(self, nIndex)
+    self:UpdateItemList()
+  end)
+  self.tbBagScrollView = Ui:NewLoopScrollView(self, tbControls.goItemCell, "Item")
+  self.nRow = 5
+  self.tbSelfTradeItemScrollView = Ui:NewItemGridScrollView(self, tbControls.SelfTradeItemTemplate, Trade.ITEM_PER_LINE, Trade.TRADE_LINE, "Trade_SelfTradeItemBox")
+  self.tbOtherTradeItemScrollView = Ui:NewItemGridScrollView(self, tbControls.OtherTradeItemTemplate, Trade.ITEM_PER_LINE, Trade.TRADE_LINE, "Trade_OtherTradeItemBox")
+  self.PriceAddAndSubGroup = Ui:NewExistAddAndSubGroup(self, "node/imgBG/Content/SelfTradePanel/Gold/imgGoldNum/UIAddAndSubGroup")
+  self.PriceAddAndSubGroup:BindEvent(function(nValue)
+    if not Trade:MakeMoneyDecision(nValue) then
+      return 0, i18n.Get(Trade.MSG.PLZ_INPUT_MONEY)
+    end
+  end)
+  self.PriceAddAndSubGroup:SetNumPadPos(-684, -122)
+  self:UpdateBagCount()
+end
+
+function tbWnd:OnOpen(tbTradeInfo)
+  self.bQuickWithdraw = false
+  self.pPanel:Toggle_SetChecked(tbControls.toggleQuickWithdraw, false)
+  self.nOriginBagTradableCount = 0
+  self.tbItemKindGroup:Select(tbToggle.TogNormal)
+  self.tbTradeInfo = tbTradeInfo
+  self:OnOtherTradeItemChange()
+  self:OnSelfTradeItemChange()
+  self:OnMoneyChange(me.dwID)
+  self:OnTradeStateChange()
+  self.pPanel:Label_SetText(tbControls.txtChangeCoinNumOfSelfTradePanel, i18n.Get(Trade.MSG.PLZ_INPUT_MONEY))
+  self.pPanel:Label_SetText(tbControls.txtChangeCoinNumOfOtherTradePanel, "0")
+  self.pPanel:Label_SetText(tbControls.txtChangeNotice, "")
+  self:UpdateTradeRoleInfo()
+end
+
+function tbWnd:UpdateTradeRoleInfo()
+  self.pPanel:Label_SetText(tbControls.txtRoleNameOfSelfTradePanel, me.szName)
+  if self.tbTradeInfo and self.tbTradeInfo.dwTradeRoleId and self.tbTradeInfo.dwTradeRoleId > 0 then
+    self.pPanel:Label_SetText(tbControls.txtRoleNameOfOtherTradePanel, self.tbTradeInfo.szTradeRoleName)
+  end
+end
+
+function tbWnd:OnClose()
+  Ui:CloseWindow("UIItemTips")
+  Ui:CloseWindow("UINumKeyboard")
+  Trade:Clear()
+end
+
+function tbWnd:OnMoneyChange(dwPlayerId)
+  self.tbMoneyPanel:SetMoneyValue()
+  local dwSeflMoney, dwOtherMoney = Trade:GetBothMoney()
+  if dwSeflMoney > 0 then
+    local szSeflMoney = string.format("%s", Lib:TransferDigit2CnNumOverMillion(dwSeflMoney))
+    self.pPanel:Label_SetText(tbControls.txtChangeCoinNumOfSelfTradePanel, szSeflMoney)
+  else
+    self.pPanel:Label_SetText(tbControls.txtChangeCoinNumOfSelfTradePanel, i18n.Get(Trade.MSG.PLZ_INPUT_MONEY))
+  end
+  local szOtherMoney = string.format("%s", Lib:TransferDigit2CnNumOverMillion(dwOtherMoney))
+  self.pPanel:Label_SetText(tbControls.txtChangeCoinNumOfOtherTradePanel, szOtherMoney)
+  if dwPlayerId and me.dwID ~= dwPlayerId then
+    self.pPanel:Label_SetText(tbControls.txtChangeNotice, i18n.Get(Trade.MSG.OTHER_CHANGE_MONEY))
+  end
+end
+
+function tbWnd:OnSelfTradeItemChange()
+  self:UpdateItemList()
+  self:UpdateAllTradeItemSelf()
+  self:UpdateBagCount()
+end
+
+function tbWnd:OnTradeItemChange(bSelf, dwOperation, bChangeCount)
+  if bSelf then
+    self:OnSelfTradeItemChange()
+  else
+    self:OnOtherTradeItemChange(dwOperation, bChangeCount)
+  end
+end
+
+function tbWnd:OnOtherTradeItemChange(dwOperation, bChangeCount)
+  self:UpdateAllTradeItemOther()
+  if dwOperation == Trade.Operation.ADD then
+    if bChangeCount then
+      self.pPanel:Label_SetText(tbControls.txtChangeNotice, i18n.Get(Trade.MSG.OTHER_CHANGE_ITEM_COUNT))
+    else
+      self.pPanel:Label_SetText(tbControls.txtChangeNotice, i18n.Get(Trade.MSG.OTHER_PUT_ITEM))
+    end
+  else
+    self.pPanel:Label_SetText(tbControls.txtChangeNotice, i18n.Get(Trade.MSG.OTHER_DEL_ITEM))
+  end
+end
+
+function tbWnd:StartWaitServerCallBack()
+  self.pPanel:Button_SetEnable(tbControls.btnLockTrade, false)
+  self.pPanel:Button_SetEnable(tbControls.btnCancelLockTrade, false)
+  self.pPanel:Button_SetEnable(tbControls.btnConfirmTrade, false)
+end
+
+function tbWnd:OnTradeStateChange()
+  self.pPanel:Button_SetEnable(tbControls.btnLockTrade, true)
+  self.pPanel:Button_SetEnable(tbControls.btnCancelLockTrade, true)
+  self.pPanel:Button_SetEnable(tbControls.btnConfirmTrade, true)
+  local nSelfState, nOtherState = Trade:GetBothState()
+  self.PriceAddAndSubGroup:SetEnable(nSelfState == Trade.STATE.EXCHANGING)
+  self.pPanel:SetActive(tbControls.imgLockOfSelfTradePanel, nSelfState >= Trade.STATE.LOCK)
+  self.pPanel:SetActive(tbControls.btnLockTrade, nSelfState < Trade.STATE.LOCK)
+  self.pPanel:SetActive(tbControls.btnCancelLockTrade, nSelfState >= Trade.STATE.LOCK)
+  self.pPanel:SetActive(tbControls.imgLockOfOtherTradePanel, nOtherState >= Trade.STATE.LOCK)
+  self.pPanel:Button_SetEnable(tbControls.btnConfirmTrade, nSelfState == Trade.STATE.LOCK and nOtherState >= Trade.STATE.LOCK)
+  self.pPanel:Button_SetEnable(tbControls.btnCancelLockTrade, nSelfState == Trade.STATE.LOCK)
+  if nSelfState == Trade.STATE.EXCHANGING and nOtherState == Trade.STATE.EXCHANGING then
+    self.pPanel:Label_SetText(tbControls.txtChangeNotice, "")
+  end
+  if nSelfState < Trade.STATE.LOCK and nOtherState == Trade.STATE.LOCK then
+    self.pPanel:Label_SetText(tbControls.txtChangeNotice, i18n.Get(Trade.MSG.OTHER_SIDE_LOCK))
+  end
+  if nSelfState == Trade.STATE.LOCK and nOtherState < Trade.STATE.LOCK then
+    self.pPanel:Label_SetText(tbControls.txtChangeNotice, i18n.Get(Trade.MSG.WAIT_OTHER_SIDE_LOCK))
+  end
+  if nSelfState == Trade.STATE.LOCK and nOtherState == Trade.STATE.LOCK then
+    self.pPanel:Label_SetText(tbControls.txtChangeNotice, i18n.Get(Trade.MSG.BOTH_LOCK))
+  end
+  if nSelfState < Trade.STATE.CONFIRM and nOtherState == Trade.STATE.CONFIRM then
+    self.pPanel:Label_SetText(tbControls.txtChangeNotice, i18n.Get(Trade.MSG.OTHER_SIDE_CONFIRM))
+  end
+  if nSelfState == Trade.STATE.CONFIRM and nOtherState < Trade.STATE.CONFIRM then
+    self.pPanel:Label_SetText(tbControls.txtChangeNotice, i18n.Get(Trade.MSG.WAIT_OTHER_SIDE_CONFIRM))
+  end
+end
+
+function tbWnd:OnTradeFinish()
+  self:Close()
+end
+
+function tbWnd:OnTradeCancel()
+  self:Close()
+end
+
+function tbWnd:OnTradeDataChange(szDataChangeCb, ...)
+  local fDataChangeCbFun = self[szDataChangeCb]
+  if not fDataChangeCbFun then
+    return false
+  end
+  fDataChangeCbFun(self, ...)
+end
+
+function tbWnd:UpdateItemList()
+  self.tbItemLists = {}
+  for _, nToggle in pairs(tbToggle) do
+    self.tbItemLists[nToggle] = {}
+  end
+  local nCount = 0
+  local tbItem = me.GetAllItemsInBag()
+  local tbTradeItemSelf = Trade:GetSelfTradeItemList()
+  local tbTradeItem = {}
+  for nIdx, pItem in pairs(tbItem) do
+    if not pItem.IsInTradeLimit(Item.eTRADELIMITWAY.P2P) then
+      table.insert(tbTradeItem, pItem)
+    end
+  end
+  for nIdx, pItem in pairs(tbTradeItem) do
+    local tbTradeItemInfo = tbTradeItemSelf[pItem.dwId]
+    local nTradeCount = tbTradeItemInfo and tbTradeItemInfo.pItem.nCount or 0
+    if not tbTradeItemInfo or nTradeCount < pItem.nCount then
+      local nShowCount = nTradeCount > 0 and pItem.nCount - nTradeCount or nil
+      local tbData = {
+        nKey1 = SORT_KEY[pItem.nItemType] or 1000,
+        nKey2 = pItem.nDetailType,
+        nKey3 = pItem.nLevel,
+        nItemId = pItem.dwId,
+        dwTemplateId = pItem.dwTemplateId,
+        nShowCount = nShowCount,
+        szItemOpt = "Trade_ItemBox"
+      }
+      tbData.tbItemExtParams = tbData.tbItemExtParams or {}
+      tbData.tbItemExtParams.tbTradeInfo = {
+        szWndType = "UITradeItemPanel",
+        nItemId = pItem.dwId,
+        nOnTradeCount = nTradeCount,
+        nMaxCount = nShowCount,
+        bOnTrade = false
+      }
+      
+      function tbData.fnItemClick()
+        Item:ShowItemDetail(tbData)
+      end
+      
+      table.insert(self.tbItemLists[tbToggle.TogAll], tbData)
+      nCount = nCount + 1
+      local tbClassifyInfo = Item:GetDetailTypeClassify(pItem.nItemType, pItem.nDetailType)
+      if not tbClassifyInfo then
+        LogErr(string.format("DetailTypeClassify.tab: DetailType:%d%s not Define Classify!", pItem.nDetailType, i18n.Parse(pItem.szName)))
+        return
+      end
+      for key, nClassify in pairs(tbKey2Classify) do
+        if 1 == tbClassifyInfo[key] and tbMapToggle[nClassify] then
+          table.insert(self.tbItemLists[nClassify], tbData)
+        end
+      end
+    end
+  end
+  self.nAllItemCount = nCount
+  self.nOriginBagTradableCount = math.max(self.nAllItemCount, self.nOriginBagTradableCount)
+  local nCurItemKind = self.tbItemKindGroup:GetKey()
+  if self.tbItemLists[nCurItemKind] then
+    self.tbItemList = self.tbItemLists[nCurItemKind]
+  end
+  
+  local function fnSort(tbA, tbB)
+    if tbA.nKey1 ~= tbB.nKey1 then
+      return tbA.nKey1 < tbB.nKey1
+    end
+    if tbA.nKey2 ~= tbB.nKey2 then
+      return tbA.nKey2 < tbB.nKey2
+    end
+    if tbA.nKey3 ~= tbB.nKey3 then
+      return tbA.nKey3 > tbB.nKey3
+    end
+    if tbA.dwTemplateId ~= tbB.dwTemplateId then
+      return tbA.dwTemplateId < tbB.dwTemplateId
+    end
+    return tbA.nItemId < tbB.nItemId
+  end
+  
+  table.sort(self.tbItemList, fnSort)
+  self:UpdateItemSV()
+end
+
+function tbWnd:UpdateTradeItemListSelf()
+  local tbTradeItemSelf = Trade:GetSelfTradeItemList()
+  local tbItem = {}
+  for nReferenceItemId, v in pairs(tbTradeItemSelf) do
+    local tbTradeItemInfo = tbTradeItemSelf[nReferenceItemId]
+    local nTradeCount = tbTradeItemInfo and tbTradeItemInfo.pItem.nCount or 0
+    local tbData = {
+      nKey = v.pItem.nDetailType,
+      nItemId = v.pItem.dwId,
+      dwTemplateId = v.pItem.dwTemplateId,
+      szItemOpt = "Trade_SelfTradeItemBox"
+    }
+    tbData.tbItemExtParams = tbData.tbItemExtParams or {}
+    tbData.tbItemExtParams.tbTradeInfo = {
+      szWndType = "UITradeItemPanel",
+      nItemId = v.pItem.dwId,
+      nOnTradeCount = nTradeCount,
+      nMaxCount = nTradeCount,
+      bOnTrade = true
+    }
+    
+    function tbData.fnItemClick()
+      if self.bQuickWithdraw then
+        Trade:MakeItemDecision(Trade.Operation.REMOVE, v.pItem.dwId, nTradeCount)
+      else
+        Item:ShowItemDetail(tbData)
+      end
+    end
+    
+    table.insert(tbItem, tbData)
+  end
+  self.tbItemListSelf = tbItem
+  self.tbSelfTradeItemScrollView:UpdateView(self.tbItemListSelf)
+end
+
+function tbWnd:UpdateTradeItemListOther()
+  local tbTradeItemOther = Trade:GetOtherTradeItemList()
+  local tbItem = {}
+  for _, v in pairs(tbTradeItemOther) do
+    local tbData = {
+      nKey = v.nDetailType,
+      nItemId = v.dwId,
+      dwTemplateId = v.dwTemplateId
+    }
+    table.insert(tbItem, tbData)
+  end
+  self.tbItemListOther = tbItem
+  self.tbOtherTradeItemScrollView:UpdateView(self.tbItemListOther)
+end
+
+function tbWnd:OnSyncItem(nItemId, bUpdateAll)
+  if self.bStopUpdateAtOnce then
+    return
+  end
+  if 1 == bUpdateAll then
+    self:UpdateItemList()
+    return
+  end
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem.IsInTradeLimit(Item.eTRADELIMITWAY.P2P) then
+    self:UpdateItemList()
+  end
+end
+
+function tbWnd:OnDelItem()
+  self:UpdateItemList()
+end
+
+function tbWnd:UpdateAllTradeItemSelf()
+  self:UpdateTradeItemListSelf()
+end
+
+function tbWnd:UpdateAllTradeItemOther()
+  self:UpdateTradeItemListOther()
+end
+
+function tbWnd:UpdateBagCount()
+  local nCurTradableCount = self.nAllItemCount or 0
+  local nDifferenceValue = self.nOriginBagTradableCount - nCurTradableCount
+  self.pPanel:Label_SetText(tbControls.txtItemCount, string.format("%d", me.GetFreeBagCount() + nDifferenceValue))
+end
+
+function tbWnd:RefreshMoney()
+  self.tbMoneyPanel:SetMoneyValue()
+end
+
+function tbWnd:CloseByDefault()
+  Trade:DoCancelTrade()
+  self:Close()
+end
+
+function tbWnd:UpdateItemSV()
+  local nCount = Lib:CountTB(self.tbItemList)
+  local nMaxCount = me.GetMaxCountInBag()
+  
+  local function fnSetItem(tbLoopScroll, nIndex)
+    local nCol = nMaxCount - self.nRow * (nIndex - 1)
+    if nCol > self.nRow then
+      nCol = self.nRow
+    end
+    for i = 1, self.nRow do
+      if i <= nCol then
+        local itemObj = tbLoopScroll:GetGridElement(nIndex, i)
+        local curIndex = (nIndex - 1) * self.nRow + i
+        itemObj.pPanel:SetActive("Main", true)
+        local itemGrid = Ui:NewExistItemGrid(itemObj, "UIItemGrid")
+        if curIndex <= nCount then
+          itemGrid:SetActive(true)
+          local tbItem = self.tbItemList[curIndex]
+          local nItemId = tbItem and tbItem.nItemId
+          local nShowCount = tbItem and tbItem.nShowCount
+          local fnItemClick = tbItem and tbItem.fnItemClick
+          itemGrid.szItemOpt = "Trade_ItemBox"
+          itemGrid:SetItem(nItemId, nil, {bShowTip = true, bShowSeries = nil}, nil, nil, nil, nil, nShowCount)
+          itemGrid:SetClickEnable(true, function()
+            if self.bQuickWithdraw then
+              local pItem = KItem.GetItemObj(nItemId)
+              local bCanSell = true
+              local szErrMsg = ""
+              if not pItem.dwTradeLimitType or pItem.dwTradeLimitType == Item.eTRADELIMITTYPE.NONE then
+                szErrMsg = i18n.EasyGet("<color=#b60000>\228\184\141\229\143\175\228\186\164\230\152\147</color>")
+                bCanSell = false
+              elseif pItem.dwTradeLimitType == Item.eTRADELIMITTYPE.TRADE_TIMES then
+                if pItem.dwTradeLimitValue <= 0 then
+                  szErrMsg = i18n.EasyGet("\228\186\164\230\152\147\230\172\161\230\149\176\239\188\154<color=#b60000>0</color>")
+                  bCanSell = false
+                end
+              elseif pItem.dwTradeLimitType == Item.eTRADELIMITTYPE.REFRESH_PROTECTED_TIME then
+                if pItem.dwTradeLimitValue <= GetTime() then
+                  szErrMsg = i18n.EasyGet("\228\186\164\230\152\147\228\191\157\230\138\164\230\151\182\233\151\180\239\188\154\230\151\160")
+                end
+                local nTime = Lib:TimeDesc2(pItem.dwTradeLimitValue - GetTime())
+                szErrMsg = i18n.EasyGet("\228\186\164\230\152\147\228\191\157\230\138\164\230\151\182\233\151\180\239\188\154<color=#b60000>{0}</color>", nTime)
+                bCanSell = false
+              end
+              if not bCanSell then
+                me.CenterMsg(szErrMsg)
+              else
+                Trade:MakeItemDecision(Trade.Operation.ADD, nItemId, pItem.nCount)
+              end
+            else
+              fnItemClick()
+            end
+          end)
+        else
+          itemGrid:SetEmpty()
+          itemGrid:SetActive(false)
+        end
+      else
+        tbLoopScroll:GetGridElement(nIndex, i).pPanel:SetActive("Main", false)
+      end
+    end
+  end
+  
+  self.tbBagScrollView:SetElement(math.ceil(nMaxCount / self.nRow), fnSetItem)
+end
+
+function tbWnd:OnServerConnectLost()
+  self:Close()
+end

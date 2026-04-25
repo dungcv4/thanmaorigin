@@ -1,0 +1,71 @@
+BelongUI = BelongUI or {}
+BelongUI.nCheckTimer = 0
+BelongUI.tbNpc = {}
+BelongUI.tbBelongData = {}
+
+function BelongUI:LoadConfig()
+  local tbSetting = Lib:EasyLoadTabFile("Setting/Npc/BelongUINpc.tab")
+  for index, tbInfo in ipairs(tbSetting) do
+    self.tbNpc[tbInfo.nTemplateID] = tbInfo.nDistance
+  end
+end
+
+BelongUI:LoadConfig()
+
+function BelongUI:StartCheckShow()
+  if 0 ~= BelongUI.nCheckTimer then
+    Timer:Close(BelongUI.nCheckTimer)
+  end
+  BelongUI.nCheckTimer = Timer:Register(Env.GAME_FPS, self.CheckShow, self)
+end
+
+function BelongUI:CheckShow()
+  local tbNpcList = KNpc.GetNpcListInCurrentMap()
+  local nShowNpcID = 0
+  local nMinR = 0
+  local _, nMeX, nMeY = me.GetWorldPos()
+  for _, pNpc in pairs(tbNpcList) do
+    local nDistance = self.tbNpc[pNpc.nTemplateId]
+    if nDistance then
+      local _, nNpcX, nNpcY = pNpc.GetWorldPos()
+      local nDiffX = math.abs(nNpcX - nMeX)
+      local nDiffY = math.abs(nNpcY - nMeY)
+      local nR = nDiffX * nDiffX + nDiffY * nDiffY
+      if nR < nDistance * nDistance and (0 == nMinR or nMinR > nR) then
+        nMinR = nR
+        nShowNpcID = pNpc.nId
+      end
+    end
+  end
+  if 0 ~= nShowNpcID then
+    if not Ui:WindowVisible("UIActivity_DualDomain") then
+      Ui:OpenWindow("UIActivity_DualDomain", nShowNpcID, self.tbBelongData[nShowNpcID] or 0)
+    else
+      EventNotify.OnNotify(EventNotify.emNOTIFY_BELONGUI_UPDATE_TARGET, nShowNpcID, self.tbBelongData[nShowNpcID] or 0)
+    end
+  else
+    Ui:CloseWindow("UIActivity_DualDomain")
+  end
+  return true
+end
+
+function BelongUI:EndCheckShow()
+  if 0 ~= BelongUI.nCheckTimer then
+    Timer:Close(BelongUI.nCheckTimer)
+    BelongUI.nCheckTimer = 0
+  end
+  if Ui:WindowVisible("UIActivity_DualDomain") then
+    Ui:CloseWindow("UIActivity_DualDomain")
+  end
+  self.tbBelongData = {}
+end
+
+function BelongUI:AddBelongData(nNpcId, nBelong)
+  self.tbBelongData[nNpcId] = nBelong
+  if Ui:WindowVisible("UIActivity_DualDomain") then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_BELONGUI_UPDATE_BELONG, nNpcId, nBelong)
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, BelongUI)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, BelongUI.EndCheckShow, BelongUI)

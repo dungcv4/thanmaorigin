@@ -1,0 +1,191 @@
+local tbWnd = Ui:CreateWindow("UIPartnerSettingWuLin")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_WULINDAHUI_SYNC_PARTNER,
+      self.UpdatePartnerList,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SUPERSTARWARS_SYNC_PARTNER,
+      self.UpdatePartnerList,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnOK = "node/imgBG/Content/btnOK",
+  NameGroup = "node/imgBG/Content/PartnerName/NameGroup",
+  btnRemove = "node/imgBG/Content/PartnerName/btnRemove",
+  Template = "node/imgBG/Content/List/Viewport/Content/Template",
+  imgSelected = "node/imgBG/Content/List/Viewport/Content/Element%d/imgSelected"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnOK = function(self)
+    self:SetBattlePartner()
+  end,
+  btnRemove = function(self)
+    self:RemoveBattlePartner()
+  end
+}
+tbWnd.tbModuleSetting = {
+  MultiPvP = {
+    nGroup = MultiPvP.SAVE_GROUP,
+    nTaskId = MultiPvP.SAVE_PARTNER,
+    szSetFunc = "MultiPvP:SendProtocolSetBattlePartner",
+    szRemoveFunc = "MultiPvP:SendProtocolRemoveBattlePartner"
+  },
+  WuLinDaHui = {
+    nGroup = WuLinDaHui.SAVE_GROUP,
+    nTaskId = WuLinDaHui.SAVE_PARTNER,
+    szSetFunc = "WuLinDaHui:SendProtocolSetBattlePartner",
+    szRemoveFunc = "WuLinDaHui:SendProtocolRemoveBattlePartner"
+  },
+  SuperstarWars = {
+    nGroup = SuperstarWars.SAVE_GROUP,
+    nTaskId = SuperstarWars.SAVE_PARTNER,
+    szSetFunc = "SuperstarWars:SendProtocolSetBattlePartner",
+    szRemoveFunc = "SuperstarWars:SendProtocolRemoveBattlePartner"
+  }
+}
+
+function tbWnd:OnCreate()
+  self.tbPartnerList = {}
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.Template, function(self, nIndex, element)
+    self:UpdateChoice(nIndex)
+  end, false, false)
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:OnOpen(szModule)
+  self.szModule = szModule
+  self.tbPartnerList = self:GetAllPartners()
+  self:UpdatePartnerList()
+end
+
+function tbWnd:UpdatePartnerList()
+  if not self.tbPartnerList then
+    return
+  end
+  local tbSetting = self.tbModuleSetting[self.szModule]
+  if not tbSetting then
+    return
+  end
+  local nCurPartnerId = me.GetUserValue(tbSetting.nGroup, tbSetting.nTaskId)
+  local pCurPartner = me.GetPartnerObj(nCurPartnerId)
+  if pCurPartner then
+    self.pPanel:SetActive(tbControls.NameGroup .. "/txtName", true)
+    self.pPanel:SetActive(tbControls.NameGroup .. "/imgNameBg", true)
+    self.pPanel:Label_SetText(tbControls.NameGroup .. "/txtName", i18n.Parse(pCurPartner.szName))
+    local nQuality = Partner.tbAllPartnerInfo[pCurPartner.nTemplateId].nQualityLevel
+    self.pPanel:Sprite_SetSprite(tbControls.NameGroup .. "/imgNameBg", Partner.tbPartnerNameBg[nQuality])
+    self.pPanel:SetActive(tbControls.NameGroup .. "/imgEmpty", false)
+    self.pPanel:SetActive(tbControls.btnRemove, true)
+  else
+    self.pPanel:SetActive(tbControls.NameGroup .. "/txtName", false)
+    self.pPanel:SetActive(tbControls.NameGroup .. "/imgNameBg", false)
+    self.pPanel:SetActive(tbControls.NameGroup .. "/imgEmpty", true)
+    self.pPanel:SetActive(tbControls.btnRemove, false)
+  end
+  self.tbPartnerList = self:GetAllPartners()
+  self.tbScrollView:Reset()
+  for i = 1, #self.tbPartnerList do
+    self.tbScrollView:SetElement(i, function(tbElement)
+      local pPartner = me.GetPartnerObj(self.tbPartnerList[i].dwId)
+      if pPartner then
+        tbElement.pPanel:Label_SetText("txtName", i18n.Parse(pPartner.szName))
+        tbElement.pPanel:Label_SetText("txtLv", i18n.EasyGet("\231\173\137\231\186\167{0}", self.tbPartnerList[i].nLevel))
+        tbElement.pPanel:Sprite_SetSprite("imgBg", Partner.tbPartnerNameBg[self.tbPartnerList[i].nQualityLevel])
+        if nCurPartnerId == pPartner.dwId then
+          self:UpdateChoice(i)
+        end
+      end
+    end)
+  end
+end
+
+function tbWnd:GetAllPartners()
+  local tbPartnerList = {}
+  local tbPosInfo = me.GetPartnerPosInfo()
+  for nIndex, nPartnerId in pairs(tbPosInfo) do
+    local pPartner = me.GetPartnerObj(nPartnerId)
+    if pPartner then
+      pPartner.nPartnerId = nPartnerId
+      local tbPartner = {
+        nLevel = pPartner.nLevel,
+        nQualityLevel = Partner.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel,
+        dwId = pPartner.dwId
+      }
+      table.insert(tbPartnerList, tbPartner)
+    end
+  end
+  table.sort(tbPartnerList, function(tbA, tbB)
+    if tbA.nLevel ~= tbB.nLevel then
+      return tbA.nLevel > tbB.nLevel
+    end
+    return tbA.nQualityLevel < tbB.nQualityLevel
+  end)
+  return tbPartnerList
+end
+
+function tbWnd:UpdateChoice(nIndex)
+  local nOldSelect = self.nSelect
+  self.nSelect = nIndex
+  if nOldSelect then
+    local szPath = string.format(tbControls.imgSelected, nOldSelect)
+    self.pPanel:SetActive(szPath, false)
+  end
+  local szPath = string.format(tbControls.imgSelected, self.nSelect)
+  self.pPanel:SetActive(szPath, true)
+end
+
+function tbWnd:SetBattlePartner()
+  local tbSetting = self.tbModuleSetting[self.szModule]
+  if not tbSetting then
+    return
+  end
+  if not self.nSelect or self.nSelect <= 0 then
+    me.CenterMsg(i18n.EasyGet("\232\175\183\233\128\137\230\139\169\228\189\160\232\166\129\228\184\138\233\152\181\231\154\132\229\144\140\228\188\180"))
+    return
+  end
+  local nPartnerId = self.tbPartnerList[self.nSelect].dwId
+  local nOldPartnerId = me.GetUserValue(tbSetting.nGroup, tbSetting.nTaskId)
+  if nOldPartnerId == nPartnerId then
+    me.CenterMsg(i18n.EasyGet("\230\173\164\229\144\140\228\188\180\229\183\178\229\135\186\230\136\152"))
+    return
+  end
+  local pPartner = me.GetPartnerObj(nPartnerId)
+  if not pPartner then
+    me.CenterMsg(i18n.EasyGet("\230\151\160\230\149\136\229\144\140\228\188\180"))
+    return
+  end
+  if Lib:IsEmptyStr(tbSetting.szSetFunc) then
+    return
+  end
+  Lib:StringCallBack(tbSetting.szSetFunc, nPartnerId)
+end
+
+function tbWnd:RemoveBattlePartner()
+  local tbSetting = self.tbModuleSetting[self.szModule]
+  if not tbSetting then
+    return
+  end
+  local nPartnerId = me.GetUserValue(tbSetting.nGroup, tbSetting.nTaskId)
+  if nPartnerId < 0 then
+    me.CenterMsg(i18n.EasyGet("\231\155\174\229\137\141\230\178\161\230\156\137\229\144\140\228\188\180\228\184\138\233\152\181"))
+    return
+  end
+  if Lib:IsEmptyStr(tbSetting.szRemoveFunc) then
+    return
+  end
+  Lib:StringCallBack(tbSetting.szRemoveFunc)
+end

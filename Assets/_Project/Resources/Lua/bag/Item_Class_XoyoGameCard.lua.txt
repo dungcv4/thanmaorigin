@@ -1,0 +1,75 @@
+local tbXoyoGameCard = Item:GetClass("XoyoGameCard")
+
+function tbXoyoGameCard:OnCreate(pItem)
+end
+
+function tbXoyoGameCard:OnTimeOut(pItem, pPlayer)
+  local nCount = pItem.nCount
+  if pPlayer.ConsumeItem(pItem, pItem.nCount, Env.LogWay_TimeOut) <= 0 then
+    LogErr("tbXoyoGameCard:OnTimeOut Error", pPlayer.dwID, pItem.dwId, pItem.szClass, pItem.nCount)
+    return
+  end
+  local nCoin = nCount * XoyoGame.XoyoGameRecordCfg.nCardCoin
+  local tbMail = {
+    To = pPlayer.dwID,
+    Title = i18n.EasyGet("\233\128\141\233\129\165\229\141\161\229\183\178\232\191\135\230\156\159"),
+    From = i18n.EasyGet("\231\179\187\231\187\159"),
+    Text = i18n.EasyGet("\230\130\168\231\154\132\233\128\141\233\129\165\229\141\161\229\183\178\232\191\135\230\156\159\239\188\140\232\135\170\229\138\168\230\138\152\231\174\151\228\184\186{0}\233\147\182\228\184\164", nCoin),
+    tbAttach = {
+      {"Coin", nCoin}
+    },
+    nLogReason = Env.LogWay_XoyoGameCard
+  }
+  Mail:SendSystemMail(tbMail)
+end
+
+function tbXoyoGameCard:OnUse(pItem)
+  if self:OnAutoUse(me, pItem.dwTemplateId, pItem.nCount) then
+    return pItem.nCount
+  end
+  return 0
+end
+
+function tbXoyoGameCard:OnAutoUse(pPlayer, nItemTemplateId, nCount, szMsg, tbItemExtParams, nLogReason, nLogReason2)
+  local nRecordId = XoyoGame.XoyoGameRecordCfg.nRecordId
+  local nRecordCount, tbItemList = pPlayer.GetItemCountByTypeInBag(nRecordId)
+  local pRecordItem
+  if nRecordCount <= 0 then
+    pRecordItem = pPlayer.AddItemEx_Unsafe(nRecordId, 1, {}, Env.LogWay_XoyoGameCard)
+    if not pRecordItem then
+      return false
+    end
+  else
+    pRecordItem = tbItemList[1]
+  end
+  local nIndex = XoyoGame:GetXYGCardIndex(nItemTemplateId)
+  if not nIndex then
+    return false
+  end
+  local nHadId = pRecordItem.GetIntValue(nIndex)
+  if nHadId and nHadId == nItemTemplateId then
+    if not pPlayer.AddMoney("Coin", XoyoGame.XoyoGameRecordCfg.nCardCoin * nCount, Env.LogWay_XoyoGameCard) then
+      LogErr("tbXoyoGameCard:OnAutoUse Add Coin Error nCount", XoyoGame.XoyoGameRecordCfg.nCardCoin * nCount)
+      return false
+    end
+    pPlayer.CenterMsg(i18n.EasyGet("{0}\229\183\178\229\156\168\233\128\141\233\129\165\229\189\149\230\191\128\230\180\187\239\188\140\230\138\152\231\174\151\230\136\144{1}\233\147\182\228\184\164", Item:GetName(nItemTemplateId, pPlayer), XoyoGame.XoyoGameRecordCfg.nCardCoin * nCount))
+  else
+    pRecordItem.SetIntValue(nIndex, nItemTemplateId)
+    Log("tbXoyoGameCard:OnAutoUse dwID,szName,nItemTemplateId:", pPlayer.dwID, pPlayer.szName, nItemTemplateId)
+    local nCardCount = Item:GetClass("XoyoGameRecord"):GetHadCardNum(pRecordItem)
+    RankBoard:UpdateRankVal("XoyoGameRecord", pPlayer.dwID, nCardCount)
+    local szName = Item:GetName(nItemTemplateId, pPlayer)
+    pPlayer.CenterMsg(i18n.EasyGet("\230\136\144\229\138\159\230\191\128\230\180\187\233\128\141\233\129\165\229\189\149-{0}", szName))
+    Event:OnEvent(Event.emEVENT_XOYOGAMERECORD_ADD, pPlayer.dwID)
+    Lib:TrackEvent(pPlayer.dwID, Env.track_xoyogamerecord_active, nItemTemplateId, nCardCount)
+    if nCount > 1 then
+      nCount = nCount - 1
+      if not pPlayer.AddMoney("Coin", XoyoGame.XoyoGameRecordCfg.nCardCoin * nCount, Env.LogWay_XoyoGameCard) then
+        LogErr("tbXoyoGameCard:OnAutoUse Add Coin Error nCount", XoyoGame.XoyoGameRecordCfg.nCardCoin * nCount)
+        return false
+      end
+      pPlayer.CenterMsg(i18n.EasyGet("{0}\229\183\178\229\156\168\233\128\141\233\129\165\229\189\149\230\191\128\230\180\187\239\188\140\230\138\152\231\174\151\230\136\144{1}\233\147\182\228\184\164", Item:GetName(nItemTemplateId, pPlayer), XoyoGame.XoyoGameRecordCfg.nCardCoin * nCount))
+    end
+  end
+  return true
+end

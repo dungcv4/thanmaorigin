@@ -1,0 +1,2878 @@
+Require("Script/EventSystem/EventNotify.lua")
+Require("CommonScript/Chat/ChatDef.lua")
+Require("CommonScript/Dungeon/KinLevel/KinLevelCommonDef.lua")
+Require("CommonScript/Tong/TongDef.lua")
+local ChannelColor = {
+  [ChatMgr.ChannelType.Public] = "44ee76",
+  [ChatMgr.ChannelType.Nearby] = "ebebeb",
+  [ChatMgr.ChannelType.Color] = "aabbcc",
+  [ChatMgr.ChannelType.Map] = "ffaa00",
+  [ChatMgr.ChannelType.Team] = "ff88cd",
+  [ChatMgr.ChannelType.Group] = "49e1b9",
+  [ChatMgr.ChannelType.Kin] = "68cff5",
+  [ChatMgr.nChannelFriendName] = "db25ff",
+  [ChatMgr.ChannelType.Private] = "db25ff",
+  [ChatMgr.ChannelType.System] = "f56161",
+  [ChatMgr.ChannelType.Friend] = "d79eff",
+  [ChatMgr.ChannelType.Recruit] = "ff88cd",
+  [ChatMgr.ChannelType.Hawk] = "ff88cd",
+  [ChatMgr.ChannelType.Faction] = "ff88cd",
+  SystemMsgTip = "ffff0e"
+}
+ChatMgr.nDefaultVoiceTime = 15000
+ChatMgr.nKinMascotVoiceTime = 30000
+ChatMgr.PrivateChatUnReadCache = ChatMgr.PrivateChatUnReadCache or {}
+ChatMgr.PrivateChatReadCache = ChatMgr.PrivateChatReadCache or {}
+ChatMgr.MAX_PRIVATE_LIST_NUM = 20
+ChatMgr.MAX_WANTTOCHAT_COUNT = 20
+ChatMgr.MAX_PRIVATE_MSG_NUM = 50
+ChatMgr.RecentPrivateList = ChatMgr.RecentPrivateList or {}
+ChatMgr.RecentWantToChatList = ChatMgr.RecentWantToChatList or {
+  tbRoleInfo = {},
+  tbCheckMap = {}
+}
+ChatMgr.ChannelMsgUnReadCache = ChatMgr.ChannelMsgUnReadCache or {}
+ChatMgr._GetCacheSessionMap = ChatMgr._GetCacheSessionMap or {}
+ChatMgr.VoiceInfo = ChatMgr.VoiceInfo or {}
+ChatMgr.VoiceInfo.autoQueue = ChatMgr.VoiceInfo.autoQueue or {}
+ChatMgr.tbDynamicChannel = ChatMgr.tbDynamicChannel or {}
+ChatMgr.ChatRoom = ChatMgr.ChatRoom or {}
+ChatMgr.tbAutoVoiceList = ChatMgr.tbAutoVoiceList or {}
+ChatMgr.szCurPlayingVoice = nil
+ChatMgr.nStartPlayVoiceTimer = -1
+ChatMgr.PrivateRequestInterval = 10
+ChatMgr.LinkUpdateInterval = 3
+ChatMgr.LinkUpdateChannel = {
+  ChatMgr.ChannelType.Public,
+  ChatMgr.ChannelType.Kin,
+  ChatMgr.ChannelType.Tong
+}
+ChatMgr.bLinkUpdateSwitch = ChatMgr.bLinkUpdateSwitch or true
+ChatMgr.tbLinkInfoCache = ChatMgr.tbLinkInfoCache or {}
+ChatMgr.tbLinkModUpdate = ChatMgr.tbLinkModUpdate or {}
+local ChatRoomMgr = luanet.import_type("ChatRoomMgr")
+ChatMgr.ApolloVoiceErr = {
+  APOLLO_VOICE_NONE = 1,
+  APOLLO_VOICE_UNKNOWN = 3,
+  APOLLO_VOICE_STATE_ERR = 4,
+  APOLLO_VOICE_JOIN_TIMEOUT = 50,
+  APOLLO_VOICE_JOIN_SUCC = 51
+}
+ChatMgr.tbItemFunc = {
+  SkillBook = function(tbPack)
+    local nItemTemplateId, nItemId, nPosX, nPosY = table.unpack(tbPack)
+    if nPosX and nPosY then
+      Ui:OpenWindowAtPos("SkillCheatsPanel", nPosX, nPosY, nItemId, nItemTemplateId)
+    else
+      Ui:OpenWindow("SkillCheatsPanel", nItemId, nItemTemplateId)
+    end
+  end
+}
+ChatMgr.tbVoicePath2Channel = ChatMgr.tbVoicePath2Channel or {}
+ChatMgr.tbVoiceId2Channel = ChatMgr.tbVoiceId2Channel or {}
+
+local function CheckCanDoSwitchMap(nSrcMapId, nDstMapId, nSrcMapTemplateId, nDstMapTemplateId)
+  local bResult = true
+  local szErrMsg
+  if nil == nSrcMapTemplateId then
+    LogErr("Illegal param 'nSrcMapTemplateId'.")
+    bResult = false
+    szErrMsg = nil
+  end
+  local tbSrcMapSetting = Map:GetMapSetting(nSrcMapTemplateId)
+  if nil == tbSrcMapSetting then
+    LogErr("Failed finding corresponding mapsetting. 'nSrcMapTemplateId' : ", nSrcMapTemplateId)
+    bResult = false
+    szErrMsg = nil
+  elseif nil == nDstMapTemplateId then
+    LogErr("Illegal param 'nDstMapTemplateId'.")
+    bResult = false
+    szErrMsg = nil
+  elseif not IsSameMapId(nSrcMapId, nDstMapId) and nil ~= tbSrcMapSetting.TransForbidden and 1 == tonumber(tbSrcMapSetting.TransForbidden) then
+    bResult = false
+    szErrMsg = i18n.Get(ChatMgr.Terms.TransForbidden)
+  end
+  return bResult, szErrMsg
+end
+
+ChatMgr.tbLinkClickFns = {
+  [ChatMgr.LinkType.Position] = function(tbLinkInfo)
+    local nSelfMapId, nSelfX, nSelfY = me.GetWorldPos()
+    local tbParam = tbLinkInfo.linkParam
+    local nMapId, nX, nY, nMapTemplateId
+    if tbParam then
+      nMapId, nX, nY, nMapTemplateId = table.unpack(tbParam)
+    else
+      if not tbLinkInfo.nMapId then
+        return
+      end
+      nMapId, nX, nY, nMapTemplateId = tbLinkInfo.nMapId, tbLinkInfo.nX, tbLinkInfo.nY, tbLinkInfo.nMapTemplateId
+    end
+    if nSelfMapId == nMapId then
+      local nDisSquare = Lib:GetDistsSquare(nSelfX, nSelfY, nX, nY)
+      if nDisSquare <= Npc.DIALOG_DISTANCE * Npc.DIALOG_DISTANCE then
+        me.CenterMsg(i18n.EasyGet("\228\189\160\229\183\178\231\187\143\229\156\168\231\155\174\230\160\135\231\130\185\233\153\132\232\191\145"))
+        return
+      end
+    end
+    if QinShiHuangLing:CheckAndGoto(nMapTemplateId, nX, nY) then
+      return
+    end
+    if KeYiMen.C:CheckAndGoto(nMapTemplateId, nX, nY) then
+      return
+    end
+    if TieFuCheng:CheckAndGoto(nMapTemplateId, nMapId, nX, nY) then
+      return
+    end
+    if HanHaiMiCheng:CheckAndGoto(nMapTemplateId, nX, nY) then
+      return
+    end
+    if GlobalDomainBattle:CheckAndGoto(nMapTemplateId, nMapId, nX, nY) then
+      return
+    end
+    local bRetCode, szErrMsg = CheckCanDoSwitchMap(me.nMapId, nMapId, me.nMapTemplateId, nMapTemplateId)
+    if bRetCode then
+      TeamMgr:StopFollowMember()
+      AFK:Stop()
+      AutoPath:GotoAndCallEx(nMapId, nX, nY, function()
+        if me.nFightMode == Npc.FIGHT_MODE.emFightMode_Fight then
+          AFK:Start()
+        end
+      end, Npc.DIALOG_DISTANCE)
+    elseif nil ~= szErrMsg then
+      me.CenterMsg(szErrMsg)
+    end
+  end,
+  [ChatMgr.LinkType.PositionAndDialog] = function(tbLinkInfo)
+    local tbParam = tbLinkInfo.linkParam
+    if tbParam then
+      local nSelfMapId, nSelfX, nSelfY = me.GetWorldPos()
+      local nMapId, nX, nY, nMapTemplateId, nNpcId = table.unpack(tbParam)
+      if nSelfMapId == nMapId then
+        local nDisSquare = Lib:GetDistsSquare(nSelfX, nSelfY, nX, nY)
+        if nDisSquare <= Npc.DIALOG_DISTANCE * Npc.DIALOG_DISTANCE then
+          me.CenterMsg(i18n.EasyGet("\228\189\160\229\183\178\231\187\143\229\156\168\231\155\174\230\160\135\231\130\185\233\153\132\232\191\145"))
+          return
+        end
+      end
+      local fnCallBack
+      if nNpcId then
+        function fnCallBack()
+          Operation:SimpleTap(nNpcId)
+        end
+      end
+      local bRetCode, szErrMsg = CheckCanDoSwitchMap(me.nMapId, nMapId, me.nMapTemplateId, nMapTemplateId)
+      if bRetCode then
+        TeamMgr:StopFollowMember()
+        AFK:Stop()
+        AutoPath:GotoAndCallEx(nMapId, nX, nY, fnCallBack, Npc.DIALOG_DISTANCE)
+      elseif nil ~= szErrMsg then
+        me.CenterMsg(szErrMsg)
+      end
+      return
+    end
+  end,
+  [ChatMgr.LinkType.Item] = function(tbLinkInfo)
+    local tbInfo = {
+      nTemplate = tbLinkInfo.nTemplateId,
+      nFaction = tbLinkInfo.nFaction,
+      nFactionSect = tbLinkInfo.nFactionSect,
+      tbLinkInfo = tbLinkInfo,
+      nBodySex = tbLinkInfo.nBodySex,
+      nSeries = tbLinkInfo.nSeries
+    }
+    if tbLinkInfo.linkParam then
+      tbInfo.tbItemExtParams = {
+        dwId = tbLinkInfo.linkParam[1],
+        nTradeLimitType = tbLinkInfo.linkParam[2],
+        nTradeLimitValue = tbLinkInfo.linkParam[3]
+      }
+    end
+    Item:ShowItemDetail(tbInfo)
+  end,
+  [ChatMgr.LinkType.Team] = function(tbLinkInfo)
+    TeamMgr:ApplyActivityTeam(tbLinkInfo.nActivityId, tbLinkInfo.nTeamId)
+  end,
+  [ChatMgr.LinkType.Achievement] = function(tbLinkInfo)
+    Achievement:JumpAchievementDetail(tbLinkInfo)
+  end,
+  [ChatMgr.LinkType.KinQuestion] = function(tbLinkInfo)
+    local tbQuestion = tbLinkInfo.tbQuestionData
+    if not tbQuestion then
+      return
+    end
+    TongParty:OpenAnswerWnd()
+  end,
+  [ChatMgr.LinkType.Color] = function(tbLinkInfo)
+  end,
+  [ChatMgr.LinkType.MultiLink] = function(tbLinkInfo)
+    MultiPvP:RequestJoinTeam(tbLinkInfo.nValue)
+  end,
+  [ChatMgr.LinkType.DoScript] = function(tbLinkInfo, idx)
+    if tbLinkInfo.ScriptTable ~= nil then
+      me.CallClientScript(table.unpack(tbLinkInfo.ScriptTable))
+    end
+  end,
+  [ChatMgr.LinkType.OpenWindow] = function(tbLinkInfo)
+    local tbParams = tbLinkInfo.tbParams
+    if not (tbParams and tbParams[1]) or "" == tbParams[1] then
+      LogErr("ChatMgr.LinkType.OpenWindow invaild tbParams")
+      return
+    end
+    Ui:OpenWindow(table.unpack(tbParams))
+  end,
+  [ChatMgr.LinkType.RedPacket] = function(tbLinkInfo)
+    if tbLinkInfo.nKinId and me.dwKinId ~= tbLinkInfo.nKinId then
+      me.CenterMsg(i18n.EasyGet("\230\130\168\229\183\178\233\128\128\229\135\186\232\175\165\229\174\182\230\151\143\239\188\140\230\151\160\230\179\149\230\159\165\231\156\139\231\186\162\229\140\133"))
+      return
+    end
+    if tbLinkInfo.nTongId and me.dwTongId ~= tbLinkInfo.dwTongId then
+      me.CenterMsg(i18n.EasyGet("\230\130\168\229\183\178\233\128\128\229\135\186\232\175\165\229\174\182\230\151\143\239\188\140\230\151\160\230\179\149\230\159\165\231\156\139\231\186\162\229\140\133"))
+      return
+    end
+    RedPacketMgr:OpenRedPacket(tbLinkInfo.nId)
+  end,
+  [ChatMgr.LinkType.WuLinDaHuiLink] = function(tbLinkInfo)
+    WuLinDaHui:RequestJoinTeam(tbLinkInfo.nValue)
+  end,
+  [ChatMgr.LinkType.DingFengPKLink] = function(tbLinkInfo)
+    DingFengPK:RequestJoinTeam(tbLinkInfo.nValue)
+  end,
+  [ChatMgr.LinkType.AvenueOfStarsSpeak] = function(tbLinkInfo)
+    AvenueOfStars:ClickSloganLink(tbLinkInfo)
+  end,
+  [ChatMgr.LinkType.XiaKeDao] = function(tbLinkInfo)
+    if tbLinkInfo.linkParam.bFailure then
+      me.CenterMsg(i18n.EasyGet("\232\175\165\233\147\190\230\142\165\229\183\178\229\164\177\230\149\136"))
+      return
+    end
+    RemoteServer.RequestXiaKeDao("AssistEnterMap", tbLinkInfo.linkParam[1], tbLinkInfo.linkParam[5])
+  end
+}
+ChatMgr.tbLinkQueryFns = {
+  [ChatMgr.LinkType.Team] = function(tbLinkInfo, tbQuerySet, tbCache, tbLocalSet, bModUpdate)
+    local nTeamId = tbLinkInfo.nTeamId
+    if nTeamId ~= TeamMgr:GetTeamId() then
+      local nMemberCount = tbCache and tbCache[nTeamId] or 0
+      if nMemberCount >= 0 then
+        tbQuerySet[nTeamId] = nMemberCount
+      end
+    elseif bModUpdate then
+      tbLocalSet[nTeamId] = true
+    end
+  end,
+  [ChatMgr.LinkType.XiaKeDao] = function(tbLinkInfo, tbQuerySet, tbCache, tbLocalSet, bModUpdate)
+    local nAssistId = tbLinkInfo.linkParam[5]
+    local nBossId = tbLinkInfo.linkParam[6]
+    local nLinkIndex = tbLinkInfo.linkParam[8]
+    local nMapId = tbLinkInfo.linkParam[1]
+    if tbCache and tbCache[nLinkIndex] and tbCache[nLinkIndex][nAssistId] and tbCache[nLinkIndex][nAssistId][nBossId] and tbCache[nLinkIndex][nAssistId][nBossId].nFailureMsg then
+      return
+    end
+    if not tbQuerySet[nLinkIndex] then
+      tbQuerySet[nLinkIndex] = {}
+    end
+    if not tbQuerySet[nLinkIndex][nAssistId] then
+      tbQuerySet[nLinkIndex][nAssistId] = {}
+    end
+    tbQuerySet[nLinkIndex][nAssistId][nBossId] = {
+      nBossId = nBossId,
+      nMapId = nMapId,
+      nLinkIndex = nLinkIndex
+    }
+  end
+}
+ChatMgr.tbLinkUpdateFns = {
+  [ChatMgr.LinkType.Team] = function(tbResult, tbCache)
+    for nTeamId, nMemberCount in pairs(tbResult) do
+      tbCache[nTeamId] = nMemberCount
+    end
+  end,
+  [ChatMgr.LinkType.XiaKeDao] = function(tbResult, tbCache)
+    for nLinkIndex, tbLinkInfoList in pairs(tbResult) do
+      for nPlayerId, tbLinkData in pairs(tbLinkInfoList) do
+        for nBossId, tbLinkInfo in pairs(tbLinkData) do
+          if not tbCache[nLinkIndex] then
+            tbCache[nLinkIndex] = {}
+          end
+          if not tbCache[nLinkIndex][nPlayerId] then
+            tbCache[nLinkIndex][nPlayerId] = {}
+          end
+          tbCache[nLinkIndex][nPlayerId][nBossId] = tbLinkInfo
+        end
+      end
+    end
+  end
+}
+ChatMgr.tbLinkToMsgFns = {
+  [ChatMgr.LinkType.Team] = function(szMsg, tbLinkInfo, tbCache)
+    local nTeamId = tbLinkInfo.nTeamId
+    local nMemberCount
+    if nTeamId ~= TeamMgr:GetTeamId() then
+      nMemberCount = tbCache and tbCache[tbLinkInfo.nTeamId] or -1
+    else
+      nMemberCount = TeamMgr:GetMembersCount()
+    end
+    if nMemberCount < 0 then
+      return szMsg
+    end
+    return i18n.Get(tostring(tbLinkInfo.nMsgTerm), nMemberCount, TeamMgr.Cfg.MAX_MEMBER_COUNT, TeamMgr:GetActivityInfo(tbLinkInfo.nActivityId) or "")
+  end,
+  [ChatMgr.LinkType.XiaKeDao] = function(szMsg, tbLinkInfo, tbCache)
+    local nAssistId = tbLinkInfo.linkParam[5]
+    local nBossId = tbLinkInfo.linkParam[6]
+    local nLinkIndex = tbLinkInfo.linkParam[8]
+    if tbCache and tbCache[nLinkIndex] and tbCache[nLinkIndex][nAssistId] and tbCache[nLinkIndex][nAssistId][nBossId] and tbCache[nLinkIndex][nAssistId][nBossId].nFailureMsg then
+      tbLinkInfo.linkParam.bFailure = true
+      return i18n.Parse(tbLinkInfo.linkParam[7])
+    end
+    if tbLinkInfo.linkParam.bFailure then
+      return i18n.Parse(tbLinkInfo.linkParam[7])
+    end
+    if DegreeCtrl:GetDegree(me, "XiaKeDaoAssistNum") <= 0 then
+      return i18n.Parse(tbLinkInfo.linkParam[9])
+    end
+    return szMsg
+  end
+}
+
+function ChatMgr:DealMsgWithLinkUpdate(szMsg, tbLinkInfo)
+  local nLinkType = tbLinkInfo.nLinkType
+  local fnTranslate = self.tbLinkToMsgFns[nLinkType]
+  if not fnTranslate then
+    return szMsg
+  end
+  return fnTranslate(szMsg, tbLinkInfo, self.tbLinkInfoCache[nLinkType])
+end
+
+local tbLinkColor = {
+  [ChatMgr.LinkType.None] = "ebebeb",
+  [ChatMgr.LinkType.Position] = "1560b5",
+  [ChatMgr.LinkType.Team] = "1560b5",
+  [ChatMgr.LinkType.Achievement] = "28ff28",
+  [ChatMgr.LinkType.KinQuestion] = "ffff0e",
+  [ChatMgr.LinkType.RedPacket] = "c56d05",
+  [ChatMgr.LinkType.PositionAndDialog] = "1560b5",
+  [ChatMgr.LinkType.OpenWindow] = "28ff28",
+  [ChatMgr.LinkType.MultiLink] = "1560b5",
+  [ChatMgr.LinkType.WuLinDaHuiLink] = "1560b5",
+  [ChatMgr.LinkType.DingFengPKLink] = "1560b5",
+  [ChatMgr.LinkType.AvenueOfStarsSpeak] = "1560b5",
+  [ChatMgr.LinkType.XiaKeDao] = "c56d05"
+}
+local tbSpecColor = {
+  [ChatMgr.LinkType.Position] = {
+    Spec = {Norl = "c56d05", Click = "c56d05"},
+    Norl = {Norl = "c56d05", Click = "c56d05"}
+  },
+  [ChatMgr.LinkType.Team] = {
+    Spec = {Norl = "c56d05", Click = "c56d05"},
+    Norl = {Norl = "c56d05", Click = "c56d05"}
+  }
+}
+local tbLinkColorValueCache
+
+function ChatMgr:DealMsgWithLinkColor(szMsg, tbLinkInfo, tbMsg, bLarge)
+  tbLinkColorValueCache = {
+    links = {tbLinkInfo},
+    tbMsg = tbMsg,
+    bLarge = bLarge,
+    i = 1
+  }
+  local szRet = string.gsub(szMsg, "%<.+%>", self._AddColor2Link) or szMsg
+  tbLinkColorValueCache = nil
+  return szRet
+end
+
+function ChatMgr._AddColor2Link(sz)
+  if "</%w->" == sz then
+    return sz
+  end
+  if "[]" == sz then
+    return sz
+  end
+  if string.match(sz, "<%w-=#?%w->") ~= nil then
+    return sz
+  end
+  return ChatMgr._AddColor2Link2(sz)
+end
+
+function ChatMgr._AddColor2Link2(sz)
+  local tbLinkInfo = tbLinkColorValueCache.links[tbLinkColorValueCache.i]
+  local tbMsg = tbLinkColorValueCache.tbMsg
+  local bLarge = tbLinkColorValueCache.bLarge
+  tbLinkColorValueCache.i = tbLinkColorValueCache.i + 1
+  if nil == tbLinkInfo then
+    return sz
+  end
+  local szLinkColor = ChatMgr:_GetLinkTypeColor(tbLinkInfo, tbMsg, bLarge)
+  return szLinkColor and string.format("<color=#%sff><a href=%d>%s</a></color>", szLinkColor, tbLinkColorValueCache.i, sz) or sz
+end
+
+function ChatMgr:_GetLinkTypeColor(tbLinkInfo, tbMsg, bLarge)
+  if not tbLinkInfo or tbLinkInfo.nLinkType == ChatMgr.LinkType.None then
+    return nil
+  end
+  local szLinkColor = tbLinkColor[tbLinkInfo.nLinkType]
+  if tbLinkInfo.nLinkType == ChatMgr.LinkType.XiaKeDao then
+    if tbLinkInfo.linkParam.bFailure then
+      szLinkColor = "939392"
+    elseif DegreeCtrl:GetDegree(me, "XiaKeDaoAssistNum") <= 0 then
+      szLinkColor = "939392"
+    end
+  end
+  if tbSpecColor[tbLinkInfo.nLinkType] then
+    szLinkColor = tbSpecColor[tbLinkInfo.nLinkType][bLarge and "Spec" or "Norl"][tbMsg.bClickLink and "Click" or "Norl"]
+  end
+  if tbLinkInfo.nLinkType == ChatMgr.LinkType.Item then
+    local nQuality
+    if tbLinkInfo.nTemplateId ~= nil then
+      if tbLinkInfo.bUseMeInfo then
+        tbLinkInfo.nFaction = me.nFaction
+        tbLinkInfo.nFactionSect = me.nFactionSect
+        tbLinkInfo.nBodySex = me.GetNpc().GetBodySex()
+      end
+      local szName, nIconImage, nViewImage, nQuality2, nResId = KItem.GetItemShowInfo(tbLinkInfo.nTemplateId, tbLinkInfo.nFaction, tbLinkInfo.nFactionSect, tbLinkInfo.nBodySex)
+      nQuality = nQuality2
+    end
+    if tbLinkInfo.linkParam then
+      local pItem = KItem.GetItemObj(tbLinkInfo.linkParam[1])
+      if pItem then
+        nQuality = pItem.nQuality
+      end
+    end
+    if tbLinkInfo.bIsEquip then
+      local tbInfo = Item:GetItemBaseProp(tbLinkInfo.nTemplateId)
+      nQuality = tbInfo and tbInfo.nQuality
+    elseif tbLinkInfo.nTemplateId then
+      local tbInfo = Item:GetItemBaseProp(tbLinkInfo.nTemplateId)
+      nQuality = tbInfo and tbInfo.nQuality
+    end
+    local szLargeColor, szSmallColor = Item:GetChatColor(nQuality or 1)
+    szLinkColor = bLarge and szLargeColor or szSmallColor
+  end
+  return szLinkColor
+end
+
+function ChatMgr:Init()
+  local szChannelSettingPath = "Setting/Chat/ChannelSetting.tab"
+  ChatMgr.tbChannelSetting = Lib:LoadTabFileEx(szChannelSettingPath, "dsdddsd", "nType", {
+    "nType",
+    "szName",
+    "nCharge",
+    "nCd",
+    "nLevel",
+    "szChannelName",
+    "nVip"
+  })
+  self.ChatDataCache = self.ChatDataCache or {}
+end
+
+ChatMgr:Init()
+
+function ChatMgr:ClearCache()
+  self.ChatDataCache = {}
+end
+
+function ChatMgr:InitPrivateList()
+  self.RecentPrivateList = {}
+  self.PrivateChatUnReadCache = {}
+  self.PrivateChatReadCache = {}
+  self.PrivateChatRedPointNum = 0
+  self.RecentWantToChatList = {
+    tbRoleInfo = {},
+    tbCheckMap = {}
+  }
+  local tbSaveData = Client:GetPrivateMsgData()
+  local tbData = tbSaveData.tbData
+  if not tbData then
+    return
+  end
+  for i, v in ipairs(tbData) do
+    table.insert(self.RecentPrivateList, v[1])
+    self.PrivateChatUnReadCache[v[1].dwID] = v[2]
+    self.PrivateChatReadCache[v[1].dwID] = v[3]
+  end
+  self.nInitPrivateList = GetTime()
+end
+
+function ChatMgr:AddRecentWantToChatList(tbRoleInfo)
+  if nil == tbRoleInfo then
+    return
+  end
+  local dwID = tbRoleInfo.dwID
+  local tbRecentRoleInfo = self.RecentWantToChatList.tbRoleInfo
+  local tbCheckMap = self.RecentWantToChatList.tbCheckMap
+  if tbCheckMap[dwID] then
+    for i = 1, #tbRecentRoleInfo do
+      if tbRecentRoleInfo[i].dwID == dwID then
+        table.remove(tbRecentRoleInfo, i)
+        table.insert(tbRecentRoleInfo, 1, tbRoleInfo)
+        break
+      end
+    end
+  else
+    table.insert(tbRecentRoleInfo, 1, tbRoleInfo)
+    if #tbRecentRoleInfo > self.MAX_WANTTOCHAT_COUNT then
+      tbCheckMap[tbRecentRoleInfo[self.MAX_WANTTOCHAT_COUNT + 1].dwID] = nil
+      table.remove(tbRecentRoleInfo, self.MAX_WANTTOCHAT_COUNT + 1)
+    end
+  end
+  tbCheckMap[dwID] = true
+end
+
+function ChatMgr:RemoveRecentWantToChatList(dwID)
+  local tbRecentRoleInfo = self.RecentWantToChatList.tbRoleInfo
+  local tbCheckMap = self.RecentWantToChatList.tbCheckMap
+  for i = 1, #tbRecentRoleInfo do
+    if tbRecentRoleInfo[i].dwID == dwID then
+      table.remove(tbRecentRoleInfo, i)
+      break
+    end
+  end
+  tbCheckMap[dwID] = nil
+end
+
+function ChatMgr:CheckUpdateStrangerState()
+  local nNow = GetTime()
+  if not self.nInitPrivateList or nNow - self.nInitPrivateList < 3600 then
+    return
+  end
+  local tbCheckRoleIDs = {}
+  for i, v in ipairs(self.RecentPrivateList) do
+    local tbData = FriendShip:GetFriendDataInfo(v.dwID)
+    if not tbData then
+      table.insert(tbCheckRoleIDs, v.dwID)
+    end
+  end
+  if next(tbCheckRoleIDs) then
+    RemoteServer.RequestChatRoleBaseInfo(tbCheckRoleIDs)
+  end
+  self.nInitPrivateList = nNow
+end
+
+function ChatMgr:SavePriveMsg()
+  if not Login.bEnterGame then
+    return
+  end
+  local tbSaveData = Client:GetPrivateMsgData()
+  tbSaveData.tbData = nil
+  local tbSavePrivateMsgs = {}
+  local PrivateChatUnReadCache = self.PrivateChatUnReadCache
+  local PrivateChatReadCache = self.PrivateChatReadCache
+  for i, v in ipairs(self.RecentPrivateList) do
+    local tbUnRead = PrivateChatUnReadCache[v.dwID] or {}
+    local tbReaded = PrivateChatReadCache[v.dwID] or {}
+    local nToTal = #tbUnRead + #tbReaded
+    local nNeedDel = nToTal - self.MAX_PRIVATE_MSG_NUM
+    if nNeedDel > 0 then
+      for i2 = 1, #tbReaded do
+        table.remove(tbReaded, 1)
+        nNeedDel = nNeedDel - 1
+        if 0 == nNeedDel then
+          break
+        end
+      end
+      if nNeedDel > 0 then
+        for i2 = 1, #tbUnRead do
+          table.remove(tbUnRead, 1)
+          nNeedDel = nNeedDel - 1
+          if 0 == nNeedDel then
+            break
+          end
+        end
+      end
+    end
+    table.insert(tbSavePrivateMsgs, {
+      v,
+      tbUnRead,
+      tbReaded
+    })
+  end
+  tbSaveData.tbData = tbSavePrivateMsgs
+  Client:SavePrivateMsgData()
+end
+
+function ChatMgr:CheckSavePrivateMsg()
+  if self.nTimerSavePrivate then
+    return
+  end
+  self.nTimerSavePrivate = Timer:Register(Env.GAME_FPS * 30, function()
+    ChatMgr:SavePriveMsg()
+    self.nTimerSavePrivate = nil
+  end)
+end
+
+function ChatMgr:IsValidVoiceMsg(szVoiceFileId)
+  return nil ~= szVoiceFileId and "" ~= szVoiceFileId
+end
+
+function ChatMgr:Filter4CharString(szMsg)
+  local tbWords = Lib:GetUft8Chars(szMsg)
+  local tbValidWords = {}
+  for _, c in pairs(tbWords) do
+    if string.len(c) <= 3 then
+      table.insert(tbValidWords, c)
+    end
+  end
+  return table.concat(tbValidWords)
+end
+
+function ChatMgr:FilterUnityTag(szMsg)
+  szMsg = string.gsub(szMsg, "</?color.->", "")
+  szMsg = string.gsub(szMsg, "</?size.->", "")
+  szMsg = string.gsub(szMsg, "</?b.->", "")
+  szMsg = string.gsub(szMsg, "</?i.->", "")
+  szMsg = string.gsub(szMsg, "</?material.->", "")
+  szMsg = string.gsub(szMsg, "</?quad.->", "")
+  szMsg = string.gsub(szMsg, "</?a.->", "")
+  szMsg = string.gsub(szMsg, "</?i18n.->", "")
+  szMsg = string.gsub(szMsg, "</?fmt.->", "")
+  return szMsg
+end
+
+function ChatMgr:SendMsg(nChannelType, nExtra, szMsg, bVoice, szVoiceFileId, nVoiceTime)
+  if string.len(szMsg) > 2 and string.sub(szMsg, 1, 2) == "//" then
+    return false
+  end
+  szMsg = ChatMgr:Filter4CharString(szMsg)
+  szMsg = ChatMgr:FilterUnityTag(szMsg)
+  if not ChatMgr:CheckSendMsg(nChannelType, nExtra, szMsg, false, szVoiceFileId, nVoiceTime) then
+    return false
+  end
+  if nChannelType == ChatMgr.ChannelType.Kin then
+    nExtra = ChatMgr.KinCommand:GetExtra()
+  end
+  local tbChatLink = self.tbChatLink or {}
+  local nLinkType = tbChatLink.nLinkType
+  local linkParam = tbChatLink.linkParam
+  if nLinkType == ChatMgr.LinkType.Team and linkParam[4] and nChannelType == ChatMgr.ChannelType.Public then
+    nExtra = ChatMgr.ChannelType.Recruit
+  end
+  self.tbChatLink = nil
+  if not ChatMgr:CheckLinkAvailable(szMsg, nLinkType, linkParam) then
+    nLinkType = 0
+    linkParam = 0
+  end
+  nExtra = nExtra or 0
+  if ChatMgr:IsValidVoiceMsg(szVoiceFileId) then
+    SendChannelMessage(nChannelType, nExtra, szMsg, nLinkType, linkParam, szVoiceFileId, nVoiceTime)
+  else
+    SendChannelMessage(nChannelType, nExtra, szMsg, nLinkType, linkParam)
+  end
+  ChatMgr:DealAchievement(nChannelType, szMsg, bVoice)
+  ChatMgr:InsertRecentSendMsg(szMsg, tbChatLink)
+  return true
+end
+
+function ChatMgr:DealAchievement(nChannelId, szMsg, bVoice)
+  if bVoice then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_VOICE)
+  end
+  if nChannelId == ChatMgr.ChannelType.Public then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_WORLD)
+  elseif nChannelId == ChatMgr.ChannelType.Private then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_PRIVATEMSG)
+  elseif nChannelId == ChatMgr.ChannelType.Kin then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_KIN)
+  elseif nChannelId == ChatMgr.ChannelType.Tong then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_TONG)
+  elseif nChannelId == ChatMgr.ChannelType.Color then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_COLOR)
+  end
+end
+
+function ChatMgr:InsertRecentSendMsg(szMsg, tbChatLink)
+  if not szMsg and string.len(szMsg) <= 1 then
+    return
+  end
+  local tbRecentMsg = LocalData:GetRoleTable("ChatMsgHistory", {})
+  for nIdx, tbOldMsg in ipairs(tbRecentMsg) do
+    if tbOldMsg[1] == szMsg then
+      table.remove(tbRecentMsg, nIdx)
+      break
+    end
+  end
+  if tbChatLink and Lib:IsEmptyTB(tbChatLink) then
+    tbChatLink = nil
+  end
+  table.insert(tbRecentMsg, 1, {szMsg, tbChatLink})
+  if #tbRecentMsg > ChatMgr.nMaxMsgHistoryCount then
+    table.remove(tbRecentMsg)
+  end
+  LocalData:SetRoleTable("ChatMsgHistory", tbRecentMsg)
+end
+
+function ChatMgr:GetRecentMsgs()
+  return LocalData:GetRoleTable("ChatMsgHistory")
+end
+
+function ChatMgr:SetChatLink(nLinkType, linkParam)
+  self.tbChatLink = self.tbChatLink or {}
+  self.tbChatLink = {nLinkType = nLinkType, linkParam = linkParam}
+end
+
+function ChatMgr:SetLCLink(nLCType, linkParam, linkParam2)
+  self.tbChatLink = self.tbChatLink or {}
+  self.tbChatLink = {
+    nLinkType = ChatMgr.LinkType.LuaCustom,
+    linkParam = {
+      nLCType,
+      linkParam or 0,
+      linkParam2 or 0
+    }
+  }
+end
+
+function ChatMgr:GetChannelEmotion(nChannelType, nSenderId, nExtra)
+  local tbChannelCfg = ChatMgr.tbDynamicChannel[nChannelType]
+  if tbChannelCfg then
+    return tbChannelCfg.szIcon or ""
+  end
+  local nRealChannel
+  if nChannelType == ChatMgr.ChannelType.System then
+    nRealChannel, nExtra = self:GetSystemMsgChannel(nSenderId)
+    if nSenderId == ChatMgr.SystemMsgType.Tip then
+      nRealChannel = "SystemMsgTip"
+    end
+  else
+    nRealChannel = nChannelType
+  end
+  nExtra = nExtra or 0
+  local vEmotion = ChatMgr.ChannelEmotion[nRealChannel]
+  if type(vEmotion) == "table" then
+    return vEmotion[nExtra] or vEmotion.def
+  else
+    return vEmotion or ""
+  end
+end
+
+function ChatMgr:GetChannelColor(nChannelType, nSenderId)
+  if nChannelType >= self.nDynChannelBegin then
+    return self.DynamicColor
+  end
+  if nChannelType == ChatMgr.ChannelType.System then
+    local nRealChannel = ChatMgr.SystemTypeChannel[nSenderId]
+    if nRealChannel ~= ChatMgr.ChannelType.System then
+      return ChannelColor[nRealChannel]
+    end
+    if nSenderId == ChatMgr.SystemMsgType.Tip then
+      return ChannelColor.SystemMsgTip
+    end
+  end
+  return ChannelColor[nChannelType]
+end
+
+function ChatMgr:_IsExtraMnfl(nExtra)
+  return nil ~= nExtra and nExtra > 0
+end
+
+function ChatMgr:GetChannelChatData(nChannelType, nExtra)
+  if not self:_IsExtraMnfl(nExtra) then
+    if not self.ChatDataCache[nChannelType] then
+      self.ChatDataCache[nChannelType] = {}
+    end
+    return self.ChatDataCache[nChannelType]
+  else
+    local szKey = string.format("%s,%d", nChannelType, nExtra)
+    if not self.ChatDataCache[szKey] then
+      self.ChatDataCache[szKey] = {}
+    end
+    return self.ChatDataCache[szKey]
+  end
+end
+
+function ChatMgr:ClearChannelChatData(nChannelType, nExtra)
+  if not self:_IsExtraMnfl(nExtra) then
+    if self.ChatDataCache[nChannelType] then
+      self.ChatDataCache[nChannelType] = {}
+    end
+  else
+    local szKey = string.format("%s,%d", nChannelType, nExtra)
+    if self.ChatDataCache[szKey] then
+      self.ChatDataCache[szKey] = {}
+    end
+  end
+end
+
+function ChatMgr:_AddChannelMsg2ChatData(tbChatData, tbMsg, nLimit, bSkipTimeTips)
+  if not bSkipTimeTips then
+    self:InsertTimeTips(tbChatData, tbMsg, #tbChatData)
+  end
+  table.insert(tbChatData, tbMsg)
+  while nLimit < #tbChatData do
+    table.remove(tbChatData, 1)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_DATA_CHANGE)
+end
+
+function ChatMgr:AddChannelMsg2Channel(nChannelType, nExtra, tbMsg)
+  local nLimit = ChatMgr.tbSpecChannelMsgCount[nChannelType] or ChatMgr.nMaxChannelMsgCount
+  if ChatMgr.ChannelHasRecruit[nChannelType] and self:_IsExtraMnfl(nExtra) then
+    self:_AddChannelMsg2ChatData(self:GetChannelChatData(nChannelType), tbMsg, nLimit, nChannelType == ChatMgr.chatSmall)
+  end
+  local tbChatData = self:GetChannelChatData(nChannelType, nExtra)
+  local bSkipTimeTips = nChannelType == ChatMgr.chatSmall
+  if self:IsKinCommander(nChannelType, nExtra) then
+    bSkipTimeTips = true
+  end
+  self:_AddChannelMsg2ChatData(tbChatData, tbMsg, nLimit, bSkipTimeTips)
+end
+
+function ChatMgr:ParseLinkInfo(tbLinkInfo)
+  if not tbLinkInfo or tbLinkInfo.nLinkType == ChatMgr.LinkType.None or not tbLinkInfo.nLinkParam then
+    return tbLinkInfo
+  end
+  local tbResult = ParseLinkData(tbLinkInfo.nLinkType, tbLinkInfo.nLinkParam, tbLinkInfo.byData)
+  if tbResult and tbResult.nLinkType == ChatMgr.LinkType.LuaPacker then
+    tbResult = tbResult.tbData
+  end
+  return tbResult
+end
+
+function ChatMgr:OnSyncChatOfflineData(tbData)
+  for nChannelType, tbChannelData in pairs(tbData) do
+    self.ChatDataCache[nChannelType] = tbChannelData
+    for nIdx, tbMsg in ipairs(tbChannelData) do
+      local szMsg = i18n.Parse(tbMsg.szMsg)
+      tbMsg.szMsg = ReplaceLimitWords(szMsg) or szMsg
+      tbMsg.tbLinkInfo = ChatMgr:ParseLinkInfo(tbMsg.tbLinkInfo)
+      self:InsertTimeTips(tbChannelData, tbMsg, nIdx - 1)
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_NEW_MSG)
+  if self.nColorUpdateTimer then
+    Timer:Close(self.nColorUpdateTimer)
+  end
+  self.nColorUpdateTimer = Timer:Register(Env.GAME_FPS * ChatMgr.nColorMsgFreshTime, self.ColorUpdate, self)
+  self:ColorUpdate()
+end
+
+function ChatMgr:ColorUpdate()
+  local tbColorMsg = self:GetChannelChatData(ChatMgr.ChannelType.Color)
+  local preColorMsg = self.tbCurColorMsg
+  self.tbCurColorMsg = table.remove(tbColorMsg, 1)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_COLOR_MSG)
+  if not self.tbCurColorMsg and not preColorMsg then
+    self.nColorUpdateTimer = nil
+    return false
+  end
+  return true
+end
+
+function ChatMgr:GetColorMsg()
+  return self.tbCurColorMsg or {}
+end
+
+function ChatMgr:InsertTimeTips(tbChatData, tbMsg, nIdx)
+  if tbMsg.nChannelType ~= ChatMgr.ChannelType.Kin then
+    return
+  end
+  local tbLastMsg = tbChatData[nIdx] or {}
+  if tbLastMsg.nTime and tbMsg.nTime < tbLastMsg.nTime + 600 then
+    return
+  end
+  table.insert(tbChatData, nIdx + 1, {
+    nChannelType = ChatMgr.ChannelType.System,
+    nSenderId = ChatMgr.SystemMsgType.TimeTips,
+    szSenderName = "",
+    nTime = tbMsg.nTime
+  })
+end
+
+function ChatMgr:SpecialMsg(nChannelType, nSenderId, szSenderName, szMsg)
+  if nChannelType == ChatMgr.ChannelType.System and nSenderId == ChatMgr.SystemMsgType.Boss then
+    local tbBossChatData = ChatMgr:GetChannelChatData("Boss")
+    table.insert(tbBossChatData, szMsg)
+    if #tbBossChatData > ChatMgr.tbSpecChannelMsgCount.Boss then
+      table.remove(tbBossChatData, 1)
+    end
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_BOSS_DATA, "BroadcastMsg")
+    return true
+  end
+  return false
+end
+
+function ChatMgr:ClearColorFlag(szMsg)
+  szMsg = string.gsub(szMsg or "", "(%[%x%x%x%x%x%x%])", "")
+  szMsg = string.gsub(szMsg, "(%[%-%])", "")
+  return szMsg
+end
+
+local function IsPlayerEmotion(nEmotionId)
+  if nEmotionId <= ChatMgr.MAX_CHAT_EMOTION_LEN then
+    return true
+  end
+  return ChatMgr.tbSpcialUserEmotion[nEmotionId]
+end
+
+function ChatMgr:FilterPlayerMsg(nChannelId, szMsg)
+  if nChannelId == ChatMgr.ChannelType.System then
+    return szMsg
+  end
+  szMsg = ChatMgr:ClearColorFlag(szMsg)
+  local tbMsg = Lib:SplitStr(szMsg, "#")
+  local bEmojiExist = false
+  for i = 2, #tbMsg do
+    local szStr = tbMsg[i]
+    local szEmoId = string.match(szStr, "^%d%d?%d?")
+    if szEmoId and not IsPlayerEmotion(tonumber(szEmoId)) then
+      tbMsg[i] = " " .. szStr
+    elseif szEmoId and IsPlayerEmotion(tonumber(szEmoId)) then
+      bEmojiExist = true
+    end
+  end
+  szMsg = table.concat(tbMsg, "#")
+  return szMsg, bEmojiExist
+end
+
+function ChatMgr:OnChannelMessage(nChannelType, nExtra, nSenderId, szSenderName, nFaction, nPortrait, nLevel, szMsg, szVoiceFileId, uVoiceTime, nNamePrefix, tbLinkInfo, tbExtra)
+  szMsg = i18n.Parse(szMsg)
+  self:_OnChannelMessage(nChannelType, nExtra, nSenderId, szSenderName, nFaction, nPortrait, nLevel, szMsg, szVoiceFileId, uVoiceTime, nNamePrefix, tbLinkInfo, tbExtra)
+end
+
+function ChatMgr:_OnChannelMessage(nChannelType, nExtra, nSenderId, szSenderName, nFaction, nPortrait, nLevel, szMsg, szVoiceFileId, uVoiceTime, nNamePrefix, tbLinkInfo, tbExtra)
+  if ChatMgr:InBlackList(nChannelType, nSenderId) then
+    return
+  end
+  if ChatMgr:SpecialMsg(nChannelType, nSenderId, szSenderName, szMsg) then
+    return
+  end
+  szMsg = ChatMgr:FilterPlayerMsg(nChannelType, szMsg) or szMsg
+  if tbLinkInfo and (tbLinkInfo.nLinkType == ChatMgr.LinkType.LuaPacker or tbLinkInfo.nLinkType == ChatMgr.LinkType.LuaCustom) then
+    tbLinkInfo = tbLinkInfo.tbData
+  end
+  if "" == szVoiceFileId then
+    szVoiceFileId = nil
+  end
+  if nChannelType == ChatMgr.ChannelType.Public and nExtra and nExtra == ChatMgr.ChannelType.Hawk then
+    nChannelType = ChatMgr.ChannelType.Hawk
+    nExtra = 0
+  end
+  local nNow = GetTime()
+  local tbMsg = {}
+  tbMsg.nChannelType = nChannelType
+  tbMsg.nSenderId = nSenderId
+  tbMsg.szSenderName = szSenderName
+  tbMsg.nNamePrefix = nNamePrefix
+  tbMsg.nPortrait = nPortrait
+  tbMsg.nFaction = nFaction
+  tbMsg.nLevel = nLevel
+  tbMsg.szMsg = szMsg
+  tbMsg.nTime = nNow
+  tbMsg.tbLinkInfo = tbLinkInfo
+  tbMsg.szMsgVoiceFileId = szVoiceFileId
+  tbMsg.uVoiceTime = uVoiceTime
+  tbMsg.tbExtra = tbExtra and tbExtra.tbExtra
+  tbMsg.nExtra = nExtra
+  if tbMsg.tbExtra then
+    tbMsg.nSpeechBalloon = tbMsg.tbExtra.nPlayerSpeechBalloon
+  end
+  local bAllHit, nSession, tbRoleInfoList = Player.RoleInfoCache:GetCache({nSenderId})
+  if not bAllHit then
+    tbMsg.nSession = nSession
+    tbMsg.nPortraitFrame = 0
+    self._GetCacheSessionMap[nSession] = {nChannelType = nChannelType, nExtra = nExtra}
+  else
+    tbMsg.nPortraitFrame = tbRoleInfoList[nSenderId].nPortraitFrame
+  end
+  if tbLinkInfo and tbLinkInfo.nLinkType == ChatMgr.LinkType.Item and tbLinkInfo.nTemplateId then
+    local szReplaceName = KItem.GetItemShowInfo(tbLinkInfo.nTemplateId, tbLinkInfo.nFaction or me.nFaction, tbLinkInfo.nFactionSect or me.nFactionSect, tbLinkInfo.nBodySex or me.GetNpc().GetBodySex())
+    szReplaceName = string.format("<%s>", i18n.Parse(szReplaceName))
+    for w in szMsg:gmatch("%<.-%>") do
+      if not w:match("<%w-=#?%w->") and not w:match("<%w- ?%w-=%w->") and not w:match("<?/%w->") then
+        szMsg = szMsg:gsub(w, szReplaceName)
+        break
+      end
+    end
+    tbMsg.szMsg = szMsg
+  end
+  local nRealChannel = nChannelType
+  if nChannelType == ChatMgr.ChannelType.System then
+    nRealChannel, nExtra = ChatMgr:GetSystemMsgChannel(nSenderId)
+    nExtra = nExtra or 0
+  end
+  if nChannelType == ChatMgr.ChannelType.Color then
+    self:AddChannelMsg2Channel(nChannelType, nExtra, tbMsg)
+    nRealChannel = ChatMgr.ChannelType.Public
+  end
+  self:AddChannelMsg2Channel(nRealChannel, nExtra, tbMsg)
+  if ChatMgr:CheckShowInSmall(nChannelType, nExtra, nRealChannel) then
+    self:AddChannelMsg2Channel(ChatMgr.chatSmall, nil, tbMsg)
+  end
+  if nChannelType == ChatMgr.ChannelType.Color and not self.nColorUpdateTimer then
+    self.nColorUpdateTimer = Timer:Register(Env.GAME_FPS * ChatMgr.nColorMsgFreshTime, self.ColorUpdate, self)
+    self:ColorUpdate()
+  end
+  if szVoiceFileId and tbMsg.nSenderId ~= me.dwID and ChatMgr:CheckVoiceAutoEnable(nChannelType) then
+    ChatMgr:AddAutoPlayVoice(szVoiceFileId)
+  end
+  local szMsgBubble = szMsg
+  if szVoiceFileId then
+    szMsgBubble = string.format("#v7u2ic5e%s", szMsgBubble)
+  end
+  ChatMgr:DealChatBubbleTalk(nChannelType, nSenderId, szMsgBubble)
+  ChatMgr:SetUnReadChannelMsg(nRealChannel, true)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_NEW_MSG, nRealChannel, tbMsg, nExtra)
+  ChatMgr:OnReceiveMsgTip(tbMsg)
+  if tbLinkInfo then
+    self:InitLinkUpdate()
+  end
+end
+
+function ChatMgr:SetUnReadChannelMsg(nChannelId, bUnRead)
+  if bUnRead then
+    self.ChannelMsgUnReadCache[nChannelId] = (self.ChannelMsgUnReadCache[nChannelId] or 0) + 1
+  else
+    self.ChannelMsgUnReadCache[nChannelId] = nil
+  end
+end
+
+function ChatMgr:CountUnReadChannelMsg(nChannelId)
+  return self.ChannelMsgUnReadCache[nChannelId] or 0
+end
+
+function ChatMgr:CheckVoiceAutoEnable(nChannelType)
+  local tbSetting = self:GetSetting()
+  if tbSetting[self.tbVoiceAutoSettingNameMap[nChannelType]] ~= nil and tbSetting[self.tbVoiceAutoSettingNameMap[nChannelType]] then
+    return true
+  else
+    return false
+  end
+end
+
+function ChatMgr:AddAutoPlayVoice(szVoiceFileId)
+  table.insert(self.tbAutoVoiceList, szVoiceFileId)
+  if self.nStartPlayVoiceTimer >= 0 then
+    return
+  elseif self.szCurPlayingVoice ~= nil then
+    return
+  else
+    self:PlayVoice(szVoiceFileId)
+  end
+end
+
+function ChatMgr:OnNpcBubbleTalk(szNpc, szTalk)
+  local nNow = GetTime()
+  local tbMsg = {}
+  tbMsg.nChannelType = ChatMgr.SystemMsgType.System
+  tbMsg.nSenderId = ChatMgr.SystemMsgType.Nearby
+  tbMsg.szSenderName = szNpc
+  tbMsg.nNamePrefix = 0
+  tbMsg.nPortrait = 0
+  tbMsg.nFaction = 0
+  tbMsg.nLevel = 0
+  tbMsg.szMsg = szTalk
+  tbMsg.nTime = nNow
+  tbMsg.tbLinkInfo = nil
+  tbMsg.szMsgVoiceFileId = nil
+  tbMsg.uVoiceTime = 0
+  tbMsg.tbExtra = nil
+  self:AddBossBubble2Channel(tbMsg)
+end
+
+function ChatMgr:AddBossBubble2Channel(tbMsg)
+  local szShowMsg = string.format("%s\239\188\154%s", tbMsg.szSenderName, tbMsg.szMsg)
+  self:OnChannelMessage(ChatMgr.ChannelType.System, 0, ChatMgr.SystemMsgType.Nearby, "", 0, 0, 0, szShowMsg)
+end
+
+function ChatMgr:OnReceiveMsgTip(tbMsg)
+  if tbMsg.nChannelType == ChatMgr.ChannelType.Public and tbMsg.nSenderId == me.dwID then
+    local nLeftPublicCount = ChatMgr:GetPublicChatLeftCount(me)
+    local tbLeftCountTip = {
+      nChannelType = ChatMgr.ChannelType.System,
+      nSenderId = ChatMgr.SystemMsgType.Tip,
+      szSenderName = "",
+      nTime = GetTime(),
+      szMsg = i18n.Get(self.Terms.PublicCountLeft, nLeftPublicCount)
+    }
+    self:AddChannelMsg2Channel(tbMsg.nChannelType, nil, tbLeftCountTip)
+    EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_NEW_MSG, tbMsg.nChannelType, tbLeftCountTip, nil, true)
+  end
+  if tbMsg.nChannelType == ChatMgr.ChannelType.Zone and tbMsg.nSenderId == me.dwID then
+    local nLeftZoneCount = ChatMgr:GetZoneChatLeftCount(me)
+    local tbLeftCountTip = {
+      nChannelType = ChatMgr.ChannelType.System,
+      nSenderId = ChatMgr.SystemMsgType.Tip,
+      szSenderName = "",
+      nTime = GetTime(),
+      szMsg = i18n.Get(self.Terms.ZoneCountLeft, nLeftZoneCount)
+    }
+    self:AddChannelMsg2Channel(tbMsg.nChannelType, nil, tbLeftCountTip)
+    EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_NEW_MSG, tbMsg.nChannelType, tbLeftCountTip, nil, true)
+  end
+end
+
+function ChatMgr:DealChatBubbleTalk(nChannelId, nSenderId, szMsg)
+  if nChannelId ~= ChatMgr.ChannelType.Nearby then
+    return
+  end
+  if not me or not me.GetNpc() then
+    return
+  end
+  local pSenderNpc = me.GetNpc().GetNearbyNpcByPlayerId(nSenderId)
+  if pSenderNpc then
+    szMsg = ChatMgr:CutMsg(szMsg, ChatMgr.nMaxBubbleMsgLen)
+    pSenderNpc.BubbleTalk(szMsg, tostring(ChatMgr.nBubbleLastingTime))
+  end
+end
+
+function ChatMgr:InBlackList(nChannelType, nSenderId)
+  if nChannelType == ChatMgr.ChannelType.System then
+    return false
+  end
+  return FriendShip:IsHeInMyBlack(nSenderId)
+end
+
+function ChatMgr:GetUnReadPrivateMsgNum()
+  local nNUM = 0
+  for k, v in pairs(ChatMgr.PrivateChatUnReadCache) do
+    nNUM = nNUM + #v
+  end
+  return nNUM
+end
+
+local function CheckInSertPrivateMsgTime(lastV, tbReaded, nTime)
+  if not lastV or nTime - lastV.nTime >= 600 then
+    table.insert(tbReaded, {
+      nChannelType = ChatMgr.ChannelType.System,
+      nSenderId = ChatMgr.SystemMsgType.TimeTips,
+      szSenderName = "",
+      nTime = nTime
+    })
+  end
+end
+
+function ChatMgr:SendPrivateMessage(dwReceive, szMsg, szVoiceFileId, nVoiceTime)
+  if not ChatMgr:CheckSendMsg(ChatMgr.ChannelType.Private, nil, szMsg, false, szVoiceFileId, nVoiceTime) then
+    return
+  end
+  if FriendShip:IsHeInMyBlack(dwReceive) then
+    me.CenterMsg(i18n.Get(self.Terms.BlackListLimited))
+    return
+  end
+  szMsg = ChatMgr:Filter4CharString(szMsg)
+  szMsg = ChatMgr:FilterUnityTag(szMsg)
+  szMsg = ReplaceLimitWords(szMsg) or szMsg
+  local tbChatLink = self.tbChatLink or {}
+  local nLinkType = tbChatLink.nLinkType
+  local linkParam = tbChatLink.linkParam
+  if not ChatMgr:CheckLinkAvailable(szMsg, nLinkType, linkParam) then
+    nLinkType = 0
+    linkParam = 0
+  end
+  if ChatMgr:IsValidVoiceMsg(szVoiceFileId) then
+    SendPrivateMessage(dwReceive, szMsg, nLinkType, linkParam, szVoiceFileId, nVoiceTime)
+  else
+    szVoiceFileId = nil
+    nVoiceTime = 0
+    SendPrivateMessage(dwReceive, szMsg, nLinkType, linkParam)
+  end
+  self:DealAchievement(ChatMgr.ChannelType.Private, szMsg, ChatMgr:IsValidVoiceMsg(szVoiceFileId))
+  return true
+end
+
+function ChatMgr:SortRecentPrivateList(dwRoleId, bOnline)
+  if not dwRoleId then
+    return false
+  end
+  local RecentPrivateList = self.RecentPrivateList
+  for i, v in ipairs(RecentPrivateList) do
+    if v.dwID == dwRoleId then
+      RecentPrivateList[1], RecentPrivateList[i] = RecentPrivateList[i], RecentPrivateList[1]
+      if bOnline then
+        v.nState = 2
+      end
+      local nTime = GetTime()
+      if not v.nSyncTime or nTime - v.nSyncTime > ChatMgr.PrivateRequestInterval then
+        v.nSyncTime = nTime
+        RemoteServer.RequestChatRoleBaseInfo({dwRoleId})
+      end
+      return v
+    end
+  end
+  if #RecentPrivateList >= self.MAX_PRIVATE_LIST_NUM then
+    table.remove(RecentPrivateList)
+  end
+  local tbData = FriendShip:GetFriendDataInfo(dwRoleId)
+  if tbData then
+    table.insert(RecentPrivateList, 1, Lib:CopyTB1(tbData))
+    return tbData
+  else
+    table.insert(RecentPrivateList, 1, {
+      dwID = dwRoleId,
+      szName = i18n.EasyGet("\233\153\140\231\148\159\228\186\186"),
+      nPortrait = 1,
+      nPortraitFrame = 0,
+      nLevel = 1,
+      nHonorLevel = 0,
+      nFaction = 1,
+      nVipLevel = 0,
+      nState = 2,
+      nSyncTime = GetTime(),
+      bClientEmpty = true
+    })
+    RemoteServer.RequestChatRoleBaseInfo({dwRoleId})
+    return false
+  end
+end
+
+function ChatMgr:RemoveRecentPrivateTarget(dwRoleId)
+  for i, v in ipairs(self.RecentPrivateList) do
+    if v.dwID == dwRoleId then
+      table.remove(self.RecentPrivateList, i)
+      return
+    end
+  end
+end
+
+function ChatMgr:OnPrivateSendMessage(dwReceive, nTime, szMsg, szVoiceFileId, uVoiceTime, tbLinkInfo, tbExtra)
+  if tbLinkInfo and tbLinkInfo.nLinkType == ChatMgr.LinkType.LuaCustom then
+    tbLinkInfo = tbLinkInfo.tbData
+  end
+  local nNow = nTime
+  local tbReaded = ChatMgr.PrivateChatReadCache[dwReceive] or {}
+  local lastV = next(tbReaded) and tbReaded[#tbReaded]
+  CheckInSertPrivateMsgTime(lastV, tbReaded, nNow)
+  if "" == szVoiceFileId then
+    szVoiceFileId = nil
+  end
+  table.insert(tbReaded, {
+    nSenderId = me.dwID,
+    szSenderName = me.szName,
+    nFaction = me.nFaction,
+    szMsg = szMsg,
+    tbLinkInfo = tbLinkInfo,
+    tbExtra = tbExtra and tbExtra.tbExtra,
+    szMsgVoiceFileId = szVoiceFileId,
+    uVoiceTime = uVoiceTime,
+    nTime = nNow
+  })
+  ChatMgr.PrivateChatReadCache[dwReceive] = tbReaded
+  self:SortRecentPrivateList(dwReceive)
+  self:CheckSavePrivateMsg()
+  ChatMgr:InsertRecentSendMsg(szMsg)
+  EventNotify.OnNotify(EventNotify.emNoTIFY_NEW_PRIVATE_MSG, dwReceive)
+end
+
+function ChatMgr:OnPrivateMessage(dwSender, nTime, szMsg, szVoiceFileId, uVoiceTime, tbLinkInfo, tbExtra)
+  if FriendShip:IsHeInMyBlack(dwSender) then
+    return
+  end
+  if "" == szVoiceFileId then
+    szVoiceFileId = nil
+  end
+  if tbLinkInfo and tbLinkInfo.nLinkType == ChatMgr.LinkType.LuaPacker then
+    tbLinkInfo.nLinkType = tbLinkInfo.tbData and tbLinkInfo.tbData.nLinkType
+  end
+  if tbLinkInfo and tbLinkInfo.nLinkType == ChatMgr.LinkType.LuaCustom then
+    tbLinkInfo = tbLinkInfo.tbData
+  end
+  local tbPersonCache = ChatMgr.PrivateChatUnReadCache[dwSender] or {}
+  ChatMgr.PrivateChatUnReadCache[dwSender] = tbPersonCache
+  local tbPersonReadedCache = ChatMgr.PrivateChatReadCache[dwSender] or {}
+  local tbData = self:SortRecentPrivateList(dwSender, true)
+  local szSenderName = i18n.EasyGet("\233\153\140\231\148\159\228\186\186")
+  local nFaction
+  if tbData then
+    szSenderName = tbData.szName or szSenderName
+    nFaction = tbData.nFaction or tbData.nFactionSect
+  end
+  local tbMsg = {
+    nChannelType = ChatMgr.ChannelType.Private,
+    nSenderId = dwSender,
+    nTime = nTime,
+    szMsg = szMsg,
+    tbLinkInfo = tbLinkInfo,
+    szMsgVoiceFileId = szVoiceFileId,
+    uVoiceTime = uVoiceTime,
+    tbExtra = tbExtra and tbExtra.tbExtra,
+    szSenderName = szSenderName,
+    nFaction = nFaction
+  }
+  if tbMsg.tbExtra then
+    tbMsg.nSpeechBalloon = tbMsg.tbExtra.nPlayerSpeechBalloon
+  end
+  if nTime <= GetTime() - 5 then
+    table.insert(tbPersonCache, 1, tbMsg)
+  else
+    table.insert(tbPersonCache, tbMsg)
+    self:AddChannelMsg2Channel(ChatMgr.chatSmall, nil, tbMsg)
+  end
+  if #tbPersonReadedCache + #tbPersonCache > FriendShip.nMaxPrivateMessages then
+    if 0 == #tbPersonReadedCache then
+      table.remove(tbPersonCache, 1)
+    else
+      table.remove(tbPersonReadedCache, 1)
+    end
+  end
+  if not Ui:WindowVisible("UIChat") then
+    ChatMgr.PrivateChatRedPointNum = ChatMgr.PrivateChatRedPointNum + 1
+  end
+  EventNotify.OnNotify(EventNotify.emNoTIFY_NEW_PRIVATE_MSG, dwSender)
+  self:CheckSavePrivateMsg()
+end
+
+function ChatMgr:OpenPrivateWindow(dwRoleId, tbPassData)
+  assert(dwRoleId)
+  local tbBlack = FriendShip:IsHeInMyBlack(dwRoleId)
+  if tbBlack then
+    local function fnCallBack()
+      FriendShip:DelBlack(dwRoleId, tbBlack.szName)
+      
+      ChatMgr:OpenPrivateWindow(dwRoleId, tbBlack)
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.Get(self.Terms.BlackListDel, tbBlack.szName), {
+      {fnCallBack},
+      {}
+    }, {
+      i18n.Get(self.Terms.Agree),
+      i18n.szCancel
+    })
+    return
+  end
+  local tbData = self:SortRecentPrivateList(dwRoleId)
+  if not tbData then
+    tbData = tbPassData
+    tbData.dwID = dwRoleId
+  end
+  if not tbData.szName then
+    Log(debug.traceback())
+    return
+  end
+  local tbWnd = Ui:GetWindow("UIChat")
+  if nil ~= tbWnd and Ui:WindowVisible("UIChat") then
+    tbWnd:ShowFriendChat(dwRoleId, tbData)
+  else
+    Ui:OpenWindow("UIChat", ChatMgr.ChannelType.Private, dwRoleId, tbData)
+  end
+end
+
+function ChatMgr:OnPrivateChatOffline(dwRoleId)
+  if FriendShip:GetFriendDataInfo(dwRoleId) then
+    return
+  end
+  for i, v in ipairs(self.RecentPrivateList) do
+    if v.dwID == dwRoleId then
+      v.nState = 0
+      EventNotify.OnNotify(EventNotify.emNoTIFY_NEW_PRIVATE_MSG)
+      return
+    end
+  end
+end
+
+function ChatMgr:OnSynChatRoleBaseInfo(tbRoles)
+  local bFind = false
+  local bEventNotify = false
+  for i, v in ipairs(self.RecentPrivateList) do
+    for i2, v2 in ipairs(tbRoles) do
+      if v.dwID == v2.dwID then
+        if v.bClientEmpty then
+          bEventNotify = true
+        end
+        self.RecentPrivateList[i] = v2
+        table.remove(tbRoles, i2)
+        v2.nSyncTime = GetTime()
+        bFind = true
+        break
+      end
+    end
+    if not next(tbRoles) then
+      break
+    end
+  end
+  if bEventNotify then
+    EventNotify.OnNotify(EventNotify.emNoTIFY_NEW_PRIVATE_MSG)
+  end
+end
+
+function ChatMgr:OnSyncChatRolePortraitFrame(tbData)
+  local bEventNotify = false
+  for i, v in ipairs(self.RecentPrivateList) do
+    for dwID, nPortraitFrame in ipairs(tbData) do
+      if v.dwID == dwID then
+        if v.bClientEmpty then
+          bEventNotify = true
+        end
+        self.RecentPrivateList[i].nPortraitFrame = nPortraitFrame
+        table.remove(tbData, dwID)
+        break
+      end
+    end
+    if not next(tbData) then
+      break
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNoTIFY_NEW_PRIVATE_MSG)
+end
+
+function ChatMgr:GetPrivateMsg(dwSender)
+  if FriendShip:IsHeInMyBlack(dwSender) then
+    ChatMgr.PrivateChatUnReadCache[dwSender] = nil
+    ChatMgr.PrivateChatReadCache[dwSender] = nil
+    return
+  end
+  local tbUnRead = ChatMgr.PrivateChatUnReadCache[dwSender] or {}
+  local tbReaded = ChatMgr.PrivateChatReadCache[dwSender] or {}
+  local tbRoleInfo = self:SortRecentPrivateList(dwSender)
+  if not tbRoleInfo then
+    return
+  end
+  for i, v in ipairs(tbReaded) do
+    if v.nChannelType == ChatMgr.ChannelType.Private then
+      v.szSenderName = tbRoleInfo.szName
+      v.nPortrait = tbRoleInfo.nPortrait
+      v.nPortraitFrame = tbRoleInfo.nPortraitFrame
+      v.nLevel = tbRoleInfo.nLevel
+      v.nFaction = tbRoleInfo.nFaction
+    end
+  end
+  local lastV = next(tbReaded) and tbReaded[#tbReaded]
+  for i, v in ipairs(tbUnRead) do
+    v.szSenderName = tbRoleInfo.szName
+    v.nPortrait = tbRoleInfo.nPortrait
+    v.nPortraitFrame = tbRoleInfo.nPortraitFrame
+    v.nLevel = tbRoleInfo.nLevel
+    v.nFaction = tbRoleInfo.nFaction
+    CheckInSertPrivateMsgTime(lastV, tbReaded, v.nTime)
+    table.insert(tbReaded, v)
+    lastV = v
+  end
+  ChatMgr.PrivateChatReadCache[dwSender] = tbReaded
+  ChatMgr.PrivateChatUnReadCache[dwSender] = nil
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PRIVATE_MSG_NUM_CHANGE)
+  if next(tbUnRead) then
+    self:CheckSavePrivateMsg()
+  end
+  return tbReaded
+end
+
+function ChatMgr:GetPrivateMsgWithoutModified(dwSender)
+  local tbUnRead = ChatMgr.PrivateChatUnReadCache[dwSender] or {}
+  local tbReaded = ChatMgr.PrivateChatReadCache[dwSender] or {}
+  local tbResult = {}
+  for _, v in ipairs(tbUnRead) do
+    table.insert(tbResult, v)
+  end
+  for _, v in ipairs(tbReaded) do
+    table.insert(tbResult, v)
+  end
+  return tbResult
+end
+
+function ChatMgr:ClearPersonPrivateMsg(dwSender)
+  ChatMgr.PrivateChatUnReadCache[dwSender] = nil
+  ChatMgr.PrivateChatReadCache[dwSender] = nil
+end
+
+function ChatMgr:OnSyncRoleStayInfo(nSession, tbRoleInfoList)
+  do return end
+  local tbMsgType = self._GetCacheSessionMap[nSession]
+  if not tbMsgType then
+    return
+  end
+  self._GetCacheSessionMap[nSession] = nil
+  local tbChatData
+  if ChatMgr.ChannelHasRecruit[tbMsgType.nChannelType] and self:_IsExtraMnfl(tbMsgType.nExtra) then
+    tbChatData = self:GetChannelChatData(tbMsgType.nChannelType)
+  else
+    tbChatData = self:GetChannelChatData(tbMsgType.nChannelType, tbMsgType.nExtra)
+  end
+  if tbChatData then
+    for nIdx, tbMsg in ipairs(tbChatData) do
+      if tbMsg.nSession == nSession then
+        local tbRoleInfo = tbRoleInfoList[tbMsg.nSenderId]
+        if tbRoleInfo then
+          tbChatData[nIdx].nPortraitFrame = tbRoleInfo.nPortraitFrame or 0
+          EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_DATA_CHANGE)
+          EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_NEW_MSG, tbMsgType.nChannelType, tbMsg, tbMsgType.nExtra)
+        end
+        return
+      end
+    end
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ROLE_STAY_INFO, ChatMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ROLE_STAY_INFO, ChatMgr.OnSyncRoleStayInfo, ChatMgr)
+local tbSettingNameMap = {
+  [ChatMgr.ChannelType.Public] = "CheckPublic",
+  [ChatMgr.ChannelType.Nearby] = "CheckNearby",
+  [ChatMgr.ChannelType.Team] = "CheckTeam",
+  [ChatMgr.ChannelType.Kin] = "CheckKin",
+  [ChatMgr.ChannelType.Tong] = "CheckTong",
+  [ChatMgr.ChannelType.System] = "CheckSystem",
+  [ChatMgr.ChannelType.Friend] = "CheckFriend",
+  [ChatMgr.ChannelType.Faction] = "CheckFaction",
+  [ChatMgr.ChannelType.Zone] = "CheckZone",
+  [ChatMgr.ChannelType.Zone_Legion] = "CheckZoneLegion"
+}
+ChatMgr.tbVoiceAutoSettingNameMap = {
+  [ChatMgr.ChannelType.Public] = "CheckPublicVoice",
+  [ChatMgr.ChannelType.Nearby] = "CheckNearbyVoice",
+  [ChatMgr.ChannelType.Team] = "CheckTeamVoice",
+  [ChatMgr.ChannelType.Kin] = "CheckKinVoice",
+  [ChatMgr.ChannelType.Tong] = "CheckTongVoice",
+  [ChatMgr.ChannelType.Friend] = "CheckFriendVoice"
+}
+
+function ChatMgr:IsKinCommander(nChannelId, nExtra)
+  if nChannelId == ChatMgr.ChannelType.Kin and self:_IsExtraMnfl(nExtra) then
+    return true
+  end
+  return false
+end
+
+function ChatMgr:CheckShowInSmall(nChannelId, nExtra, nRealChannel)
+  local tbChannelCfg = ChatMgr.tbDynamicChannel[nChannelId]
+  if tbChannelCfg and tbChannelCfg.szIcon and tbChannelCfg.szIcon ~= "" then
+    return true
+  end
+  if nChannelId == ChatMgr.ChannelType.Hawk then
+    return true
+  end
+  if nChannelId == ChatMgr.ChannelType.Private then
+    return true
+  end
+  if nChannelId == ChatMgr.ChannelType.Group then
+    return true
+  end
+  if self:IsKinCommander(nChannelId, nExtra) or self:IsKinCommander(nRealChannel, nExtra) then
+    return false
+  end
+  local szCheckName = tbSettingNameMap[nChannelId]
+  local tbSetting = ChatMgr:GetSetting()
+  return tbSetting[szCheckName]
+end
+
+function ChatMgr:GetSetting()
+  local tbSetting = LocalData:GetRoleTable("ChatSetting", {})
+  if not next(tbSetting) then
+    tbSetting.CheckPublic = true
+    tbSetting.CheckNearby = true
+    tbSetting.CheckKin = true
+    tbSetting.CheckTong = true
+    tbSetting.CheckTeam = true
+    tbSetting.CheckFriend = true
+    tbSetting.CheckSystem = true
+    tbSetting.CheckZone = true
+    tbSetting.CheckZoneLegion = true
+    tbSetting.CheckPublicVoice = false
+    tbSetting.CheckNearbyVoice = false
+    tbSetting.CheckKinVoice = true
+    tbSetting.CheckTongVoice = true
+    tbSetting.CheckTeamVoice = false
+    tbSetting.CheckFriendVoice = false
+    tbSetting.CheckTextVoice = false
+    tbSetting.TeamBubble = false
+  end
+  return tbSetting
+end
+
+function ChatMgr:SaveSetting(tbSetting)
+  LocalData:SetRoleTable("ChatSetting", tbSetting)
+end
+
+function ChatMgr:CutMsg(szMsg, nLen)
+  nLen = nLen or ChatMgr.nMaxMsgLengh
+  if nLen < Lib:StrLen(szMsg) then
+    szMsg = KLib.CutUtf8(szMsg, nLen - 1) .. "\226\128\166"
+  end
+  return szMsg
+end
+
+function ChatMgr:UpdateColorMsgCount()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UPDATE_COLORMSG_COUNT)
+end
+
+function ChatMgr:OnLostConnect()
+  self:ClearDynChannelInfo()
+end
+
+function ChatMgr:OnLeaveGame()
+  self:ClearCache()
+  self:SavePriveMsg()
+  self:ClearDynChannelInfo()
+  self:LeaveCurChatRoom()
+  self:CloseLinkUpdate()
+end
+
+function ChatMgr:OnSyncEnterChatChannel(...)
+  local tbChannelList = {
+    ...
+  }
+  for _, tbInfo in pairs(tbChannelList) do
+    self.tbDynamicChannel[tbInfo[1]] = {
+      nId = tbInfo[1],
+      szName = tbInfo[2],
+      szIcon = tbInfo[3],
+      nLevel = tbInfo[4],
+      nMinCd = tbInfo[5]
+    }
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DYN_CHANNEL_CHANGE)
+end
+
+function ChatMgr:OnSyncLeaveChatChannel(nChannelId)
+  self.tbDynamicChannel[nChannelId] = nil
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DYN_CHANNEL_CHANGE)
+end
+
+function ChatMgr:ClearDynChannelInfo()
+  self.tbDynamicChannel = {}
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DYN_CHANNEL_CHANGE)
+end
+
+function ChatMgr:IsChatRoomAvailable()
+  if self.ChatRoom.dwRoomHighId and self.ChatRoom.dwRoomLowId and (0 ~= self.ChatRoom.dwRoomHighId or 0 ~= self.ChatRoom.dwRoomLowId) then
+    return true
+  end
+  return false
+end
+
+function ChatMgr:OnSyncEnterChatRoom(dwRoomHighId, dwRoomLowId, dwRoomHighKey, dwRoomLowKey, uBusinessId, nIsLarge, nPrivilege, uMemberId, tbUrl)
+  if self.ChatRoom.dwRoomHighId == dwRoomHighId and self.ChatRoom.dwRoomLowId == dwRoomLowId then
+    return
+  end
+  self:LeaveCurChatRoom()
+  self.ChatRoom.dwRoomHighId = dwRoomHighId
+  self.ChatRoom.dwRoomLowId = dwRoomLowId
+  self.ChatRoom.dwRoomHighKey = dwRoomHighKey
+  self.ChatRoom.dwRoomLowKey = dwRoomLowKey
+  self.ChatRoom.uBusinessId = uBusinessId
+  self.ChatRoom.nIsLarge = nIsLarge
+  self.ChatRoom.nPrivilege = nPrivilege
+  self.ChatRoom.uMemberId = uMemberId
+  self.ChatRoom.isEnterRoom = false
+  self.ChatRoom.bSpeakerState = false
+  self.ChatRoom.bMicState = false
+  for idx, szUrl in pairs(tbUrl) do
+    if 1 ~= nIsLarge and string.sub(tbUrl[idx], 1, string.len("udp://")) ~= "udp://" then
+      tbUrl[idx] = "udp://" .. szUrl
+    end
+  end
+  self.ChatRoom.tbUrl = tbUrl
+  self:StartEnterRoom()
+end
+
+function ChatMgr:OnSyncLeaveChatRoom(dwRoomHighId, dwRoomLowId)
+  if self.ChatRoom.dwRoomHighId ~= dwRoomHighId or self.ChatRoom.dwRoomLowId ~= dwRoomLowId then
+    return
+  end
+  self:LeaveCurChatRoom()
+end
+
+function ChatMgr:LeaveCurChatRoom()
+  if not self:IsChatRoomAvailable() then
+    return
+  end
+  self:CloseCheckEnterTimer()
+  ChatRoomMgr.LeaveRoom(self.ChatRoom.dwRoomHighId, self.ChatRoom.dwRoomLowId, self.ChatRoom.uMemberId, self.ChatRoom.nIsLarge)
+  self.ChatRoom.dwRoomHighId = 0
+  self.ChatRoom.dwRoomLowId = 0
+  self.ChatRoom.dwRoomHighKey = 0
+  self.ChatRoom.dwRoomLowKey = 0
+  self.ChatRoom.uBusinessId = 0
+  self.ChatRoom.nIsLarge = 0
+  self.ChatRoom.nPrivilege = 0
+  self.ChatRoom.uMemberId = 0
+  self.ChatRoom.isEnterRoom = false
+  self.ChatRoom.bSpeakerState = false
+  self.ChatRoom.bMicState = false
+  self.ChatRoom.tbUrl = {}
+  self:CheckMusicVolume()
+  Ui:CloseWindow("HomeScreenVoice")
+end
+
+function ChatMgr:CheckMusicVolume()
+  if self.checkVolumeTimer then
+    return
+  end
+  
+  local function checkVolume()
+    self.checkVolumeTimer = nil
+    if self.ChatRoom.bSpeakerState or self.ChatRoom.bMicState or ChatMgr.VoiceInfo.curPlayVoice or Ui:WindowVisible("VoiceRecord") then
+      Log("-----------------ChatMgr:CheckMusicVolume", tostring(ChatMgr.VoiceInfo.curPlayVoice), tostring(Ui:WindowVisible("VoiceRecord")))
+    else
+    end
+  end
+  
+  self.checkVolumeTimer = Timer:Register(Env.GAME_FPS * 1, checkVolume)
+end
+
+function ChatMgr:OpenChatRoomSpeaker()
+  if not self:IsChatRoomAvailable() then
+    return
+  end
+  self.ChatRoom.bSpeakerState = ChatRoomMgr.OpenSpeaker()
+  self:CheckMusicVolume()
+end
+
+function ChatMgr:CloseChatRoomSpeaker()
+  if not self:IsChatRoomAvailable() then
+    return
+  end
+  self.ChatRoom.bSpeakerState = ChatRoomMgr.CloseSpeaker()
+  self:CheckMusicVolume()
+end
+
+function ChatMgr:OpenChatRoomMic()
+  if not self:IsChatRoomAvailable() then
+    return
+  end
+  self.ChatRoom.bMicState = ChatRoomMgr.OpenMic()
+  self:CheckMusicVolume()
+end
+
+function ChatMgr:CloseChatRoomMic()
+  if not self:IsChatRoomAvailable() then
+    return
+  end
+  self.ChatRoom.bMicState = ChatRoomMgr.CloseMic()
+  self:CheckMusicVolume()
+end
+
+function ChatMgr:ClearRoleChatMsg(dwRoleID)
+  for nRealChannel, tbChatData in pairs(self.ChatDataCache) do
+    local bChanged = false
+    for idx = #tbChatData, 1, -1 do
+      if tbChatData[idx].nSenderId == dwRoleID then
+        table.remove(tbChatData, idx)
+        bChanged = true
+      end
+    end
+    if bChanged then
+      EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_NEW_MSG, nRealChannel)
+    end
+  end
+end
+
+function ChatMgr:StartEnterRoom()
+  if not self:IsChatRoomAvailable() then
+    return
+  end
+  ChatRoomMgr.EnterRoom(self.ChatRoom.dwRoomHighId, self.ChatRoom.dwRoomLowId, self.ChatRoom.dwRoomHighKey, self.ChatRoom.dwRoomLowKey, self.ChatRoom.uBusinessId, self.ChatRoom.nIsLarge, self.ChatRoom.nPrivilege, self.ChatRoom.uMemberId, self.ChatRoom.tbUrl[1] or "", self.ChatRoom.tbUrl[2] or "", self.ChatRoom.tbUrl[3] or "")
+  self:CloseCheckEnterTimer()
+  self:StartCheckEnterTimer()
+end
+
+function ChatMgr:IsCanUseRoomMic()
+  if not self:IsChatRoomAvailable() or not self.ChatRoom.isEnterRoom then
+    return false
+  end
+  if 1 == self.ChatRoom.nIsLarge and self.ChatRoom.nPrivilege ~= ChatMgr.RoomPrivilege.emSpeaker then
+    return false
+  end
+  return true
+end
+
+function ChatMgr:IsCanUseRoomSpeaker()
+  if not self:IsChatRoomAvailable() or not self.ChatRoom.isEnterRoom then
+    return false
+  end
+  return true
+end
+
+function ChatMgr:OnEnterChatRoom()
+  self.ChatRoom.isEnterRoom = true
+  ChatMgr:OpenChatRoomSpeaker()
+  if true == Ui:WindowVisible("HomeScreenVoice") then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_ROOM_STATUS, true, self:IsCanUseRoomMic(), self:IsCanUseRoomSpeaker())
+  else
+    Ui:OpenWindow("HomeScreenVoice")
+  end
+end
+
+function ChatMgr:StartCheckEnterTimer()
+  if self.ChatRoom.nCheckTimer then
+    return
+  end
+  local nRet = ChatRoomMgr.GetEnterRoomResult(self.ChatRoom.nIsLarge)
+  if nRet == ChatMgr.ApolloVoiceErr.APOLLO_VOICE_JOIN_SUCC then
+    ChatMgr:OnEnterChatRoom()
+    return
+  end
+  local nCheckCount = 0
+  self.ChatRoom.nCheckTimer = Timer:Register(Env.GAME_FPS * 1, function()
+    local nRet = ChatRoomMgr.GetEnterRoomResult(self.ChatRoom.nIsLarge)
+    if nRet == ChatMgr.ApolloVoiceErr.APOLLO_VOICE_JOIN_SUCC then
+      ChatMgr:OnEnterChatRoom()
+      return false
+    end
+    if nCheckCount >= 30 then
+      ChatRoomMgr.LeaveRoom(self.ChatRoom.dwRoomHighId, self.ChatRoom.dwRoomLowId, self.ChatRoom.uMemberId, self.ChatRoom.nIsLarge)
+      ChatMgr:StartEnterRoom()
+      return false
+    end
+    nCheckCount = nCheckCount + 1
+    return true
+  end)
+end
+
+function ChatMgr:CloseCheckEnterTimer()
+  if not self.ChatRoom.nCheckTimer then
+    return
+  end
+  Timer:Close(self.ChatRoom.nCheckTimer)
+  self.ChatRoom.nCheckTimer = nil
+end
+
+ChatMgr.tbIconState = {
+  NotOwn = 1,
+  Own = 2,
+  Use = 3
+}
+
+function ChatMgr:RequestIconData()
+  RemoteServer.RecIconSettingData()
+end
+
+function ChatMgr:RecChatPrefixData()
+  RemoteServer.RecChatPrefixData()
+end
+
+function ChatMgr:OnSynIconData(tbIconData)
+  self.tbIconData = tbIconData or {}
+  if self.tbIconData.tbOwnIcon then
+    local tbData = {}
+    for _, v in ipairs(self.tbIconData.tbOwnIcon) do
+      tbData[v] = 1
+    end
+    self.tbIconData.tbOwnIcon = tbData
+  end
+end
+
+function ChatMgr:GetIconSettingData()
+  if not self.tbIconData then
+    return
+  end
+  local tbOwnIcon = self.tbIconData.tbOwnIcon
+  local tbData = {}
+  for key, tbItem in pairs(self.ChatIconSetting) do
+    if tbOwnIcon and tbOwnIcon[tbItem.TemplateId] then
+      tbItem.szState = self.tbIconState.Own
+    else
+      tbItem.szState = self.tbIconState.NotOwn
+    end
+    table.insert(tbData, tbItem)
+  end
+  return tbData
+end
+
+function ChatMgr:GetOwnIconData()
+  if not self.tbIconData then
+    return
+  end
+  local tbOwnIcon = self.tbIconData.tbOwnIcon
+  local tbData = {}
+  for key, tbItem in pairs(self.ChatIconSetting) do
+    if tbOwnIcon and tbOwnIcon[tbItem.TemplateId] then
+      tbItem.szState = self.tbIconState.Own
+      table.insert(tbData, tbItem)
+    end
+  end
+  return tbData
+end
+
+function ChatMgr:GetCurrUseIcon()
+  if self.tbIconData and self.tbIconData.tbCurrIcon then
+    local tbData = {
+      self.tbIconData.tbCurrIcon[2],
+      self.tbIconData.tbCurrIcon[4]
+    }
+    return tbData
+  end
+end
+
+function ChatMgr:SetHeadIcon(nTemplateId, nHeadIconId)
+  local tbCurrIcon = self:GetCurrUseIcon()
+  if tbCurrIcon and tbCurrIcon[1] ~= nHeadIconId then
+    RemoteServer.SetHeadIcon(nTemplateId, nHeadIconId)
+  end
+end
+
+function ChatMgr:SetBubbleIocn(nTemplateId, nBubbleIocId)
+  local tbCurrIcon = self:GetCurrUseIcon()
+  if tbCurrIcon and tbCurrIcon[2] ~= nBubbleIocId then
+    RemoteServer.SetBubbleIocn(nTemplateId, nBubbleIocId)
+  end
+end
+
+function ChatMgr:SetChatPrefix(nTemplate)
+  RemoteServer.SetUserChatPrefix(nTemplate)
+end
+
+function ChatMgr:GetPrefixData()
+  if self.tbPlayerPrefix then
+    local tbData = self.tbPlayerPrefix.tbOwn
+    return tbData
+  end
+end
+
+function ChatMgr:GetCurrUsePrefix()
+  local nPrefixId
+  if self.tbPlayerPrefix then
+    nPrefixId = self.tbPlayerPrefix.nCurrUseId
+  end
+  return nPrefixId
+end
+
+function ChatMgr:GetIconSprite(nTemplateId)
+  local tbData = self.tbChatIcon[nTemplateId]
+  if tbData then
+    return tbData.Altlas, tbData.SpriteName
+  end
+end
+
+function ChatMgr:GetHeadIconSprite(nId)
+  local tbInfo = self.ChatIconSetting[nId]
+  if not tbInfo then
+    return
+  end
+  return self:GetIconSprite(tbInfo.HeadIconId)
+end
+
+function ChatMgr:OnSynPrefixData(tbPrefixData)
+  self.tbPlayerPrefix = tbPrefixData
+end
+
+function ChatMgr:GetDefaultHeadFrame()
+  return "UIAtlas/XJChatFrame.prefab", "XJChat_HeadFrame_Normal"
+end
+
+function ChatMgr:Time2Str(nTime)
+  local bToday = Lib:GetLocalDay() == Lib:GetLocalDay(nTime)
+  local szFormat = bToday and "%H:%M" or "%m-%d %H:%M"
+  return Lib:OSDate(szFormat, nTime)
+end
+
+ChatMgr.nSpecifyVoiceChannel = 0
+
+function ChatMgr:SetSpecifyVoiceChannel(channel)
+  LogErr("SetSpecifyVoiceChannel", channel)
+  self.nSpecifyVoiceChannel = channel
+end
+
+function ChatMgr:InitVoiceMsg()
+  local Directory = CS.System.IO.Directory
+  local szDir = CS.VoiceModule.GetVoiceTmpFileRoot()
+  if Directory.Exists(szDir) then
+    Directory.Delete(szDir, true)
+    Directory.CreateDirectory(szDir)
+  else
+    Directory.CreateDirectory(szDir)
+  end
+end
+
+ChatMgr:InitVoiceMsg()
+
+function ChatMgr:UpdateMicLevelTips()
+  local nMicLevel = CS.VoiceModule.GetOfflineMicLevel()
+  local tbWnd = Ui:GetWindow("UIRecordVoiceTip")
+  if nil ~= tbWnd and Ui:WindowVisible("UIRecordVoiceTip") then
+    tbWnd:ShowMicTips(nMicLevel / 20)
+  else
+    Ui:OpenWindow("UIRecordVoiceTip", nMicLevel / 20)
+  end
+  return true
+end
+
+function ChatMgr:SetCurVoiceInfo(nChannelId, tbChatTargetInfo)
+  ChatMgr.nCurChannelId = nChannelId
+  ChatMgr.tbCurChatTargetInfo = tbChatTargetInfo
+end
+
+function ChatMgr:ShowRequestMicUi()
+  Ui:OpenWindow("UIRequestPermission", i18n.Get(self.Terms.PermissionReq), "Voice")
+end
+
+function ChatMgr:StartRecording()
+  self:HideMicTips()
+  self.nMicLevelTips = Timer:Register(Env.GAME_FPS * 1, self.UpdateMicLevelTips, self)
+  self:UpdateMicLevelTips()
+  local dataPath = CS.GameEnv.GetPersistent()
+  local dateTime = CS.VoiceModule.GetCurDateTime()
+  local localPath = CS.VoiceModule.GetVoiceTmpFileRoot() .. dateTime
+  ChatMgr.tbVoicePath2Channel[localPath] = {
+    nChannelId = ChatMgr.nCurChannelId,
+    tbChatTargetInfo = ChatMgr.tbCurChatTargetInfo
+  }
+  self:UpdateMusicAndSound(true)
+  CS.VoiceModule.StartRecording(localPath)
+end
+
+function ChatMgr:HideMicTips()
+  if self.nMicLevelTips ~= nil and self.nMicLevelTips >= 0 then
+    Timer:Close(self.nMicLevelTips)
+    self.nMicLevelTips = -1
+  end
+  local tbWnd = Ui:GetWindow("UIRecordVoiceTip")
+  if nil ~= tbWnd then
+    tbWnd:HideMicTips()
+    Ui:CloseWindow("UIRecordVoiceTip")
+  end
+end
+
+function ChatMgr:StopRecording()
+  self:HideMicTips()
+  CS.VoiceModule.StopRecording()
+  self:UpdateMusicAndSound(false)
+end
+
+function ChatMgr:CancelRecording()
+  self:HideMicTips()
+  CS.VoiceModule.CancelRecording()
+  self:UpdateMusicAndSound(false)
+end
+
+function ChatMgr:OnRecordFileComplete(nCode, szFilePath)
+  self:HideMicTips()
+  if 0 == nCode then
+    CS.VoiceModule.UploadRecordedFile(szFilePath)
+  elseif 4102 == nCode then
+    me.CenterMsg(i18n.EasyGet("\233\186\166\229\133\139\233\163\142\230\156\170\230\142\136\230\157\131"))
+  elseif 4103 == nCode then
+    me.CenterMsg(i18n.EasyGet("\229\189\149\233\159\179\230\151\182\233\151\180\229\164\170\231\159\173"))
+  else
+    me.CenterMsg(i18n.EasyGet("\233\186\166\229\133\139\233\163\142\232\174\190\229\164\135\229\188\130\229\184\184\239\188\140\232\175\183\230\163\128\230\159\165"))
+  end
+end
+
+function ChatMgr:OnUploadFileComplete(nCode, szFilePath, nFileId)
+  local szLocalPath = CS.VoiceModule.GetLocalVoiceFile(nFileId)
+  local ret, err = os.rename(szFilePath, szLocalPath)
+  if not ret then
+    LogErr("OnUploadFileComplete rename", err, szFilePath, szLocalPath, nFileId)
+    ret = CS.VoiceModule.ReNameLocalVoiceFile(szFilePath, szLocalPath)
+    if not ret then
+      LogErr("OnUploadFileComplete c# rename", szFilePath, szLocalPath, nFileId)
+    end
+  end
+  ChatMgr.tbVoiceId2Channel[nFileId] = ChatMgr.tbVoicePath2Channel[szFilePath]
+  if Client.EnableVoiceToText then
+    local language = "cmn-Hans-CN"
+    CS.VoiceModule.SpeechToText(nFileId, language, language)
+  else
+    local nVoiceLength = CS.VoiceModule.GetVoiceDurationByFileId(nFileId)
+    self:SendVoiceMsg(false, nFileId, "", nVoiceLength)
+  end
+end
+
+function ChatMgr:SetVoiceCallType(szCallType)
+  self.szVoiceCallType = szCallType
+end
+
+function ChatMgr:OnSpeechToTextComplete(code, fileId, result)
+  local bOnlySendText = self:OnlySendVoiceText()
+  local szMsg
+  local nVoiceLength = CS.VoiceModule.GetVoiceDurationByFileId(fileId)
+  if 0 ~= code and nil ~= result then
+    szMsg = ""
+  else
+    szMsg = result
+  end
+  self:SendVoiceMsg(bOnlySendText, fileId, szMsg, nVoiceLength)
+end
+
+function ChatMgr:SendVoiceMsg(bOnlySendText, szFileId, szMsg, nVoiceLength)
+  local nChannel = ChatMgr.tbVoiceId2Channel[szFileId].nChannelId
+  local tbCurTargetInfo = ChatMgr.tbVoiceId2Channel[szFileId].tbChatTargetInfo
+  local bPrivate
+  local bSucceed = false
+  if 0 == self.nSpecifyVoiceChannel then
+    bPrivate = nChannel == ChatMgr.ChannelType.Private
+  else
+    bPrivate = self.nSpecifyVoiceChannel == ChatMgr.ChannelType.Private
+    nChannel = self.nSpecifyVoiceChannel
+  end
+  if bPrivate then
+    if bOnlySendText then
+      bSucceed = self:SendPrivateMessage(tbCurTargetInfo.dwID, szMsg)
+    else
+      bSucceed = self:SendPrivateMessage(tbCurTargetInfo.dwID, szMsg, szFileId, nVoiceLength)
+    end
+  elseif bOnlySendText then
+    bSucceed = self:SendMsg(nChannel, nil, szMsg)
+  else
+    bSucceed = self:SendMsg(nChannel, nil, szMsg, true, szFileId, nVoiceLength)
+  end
+end
+
+function ChatMgr:PlayVoice(szVoiceFileId)
+  self:UpdateMusicAndSound(true)
+  self.szCurPlayingVoice = szVoiceFileId
+  CS.VoiceModule.PlayVoice(szVoiceFileId)
+  local nIndex = self:GetAutoPlayIndex(szVoiceFileId)
+  if nIndex >= 0 then
+    table.remove(self.tbAutoVoiceList, nIndex)
+  end
+end
+
+function ChatMgr:GetAutoPlayIndex(szVoiceFileId)
+  if self.tbAutoVoiceList == nil then
+    return -1
+  end
+  for nIndex, szFileId in ipairs(self.tbAutoVoiceList) do
+    if self.tbAutoVoiceList[nIndex] == szVoiceFileId then
+      return nIndex
+    end
+  end
+  return -1
+end
+
+function ChatMgr:OnPlayVoiceComplete(nCode, szFilePath)
+  self.szCurPlayingVoice = nil
+  if nil ~= self.tbAutoVoiceList and #self.tbAutoVoiceList > 0 then
+    self.nStartPlayVoiceTimer = Timer:Register(Env.GAME_FPS * 2, function()
+      if not self.tbAutoVoiceList and Lib:CountTB(self.tbAutoVoiceList) > 0 then
+        self:PlayVoice(self.tbAutoVoiceList[1])
+      else
+        self:UpdateMusicAndSound(false)
+      end
+      self.nStartPlayVoiceTimer = -1
+    end)
+  else
+    self:UpdateMusicAndSound(false)
+  end
+end
+
+function ChatMgr:OnlySendVoiceText()
+  local tbSetting = self:GetSetting()
+  return tbSetting.CheckTextVoice
+end
+
+function ChatMgr:PrintStaticsData(nTotalMsgBytes, nDirectlyMsgBytes, nCountCacheHasSentMsgBytes, nTotalInCacheMsgBytes, nTotalMsgs, nDirectlyMsgs, nCacheMsgs, nTimeUsed)
+  print("################## chat stat #################")
+  print("nTotalMsgBytes:", nTotalMsgBytes)
+  print("nDirectlyMsgBytes:", nDirectlyMsgBytes)
+  print("nCountCacheHasSentMsgBytes:", nCountCacheHasSentMsgBytes)
+  print("nTotalInCacheMsgBytes:", nTotalInCacheMsgBytes)
+  print("nTotalMsgs:", nTotalMsgs)
+  print("nDirectlyMsgs:", nDirectlyMsgs)
+  print("nCacheMsgs:", nCacheMsgs)
+  print("nTimeUsed:", nTimeUsed)
+  print("################## chat stat #################")
+end
+
+ChatMgr.szChatRoomId = nil
+ChatMgr.dwCurPlayerID = 0
+ChatMgr.nRoomTypeKin = 0
+ChatMgr.nRoomTypeTeam = 1
+ChatMgr.nRoomTypeTong = 2
+ChatMgr.nRoomTypeLegion = 3
+ChatMgr.tbChatRoom = {}
+ChatMgr.tbChatRoom.bMicOn_Default = false
+ChatMgr.tbChatRoom.bSpeakerOn_Default = true
+ChatMgr.tbChatRoom.bMicOn = ChatMgr.tbChatRoom.bMicOn_Default
+ChatMgr.tbChatRoom.bSpeakerOn = ChatMgr.tbChatRoom.bSpeakerOn_Default
+ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting = ChatMgr.tbChatRoom.bSpeakerOn_Default
+ChatMgr.nChatRoomStatusReportTimer = nil
+ChatMgr.tbChatRoomForKinAndTongMap = {
+  8,
+  12,
+  13,
+  18,
+  19,
+  20,
+  21,
+  22,
+  23,
+  24,
+  50,
+  25,
+  26,
+  27,
+  28,
+  29,
+  7,
+  30,
+  32,
+  33,
+  34,
+  35,
+  36,
+  37,
+  38,
+  39,
+  275,
+  276,
+  277,
+  278,
+  299,
+  300,
+  301,
+  302,
+  303,
+  315,
+  316,
+  317
+}
+ChatMgr.tbChatRoomForKinMap = {
+  KinLevel.nMainMapTemplateId
+}
+ChatMgr.tbChatRoomForTongMap = {
+  68,
+  69,
+  70,
+  71,
+  72,
+  73,
+  74,
+  75,
+  76,
+  77,
+  78,
+  79,
+  80,
+  81,
+  82,
+  83,
+  84,
+  85,
+  Tong.Def.nMainMapTemplateId,
+  319,
+  320,
+  353,
+  354
+}
+ChatMgr.tbChatRoomForTeamMap = {
+  261,
+  262,
+  263,
+  264,
+  265,
+  266,
+  267,
+  268,
+  269,
+  270,
+  279,
+  280,
+  281,
+  282,
+  283,
+  284,
+  285,
+  286,
+  271,
+  272,
+  112,
+  117,
+  4,
+  5,
+  288,
+  292,
+  293,
+  294,
+  295,
+  296,
+  297,
+  298,
+  345,
+  346,
+  349,
+  339,
+  340,
+  341,
+  342
+}
+ChatMgr.tbChatRoomForLegionMap = {
+  364,
+  365,
+  366,
+  367,
+  368,
+  369,
+  370,
+  371,
+  372,
+  373,
+  374,
+  375,
+  376,
+  377,
+  378,
+  379,
+  380,
+  381
+}
+
+function ChatMgr:IsInChatRoom()
+  return CS.VoiceModule.IsInRoom()
+end
+
+function ChatMgr:GetChatRoomId(nRoomType)
+  if nRoomType == self.nRoomTypeKin then
+    return "KinRoom_" .. me.dwKinId
+  elseif nRoomType == self.nRoomTypeTeam then
+    local nCaptainID = TeamMgr:GetTeamDataCache().nCaptainID
+    return "TeamRoom_" .. me.dwTeamID .. "_" .. nCaptainID
+  elseif nRoomType == self.nRoomTypeTong then
+    return "TongRoom_" .. me.dwTongId
+  elseif nRoomType == self.nRoomTypeLegion then
+    return "LegionRoom_" .. me.dwLegionId
+  end
+  LogErr("[ChatMgr]error room type " .. nRoomType)
+  return -1
+end
+
+function ChatMgr:OnConnectLost()
+  if self:IsInChatRoom() then
+    self:ExitChatRoom()
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SERVER_CONNECT_LOST, ChatMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SERVER_CONNECT_LOST, ChatMgr.OnConnectLost, ChatMgr)
+
+function ChatMgr:OnMapLoaded(nMapTemplateId)
+  self:UpdateChatRoomByMap(nMapTemplateId)
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_LOADED, ChatMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LOADED, ChatMgr.OnMapLoaded, ChatMgr)
+
+function ChatMgr:OnActivityStateChange(szKey, nState)
+  ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting = ChatMgr.tbChatRoom.bSpeakerOn_Default
+  self:UpdateChatRoomByMap(me.nMapTemplateId)
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_ONACTIVITY_STATE_CHANGE, ChatMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_ONACTIVITY_STATE_CHANGE, ChatMgr.OnActivityStateChange, ChatMgr)
+
+function ChatMgr:OnKinDataChange(szAction)
+  if nil == szAction then
+    return
+  end
+  if "Quit" == szAction or "MemberList" == szAction then
+    self:UpdateChatRoomByMap(me.nMapTemplateId)
+    self:CheckMicState()
+  end
+  self:SyncChatTitlePrefixPlayerDataReq()
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, ChatMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_KIN_DATA, ChatMgr.OnKinDataChange, ChatMgr)
+
+function ChatMgr:OnTongDataChange()
+  self:SyncChatTitlePrefixPlayerDataReq()
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_TONG_BASEINFO, ChatMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_TONG_BASEINFO, ChatMgr.OnTongDataChange, ChatMgr)
+
+function ChatMgr:OnTongQuit()
+  self:UpdateChatRoomByMap(me.nMapTemplateId)
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_TONG_QUIT, ChatMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_TONG_QUIT, ChatMgr.OnTongQuit, ChatMgr)
+
+function ChatMgr:OnTongMemberUpdate()
+  self:UpdateChatRoomByMap(me.nMapTemplateId)
+  self:CheckMicState()
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_TONG_MEMBERLIST, ChatMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_TONG_MEMBERLIST, ChatMgr.OnTongMemberUpdate, ChatMgr)
+
+function ChatMgr:OnTeamUpdate(szAction)
+  if "TeamUpdate" == szAction then
+    return
+  end
+  self:UpdateChatRoomByMap(me.nMapTemplateId)
+  if "new" == szAction or "MemberChanged" == szAction or "quite" == szAction then
+    self.tbLinkModUpdate[self.LinkType.Team] = true
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_TEAM_UPDATE, ChatMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_TEAM_UPDATE, ChatMgr.OnTeamUpdate, ChatMgr)
+
+function ChatMgr:OnXiaKeDaoLinkMsgUpdate()
+  self.tbLinkModUpdate[self.LinkType.XiaKeDao] = true
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_LEAVE_XIAKEDAO, ChatMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_LEAVE_XIAKEDAO, ChatMgr.OnXiaKeDaoLinkMsgUpdate, ChatMgr)
+
+function ChatMgr:InitChat(bReconnect)
+  CS.VoiceModule.Uninit()
+  CS.VoiceModule.InitVoice(Client.GME.AppId, me.dwID, Client.GME.AuthKey)
+  self.tbChatRoom.bMicOn = false
+  self.tbChatRoom.bSpeakerOn = true
+  self.tbChatRoom.bSpeakerOn_PlayerSetting = true
+  if self.nChatRoomStatusReportTimer ~= nil then
+    Timer:Close(self.nChatRoomStatusReportTimer)
+    self.nChatRoomStatusReportTimer = nil
+  end
+end
+
+function ChatMgr:ReporChatRoomStatus()
+  return true
+end
+
+function ChatMgr:OnLogin(bReConnect)
+  self:InitChat(bReConnect)
+end
+
+function ChatMgr:UpdateChatRoomByMap(nMapTemplateId)
+  local bInRoom = self:IsInChatRoom()
+  local bInLegionChatMap = ChatMgr:InChatMap(me.nMapTemplateId, ChatMgr.tbChatRoomForLegionMap)
+  local bInKinAndTongChatMap = self:InChatMap(nMapTemplateId, self.tbChatRoomForKinAndTongMap)
+  local bInKinChatMap = self:InChatMap(nMapTemplateId, self.tbChatRoomForKinMap)
+  local bInTongChatMap = self:InChatMap(nMapTemplateId, self.tbChatRoomForTongMap)
+  local bInTeamChatMap = self:InChatMap(nMapTemplateId, self.tbChatRoomForTeamMap)
+  local bHasKin = Kin:HasKin()
+  local bHasTong = Tong:HasTong()
+  local bHasTeam = TeamMgr:HasTeam()
+  local bHasLegion = Legion:HasLegion()
+  Log("[ChatMgr] update chat room by map ", nMapTemplateId, bInRoom, bInLegionChatMap, bInKinAndTongChatMap, bInKinChatMap, bInTongChatMap, bInTeamChatMap, bHasKin, bHasTong, bHasTeam, bHasLegion)
+  if bInKinAndTongChatMap then
+    if bHasTong then
+      local szTongChatRoomId = self:GetChatRoomId(self.nRoomTypeTong)
+      if not self.tbChatRoom.bSpeakerOn and (not self.tbChatRoom.bMicOn or not Tong:IsTongVoiceManager()) then
+        self:ExitChatRoom()
+      elseif bInRoom and self.szChatRoomId ~= nil and self.szChatRoomId ~= szTongChatRoomId then
+        self:ExitChatRoom()
+        self:EnterChatRoom(szTongChatRoomId)
+      elseif not bInRoom then
+        self:EnterChatRoom(szTongChatRoomId)
+      end
+    elseif bHasKin then
+      local szKinChatRoomId = self:GetChatRoomId(self.nRoomTypeKin)
+      if not self.tbChatRoom.bSpeakerOn and (not self.tbChatRoom.bMicOn or not Kin:IsKinVoiceManager()) then
+        self:ExitChatRoom()
+      elseif bInRoom and self.szChatRoomId ~= nil and self.szChatRoomId ~= szKinChatRoomId then
+        self:ExitChatRoom()
+        self:EnterChatRoom(szKinChatRoomId)
+      elseif not bInRoom then
+        self:EnterChatRoom(szKinChatRoomId)
+      end
+    elseif bInRoom then
+      self:ExitChatRoom()
+    end
+  elseif bInLegionChatMap then
+    local szLegionChatRoomId = self:GetChatRoomId(self.nRoomTypeLegion)
+    if not self.tbChatRoom.bSpeakerOn and (not self.tbChatRoom.bMicOn or not Legion:IsLegionVoiceManager()) then
+      self:ExitChatRoom()
+    elseif not bHasLegion and bInRoom then
+      self:ExitChatRoom()
+    elseif bHasLegion and bInRoom and self.szChatRoomId ~= nil and self.szChatRoomId ~= szLegionChatRoomId then
+      self:ExitChatRoom()
+      self:EnterChatRoom(szLegionChatRoomId)
+    elseif bHasLegion and not bInRoom then
+      self:EnterChatRoom(szLegionChatRoomId)
+    end
+  elseif bInTongChatMap then
+    local szTongChatRoomId = self:GetChatRoomId(self.nRoomTypeTong)
+    if not self.tbChatRoom.bSpeakerOn and (not self.tbChatRoom.bMicOn or not Tong:IsTongVoiceManager()) then
+      self:ExitChatRoom()
+    elseif not bHasTong and bInRoom then
+      self:ExitChatRoom()
+    elseif bHasTong and bInRoom and self.szChatRoomId ~= nil and self.szChatRoomId ~= szTongChatRoomId then
+      self:ExitChatRoom()
+      self:EnterChatRoom(szTongChatRoomId)
+    elseif bHasTong and not bInRoom then
+      self:EnterChatRoom(szTongChatRoomId)
+    end
+  elseif bInKinChatMap then
+    local szKinChatRoomId = self:GetChatRoomId(self.nRoomTypeKin)
+    if not self.tbChatRoom.bSpeakerOn and (not self.tbChatRoom.bMicOn or not Kin:IsKinVoiceManager()) then
+      self:ExitChatRoom()
+    elseif not bHasKin and bInRoom then
+      self:ExitChatRoom()
+    elseif bHasKin and bInRoom and self.szChatRoomId ~= nil and self.szChatRoomId ~= szKinChatRoomId then
+      self:ExitChatRoom()
+      self:EnterChatRoom(szKinChatRoomId)
+    elseif bHasKin and not bInRoom then
+      self:EnterChatRoom(szKinChatRoomId)
+    end
+  elseif bInTeamChatMap then
+    local szTeamChatRoomId = self:GetChatRoomId(self.nRoomTypeTeam)
+    if not self.tbChatRoom.bMicOn and not self.tbChatRoom.bSpeakerOn then
+      self:ExitChatRoom()
+    elseif not bHasTeam and bInRoom then
+      self:ExitChatRoom()
+    elseif bHasTeam and bInRoom and self.szChatRoomId ~= nil and self.szChatRoomId ~= szTeamChatRoomId then
+      self:ExitChatRoom()
+      self:EnterChatRoom(szTeamChatRoomId)
+    elseif bHasTeam and not bInRoom then
+      self:EnterChatRoom(szTeamChatRoomId)
+    end
+  else
+    self:ExitChatRoom()
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_ROOM_STATUS)
+end
+
+function ChatMgr:InChatMap(nMapTemplateId, tbRoomMapList)
+  for _, v in pairs(tbRoomMapList) do
+    if v == nMapTemplateId then
+      if nMapTemplateId == Tong.Def.nMainMapTemplateId then
+        local isTongChallenge = Calendar:IsActivityInOpenState("TongChallenge")
+        local isTongPart = Calendar:IsActivityInOpenState("TongParty")
+        return isTongChallenge or isTongPart
+      elseif WuLinGaoShou:IsWuLinGaoShouMap(nMapTemplateId) then
+        if WuLinGaoShou:IsCurTimeFrameWuLinGaoShouMap(nMapTemplateId) then
+          return Calendar:IsActivityInOpenState("WuLinGaoShou")
+        else
+          return false
+        end
+      else
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function ChatMgr:UpdateMusicAndSound(bClose)
+  if bClose then
+    self.nMusicValue = ClientUtil:SetMusicVolume(0, false)
+    self.nSoundValue = ClientUtil:SetSoundVolume(0, false)
+  else
+    ClientUtil:SetMusicVolume(self.nMusicValue, false)
+    ClientUtil:SetSoundVolume(self.nSoundValue, false)
+  end
+end
+
+function ChatMgr:SwitchMicState(bOn)
+  if Sdk:GetOsType() == Sdk.eOSType_Android and bOn then
+    local nMicPermissionState = CS.VoiceModule.CheckMicPermissionState()
+    if 1 ~= nMicPermissionState then
+      self:ShowRequestMicUi()
+      local tbWnd = Ui:GetWindow("UIHudLeftFrameExt")
+      if tbWnd then
+        tbWnd:CloseMic()
+      end
+      return
+    end
+  end
+  local bInLegionChatMap = ChatMgr:InChatMap(me.nMapTemplateId, ChatMgr.tbChatRoomForLegionMap)
+  local bInKinAndTongChatMap = self:InChatMap(me.nMapTemplateId, self.tbChatRoomForKinAndTongMap)
+  local bInKinChatMap = self:InChatMap(me.nMapTemplateId, self.tbChatRoomForKinMap)
+  local bInTongChatMap = self:InChatMap(me.nMapTemplateId, self.tbChatRoomForTongMap)
+  local bInTeamChatMap = self:InChatMap(me.nMapTemplateId, self.tbChatRoomForTeamMap)
+  local bInRoom = self:IsInChatRoom()
+  local bHasKin = Kin:HasKin()
+  local bHasTong = Tong:HasTong()
+  local bHasTeam = TeamMgr:HasTeam()
+  local bHasLegion = Legion:HasLegion()
+  self.tbChatRoom.bMicOn = bOn
+  if bInKinAndTongChatMap then
+    if not bHasKin and not bHasTong then
+      LogErr("[ChatMgr] SwitchMicState : should not call this api when player in kin and Tong activity and does not has kin and Tong")
+      return
+    end
+    if bHasTong then
+      local bHasPermission = Tong:IsTongVoiceManager()
+      self.tbChatRoom.bMicOn = bHasPermission and bOn
+    elseif bHasKin then
+      local bHasPermission = Kin:IsKinVoiceManager()
+      self.tbChatRoom.bMicOn = bHasPermission and bOn
+    end
+  elseif bInLegionChatMap then
+    if not bHasLegion then
+      LogErr("[ChatMgr] SwitchMicState : should not call this api when player in Legion activity and does not has Legion")
+      return
+    end
+    local bHasPermission = Legion:IsLegionVoiceManager()
+    self.tbChatRoom.bMicOn = bHasPermission and bOn
+  elseif bInTongChatMap then
+    if not bHasTong then
+      LogErr("[ChatMgr] SwitchMicState : should not call this api when player in Tong activity and does not has Tong")
+      return
+    end
+    local bHasPermission = Tong:IsTongVoiceManager()
+    self.tbChatRoom.bMicOn = bHasPermission and bOn
+  end
+  if bInKinChatMap then
+    if not bHasKin then
+      LogErr("[ChatMgr] SwitchMicState : should not call this api when player in kin activity and does not has kin")
+      return
+    end
+    local bHasPermission = Kin:IsKinVoiceManager()
+    self.tbChatRoom.bMicOn = bHasPermission and bOn
+  end
+  if bInTeamChatMap and not bHasTeam then
+    LogErr("[ChatMgr] SwitchMicState:cannot call this api in team activity map when player not in team.")
+    return
+  end
+  if self.tbChatRoom.bMicOn then
+    if bInRoom then
+      CS.VoiceModule.EnableMic(self.tbChatRoom.bMicOn)
+    end
+  else
+    CS.VoiceModule.EnableMic(self.tbChatRoom.bMicOn)
+  end
+  self:UpdateChatRoomByMap(me.nMapTemplateId)
+end
+
+function ChatMgr:SwitchSpeakerState(bOn)
+  local bInRoom = self:IsInChatRoom()
+  self.tbChatRoom.bSpeakerOn = bOn
+  if bOn then
+    if bInRoom then
+      CS.VoiceModule.EnableSpeaker(self.tbChatRoom.bSpeakerOn)
+    end
+  else
+    CS.VoiceModule.EnableSpeaker(self.tbChatRoom.bSpeakerOn)
+  end
+  self:UpdateChatRoomByMap(me.nMapTemplateId)
+end
+
+function ChatMgr:OnEnterChatRoomExt(nErrCode, szErrorInfo)
+  if 0 ~= nErrCode then
+    return
+  end
+  CS.VoiceModule.EnableSpeaker(ChatMgr.tbChatRoom.bSpeakerOn_Default)
+  self:CheckMicState()
+  self:UpdateMusicAndSound(true)
+  me.CenterMsg(i18n.EasyGet("\228\189\160\229\183\178\232\191\155\229\133\165\229\174\158\230\151\182\232\175\173\233\159\179\233\162\145\233\129\147"))
+end
+
+function ChatMgr:CheckMicState()
+  local bInLegionChatMap = ChatMgr:InChatMap(me.nMapTemplateId, ChatMgr.tbChatRoomForLegionMap)
+  local bInKinAndTongChatMap = self:InChatMap(me.nMapTemplateId, self.tbChatRoomForKinAndTongMap)
+  local bInKinChatMap = self:InChatMap(me.nMapTemplateId, self.tbChatRoomForKinMap)
+  local bInTongChatMap = self:InChatMap(me.nMapTemplateId, self.tbChatRoomForTongMap)
+  local bInTeamChatMap = self:InChatMap(me.nMapTemplateId, self.tbChatRoomForTeamMap)
+  local bHasPermission = false
+  local bHasKin = Kin:HasKin()
+  local bHasTong = Tong:HasTong()
+  local bHasTeam = TeamMgr:HasTeam()
+  local bHasLegion = Legion:HasLegion()
+  if bInKinAndTongChatMap then
+    if not bHasKin and not bHasTong then
+      CS.VoiceModule.EnableMic(false)
+      return
+    end
+    if bHasTong then
+      bHasPermission = Tong:IsTongVoiceManager()
+      CS.VoiceModule.EnableMic(self.tbChatRoom.bMicOn and bHasPermission)
+    elseif bHasKin then
+      bHasPermission = Kin:IsKinVoiceManager()
+      CS.VoiceModule.EnableMic(self.tbChatRoom.bMicOn and bHasPermission)
+    end
+  elseif bInLegionChatMap then
+    if not bHasLegion then
+      CS.VoiceModule.EnableMic(false)
+      return
+    end
+    bHasPermission = Legion:IsLegionVoiceManager()
+    CS.VoiceModule.EnableMic(self.tbChatRoom.bMicOn and bHasPermission)
+  elseif bInTongChatMap then
+    if not bHasTong then
+      CS.VoiceModule.EnableMic(false)
+      return
+    end
+    bHasPermission = Tong:IsTongVoiceManager()
+    CS.VoiceModule.EnableMic(self.tbChatRoom.bMicOn and bHasPermission)
+  elseif bInKinChatMap then
+    if not bHasKin then
+      CS.VoiceModule.EnableMic(false)
+      return
+    end
+    bHasPermission = Kin:IsKinVoiceManager()
+    CS.VoiceModule.EnableMic(self.tbChatRoom.bMicOn and bHasPermission)
+  elseif bInTeamChatMap then
+    if not bHasTeam then
+      CS.VoiceModule.EnableMic(false)
+      return
+    end
+    CS.VoiceModule.EnableMic(self.tbChatRoom.bMicOn)
+  end
+end
+
+function ChatMgr:EnterChatRoom(szRoomId)
+  if not self.tbChatRoom.bSpeakerOn_PlayerSetting then
+    return
+  end
+  self.szChatRoomId = szRoomId
+  self.dwCurPlayerID = me.dwID
+  CS.VoiceModule.EnterRoom(szRoomId, 1, me.dwID)
+end
+
+function ChatMgr:ExitChatRoom()
+  self.szChatRoomId = nil
+  CS.VoiceModule.ExitRoom()
+end
+
+function ChatMgr:OnExitChatRoomExt()
+  CS.VoiceModule.EnableMic(false)
+  CS.VoiceModule.EnableSpeaker(false)
+  ChatMgr.tbChatRoom.bMicOn = ChatMgr.tbChatRoom.bMicOn_Default
+  ChatMgr.tbChatRoom.bSpeakerOn = ChatMgr.tbChatRoom.bSpeakerOn_Default
+  self:UpdateMusicAndSound(false)
+  me.CenterMsg(i18n.EasyGet("\228\189\160\229\183\178\233\128\128\229\135\186\229\174\158\230\151\182\232\175\173\233\159\179\233\162\145\233\129\147"))
+end
+
+function ChatMgr:AutoFlagPosForWuLinGaoShou(szMsg, nChannelType, szNpcName)
+  local nMapId, nPosX, nPosY = me.GetWorldPos()
+  local szLocation = string.format("<%s(%.0f,%.0f)>", i18n.Parse(me.szMapName), nPosX * Map.nShowPosScale, nPosY * Map.nShowPosScale)
+  local szSendInfo = i18n.Parse(szMsg) .. szLocation
+  local tbChatLink = {
+    nLinkType = ChatMgr.LinkType.Position,
+    linkParam = {
+      nMapId,
+      nPosX,
+      nPosY,
+      me.nMapTemplateId,
+      me.nMapTemplateId
+    }
+  }
+  self:SetChatLink(tbChatLink.nLinkType, tbChatLink.linkParam)
+  self:SendMsg(nChannelType, nil, szSendInfo)
+end
+
+function ChatMgr:GenPrivateLastMsg(dwID)
+  local tbUnReadCache = self.PrivateChatUnReadCache[dwID]
+  local bNew = tbUnReadCache and next(tbUnReadCache) ~= nil
+  local tbMsg = bNew and {} or self:GetPrivateMsg(dwID) or {}
+  local tbLast = #tbMsg > 0 and tbMsg[#tbMsg] or {}
+  return tbLast
+end
+
+function ChatMgr:StartAccompany(szMusicPath, loopBack, loopCount, nMsTime)
+  if self.tbChatRoom.bMicOn then
+    CS.VoiceModule.StartAccompany(szMusicPath, loopBack, loopCount, nMsTime)
+  end
+end
+
+function ChatMgr:StopAccompany(nDuckerTime)
+  CS.VoiceModule.StopAccompany(nDuckerTime)
+end
+
+function ChatMgr:IsAccompanyPlayEnd()
+  return CS.VoiceModule.IsAccompanyPlayEnd()
+end
+
+function ChatMgr:PauseAccompany()
+  CS.VoiceModule.PauseAccompany()
+end
+
+function ChatMgr:ResumeAccompany()
+  CS.VoiceModule.ResumeAccompany()
+end
+
+function ChatMgr:EnableAccompanyPlay(bEnable)
+  CS.VoiceModule.EnableAccompanyPlay(bEnable)
+end
+
+function ChatMgr:EnableAccompanyLoopBack(bEnable)
+  CS.VoiceModule.EnableAccompanyLoopBack(bEnable)
+end
+
+function ChatMgr:SetAccompanyVolume(nVol)
+  CS.VoiceModule.SetAccompanyVolume(nVol)
+end
+
+function ChatMgr:GetAccompanyVolume()
+  return CS.VoiceModule.GetAccompanyVolume()
+end
+
+function ChatMgr:GetAccompanyFileTotalTimeByMs()
+  return CS.VoiceModule.GetAccompanyFileTotalTimeByMs()
+end
+
+function ChatMgr:GetAccompanyFileCurrentPlayedTimeByMs()
+  return CS.VoiceModule.GetAccompanyFileCurrentPlayedTimeByMs()
+end
+
+function ChatMgr:SetAccompanyFileCurrentPlayedTimeByMs(nTime)
+  CS.VoiceModule.SetAccompanyFileCurrentPlayedTimeByMs(nTime)
+end
+
+function ChatMgr:SetAccompanyKey(nKey)
+  CS.VoiceModule.SetAccompanyKey(nKey)
+end
+
+function ChatMgr:OnAccompanyPlayComplete(nCode, bIsFinished, szFilePath)
+  print("ChatMgr:OnAccompanyPlayComplete", nCode, bIsFinished, szFilePath)
+end
+
+function ChatMgr:GetOfflineSpeakerVolume()
+  return CS.VoiceModule.GetOfflineSpeakerVolume()
+end
+
+function ChatMgr:SetOfflineSpeakerVolume(nVol)
+  CS.VoiceModule.SetOfflineSpeakerVolume(nVol)
+end
+
+function ChatMgr:CloseLinkUpdate()
+  if self.nLinkUpdateTimer then
+    Timer:Close(self.nLinkUpdateTimer)
+    self.nLinkUpdateTimer = nil
+  end
+  self.tbLinkInfoCache = {}
+  self.tbLinkModUpdate = {}
+end
+
+function ChatMgr:InitLinkUpdate()
+  if not self.bLinkUpdateSwitch then
+    return
+  end
+  if not self.nLinkUpdateTimer then
+    self.nLinkUpdateTimer = Timer:Register(Env.GAME_FPS * self.LinkUpdateInterval, self.OnLinkUpdateTimer, self)
+  end
+end
+
+function ChatMgr:OnLinkUpdateTimer()
+  if not self.bLinkUpdateSwitch then
+    self.nLinkUpdateTimer = nil
+    return
+  end
+  local tbQuerySet = {}
+  local tbLocalSet = {}
+  for _, nChannelType in pairs(self.LinkUpdateChannel) do
+    for _, tbChatData in ipairs(self:GetChannelChatData(nChannelType)) do
+      local tbLinkInfo = tbChatData.tbLinkInfo
+      if tbLinkInfo then
+        local nLinkType = tbLinkInfo.nLinkType
+        local fnQuery = self.tbLinkQueryFns[nLinkType]
+        if fnQuery then
+          if not tbQuerySet[nLinkType] then
+            tbQuerySet[nLinkType] = {}
+          end
+          if not tbLocalSet[nLinkType] then
+            tbLocalSet[nLinkType] = {}
+          end
+          fnQuery(tbLinkInfo, tbQuerySet[nLinkType], self.tbLinkInfoCache[nLinkType], tbLocalSet[nLinkType], self.tbLinkModUpdate[nLinkType])
+        end
+      end
+    end
+  end
+  for nLinkType, tbLinkQuerySet in pairs(tbQuerySet) do
+    if Lib:IsEmptyTB(tbLinkQuerySet) then
+      tbQuerySet[nLinkType] = nil
+    end
+  end
+  if not Lib:IsEmptyTB(tbQuerySet) then
+    RemoteServer.RequestChatLinkInfo(tbQuerySet)
+  end
+  for nLinkType, tbLinkLocalSet in pairs(tbLocalSet) do
+    if Lib:IsEmptyTB(tbLinkLocalSet) then
+      tbLocalSet[nLinkType] = nil
+    end
+  end
+  if not Lib:IsEmptyTB(tbLocalSet) then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_LINK_UPDATE)
+  end
+  self.tbLinkModUpdate = {}
+  return true
+end
+
+function ChatMgr:RespondChatLinkInfo(tbResultSet)
+  for nLinkType, tbLinkResultSet in pairs(tbResultSet) do
+    local fnUpdate = self.tbLinkUpdateFns[nLinkType]
+    if fnUpdate then
+      if not self.tbLinkInfoCache[nLinkType] then
+        self.tbLinkInfoCache[nLinkType] = {}
+      end
+      fnUpdate(tbLinkResultSet, self.tbLinkInfoCache[nLinkType])
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHAT_LINK_UPDATE)
+end

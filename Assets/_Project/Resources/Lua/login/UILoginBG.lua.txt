@@ -1,0 +1,283 @@
+Require("CommonScript/Npc/NpcDefine.lua")
+Require("CommonScript/Faction/Faction.lua")
+local tbWnd = Ui:CreateWindow("UILoginBG")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_UILOGINBG_ACTION,
+      self.PlayRoleModel
+    }
+  }
+end
+
+local AvatarResPath = "UI/loginbg/%s.prefab"
+local AvatarStaticResPath = "UI/loginbg/static/%s.prefab"
+local AvatarResMount = "Character"
+local tbControls = {
+  VFX_jin_after = "VFX_after/VFX_jin_after",
+  VFX_mu_after = "VFX_after/VFX_mu_after",
+  VFX_shui_after = "VFX_after/VFX_shui_after",
+  VFX_huo_after = "VFX_after/VFX_huo_after",
+  VFX_tu_after = "VFX_after/VFX_tu_after",
+  VFX_TY_frame_after = "VFX_after/VFX_TY_frame_after",
+  VFX_jin_front = "VFX_front/VFX_jin_front",
+  VFX_mu_front = "VFX_front/VFX_mu_front",
+  VFX_shui_front = "VFX_front/VFX_shui_front",
+  VFX_huo_front = "VFX_front/VFX_huo_front",
+  VFX_tu_front = "VFX_front/VFX_tu_front ",
+  VFX_TY_frame_front = "VFX_front/VFX_TY_frame_front",
+  VFX_after = "VFX_after",
+  VFX_front = "VFX_front"
+}
+local CharacterMidPos = {}
+local Faction2Controls = {}
+for nFactionId, tbInfo in pairs(Faction.tbFactionInfo) do
+  Faction2Controls[nFactionId] = {}
+  if tbInfo.szMaleAvatar and tbInfo.szMaleAvatar ~= "" then
+    local szControl = string.format("%s/%s", AvatarResMount, tbInfo.szMaleAvatar)
+    tbControls[tbInfo.szMaleAvatar] = szControl
+    Faction2Controls[nFactionId][0] = szControl
+    if tbInfo.tbMaleAvatarCenter then
+      CharacterMidPos[szControl] = Ui.Vector3(tbInfo.tbMaleAvatarCenter[1], tbInfo.tbMaleAvatarCenter[2], 0)
+    end
+  end
+  if tbInfo.szFemaleAvatar and "" ~= tbInfo.szFemaleAvatar then
+    local szControl = string.format("%s/%s", AvatarResMount, tbInfo.szFemaleAvatar)
+    tbControls[tbInfo.szFemaleAvatar] = szControl
+    Faction2Controls[nFactionId][1] = szControl
+    if tbInfo.tbFemaleAvatarCenter then
+      CharacterMidPos[szControl] = Ui.Vector3(tbInfo.tbFemaleAvatarCenter[1], tbInfo.tbFemaleAvatarCenter[2], 0)
+    end
+  end
+end
+tbWnd.tbControls = tbControls
+local tbTYControls = {
+  tbControls.VFX_TY_frame_after,
+  tbControls.VFX_TY_frame_front
+}
+local tbVFXControls = {
+  tbControls.VFX_after,
+  tbControls.VFX_front
+}
+local Series2Controls = {
+  [1] = {
+    tbControls.VFX_jin_after,
+    tbControls.VFX_jin_front
+  },
+  [2] = {
+    tbControls.VFX_mu_after,
+    tbControls.VFX_mu_front
+  },
+  [3] = {
+    tbControls.VFX_shui_after,
+    tbControls.VFX_shui_front
+  },
+  [4] = {
+    tbControls.VFX_huo_after,
+    tbControls.VFX_huo_front
+  },
+  [5] = {
+    tbControls.VFX_tu_after,
+    tbControls.VFX_tu_front
+  }
+}
+
+function tbWnd:OnCreate()
+  self.pPanel:ResetCamera()
+  self.tbCurControl = {}
+  self.tbTransform = {}
+  self.tbAnimator = {}
+  self.nAvatarResSeq = 0
+  self.tbAvatarExistFlag = {}
+  self.tbAvatarBundleFlag = {}
+  self.tbVect3OrgPos = {}
+  self.tbLoadingCallback = {}
+  for _, tbControl in pairs(Series2Controls) do
+    for _, szControl in pairs(tbControl) do
+      self.pPanel:SetActive(szControl, false)
+    end
+  end
+  for _, szControl in ipairs(tbTYControls) do
+    self.tbTransform[szControl] = self.pPanel:GetTransform(szControl)
+    self.pPanel:SetActive(szControl, false)
+  end
+  for _, szControl in ipairs(tbVFXControls) do
+    self.tbTransform[szControl] = self.pPanel:GetTransform(szControl)
+  end
+  self.nFaction = 0
+  self.bMale = false
+  self.bFemale = false
+  self.nSelectSex = Npc.SexDef.NONE
+end
+
+function tbWnd:OnPreDestroy()
+  for szControl, _ in pairs(self.tbAvatarExistFlag) do
+    self.tbTransform[szControl] = nil
+    self.tbAnimator[szControl] = nil
+    self.pPanel:DeleteObject(szControl)
+  end
+  self.nAvatarResSeq = 0
+  self.tbAvatarExistFlag = {}
+  self.tbAvatarBundleFlag = {}
+  self.tbLoadingCallback = {}
+  Client.ResourceModule.UnLoadResourceCache()
+  Ui:GetClass("UIWindow").OnPreDestroy(self)
+end
+
+function tbWnd:OnOpen()
+end
+
+function tbWnd:Stop()
+  for szControl, _ in pairs(self.tbCurControl) do
+    self.pPanel:SetActive(szControl, false)
+  end
+  self.tbCurControl = {}
+  self.pPanel:SetActive(tbControls.VFX_TY_frame_after, false)
+  self.pPanel:SetActive(tbControls.VFX_TY_frame_front, false)
+end
+
+function tbWnd:PlayDuo(nFactionId)
+  self:Stop()
+  self.nFaction = nFactionId
+  self.bMale = true
+  self.bFemale = true
+  self.nSelectSex = Npc.SexDef.NONE
+  self:_play(nFactionId, Npc.SexDef.MALE)
+  self:_play(nFactionId, Npc.SexDef.FEMALE)
+end
+
+function tbWnd:_play(nFactionId, nSex)
+  self:RequestAvatarRes(nFactionId, nSex, function()
+    if self.nFaction ~= nFactionId then
+      return
+    end
+    if self.bMale and Npc.SexDef.MALE == nSex or self.bFemale and Npc.SexDef.FEMALE == nSex then
+      local szControl = Faction2Controls[nFactionId][nSex]
+      self.pPanel:SetActive(szControl, true)
+      local Vect3OrgPos = self.tbVect3OrgPos[szControl]
+      if Vect3OrgPos then
+        self.pPanel:Object_SetPosition(szControl, Vect3OrgPos)
+      end
+      self.tbCurControl[szControl] = true
+    end
+  end)
+end
+
+function tbWnd:Play(nFactionId, nSex)
+  self:Stop()
+  self.nFaction = nFactionId
+  self.bMale = nSex == Npc.SexDef.MALE
+  self.bFemale = nSex == Npc.SexDef.FEMALE
+  self.nSelectSex = Npc.SexDef.NONE
+  self:RequestAvatarRes(nFactionId, nSex, function()
+    if self.nFaction ~= nFactionId then
+      return
+    end
+    if self.bMale and Npc.SexDef.MALE == nSex or self.bFemale and Npc.SexDef.FEMALE == nSex then
+      local szControl = Faction2Controls[nFactionId][nSex]
+      self.pPanel:SetActive(szControl, true)
+      local Vect3OrgPos = self.tbVect3OrgPos[szControl]
+      if not Vect3OrgPos then
+        self.tbVect3OrgPos[szControl] = self.pPanel:Object_GetPosition(szControl)
+      end
+      self.pPanel:Object_SetLocalPosition(szControl, CharacterMidPos[szControl])
+      self.tbCurControl[szControl] = true
+    end
+  end)
+end
+
+function tbWnd:Select(nFactionId, nSex)
+  self.nFaction = nFactionId
+  self.nSelectSex = nSex
+  self:RequestAvatarRes(nFactionId, nSex, function()
+    if self.nFaction ~= nFactionId then
+      return
+    end
+    if self.nSelectSex == nSex then
+      local szControl = Faction2Controls[nFactionId][nSex]
+      local pAnimator = self.tbAnimator[szControl]
+      if pAnimator then
+        pAnimator:SetTrigger("action")
+      end
+      local x = self.tbTransform[szControl].anchoredPosition.x
+      for _, szControl in ipairs(tbVFXControls) do
+        local rt = self.tbTransform[szControl]
+        rt.anchoredPosition = Ui.Vector2(x, rt.anchoredPosition.y)
+      end
+      for _, szControl in ipairs(tbTYControls) do
+        self.pPanel:SetActive(szControl, true)
+        self.tbCurControl[szControl] = true
+      end
+      local nSeries = Faction:GetSeries(nFactionId)
+      local tbSeriesControls = Series2Controls[nSeries]
+      for _, szControl in ipairs(tbSeriesControls) do
+        self.tbCurControl[szControl] = true
+        self.pPanel:SetActive(szControl, false)
+        self.pPanel:SetActive(szControl, true)
+      end
+    end
+  end)
+end
+
+function tbWnd:RequestAvatarRes(nFactionId, nSex, fnCallBack)
+  local tbControl = Faction2Controls[nFactionId]
+  if not tbControl then
+    return false
+  end
+  local szControl = tbControl[nSex]
+  if not szControl then
+    return false
+  end
+  if self.tbAvatarExistFlag[szControl] then
+    fnCallBack()
+    return true
+  end
+  if not self.tbLoadingCallback[szControl] then
+    self.tbLoadingCallback[szControl] = {fnCallBack}
+  else
+    table.insert(self.tbLoadingCallback[szControl], fnCallBack)
+    return false
+  end
+  local nRecommandQualitySetting = Client.QualityModule.GetRecommandQuality()
+  local nQualitySetting = Ui.PlayerPrefs.GetInt("QualitySetting", nRecommandQualitySetting)
+  local szResPath = AvatarResPath
+  if nQualitySetting <= 1 or Client.QualityModule.TotalMemMB < 2048 then
+    szResPath = AvatarStaticResPath
+  end
+  local szAvatarResName = Faction:GetAvatar(nFactionId, nSex)
+  self.pPanel:DynamicLoadGameObjectAsync(AvatarResMount, string.format(szResPath, szAvatarResName), szAvatarResName, function(szNewKey)
+    if Ui:WindowVisible("UILoginBG") then
+      self:AddAvatar(szControl)
+      for _, fn in ipairs(self.tbLoadingCallback[szControl]) do
+        fn()
+      end
+    end
+    self.tbLoadingCallback[szControl] = nil
+  end)
+  return true
+end
+
+function tbWnd:DeleteAvatar(szLoadedControl)
+  self.pPanel:DeleteObject(szLoadedControl)
+  self.tbTransform[szLoadedControl] = nil
+  self.tbAnimator[szLoadedControl] = nil
+  self.tbAvatarExistFlag[szLoadedControl] = nil
+  self.tbAvatarBundleFlag[szLoadedControl] = true
+end
+
+function tbWnd:AddAvatar(szControl)
+  self.tbTransform[szControl] = self.pPanel:GetRectTransform(szControl)
+  self.tbAnimator[szControl] = self.pPanel:FindAnimator(szControl)
+  self.nAvatarResSeq = self.nAvatarResSeq + 1
+  self.tbAvatarExistFlag[szControl] = self.nAvatarResSeq
+  self.tbAvatarBundleFlag[szControl] = nil
+end
+
+function tbWnd:PlayRoleModel(szFun, ...)
+  local fn = self[szFun]
+  if not fn then
+    return
+  end
+  fn(self, ...)
+end

@@ -1,0 +1,477 @@
+local tbWnd = Ui:CreateClass("UIAppearancePanel", "UIPanel")
+local tbControls = {
+  ItemTemplate = "Right/Closet/ClothesList/Viewport/Content/Template",
+  txtItemName = "Left/ClothesInfo/txtTitle",
+  txtDesc = "Left/ClothesInfo/Scroll View/Viewport/Content/txtDesc",
+  btnBuy = "Left/ClothesInfo/btnBuy",
+  btnOff = "Left/ClothesInfo/btnOff",
+  btnWear = "Left/ClothesInfo/btnWear",
+  NpcModelPath = "Left/NpcModel",
+  txtCharm = "Left/txtCharm",
+  btnLeft = "Left/btnLeft",
+  btnRight = "Left/btnRight",
+  txtTime = "Left/ClothesInfo/Scroll View/Viewport/Content/txtTime",
+  HitZone = "Left/NpcModel/HitZone",
+  txtEmpty = "Right/txtEmpty",
+  TypeList2 = "Left/TypeList2",
+  btn4Name = "Left/TypeList2/btn4/txtName"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnBuy = function(self)
+    if not self.nSelectBuy then
+      return
+    end
+    Ui:OpenWindow("UIClosetBuy", self.nSelectBuy)
+  end,
+  btnWear = function(self)
+    if not self.nSelectFashion or self.nSelectFashion <= 0 then
+      return
+    end
+    local tbFashionSetting, bCanUse = Fashion:GetFashionSetting(me, self.nSelectFashion)
+    if not bCanUse or not tbFashionSetting then
+      me.CenterMsg(i18n.EasyGet("\230\173\164\232\161\163\232\163\179\228\184\141\229\143\175\231\148\168"), true)
+      return
+    end
+    Fashion:WearFashion(self.nSelectFashion)
+  end,
+  btnOff = function(self)
+    Fashion:TakeOffFashion(self.nSelectedWearingPart)
+  end,
+  btnLeft = function(self)
+    Fashion:Preview_TurnLeft()
+  end,
+  btnRight = function(self)
+    Fashion:Preview_TurnRight()
+  end
+}
+tbWnd.tbOnSwipe = {
+  HitZone = function(self, pos)
+    Fashion:SwipeModel(pos.x)
+  end
+}
+tbWnd.tbTopBtnGroupKey = {
+  [1] = "Right/btnList/btnShop",
+  [2] = "Right/btnList/btnMy"
+}
+tbWnd.nOneSideCount = 3
+tbWnd.tbLeftButtonGroupKey = {
+  [1] = "Left/TypeList/btn1",
+  [2] = "Left/TypeList/btn2",
+  [3] = "Left/TypeList/btn3",
+  [4] = "Left/TypeList2/btn4",
+  [5] = "Left/TypeList2/btn5",
+  [6] = "Left/TypeList2/btn6"
+}
+tbWnd.tbLeftButtonGroupKeyNew = {
+  [1] = "Left/TypeList/btn1/Button",
+  [2] = "Left/TypeList/btn2/Button",
+  [3] = "Left/TypeList/btn3/Button",
+  [4] = "Left/TypeList2/btn4/Button"
+}
+tbWnd.tbTypeIndex = {
+  [1] = "Horse",
+  [2] = "Hat",
+  [3] = "Coat",
+  [4] = "Weapon"
+}
+tbWnd.tbPartId = {
+  Horse = Npc.NpcResPartsDef.npc_part_horse,
+  Hat = Npc.NpcResPartsDef.npc_part_head,
+  Coat = Npc.NpcResPartsDef.npc_part_body,
+  Weapon = Npc.NpcResPartsDef.npc_part_weapon
+}
+tbWnd.SHOP = 1
+tbWnd.MINE = 2
+
+function tbWnd:OnCreate()
+  self.objResPreview = self.pPanel:GetObject("Left/NpcModel")
+  self.tbLeftButtonGroup = Ui:NewButtonGroup(self, self.tbLeftButtonGroupKeyNew, true, function(self, nIndex)
+    self.nClickSystem = nIndex
+    self.nSelectedWearingPart = self.tbPartId[self.tbTypeIndex[nIndex]]
+    Fashion.bHorse = 1 == self.nClickSystem
+    self:Redirection()
+    Fashion:Preview_RefreshPreview()
+    self:BtnSystemClick()
+    self:UpdateLeftBtnGroupSelect(nIndex)
+  end)
+  self.tbTopButtonGroup = Ui:NewButtonGroup(self, self.tbTopBtnGroupKey, true, function(self, nIndex)
+    self.nShopOrMine = nIndex
+    self:BtnShopBagClick(nIndex)
+    self:ResetPreview()
+  end)
+  local obj = self.pPanel:GetObject(self.NpcModelPath)
+  self.NpcModel = obj:GetComponent(Ui.UINpcModel)
+  self.tbScrollView = Ui:NewScrollView(self, self.ItemTemplate)
+end
+
+function tbWnd:OnOpen()
+  self.bHorseActive = self:IsHorseOpen()
+  self:ResetPreview()
+  self:UpdateLeftButtons()
+  self:SetEmptyDetailPanel()
+  self:SetTypeList()
+  self.pPanel:SetActive(tbControls.TypeList2, true)
+  self.pPanel:Label_SetText(tbControls.btn4Name, i18n.EasyGet("\230\173\166\229\153\168"))
+end
+
+function tbWnd:UpdateFashionShop()
+  self.pPanel:SetActive(self.tbLeftButtonGroupKey[1], self.bHorseActive)
+  self.tbTopButtonGroup:Select(tbWnd.MINE)
+  self.tbLeftButtonGroup:Select(self.bHorseActive and 1 or 2)
+end
+
+function tbWnd:BtnSystemClick()
+  self.nSelectBuy = nil
+  self.nSelectFashion = nil
+  self:SetEmptyDetailPanel()
+  if self.nShopOrMine == self.SHOP then
+    self:UpdateShop()
+  end
+  if self.nShopOrMine == self.MINE then
+    self:UpdateMyApprearance()
+  end
+end
+
+function tbWnd:BtnShopBagClick(nIndex)
+  self.nSelectBuy = nil
+  self.nSelectFashion = nil
+  self:SetEmptyDetailPanel()
+  if nIndex == self.SHOP then
+    self:UpdateShop()
+  end
+  if nIndex == self.MINE then
+    self:UpdateMyApprearance()
+  end
+end
+
+function tbWnd:UpdateShop()
+  self.pPanel:SetActive(tbControls.txtEmpty, false)
+  self.tbPartShop = Shop:GetPartFashionShop(self.tbTypeIndex[self.nClickSystem])
+  self.tbScrollView:Reset()
+  if #self.tbPartShop <= 0 then
+    self.nSelectBuy = nil
+  end
+  if not self.nSelectBuy then
+    self:SetEmptyDetailPanel()
+  end
+  for i = 1, Lib:CountTB(self.tbPartShop) do
+    local nFashionID = self.tbPartShop[i].nFashionID
+    local tbSetting, bCanUse = Fashion:GetFashionSetting(me, nFashionID)
+    if bCanUse then
+      self.tbScrollView:SetElement(i, function(tbElement)
+        tbElement.pGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        Fashion:InitFashionGrid(tbElement.pGrid, tbSetting)
+        tbElement.pPanel:SetActive("MarkNew/txtNew", 1 == self.tbPartShop[i].bNewTip)
+        local szMoneyIcon = Currency:GetIcon(self.tbPartShop[i].szMoneyType)
+        tbElement.pPanel:SetActive("imgSelected", self.nSelectBuy == self.tbPartShop[i].nId)
+        local tbHave = Fashion:GetHaveFashions()
+        if tbHave[nFashionID] then
+          tbElement.pPanel:SetActive("txtEquipped", true)
+          tbElement.pPanel:Label_SetText("txtEquipped", i18n.EasyGet("\229\183\178\230\139\165\230\156\137"))
+          tbElement.pPanel:SetActive("Cost", false)
+          tbElement.pPanel:SetActive("txtComingSoon", false)
+        elseif 1 == self.tbPartShop[i].bOnlyShow then
+          tbElement.pPanel:SetActive("txtEquipped", false)
+          tbElement.pPanel:SetActive("Cost", false)
+          tbElement.pPanel:SetActive("txtComingSoon", true)
+        else
+          tbElement.pPanel:SetActive("txtComingSoon", false)
+          tbElement.pPanel:SetActive("txtEquipped", false)
+          tbElement.pPanel:SetActive("Cost", true)
+          tbElement.pPanel:Sprite_SetSprite("Cost/imgMoney", szMoneyIcon)
+          tbElement.pPanel:Label_SetText("Cost/txtCost", self.tbPartShop[i].nPrice)
+        end
+        Ui:Button_BindEvent(tbElement.pPanel, "Button", function()
+          self.nSelectBuy = self.tbPartShop[i].nId
+          self.pPanel:SetActive(self.txtItemName, true)
+          self.pPanel:Label_SetText(self.txtItemName, i18n.Parse(tbSetting.szName))
+          if Fashion.AttrCfg[nFashionID] then
+            local szDesc = i18n.Parse(tbSetting.szDesc) .. "\n"
+            szDesc = szDesc .. FightSkill:GetMagicDesc(Fashion.AttrCfg[nFashionID][1], {
+              table.unpack(Fashion.AttrCfg[nFashionID], 2)
+            })
+            self.pPanel:Label_SetText(self.txtDesc, szDesc)
+          else
+            self.pPanel:Label_SetText(self.txtDesc, i18n.Parse(tbSetting.szDesc))
+          end
+          self:RefreshBtnBuyOrWear("buy")
+          self:SetGridSelect(i)
+          if tbHave[self.tbPartShop[i].nFashionID] then
+            self.pPanel:SetActive(self.btnBuy, false)
+          else
+            self.pPanel:SetActive(self.btnBuy, true)
+          end
+          if 1 == self.tbPartShop[i].bOnlyShow then
+            self.pPanel:SetActive(self.btnBuy, false)
+          end
+          self:PreviewWear(tbSetting.nFashionId)
+        end)
+      end)
+    end
+  end
+end
+
+function tbWnd:UpdateMyApprearance()
+  local tbFashions = Fashion:GetHaveFashions()
+  local tbMine = {}
+  for nFashionID, _ in pairs(tbFashions) do
+    local tbCfg, bCanUse = Fashion:GetFashionSetting(me, nFashionID)
+    if tbCfg.nPart == self.nSelectedWearingPart then
+      table.insert(tbMine, tbCfg)
+    end
+  end
+  self.tbScrollView:Reset()
+  if #tbMine <= 0 then
+    self.nSelectFashion = nil
+    self.pPanel:SetActive(tbControls.txtEmpty, true)
+  else
+    self.pPanel:SetActive(tbControls.txtEmpty, false)
+  end
+  if not self.nSelectFashion then
+    self:SetEmptyDetailPanel()
+  end
+  for i = 1, Lib:CountTB(tbMine) do
+    local tbSetting = tbMine[i]
+    if tbSetting then
+      self.tbScrollView:SetElement(i, function(tbElement)
+        tbElement.pGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        Fashion:InitFashionGrid(tbElement.pGrid, tbSetting)
+        tbElement.pPanel:SetActive("MarkNew/txtNew", false)
+        tbElement.pPanel:SetActive("Cost", false)
+        tbElement.pPanel:SetActive("imgSelected", self.nSelectFashion == tbSetting.nFashionId)
+        
+        local function pButtonClickFunc()
+          self.nSelectFashion = tbSetting.nFashionId
+          self.pPanel:SetActive(self.txtItemName, true)
+          self.pPanel:Label_SetText(self.txtItemName, i18n.Parse(tbSetting.szName))
+          if Fashion.AttrCfg[self.nSelectFashion] then
+            local szDesc = i18n.Parse(tbSetting.szDesc) .. "\n"
+            szDesc = szDesc .. FightSkill:GetMagicDesc(Fashion.AttrCfg[self.nSelectFashion][1], {
+              table.unpack(Fashion.AttrCfg[self.nSelectFashion], 2)
+            })
+            self.pPanel:Label_SetText(self.txtDesc, szDesc)
+          else
+            self.pPanel:Label_SetText(self.txtDesc, i18n.Parse(tbSetting.szDesc))
+          end
+          if me.GetUserValue(Fashion.SAVE_GROUP, tbSetting.nPart + 1) == tbSetting.nFashionId then
+            self:RefreshBtnBuyOrWear("off")
+          else
+            self:RefreshBtnBuyOrWear("wear")
+          end
+          self:SetGridSelect(i)
+          self:PreviewWear(tbSetting.nFashionId)
+        end
+        
+        if me.GetUserValue(Fashion.SAVE_GROUP, tbSetting.nPart + 1) == tbSetting.nFashionId then
+          tbElement.pPanel:SetActive("txtEquipped", true)
+          tbElement.pPanel:Label_SetText("txtEquipped", i18n.EasyGet("\229\183\178\231\169\191\230\136\180"))
+          pButtonClickFunc()
+        else
+          tbElement.pPanel:SetActive("txtEquipped", false)
+        end
+        tbElement.pPanel:SetActive("txtComingSoon", false)
+        Ui:Button_BindEvent(tbElement.pPanel, "Button", pButtonClickFunc)
+      end)
+    end
+  end
+  if self.nSelectFashion then
+    if self.nSelectFashion == me.GetUserValue(Fashion.SAVE_GROUP, self.nSelectedWearingPart + 1) then
+      self:RefreshBtnBuyOrWear("off")
+    else
+      self:RefreshBtnBuyOrWear("wear")
+    end
+  end
+end
+
+function tbWnd:UpdateLeftBtnGroupSelect(nIndex)
+  for index, value in ipairs(self.tbLeftButtonGroupKey) do
+    self.pPanel:SetActive(value .. "/imgSelected", false)
+  end
+  if nIndex > self.nOneSideCount then
+    self.pPanel:SetActive(string.format("Left/TypeList2/btn%d/imgSelected", nIndex), true)
+  else
+    self.pPanel:SetActive(string.format("Left/TypeList/btn%d/imgSelected", nIndex), true)
+  end
+end
+
+function tbWnd:SetGridSelect(nIndex)
+  for index = 1, Lib:CountTB(self.tbPartShop) do
+    self.pPanel:SetActive(string.format("Right/Closet/ClothesList/Viewport/Content/Element%d/imgSelected", index), false)
+  end
+  self.pPanel:SetActive(string.format("Right/Closet/ClothesList/Viewport/Content/Element%d/imgSelected", nIndex), true)
+end
+
+function tbWnd:SetEmptyDetailPanel()
+  self.pPanel:SetActive(self.txtItemName, false)
+  self.pPanel:Label_SetText(self.txtDesc, i18n.EasyGet("\232\175\183\233\128\137\228\184\173\229\164\150\232\167\130\230\159\165\231\156\139\232\175\166\230\131\133"))
+  self.pPanel:SetActive(self.btnBuy, false)
+  self.pPanel:SetActive(self.btnOff, false)
+  self.pPanel:Label_SetText(self.btnOff .. "/Text", i18n.EasyGet("\229\141\184\228\184\139"))
+  self.pPanel:SetActive(self.btnWear, false)
+  self.pPanel:SetActive(self.txtTime, false)
+end
+
+function tbWnd:OnClose()
+  Fashion:Preview_Destroy()
+end
+
+function tbWnd:ResetPreview()
+  Fashion:Preview_Init(self.objResPreview)
+  self:Redirection()
+  self:RefreshTotalClothingNum()
+end
+
+function tbWnd:Redirection()
+  if self.nSelectedWearingPart == Npc.NpcResPartsDef.npc_part_horse then
+    Fashion:SetResDir(1)
+  else
+    Fashion:SetResDir(0)
+  end
+end
+
+function tbWnd:RefreshTotalClothingNum()
+  local nPrettyValue = Fashion:GetPrettyValue(me)
+  self.pPanel:Label_SetText(self.txtCharm, string.format("%s  %s", i18n.EasyGet("\233\173\133\229\138\155\229\128\188"), tostring(nPrettyValue)))
+end
+
+function tbWnd:OnFashionDataUpdate()
+  self:ResetPreview()
+  self:UpdateLeftButtons()
+  if self.nShopOrMine == self.SHOP then
+    self:UpdateShop()
+  end
+  if self.nShopOrMine == self.MINE then
+    self.nSelectFashion = nil
+    self:UpdateMyApprearance()
+  end
+end
+
+function tbWnd:RefreshBtnBuyOrWear(szType)
+  local tbBtnBuyWear = {
+    buy = self.btnBuy,
+    wear = self.btnWear,
+    off = self.btnOff
+  }
+  for type, szPath in pairs(tbBtnBuyWear) do
+    self.pPanel:SetActive(szPath, type == szType)
+  end
+end
+
+function tbWnd:FashionBuySuccess()
+  if self.nShopOrMine == self.SHOP then
+    self:UpdateShop()
+  end
+  self.pPanel:SetActive(self.btnBuy, false)
+end
+
+function tbWnd:SaveWearing()
+  local tbPreviewIdList = Fashion:Preview_GetPreviewList()
+  for nPart, tbInfo in pairs(tbPreviewIdList) do
+    if tbInfo.nFashionId > 0 then
+      local tbSetting, bCanUse = Fashion:GetFashionSetting(me, tbInfo.nFashionId)
+      if not tbSetting or not bCanUse then
+        me.CenterMsg(i18n.EasyGet("\230\173\164\232\161\163\232\163\179\228\184\141\229\143\175\231\148\168"), true)
+        return
+      end
+    end
+  end
+  for nPart, tbInfo in pairs(tbPreviewIdList) do
+    local nFashionId = Fashion:GetWearingFashionIdByPart(nPart)
+    if (not nFashionId or nFashionId <= 0) and tbInfo.nFashionId > 0 then
+      Fashion:WearFashion(tbInfo.nFashionId)
+    end
+    if nFashionId and nFashionId > 0 then
+      if tbInfo.nFashionId > 0 and nFashionId ~= tbInfo.nFashionId then
+        Fashion:WearFashion(tbInfo.nFashionId)
+      end
+      if tbInfo.nFashionId <= 0 then
+        Fashion:TakeOffFashion(nPart)
+      end
+    end
+  end
+end
+
+function tbWnd:RefreshExpiredTime()
+  local nCurTime = GetTime()
+  local tbFashions = Fashion:GetHaveFashions()
+  self.pPanel:SetActive(self.txtTime, false)
+  if not tbFashions or not self.nSelectFashion then
+    return
+  end
+  self.pPanel:SetActive(self.txtTime, true)
+  local tbFashionInfo = tbFashions[self.nSelectFashion]
+  if tbFashionInfo and tbFashionInfo.nExpiredTime and tbFashionInfo.nExpiredTime > 0 then
+    if nCurTime >= tbFashionInfo.nExpiredTime then
+      self.pPanel:Label_SetText(self.txtTime, i18n.EasyGet("\229\183\178\232\191\135\230\156\159"))
+    else
+      self.pPanel:Label_SetText(self.txtTime, string.format("%s %s", i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180:"), Lib:TimeDesc2(tbFashionInfo.nExpiredTime - nCurTime)))
+    end
+  elseif tbFashionInfo and tbFashionInfo.szExpiredDate and not Lib:IsEmptyStr(tbFashionInfo.szExpiredDate) then
+    local nEndTime = Lib:ParseConfigDateTime(tbFashionInfo.szExpiredDate)
+    if nCurTime >= nEndTime then
+      self.pPanel:Label_SetText(self.txtTime, i18n.EasyGet("\229\183\178\232\191\135\230\156\159"))
+    else
+      self.pPanel:Label_SetText(self.txtTime, string.format("%s %s", i18n.EasyGet("\229\136\176\230\156\159\230\151\182\233\151\180:"), tbFashionInfo.szExpiredDate))
+    end
+  else
+    self.pPanel:Label_SetText(self.txtTime, i18n.EasyGet("\230\176\184\228\185\133"))
+  end
+end
+
+function tbWnd:OnFixedUpdate()
+  self:RefreshExpiredTime()
+end
+
+function tbWnd:PreviewWear(nFashionId)
+  local tbFashionSetting, bCanUse = Fashion:GetFashionSetting(me, nFashionId)
+  if not bCanUse then
+    return
+  end
+  local tbPreviewIdList = Fashion:Preview_GetPreviewList()
+  if tbPreviewIdList[tbFashionSetting.nPart].nFashionId == nFashionId then
+    return
+  end
+  Fashion:Preview_TryOnAFashion(tbFashionSetting.nPart, nFashionId)
+end
+
+function tbWnd:IsHorseOpen()
+  local pHorseItem = me.GetEquipByPos(Item.EQUIPPOS_HORSE)
+  if not pHorseItem then
+    return false
+  end
+  return true
+end
+
+function tbWnd:UpdateLeftButtons()
+  local szEmpty = "Left/TypeList/btn%d/Empty"
+  local szItemGrid = "Left/TypeList/btn%d/UIItemGrid"
+  for i = 1, Lib:CountTB(self.tbTypeIndex) do
+    local nFashionId = Fashion:GetWearingFashionIdByPart(self.tbPartId[self.tbTypeIndex[i]])
+    local bWear = nFashionId and nFashionId > 0
+    if i > self.nOneSideCount then
+      self.pPanel:SetActive(string.format("Left/TypeList2/btn%d/Empty", i), not bWear)
+      self.pPanel:SetActive(string.format("Left/TypeList2/btn%d/UIItemGrid", i), bWear)
+    else
+      self.pPanel:SetActive(string.format("Left/TypeList/btn%d/Empty", i), not bWear)
+      self.pPanel:SetActive(string.format("Left/TypeList/btn%d/UIItemGrid", i), bWear)
+    end
+    if bWear then
+      local tbFashionSetting = Fashion:GetFashionSetting(me, nFashionId)
+      local pGrid = {}
+      if i > self.nOneSideCount then
+        pGrid = Ui:NewExistItemGrid(self, string.format("Left/TypeList2/btn%d/UIItemGrid", i))
+      else
+        pGrid = Ui:NewExistItemGrid(self, string.format("Left/TypeList/btn%d/UIItemGrid", i))
+      end
+      Fashion:InitFashionGrid(pGrid, tbFashionSetting)
+    end
+  end
+end
+
+function tbWnd:SetTypeList()
+  self.pPanel:SetActive(tbControls.TypeList2, true)
+  self.pPanel:SetActive(self.tbLeftButtonGroupKey[4], true)
+  self.pPanel:SetActive(self.tbLeftButtonGroupKey[5], false)
+  self.pPanel:SetActive(self.tbLeftButtonGroupKey[6], false)
+end

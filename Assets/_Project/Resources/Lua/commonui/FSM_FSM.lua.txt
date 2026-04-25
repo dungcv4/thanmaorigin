@@ -1,0 +1,249 @@
+FSM = {}
+
+function FSM:init(uml)
+  self.tbStateNameList = {}
+  self.tbStates = {}
+  self.tbEvents = {}
+  self.tbEventMap = {}
+  self.szLastState = ""
+  self.szActiveState = ""
+  self.szDefaultState = nil
+  if uml then
+    local tbStates, tbEvents, szStartState = self:ParseUML(uml)
+    self.szDefaultState = szStartState
+    for _, v in pairs(tbStates) do
+      if "AnyState" ~= v then
+        self:SetStateCallback(nil, v)
+        self.tbStateNameList[#self.tbStateNameList + 1] = v
+      end
+    end
+    for _, v in pairs(tbEvents) do
+      local from, to, event = table.unpack(v)
+      if "AnyState" == from then
+        from = nil
+      end
+      self:RegisterEvent(from, event, to)
+    end
+  end
+end
+
+function FSM:Start()
+  return self:Reset()
+end
+
+function FSM:Reset()
+  self.szLastState = ""
+  self.szActiveState = ""
+  self:ChangeState(self.szDefaultState)
+end
+
+function FSM:SendEvent(szEventName)
+  assert(self.tbEventMap[szEventName], "invalid eventName " .. tostring(szEventName))
+  for _, event in pairs(self.tbEventMap[szEventName]) do
+    if event.szFromState == nil then
+      self:ChangeState(event.szToState)
+      break
+    end
+    if event.szFromState == self.szActiveState then
+      self:ChangeState(event.szToState)
+      break
+    end
+  end
+end
+
+function FSM:ChangeState(szStateName)
+  assert(self.tbStates[szStateName], "invalid entryStateName")
+  if self.szActiveState == szStateName then
+    return
+  end
+  local szOldState = self.szActiveState or ""
+  if "" ~= szOldState then
+    local state = self.tbStates[szOldState]
+    if state.OnExit then
+      state.OnExit(state.tbSelf, szStateName)
+    end
+  end
+  self.szLastState = szOldState
+  self.szActiveState = szStateName
+  local newState = self.tbStates[self.szActiveState]
+  if newState.OnEnter then
+    newState.OnEnter(newState.tbSelf, szOldState)
+  end
+end
+
+function FSM:SetStateCallback(tbSelf, stateName, OnEnter, OnExit)
+  self.tbStates[stateName] = {
+    szName = stateName,
+    tbSelf = tbSelf,
+    OnEnter = OnEnter,
+    OnExit = OnExit
+  }
+end
+
+function FSM:RegisterEvent(szFromStateName, szEventName, szToStateName)
+  assert(szEventName and "" ~= szEventName)
+  assert(nil == szFromStateName or self.tbStates[szFromStateName])
+  assert(self.tbStates[szToStateName])
+  local szKey = string.format("%s|%s|%s", szEventName, tostring(szFromStateName), szToStateName)
+  assert(not self.tbEvents[szKey], szKey)
+  self.tbEvents[szKey] = {
+    szName = szEventName,
+    szFromState = szFromStateName,
+    szToState = szToStateName
+  }
+  self.tbEventMap[szEventName] = self.tbEventMap[szEventName] or {}
+  table.insert(self.tbEventMap[szEventName], self.tbEvents[szKey])
+end
+
+function FSM:ParseUML(uml)
+  local states, statearr, events = {}, {}, {}
+  local startstat
+  uml = uml:gsub("\r", "\n"):gsub([[
+
+
+]], "\n")
+  
+  local function addstate(name)
+    if not states[name] then
+      states[name] = 1
+      statearr[#statearr + 1] = name
+    end
+  end
+  
+  for _, line in pairs(Lib:SplitStr(uml, "\n")) do
+    line = Lib:StrTrim(line)
+    if line:sub(1, 1) == "'" then
+      line = ""
+    end
+    local regex = "([%w%_%[%]%*]+)%s*%-[%w%-]*%>%s*([%w%_]+)"
+    local from, to, event = line:match(regex)
+    if from then
+      _, _, event = line:match(regex .. "%s*%:%s*([%w%_ ]+)")
+    end
+    if from then
+      if "[*]" == from then
+        addstate(to)
+        assert(not startstat, "[*] count need == 1")
+        startstat = to
+      else
+        addstate(from)
+        addstate(to)
+        events[#events + 1] = {
+          from,
+          to,
+          event
+        }
+      end
+    end
+  end
+  assert(startstat, "Start state([*]-->'XXX') not exists")
+  return statearr, events, startstat
+end
+
+function FSM:Test1()
+  local uml = "    @startuml\n    [*] --> MapCreating\n\n    MapCreating --> Perparing: OnMapCreated\n    Perparing --> Fighting: wait 5s\n    Fighting --> Wait2Close: kill npc\n    Fighting --> Wait2Close: wait 300s\n    Wait2Close --> Closing: wait 15s\n    Closing --> [*]\n\n    Perparing:\232\174\190\231\189\174\229\156\176\229\155\190\229\155\158\230\148\182\230\151\182\233\151\180(5s + 300s + 15s)\n    Perparing:\229\188\128\229\174\154\230\151\182\229\153\168(5s)\n    Perparing:\228\188\160\233\128\129\231\142\169\229\174\182()\n\n    Fighting:\229\188\128\229\174\154\230\151\182\229\153\168(300s)\n    Fighting:\229\136\155\229\187\186BOSS()\n    Wait2Close:\229\188\128\229\174\154\230\151\182\229\153\168(15s)\n    Closing:\232\184\162\231\142\169\229\174\182()\n    @enduml\n    "
+  local tbFuben = {
+    Name = "x fuben",
+    OnEnterStatusBegin = function(self, szOldState)
+      print(self.Name, "Enter", "StatusBegin")
+      if self.nTimerId then
+        Timer:Close(self.nTimerId)
+      end
+      self.nTimerId = Timer:Register(Env.GAME_FPS * 2, self.tbFSM.SendEvent, self.tbFSM, "wait 2 second")
+      Timer:Register(Env.GAME_FPS * 5, self.tbFSM.SendEvent, self.tbFSM, "timeout")
+    end,
+    OnEnterStatusClosing = function(self, szOldState)
+      print(self.Name, "Enter", "StatusClosing")
+    end,
+    OnEnterStatusPreparing = function(self, szOldState)
+      print(self.Name, "Enter", "StatusPreparing")
+      if self.nTimerId then
+        Timer:Close(self.nTimerId)
+      end
+      self.nTimerId = Timer:Register(Env.GAME_FPS * 2, self.tbFSM.SendEvent, self.tbFSM, "wait 10 second")
+    end,
+    OnEnterStatusLevel1 = function(self, szOldState)
+      print(self.Name, "Enter", "StatusLevel1")
+      if self.nTimerId then
+        Timer:Close(self.nTimerId)
+      end
+      self.nTimerId = Timer:Register(Env.GAME_FPS * 10, self.OnNpcDeath, self)
+    end,
+    OnEnterStatusEnd = function(self)
+      print(self.Name, "Enter", "StatusEnd")
+    end,
+    OnLeaveStatusBegin = function(self, szNextState)
+      print(self.Name, "Leave", "StatusBegin")
+    end,
+    OnLeaveStatusClosing = function(self, szNextState)
+      print(self.Name, "Leave", "StatusClosing")
+    end,
+    OnLeaveStatusPreparing = function(self, szNextState)
+      print(self.Name, "Leave", "StatusPreparing")
+    end,
+    OnNpcDeath = function(self)
+      self.tbFSM:SendEvent("win")
+    end
+  }
+  local tbFSM = Lib:NewClass(FSM, uml)
+  local tbCallback = {
+    {
+      tbFuben,
+      "StatusBegin",
+      tbFuben.OnEnterStatusBegin,
+      tbFuben.OnLeaveStatusBegin
+    },
+    {
+      tbFuben,
+      "StatusClosing",
+      tbFuben.OnEnterStatusClosing,
+      tbFuben.OnLeaveStatusClosing
+    },
+    {
+      tbFuben,
+      "StatusPreparing",
+      tbFuben.OnEnterStatusPreparing,
+      tbFuben.OnLeaveStatusPreparing
+    },
+    {
+      tbFuben,
+      "StatusLevel1",
+      tbFuben.OnEnterStatusLevel1,
+      nil
+    },
+    {
+      tbFuben,
+      "StatusEnd",
+      tbFuben.OnEnterStatusEnd,
+      nil
+    }
+  }
+  for _, v in ipairs(tbCallback) do
+    tbFSM:SetStateCallback(table.unpack(v))
+  end
+  tbFuben.tbFSM = tbFSM
+  tbFSM:Start()
+  return tbFSM
+end
+
+function FSM:Test2()
+  local tbFSM = Lib:NewClass(FSM)
+  tbFSM:SetStateCallback({}, "StatusBegin", function(self, szOldState)
+    print("OnEnter", szOldState, "-> StatusBegin")
+  end, function(self, szNextState)
+    print("OnLeave StatusBegin ->", szNextState)
+  end)
+  tbFSM:SetStateCallback({}, "StatusClosing", function(self, szOldState)
+    print("OnEnter", szOldState, "-> StatusClosing")
+  end, function(self, szNextState)
+    print("OnLeave StatusClosing ->", szNextState)
+  end)
+  tbFSM:SetStateCallback({}, "StatusPreparing", function(self, szOldState)
+    print("OnEnter", szOldState, "-> StatusPreparing")
+  end, function(self, szNextState)
+    print("OnLeave StatusPreparing ->", szNextState)
+  end)
+  tbFSM:RegisterEvent("StatusBegin", "-->", "StatusClosing")
+  tbFSM:ChangeState("StatusBegin")
+  return tbFSM
+end

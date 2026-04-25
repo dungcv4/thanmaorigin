@@ -1,0 +1,770 @@
+Require("CommonScript/UI/UIMenuTextCfg.lua")
+local tbRelationTypeToTextField = {
+  [ChuanGong.tbRelationType.Recieve] = Ui.MenuText.szGetChuanGong,
+  [ChuanGong.tbRelationType.Send] = Ui.MenuText.szSendChuanGong
+}
+
+local function CheckCanChuanGong_KinOrTong(tbData, emRelation)
+  local tbChuanGong = tbData.tbChuanGong
+  if nil == tbChuanGong then
+    return false
+  else
+    local tbStatus = ChuanGong:CheckStatusFromOtherData(tbData.nTotalLevel, tbData.nVipLevel, tbChuanGong.nRecieveTimes > 0, tbChuanGong.nSendTimes > 0, tbChuanGong.nLastSendTime)
+    return ChuanGong:StatusCanChuanGong(tbStatus, emRelation)
+  end
+end
+
+local function MakeChuanGongMenuItem(tbClickGoToCloseWindow, emRelation)
+  return {
+    fnName = function(tbData)
+      return i18n.Get(tbRelationTypeToTextField[emRelation])
+    end,
+    fnOnClick = function(tbMenuWnd)
+      local tbData = tbMenuWnd.tbData
+      local nDiffLevel = MasterPrentice:GetMinLevelDiff2(me.GetVipLevel(), tbData.nVipLevel or 0)
+      local nId = tbData.nMemberId or tbData.dwID
+      if ChuanGong:StatusCanChuanGong_MP(tbData, emRelation, tbData.nTotalLevel, nDiffLevel) then
+        ChuanGong:RequestChuanGong_MP(nId, emRelation, tbClickGoToCloseWindow)
+      else
+        ChuanGong:RequestChuanGongC_Kin(nId, tbData.nTotalLevel, tbData.nVipLevel or 0, tbClickGoToCloseWindow, emRelation)
+      end
+      tbMenuWnd:Close()
+    end,
+    fnAvaliable = function(tbData)
+      local nDiffLevel = MasterPrentice:GetMinLevelDiff2(me.GetVipLevel(), tbData.nVipLevel or 0)
+      local bAvailable = ChuanGong:StatusCanChuanGong_MP(tbData, emRelation, tbData.nTotalLevel, nDiffLevel)
+      if (me.dwKinId > 0 and me.dwKinId == tbData.dwKinId or me.dwTongId > 0 and me.dwTongId == tbData.dwTongId) and not bAvailable then
+        bAvailable = CheckCanChuanGong_KinOrTong(tbData, emRelation)
+      end
+      return bAvailable
+    end
+  }
+end
+
+local function MakeChatPrivateMenuItem(szNeedCloseWnd)
+  return {
+    fnName = function()
+      return i18n.Get(Ui.MenuText.szChatPrivate)
+    end,
+    fnOnClick = function(tbMenuWnd)
+      ChatMgr:OpenPrivateWindow(tbMenuWnd.tbData.dwRoleId, tbMenuWnd.tbData)
+      tbMenuWnd:Close()
+      if szNeedCloseWnd and Ui:WindowVisible(szNeedCloseWnd) then
+        Ui:CloseWindow(szNeedCloseWnd)
+      end
+    end,
+    fnAvaliable = function(tbData)
+      return tbData.dwRoleId ~= me.dwID and ChatMgr:CheckChannelLevel(ChatMgr.ChannelType.Private)
+    end
+  }
+end
+
+local nNextSendPosTime = 0
+Ui.MenuItem = {
+  TeamSendCoordinate = {
+    fnName = function(tbData)
+      return i18n.EasyGet("\229\143\145\233\128\129\229\157\144\230\160\135")
+    end,
+    fnOnClick = function(self)
+      local nMapId, nPosX, nPosY = me.GetWorldPos()
+      local szLocaltion = string.format("<%s(%.0f,%.0f)>%s", i18n.Parse(me.szMapName), nPosX * Map.nShowPosScale, nPosY * Map.nShowPosScale, i18n.EasyGet("\230\136\145\229\156\168\232\191\153\233\135\140\239\188\129"))
+      ChatMgr:SetChatLink(ChatMgr.LinkType.Position, {
+        nMapId,
+        nPosX,
+        nPosY,
+        me.nMapTemplateId,
+        me.nMapTemplateId
+      })
+      ChatMgr:SendMsg(ChatMgr.ChannelType.Team, nil, szLocaltion)
+      nNextSendPosTime = GetTime() + 5
+      me.CenterMsg(i18n.EasyGet("\230\136\144\229\138\159\229\143\145\233\128\129\229\189\147\229\137\141\229\157\144\230\160\135"))
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if tbData.dwRoleId ~= me.dwID then
+        return false
+      end
+      if nNextSendPosTime and nNextSendPosTime > GetTime() then
+        return false
+      end
+      return true
+    end
+  },
+  TeamFollowCancel = {
+    fnName = function()
+      return i18n.EasyGet("\229\143\150\230\182\136\232\183\159\230\136\152")
+    end,
+    fnOnClick = function(self)
+      if TeamMgr:IsFollowTeammate() then
+        TeamMgr:StopFollowMember()
+        self:Close()
+        return
+      end
+    end,
+    fnAvaliable = function(tbData)
+      if tbData.dwRoleId ~= me.dwID and tbData.dwRoleId == TeamMgr:GetFollowTarget(me.dwID) then
+        return true
+      end
+      return false
+    end
+  },
+  TeamFollowFight = {
+    fnName = function()
+      return i18n.EasyGet("\232\183\159\233\154\143\230\136\152\230\150\151")
+    end,
+    fnOnClick = function(self)
+      local tbTeammate = TeamMgr:GetMemberData(self.tbData.nNpcID)
+      if not tbTeammate then
+        me.CenterMsg(i18n.Get(TeamMgr.Terms.NoMember))
+        return
+      end
+      if me.nMapId ~= tbTeammate.nMapId then
+        local function fnOK()
+          TeamMgr:StartFollowMember(self.tbData.dwRoleId, self.tbData.nNpcID)
+          
+          self:Close()
+        end
+        
+        local function fnCancel()
+        end
+        
+        if Map:IsNeedTrapPointToSwitchMap(me.nMapTemplateId, tbTeammate.nMapTemplateId) then
+          fnOK()
+        else
+          Ui:OpenWindow("UIMessageBoxBig", i18n.EasyGet("\233\152\159\229\143\139\228\184\141\229\156\168\230\156\172\229\156\176\229\155\190, \230\152\175\229\144\166\228\188\160\233\128\129\229\136\176\229\175\185\230\150\185\229\156\176\229\155\190\229\185\182\232\183\159\230\136\152?"), {fnOK, fnCancel})
+        end
+        self:Close()
+        return
+      end
+      TeamMgr:StartFollowMember(self.tbData.dwRoleId, self.tbData.nNpcID)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if tbData.dwRoleId ~= me.dwID and tbData.dwRoleId ~= TeamMgr:GetFollowTarget(me.dwID) then
+        return true
+      end
+      return false
+    end
+  },
+  TeamTransmit = {
+    fnName = function()
+      return i18n.EasyGet("\228\188\160\233\128\129\229\137\141\229\190\128")
+    end,
+    fnOnClick = function(self)
+      local tbTeammate = TeamMgr:GetMemberData(self.tbData.nNpcID)
+      if not tbTeammate then
+        me.CenterMsg(i18n.Get(TeamMgr.Terms.NoMember))
+        return
+      end
+      if TeamMgr:IsFollowTeammate() then
+        me.CenterMsg(i18n.EasyGet("\232\183\159\230\136\152\228\184\173, \231\166\129\230\173\162\228\188\160\233\128\129"))
+      elseif QinShiHuangLing:CheckAndGoto(tbTeammate.nMapTemplateId, tbTeammate.nPosX, tbTeammate.nPosY) then
+      elseif KeYiMen.C:CheckAndGoto(tbTeammate.nMapTemplateId, tbTeammate.nPosX, tbTeammate.nPosY) then
+      else
+        AutoPath:GotoAndCallEx(tbTeammate.nMapId, tbTeammate.nPosX, tbTeammate.nPosY)
+      end
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if tbData.dwRoleId ~= me.dwID then
+        return true
+      end
+      return false
+    end
+  },
+  TeamApply = {
+    fnName = function(tbData)
+      return i18n.Get(Ui.MenuText.szTeamApply)
+    end,
+    fnOnClick = function(self)
+      if TeamMgr:HasTeam() then
+        RemoteServer.OnTeamRequest("CheckTeamIsFull", self.tbData.dwRoleId)
+        return
+      end
+      self:Close()
+      TeamMgr:Apply(self.tbData.dwRoleId)
+    end,
+    fnAvaliable = function(tbData)
+      return true
+    end
+  },
+  TeamInvite = {
+    fnName = function(tbData)
+      return i18n.Get(Ui.MenuText.szTeamInvite)
+    end,
+    fnOnClick = function(tbMenuWnd)
+      if not TeamMgr:HasTeam() then
+        local function fnOK()
+          TeamMgr:CreateOnePersonTeam()
+          
+          TeamMgr:SetShowTargetPanel()
+          TeamMgr:Invite(tbMenuWnd.tbData.dwRoleId)
+        end
+        
+        local function fnCancel()
+        end
+        
+        Ui:OpenWindow("UIMessageBoxBig", i18n.EasyGet("\229\189\147\229\137\141\230\178\161\230\156\137\233\152\159\228\188\141\239\188\140\230\152\175\229\144\166\229\136\155\229\187\186\233\152\159\228\188\141\229\185\182\229\143\145\233\128\129\233\130\128\232\175\183?"), {fnOK, fnCancel})
+        tbMenuWnd:Close()
+        return
+      end
+      tbMenuWnd:Close()
+      TeamMgr:Invite(tbMenuWnd.tbData.dwRoleId)
+    end,
+    fnAvaliable = function(tbData)
+      return tbData.dwRoleId ~= me.dwID
+    end
+  },
+  TeamApplyCaptain = {
+    fnName = function()
+      return i18n.Get(TeamMgr.Terms.ApplyCaptainOption)
+    end,
+    fnOnClick = function(self)
+      if not TeamMgr:HasTeam() then
+        return
+      end
+      if Ui.bInZone then
+        Ui:SendForbiddenMsgWhenInZone()
+        return
+      end
+      TeamMgr:ReqBecomeCaptain()
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if tbData.dwRoleId == me.dwID then
+        return false
+      end
+      if TeamMgr:IsCaptain(tbData.dwRoleId) then
+        return true
+      end
+      return false
+    end
+  },
+  TeamChangeCaptain = {
+    fnName = function()
+      return i18n.Get(TeamMgr.Terms.ChangeCaptainOption)
+    end,
+    fnOnClick = function(self)
+      local tbTeammate = TeamMgr:GetMemberData(self.tbData.nNpcID)
+      if not tbTeammate then
+        me.CenterMsg(i18n.Get(TeamMgr.Terms.NoMember))
+        return
+      end
+      
+      local function fnOK()
+        TeamMgr:ChangeCaptain(tbTeammate.nPlayerID)
+        self:Close()
+      end
+      
+      local function fnCancel()
+      end
+      
+      local szMsg = i18n.Get(TeamMgr.Terms.AskSetCaptain, tbTeammate.szName)
+      Ui:OpenWindow("UIMessageBoxBig", szMsg, {fnOK, fnCancel})
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if tbData.dwRoleId == me.dwID then
+        return false
+      end
+      if not TeamMgr:IsCaptain() then
+        return false
+      end
+      return true
+    end
+  },
+  TeamKickOut = {
+    fnName = function()
+      return i18n.Get(TeamMgr.Terms.KickOutOption)
+    end,
+    fnOnClick = function(self)
+      local tbTeammate = TeamMgr:GetMemberData(self.tbData.nNpcID)
+      if not tbTeammate then
+        me.CenterMsg(i18n.Get(TeamMgr.Terms.NoMember))
+        return
+      end
+      
+      local function fnOK()
+        TeamMgr:KickOutMember(tbTeammate.nPlayerID)
+        self:Close()
+      end
+      
+      local function fnCancel()
+      end
+      
+      local szMsg = i18n.Get(TeamMgr.Terms.AskKickOut, tbTeammate.szName)
+      Ui:OpenWindow("UIMessageBoxBig", szMsg, {fnOK, fnCancel})
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if tbData.dwRoleId == me.dwID then
+        return false
+      end
+      if not TeamMgr:IsCaptain() then
+        return false
+      end
+      return true
+    end
+  },
+  TeamQuit = {
+    fnName = function()
+      return i18n.Get(TeamMgr.Terms.QuitOption)
+    end,
+    fnOnClick = function(self)
+      if not TeamMgr:HasTeam() then
+        return
+      end
+      
+      local function fnOK()
+        TeamMgr:Quite()
+      end
+      
+      local function fnCancel()
+      end
+      
+      Ui:OpenWindow("UIMessageBoxBig", i18n.Get(TeamMgr.Terms.QuitConfirm), {fnOK, fnCancel})
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if tbData.dwRoleId ~= me.dwID then
+        return false
+      end
+      return true
+    end
+  },
+  TeamCallMember = {
+    fnName = function()
+      return i18n.Get(TeamMgr.Terms.InviteFollow)
+    end,
+    fnOnClick = function(self)
+      if not TeamMgr:HasTeam() then
+        return
+      end
+      if 0 == #TeamMgr:GetMembers() then
+        me.CenterMsg(i18n.Get(TeamMgr.Terms.NoMember))
+        return
+      end
+      TeamMgr:Recall()
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if tbData.dwRoleId ~= me.dwID then
+        return false
+      end
+      if not TeamMgr:IsCaptain() then
+        return false
+      end
+      return true
+    end
+  },
+  TeamCancelRecall = {
+    fnName = function()
+      return i18n.Get(TeamMgr.Terms.CancelFollow)
+    end,
+    fnOnClick = function(self)
+      if not TeamMgr:HasTeam() then
+        return
+      end
+      TeamMgr:CancelRecall()
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if tbData.dwRoleId ~= me.dwID then
+        return false
+      end
+      if not TeamMgr:IsCaptain() then
+        return false
+      end
+      return true
+    end
+  },
+  RecallAMember = {
+    fnName = function()
+      return i18n.Get(TeamMgr.Terms.RecallAMember)
+    end,
+    fnOnClick = function(self)
+      if not TeamMgr:HasTeam() then
+        return
+      end
+      if not TeamMgr:IsCaptain() then
+        return
+      end
+      local tbTeammate = TeamMgr:GetMemberData(self.tbData.nNpcID)
+      if not tbTeammate then
+        me.CenterMsg(i18n.Get(TeamMgr.Terms.NoMember))
+        return
+      end
+      TeamMgr:RecallAMember(tbTeammate.nPlayerID)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if tbData.dwRoleId == me.dwID then
+        return false
+      end
+      if not TeamMgr:IsCaptain() then
+        return false
+      end
+      return true
+    end
+  },
+  TradeInvite = {
+    fnName = function()
+      return i18n.Get(Ui.MenuText.szTradeInvite)
+    end,
+    fnOnClick = function(self)
+      Trade:DoInviteTrade(self.tbData.dwRoleId)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return true
+    end
+  },
+  MiningInvite = {
+    fnName = function()
+      return i18n.Get(Ui.MenuText.szMiningInvite)
+    end,
+    fnOnClick = function(self)
+      MiningAgency:ReqInvite(self.tbData.dwRoleId)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return 1 == GetTimeFrameState(MiningAgency.Cfg.szOpenTimeFrame)
+    end
+  },
+  FriendApply = {
+    fnName = function(tbData)
+      return i18n.Get(Ui.MenuText.szFriendApply)
+    end,
+    fnOnClick = function(tbMenuWnd)
+      FriendShip:AddOrDelFriend(tbMenuWnd.tbData.dwRoleId, tbMenuWnd.tbData.szName)
+      tbMenuWnd:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return tbData.dwRoleId ~= me.dwID and not Ui.bInZone and not FriendShip:IsFriend(me.dwID, tbData.dwRoleId)
+    end
+  },
+  SendGift = {
+    fnName = function(tbData)
+      return i18n.Get(Ui.MenuText.szSendGift)
+    end,
+    fnOnClick = function(tbMenuWnd)
+      Ui:OpenWindow("UIGiftSystem", tbMenuWnd.tbData.dwRoleId)
+    end,
+    fnAvaliable = function(tbData)
+      return tbData.dwRoleId ~= me.dwID and not Ui.bInZone and FriendShip:IsFriend(me.dwID, tbData.dwRoleId)
+    end
+  },
+  FriendDelete = {
+    fnName = function(tbData)
+      return i18n.Get(Ui.MenuText.szFriendDelete)
+    end,
+    fnOnClick = function(self)
+      local function fnOK()
+        FriendShip:RequetDelFriend(self.tbData.dwRoleId)
+        
+        self:Close()
+      end
+      
+      local function fnCancel()
+      end
+      
+      Ui:OpenWindow("UIMessageBoxBig", i18n.EasyGet("\231\161\174\229\174\154\232\166\129\229\146\140<color=#ffff0e>{0}</color>\232\167\163\233\153\164\229\165\189\229\143\139\229\133\179\231\179\187\229\144\151\239\188\159\n\239\188\136\229\165\189\229\143\139\228\186\178\229\175\134\229\186\166\229\176\134\228\188\154\230\184\133\233\155\182\239\188\137", self.tbData.szName), {fnOK, fnCancel})
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return true
+    end
+  },
+  BlackHim = {
+    fnName = function(tbData)
+      return i18n.Get(Ui.MenuText.szBlackHim)
+    end,
+    fnOnClick = function(self)
+      FriendShip:BlackHim(self.tbData.dwRoleId)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return not FriendShip:IsHeInMyBlack(tbData.dwRoleId)
+    end
+  },
+  ReportPlayer = {
+    fnName = function(tbData)
+      return i18n.Get(Ui.MenuText.szReportPlayer)
+    end,
+    fnOnClick = function(self)
+      Ui:OpenWindow("UIReportPlayer", self.tbData.dwRoleId, self.tbData.szName, self.tbData.szMsg)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return true
+    end
+  },
+  Teacher = {
+    fnName = function(tbData)
+      if not tbData.nLevel then
+        return ""
+      end
+      local nDiffLevel = MasterPrentice:GetMinLevelDiff2(me.GetVipLevel(), tbData.nVipLevel or 0)
+      if nDiffLevel <= me.nTotalLevel - tbData.nTotalLevel then
+        return i18n.EasyGet("\230\148\182\229\190\146")
+      end
+      if nDiffLevel <= tbData.nTotalLevel - me.nTotalLevel then
+        return i18n.EasyGet("\230\139\156\229\184\136")
+      end
+    end,
+    fnOnClick = function(self)
+      local bMaster = me.nTotalLevel > self.tbData.nTotalLevel and 1 or 0
+      MasterPrentice:ApplyApprentice(self.tbData.dwRoleId, bMaster)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if Ui.bInZone then
+        return false
+      end
+      if not MasterPrentice:IsOpen() then
+        return false
+      end
+      if tbData.dwRoleId == me.dwID then
+        return false
+      end
+      if not tbData.nLevel then
+        return false
+      end
+      if me.nTotalLevel == tbData.nTotalLevel then
+        return false
+      end
+      return MasterPrentice:CheckPopUpMenuCanUse(tbData.dwRoleId, tbData.nTotalLevel, tbData.nVipLevel)
+    end
+  },
+  GetChuanGong = MakeChuanGongMenuItem({}, ChuanGong.tbRelationType.Recieve),
+  SendChuanGong = MakeChuanGongMenuItem({}, ChuanGong.tbRelationType.Send),
+  FriendGetChuanGong = MakeChuanGongMenuItem({"UISocial"}, ChuanGong.tbRelationType.Recieve),
+  FriendSendChuanGong = MakeChuanGongMenuItem({"UISocial"}, ChuanGong.tbRelationType.Send),
+  KinGetChuanGong = MakeChuanGongMenuItem({"UIKin"}, ChuanGong.tbRelationType.Recieve),
+  TongGetChuanGong = MakeChuanGongMenuItem({"UITong"}, ChuanGong.tbRelationType.Recieve),
+  KinSendChuanGong = MakeChuanGongMenuItem({"UIKin"}, ChuanGong.tbRelationType.Send),
+  TongSendChuanGong = MakeChuanGongMenuItem({"UITong"}, ChuanGong.tbRelationType.Send),
+  TongQuit = {
+    fnName = function()
+      return i18n.Get(Tong.Cfg.Msg.Quit)
+    end,
+    fnOnClick = function(self)
+      Tong:ApplyQuit()
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if not Ui:WindowVisible("UITongSetting") then
+        return false
+      end
+      return Tong:CheckApplyQuitAuthority(tbData.dwKinId) and 0 == Tong:GetCountDownTime()
+    end
+  },
+  TongCancelQuit = {
+    fnName = function()
+      return i18n.EasyGet("\229\143\150\230\182\136\233\128\128\229\184\174")
+    end,
+    fnOnClick = function(self)
+      Tong:CancelQuitTong()
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if not Ui:WindowVisible("UITongSetting") then
+        return false
+      end
+      return Tong:CheckApplyQuitAuthority(tbData.dwKinId) and Tong:GetCountDownTime() > 0
+    end
+  },
+  TongExile = {
+    fnName = function()
+      return i18n.Get(Tong.Cfg.Msg.Exile)
+    end,
+    fnOnClick = function(self)
+      Tong:ApplyExile(self.tbData.dwKinId)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if not Ui:WindowVisible("UITongSetting") then
+        return false
+      end
+      return Tong:CheckApplyExileAuthority(tbData.dwKinId)
+    end
+  },
+  TongAppoint = {
+    fnName = function()
+      return i18n.Get(Tong.Cfg.Msg.Appoint)
+    end,
+    fnOnClick = function(self)
+      Tong:Appoint(self.tbData.dwKinId)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if not Ui:WindowVisible("UITongSetting") then
+        return false
+      end
+      return Tong:CheckAppointAuthority(tbData.dwKinId)
+    end
+  },
+  TongChatForbid = {
+    fnName = function()
+      return i18n.EasyGet("\229\184\174\228\188\154\231\166\129\232\168\128")
+    end,
+    fnOnClick = function(self)
+      Tong:ChatForbid(self.tbData.dwRoleId)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return Tong:CheckCanChatForbid(tbData.dwRoleId)
+    end
+  },
+  TongChatUnforbid = {
+    fnName = function()
+      return i18n.EasyGet("\232\167\163\233\153\164\231\166\129\232\168\128")
+    end,
+    fnOnClick = function(self)
+      Tong:ChatUnforbid(self.tbData.dwRoleId)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return Tong:CheckCanChatUnforbid(tbData.dwRoleId)
+    end
+  },
+  KinApply = {
+    fnName = function()
+      return i18n.EasyGet("\229\138\160\229\133\165\229\174\182\230\151\143")
+    end,
+    fnOnClick = function(self)
+      if self.tbData.dwKinId > 0 then
+        Kin:ApplyKin(self.tbData.dwKinId)
+      end
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return tbData.dwKinId and 0 == me.dwKinId and tbData.dwKinId > 0 and me.nLevel >= Kin.Cfg.nLevelLimit
+    end
+  },
+  KinInvite = {
+    fnName = function()
+      return i18n.EasyGet("\233\130\128\229\133\165\229\174\182\230\151\143")
+    end,
+    fnOnClick = function(self)
+      Kin:Invite(self.tbData.dwRoleId)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      if tbData.dwRoleId == me.dwID then
+        return false
+      end
+      if me.dwKinId <= 0 then
+        return false
+      end
+      local tbMemberData = Kin:GetMemberData(tbData.dwRoleId)
+      if tbMemberData or tbData.nLevel < Kin.Cfg.nLevelLimit then
+        return false
+      end
+      return true
+    end
+  },
+  KinKickOutMember = {
+    fnName = function()
+      return i18n.EasyGet("\232\184\162\229\135\186\229\174\182\230\151\143")
+    end,
+    fnOnClick = function(self)
+      Kin:KickOutMember(self.tbData.dwID)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return Kin:CheckCanKickOut(tbData.nCareer)
+    end
+  },
+  KinChatForbid = {
+    fnName = function()
+      return i18n.EasyGet("\229\174\182\230\151\143\231\166\129\232\168\128")
+    end,
+    fnOnClick = function(self)
+      Kin:ChatForbid(self.tbData.dwID)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return Kin:CheckCanChatForbid(tbData.dwID, tbData.nCareer)
+    end
+  },
+  KinChatUnforbid = {
+    fnName = function()
+      return i18n.EasyGet("\232\167\163\233\153\164\231\166\129\232\168\128")
+    end,
+    fnOnClick = function(self)
+      Kin:ChatUnforbid(self.tbData.dwID)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return Kin:CheckCanChatUnforbid(tbData.dwID, tbData.nCareer)
+    end
+  },
+  LegionKickOutMember = {
+    fnName = function()
+      return i18n.EasyGet("\232\184\162\229\135\186\229\134\155\229\155\162")
+    end,
+    fnOnClick = function(self)
+      Legion:KickOutMember(self.tbData.dwID)
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return Legion:CheckCanKickOut(tbData.nCareer)
+    end
+  },
+  ChatPrivate = MakeChatPrivateMenuItem("UISocial"),
+  KinChatPrivate = MakeChatPrivateMenuItem("UIKin"),
+  TongChatPrivate = MakeChatPrivateMenuItem("UITong"),
+  LegionChatPrivate = MakeChatPrivateMenuItem("UILegion"),
+  CheckInformation = {
+    fnName = function(tbData)
+      return i18n.Get(Ui.MenuText.szCheckInformation)
+    end,
+    fnOnClick = function(tbMenuWnd)
+      ViewRole:OpenWindow("UIViewRole", tbMenuWnd.tbData.dwRoleId, tbMenuWnd.tbData.nVipLevel, tbMenuWnd.tbData.tbCurrIcon)
+      tbMenuWnd:Close()
+    end,
+    fnAvaliable = function(tbData)
+      return true
+    end
+  },
+  TryExercise = {
+    fnName = function()
+      return i18n.EasyGet("\229\136\135\231\163\139")
+    end,
+    fnOnClick = function(self)
+      if me.GetNpc().nExerciseNpcId > 0 then
+        me.CenterMsg(i18n.EasyGet("\230\173\163\229\156\168\229\136\135\231\163\139\228\184\173\239\188\140\230\151\160\230\179\149\230\143\144\229\135\186\233\130\128\232\175\183"))
+      else
+        RemoteServer.PkExerciseRequest(self.tbData.dwRoleId)
+      end
+      self:Close()
+    end,
+    fnAvaliable = function(tbData)
+      local nHisFightMode = 0
+      local pNpc = KNpc.GetByPlayerId(tbData.dwRoleId)
+      if pNpc then
+        nHisFightMode = pNpc.nFightMode
+      end
+      return 0 ~= me.nFightMode and 0 ~= nHisFightMode
+    end
+  }
+}
+
+function Ui:LoadMenuSetting()
+  local tbMenuSetting = {}
+  for szMenuType, tbInfo in pairs(self.MenuSequence) do
+    local tbBtnSetting = {}
+    for nIndex, szBtnName in ipairs(tbInfo) do
+      table.insert(tbBtnSetting, self.MenuItem[szBtnName])
+    end
+    tbMenuSetting[szMenuType] = tbBtnSetting
+  end
+  self.tbRightPopUpMenuSetting = tbMenuSetting
+end
+
+function Ui:GetMenuSetting()
+  return self.tbRightPopUpMenuSetting or {}
+end
+
+Ui:LoadMenuSetting()

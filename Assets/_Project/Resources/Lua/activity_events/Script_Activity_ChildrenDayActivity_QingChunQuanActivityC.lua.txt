@@ -1,0 +1,149 @@
+Require("CommonScript/Activity/ChildrenActivity/QingChunQuanCommon.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.QingChunQuan)
+
+function tbActivity:ServerRequest(szFuncName, ...)
+  if not self[szFuncName] then
+    return
+  end
+  self[szFuncName](self, ...)
+end
+
+function tbActivity:GetRedPointEventId()
+  return {
+    RedPointMgr.EVENT.QingChunQuanExtraAward,
+    RedPointMgr.EVENT.QingChunQuanXingFuQuanMake,
+    RedPointMgr.EVENT.QingChunQuanHuanLeQuanMake,
+    RedPointMgr.EVENT.QingChunQuanFirstOpen
+  }
+end
+
+function tbActivity:S2CRefreshData()
+  self:TryLightRedPoint()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_QINGCHUNQUAN_DATA_SYNC)
+  if not self.bInit then
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.OnItemUpdate, self)
+    self.bInit = true
+  end
+end
+
+function tbActivity:InitExtraData()
+  self.SaveKey = self.nSaveGroupId
+end
+
+function tbActivity:MakeXingFuQuan(nQuanNum)
+  ActivityMgr:CallServerScriptV2(self.nId, tbActivity.Protocol.MakeXingFuQuan, nQuanNum)
+end
+
+function tbActivity:MakeHuanLeQuan(nQuanNum)
+  ActivityMgr:CallServerScriptV2(self.nId, tbActivity.Protocol.MakeHuanLeQuan, nQuanNum)
+end
+
+function tbActivity:CloseSyncTimer()
+  if self.nSyncItem then
+    Timer:Close(self.nSyncItem)
+    self.nSyncItem = nil
+  end
+end
+
+function tbActivity:TryLightRedPoint()
+  self:CloseSyncTimer()
+  local bCanGetXingFuQuanExtraAward = self:QuanCanGetExtraAward(self.QUANTYPE.XINGFUQUAN)
+  local bCanGetHuanLeQuanExtraAward = self:QuanCanGetExtraAward(self.QUANTYPE.HUANLEQUAN)
+  if bCanGetXingFuQuanExtraAward or bCanGetHuanLeQuanExtraAward then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.QingChunQuanExtraAward)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.QingChunQuanExtraAward)
+  end
+  if self:CheckPlayerCanMakeQuan(me, self.QUANTYPE.XINGFUQUAN, 1) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.QingChunQuanXingFuQuanMake)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.QingChunQuanXingFuQuanMake)
+  end
+  if self:CheckPlayerCanMakeQuan(me, self.QUANTYPE.HUANLEQUAN, 1) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.QingChunQuanHuanLeQuanMake)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.QingChunQuanHuanLeQuanMake)
+  end
+  if 0 == Ui.PlayerPrefs.GetInt("QingChunQuanFirst", 0) and self:IsOpen() then
+    print("Firstopen2")
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.QingChunQuanFirstOpen)
+  else
+    print("Firstopen 3")
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.QingChunQuanFirstOpen)
+  end
+end
+
+function tbActivity:GetExtraAwardList(nQuanType)
+  if nQuanType == self.QUANTYPE.XINGFUQUAN then
+    return self:GetExtraAwardListHelper(self.tbConfig.XingFuQuanExtraAward)
+  end
+  if nQuanType == self.QUANTYPE.HUANLEQUAN then
+    return self:GetExtraAwardListHelper(self.tbConfig.HuanLeQuanExtraAward)
+  end
+  return {}
+end
+
+function tbActivity:GetExtraAwardListHelper(tbExtraAwardList)
+  local tbList = {}
+  local tbCurList = {}
+  for _, tbInfo in ipairs(tbExtraAwardList or {}) do
+    tbCurList[tbInfo.szAwardType] = tbCurList[tbInfo.szAwardType] or self:GetCurSubmissionNum(me, tbInfo.szAwardType)
+    table.insert(tbList, {
+      szInfo = i18n.Parse(tbInfo.szInfo),
+      nNeedNum = tbInfo.nNeedQuanNum,
+      bSuccess = me.GetUserValue(self.SaveKey, self.AwardSaveID[tbInfo.nIndex]) > 0,
+      nCurNum = tbCurList[tbInfo.szAwardType],
+      tbAward = Award:GetAward(tbInfo.nAwardID, tbInfo.nAwardKey)
+    })
+  end
+  return tbList
+end
+
+function tbActivity:GetCurSubmissionNum(pPlayer, szAwardType)
+  if szAwardType == self.AwardType.XINGFUQUAN then
+    return pPlayer.GetUserValue(self.SaveKey, self.nSaveHandInXingFuQuanID)
+  end
+  if szAwardType == self.AwardType.HUANLEQUAN then
+    return pPlayer.GetUserValue(self.SaveKey, self.nSaveHandInHuanLeQuanID)
+  end
+  return 0
+end
+
+function tbActivity:GetExtraAward(nQuanType, nIndex)
+  ActivityMgr:CallServerScriptV2(self.nId, tbActivity.Protocol.GetExtraAward, nQuanType, nIndex)
+end
+
+function tbActivity:OnItemUpdate()
+  if not self.nSyncItem then
+    self.nSyncItem = Timer:Register(Env.GAME_FPS * MathRandom(1, 3), self.TryLightRedPoint, self)
+  end
+end
+
+function tbActivity:QuanCanGetExtraAward(nQuanType)
+  local tbAllExtraAward = self:GetExtraAwardCfg(nQuanType)
+  if not tbAllExtraAward then
+    LogErr("QuanCanGetExtraAward data error")
+    return
+  end
+  for i, tbExtraAward in ipairs(tbAllExtraAward) do
+    if self:CanGetExtraAward(me, nQuanType, i) then
+      return true
+    end
+  end
+  return false
+end
+
+function tbActivity:QuanAllExtraAwardHasGet(nQuanType)
+  local tbAllExtraAward = self:GetExtraAwardCfg(nQuanType)
+  if not tbAllExtraAward then
+    LogErr("QuanAllExtraAwardHasGet data error")
+    return
+  end
+  for i, tbExtraAward in ipairs(tbAllExtraAward) do
+    if not self:HasGetExtraAward(me, tbExtraAward.nIndex) then
+      return false
+    end
+  end
+  return true
+end

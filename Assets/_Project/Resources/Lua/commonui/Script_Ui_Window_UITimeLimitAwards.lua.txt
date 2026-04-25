@@ -1,0 +1,213 @@
+local tbUi = Ui:CreateWindow("UITimeLimitAwards")
+
+function tbUi:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_LIMITEDTIMEGIFT_SYNC,
+      self.UpdateDetails
+    }
+  }
+end
+
+tbUi.tbControls = {
+  txtTitle = "node/TimeLimitAwards/txtTitle",
+  btnClose = "node/TimeLimitAwards/btnClose",
+  txtCountdown = "node/TimeLimitAwards/Content/txtCountdown",
+  itemTemplate = "node/TimeLimitAwards/Content/AwardsList/item",
+  OriginalPrice = "node/TimeLimitAwards/Content/OriginalPrice",
+  DiscountPrice = "node/TimeLimitAwards/Content/DiscountPrice",
+  PresentPrice = "node/TimeLimitAwards/Content/PresentPrice",
+  txtCountValue = "node/TimeLimitAwards/Content/Count/txtCountValue",
+  btnBuy = "node/TimeLimitAwards/Content/btnBuy",
+  btnRight = "node/TimeLimitAwards/btnRight",
+  btnLeft = "node/TimeLimitAwards/btnLeft",
+  goBtnList = "node/TimeLimitAwards/btnsScrollView",
+  goBtnListTemp = "node/TimeLimitAwards/btnsScrollView/Viewport/btnList/btnTemplate"
+}
+tbUi.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnBuy = function(self)
+    self:OnBuy()
+  end,
+  btnLeft = function(self)
+    self:OnClickBtnLeft()
+  end,
+  btnRight = function(self)
+    self:OnClickBtnRight()
+  end
+}
+
+function tbUi:OnCreate()
+  self.tbItemScrollView = Ui:NewScrollView(self, self.itemTemplate)
+  self.tbGiftTypeScrollView = Ui:NewScrollView(self, self.goBtnListTemp, function(self, nIndex, tbElement)
+    self:OnClickBtnType(nIndex)
+  end, false, true)
+end
+
+function tbUi:OnOpen()
+  if not LimitedTimeGift.tbGiftList then
+    return
+  end
+  if not next(LimitedTimeGift.tbGiftList) then
+    self:Close()
+    return
+  end
+  self:GetAllGiftInfo()
+  self:UpdateTypeList()
+end
+
+function tbUi:GetAllGiftInfo()
+  if not next(LimitedTimeGift.tbGiftList) then
+    self:Close()
+    return
+  end
+  self.tbAllGiftInfo = LimitedTimeGift:GetAllGiftInfo()
+  if not self.tbAllGiftInfo then
+    self:Close()
+    return
+  end
+end
+
+function tbUi:UpdateTypeList()
+  self.nSelectedGiftType = 0
+  self.nSelectedGiftIndex = 0
+  self.tbIndex2Type = {}
+  self.tbGiftTypeScrollView:Clear()
+  local nCount = 0
+  for nGiftType, _ in pairs(self.tbAllGiftInfo) do
+    nCount = nCount + 1
+    self.tbGiftTypeScrollView:SetElement(nCount, function(tbElement)
+      tbElement.pPanel:Label_SetText("Text", LimitedTimeGift.TRIGGER_NAME[nGiftType]())
+    end)
+    self.tbIndex2Type[nCount] = nGiftType
+  end
+  self.tbGiftTypeScrollView:ScrollToIndex(1, true)
+end
+
+function tbUi:OnClickBtnLeft()
+  if self.nSelectedGiftIndex <= 1 then
+    return
+  end
+  local tbLastGiftInfo = self.tbAllGiftInfo[self.nSelectedGiftType][self.nSelectedGiftIndex - 1]
+  self.nSelectedGiftIndex = self.nSelectedGiftIndex - 1
+  self:UpdateDetails(tbLastGiftInfo)
+end
+
+function tbUi:OnClickBtnRight()
+  if self.nSelectedGiftIndex >= Lib:CountTB(self.tbAllGiftInfo[self.nSelectedGiftType]) then
+    return
+  end
+  local tbNextGiftInfo = self.tbAllGiftInfo[self.nSelectedGiftType][self.nSelectedGiftIndex + 1]
+  self.nSelectedGiftIndex = self.nSelectedGiftIndex + 1
+  self:UpdateDetails(tbNextGiftInfo)
+end
+
+function tbUi:OnClickBtnType(nIndex)
+  self.nSelectedGiftType = self.tbIndex2Type[nIndex]
+  self.nSelectedGiftIndex = 1
+  local _, tbFirstGiftInfo = next(self.tbAllGiftInfo[self.nSelectedGiftType])
+  self:UpdateDetails(tbFirstGiftInfo)
+end
+
+function tbUi:UpdateDetails(tbInfo)
+  self.tbCurrentGiftInfo = tbInfo
+  if not self.tbCurrentGiftInfo then
+    self:Close()
+    return
+  end
+  local tbGiftSetting = LimitedTimeGift:GetGiftSettingByGiftId(self.tbCurrentGiftInfo.nGiftType, self.tbCurrentGiftInfo.nGiftId)
+  if not tbGiftSetting then
+    LogErr("UITimeLimitAwards:UpdateDetails. not tbGiftSetting", self.tbCurrentGiftInfo.nGiftId)
+    self:Close()
+    return
+  end
+  self.pPanel:Label_SetText(self.txtTitle, i18n.Parse(tbGiftSetting.szGiftName))
+  self:_UpdateLeftTime()
+  local tbAwards = Award:GetAward(tbGiftSetting.nAwardId, tbGiftSetting.nAwardKey)
+  
+  local function fnSetItem(tbItemElement, nIndex)
+    local tbAwardItem = tbAwards[nIndex]
+    tbItemElement.itemGrid1 = tbItemElement.itemGrid1 or Ui:NewExistItemGrid(tbItemElement, "UIItemGrid")
+    tbItemElement.itemGrid1:SetGenericItem(tbAwardItem)
+    tbItemElement.itemGrid1.fnClick = tbItemElement.itemGrid1.DefaultClick
+  end
+  
+  self.tbItemScrollView:Clear()
+  for nIndex = 1, Lib:CountTB(tbAwards) do
+    self.tbItemScrollView:SetElement(nIndex, function(tbItemElement)
+      fnSetItem(tbItemElement, nIndex)
+    end)
+  end
+  local szIcon = Currency:GetIcon(tbGiftSetting.szMoneyType)
+  local nDiscount = math.ceil(tbGiftSetting.nPrice / tbGiftSetting.nFullPrice * 10)
+  self.pPanel:Sprite_SetSprite(self.OriginalPrice .. "/imgGold", szIcon)
+  self.pPanel:Label_SetText(self.OriginalPrice .. "/txtPrice", tbGiftSetting.nFullPrice)
+  self.pPanel:Label_SetText(self.DiscountPrice .. "/txtDiscount", i18n.GetDiscountText(nDiscount))
+  self.pPanel:Sprite_SetSprite(self.PresentPrice .. "/imgGold", szIcon)
+  self.pPanel:Label_SetText(self.PresentPrice .. "/txtPrice", tbGiftSetting.nPrice)
+  self.pPanel:Label_SetText(self.txtCountValue, string.format("%d/%d", self.tbCurrentGiftInfo.nBuyCount, tbGiftSetting.nMaxBuyCount))
+  if Lib:CountTB(self.tbAllGiftInfo[self.nSelectedGiftType]) <= 1 then
+    self.pPanel:SetActive(self.btnLeft, false)
+    self.pPanel:SetActive(self.btnRight, false)
+  elseif self.nSelectedGiftIndex <= 1 then
+    self.pPanel:SetActive(self.btnLeft, false)
+    self.pPanel:SetActive(self.btnRight, true)
+  elseif self.nSelectedGiftIndex >= Lib:CountTB(self.tbAllGiftInfo[self.nSelectedGiftType]) then
+    self.pPanel:SetActive(self.btnLeft, true)
+    self.pPanel:SetActive(self.btnRight, false)
+  else
+    self.pPanel:SetActive(self.btnLeft, true)
+    self.pPanel:SetActive(self.btnRight, true)
+  end
+end
+
+function tbUi:_UpdateLeftTime()
+  if not self.tbCurrentGiftInfo then
+    return
+  end
+  local nCurTime = GetTime()
+  local nLeftTime = self.tbCurrentGiftInfo.nEndTime - nCurTime
+  if nLeftTime <= 0 then
+    self.pPanel:Label_SetText(self.txtCountdown, i18n.EasyGet("\229\183\178\231\187\147\230\157\159"))
+  else
+    self.pPanel:Label_SetText(self.txtCountdown, LimitedTimeGift:TimeDesc(nLeftTime))
+  end
+end
+
+function tbUi:OnFixedUpdate()
+  self:_UpdateLeftTime()
+end
+
+function tbUi:OnBuy()
+  if not self.tbCurrentGiftInfo then
+    return
+  end
+  local nCurTime = GetTime()
+  local nLeftTime = self.tbCurrentGiftInfo.nEndTime - nCurTime
+  if nLeftTime <= 0 then
+    me.CenterMsg(i18n.EasyGet("\231\164\188\229\140\133\229\183\178\229\164\177\230\149\136"))
+    return
+  end
+  local tbGiftSetting = LimitedTimeGift:GetGiftSettingByGiftId(self.tbCurrentGiftInfo.nGiftType, self.tbCurrentGiftInfo.nGiftId)
+  if not tbGiftSetting then
+    return
+  end
+  if self.tbCurrentGiftInfo.nBuyCount >= tbGiftSetting.nMaxBuyCount then
+    me.CenterMsg(i18n.EasyGet("\231\164\188\229\140\133\229\183\178\229\148\174\231\189\132"))
+    return
+  end
+  if GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\229\156\176\229\155\190\230\151\160\230\179\149\232\191\155\232\161\140\230\173\164\230\147\141\228\189\156"))
+    return
+  end
+  local nMoney = me.GetMoney(tbGiftSetting.szMoneyType)
+  if nMoney < tbGiftSetting.nPrice then
+    if not GainCurrency:ReadyForJump(tbGiftSetting.szMoneyType) then
+      me.CenterMsg(i18n.EasyGet("{0}\228\184\141\232\182\179", Currency:GetName(tbGiftSetting.szMoneyType)))
+    end
+    return
+  end
+  RemoteServer.RequestBuyLimitedTimeGift(self.tbCurrentGiftInfo.nGiftType, self.tbCurrentGiftInfo.nGiftId)
+end

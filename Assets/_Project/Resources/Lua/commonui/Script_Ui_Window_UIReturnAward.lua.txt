@@ -1,0 +1,587 @@
+local tbWnd = Ui:CreateClass("UIReturnAward", "UIPanel")
+local tbControls = {
+  btnTemplate = "btnList2/btnTemplate",
+  goActiveAward = "ActiveAward",
+  goAwardTemplate = "ActiveAward/List/Viewport/Content/Template",
+  txtDailySignInTips = "ActiveAward/txtTips",
+  goReturnFund = "ReturnFund",
+  goFundTemplate = "ReturnFund/List/Viewport/Content/Template",
+  btnFundBuy = "ReturnFund/btnBuy",
+  txtFundBuyText = "ReturnFund/btnBuy/Text",
+  txtDailyFundTips = "ReturnFund/txtTips",
+  goExtraAward = "ExtraAward",
+  goExtraAwardTemplate = "ExtraAward/List/Viewport/Content/Template",
+  goDiscountShop = "DiscountShop",
+  goPnlContant = "DiscountShop/GoodsList/ItemSVWid/Viewport/pnlContant",
+  goItemCell = "DiscountShop/GoodsList/ItemSVWid/Viewport/pnlContant/ElementTemplate",
+  goNotInfo = "DiscountShop/GoodsList/NotInfo",
+  goJiangHu = "JiangHu",
+  goJiangHuItemGrid = "JiangHu/Cell1/UIItemGrid",
+  btnGet = "JiangHu/Cell1/btnGet",
+  txtReward = "JiangHu/Cell1/txtReward",
+  imgHave = "JiangHu/Cell1/img_Have",
+  btnGo = "JiangHu/Cell2/btnGo",
+  txtContent = "JiangHu/Cell2/txtContent1"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnFundBuy = function()
+    FriendsReturn:BuyReturnerFundReq()
+  end,
+  btnGet = function()
+    FriendsReturn:GetSpecialActivityClothingAwardReq()
+  end,
+  btnGo = function()
+    FriendsReturn:ChuanGongReq()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.bIsSpActivity = false
+  self.tbAwardListGroup = {}
+  self.tbButtonGroup = Ui:NewScrollView(self, tbControls.btnTemplate, function(self, nIndex)
+    self:OnSelect(nIndex)
+  end, false, false)
+  self.tbDailySignInList = Ui:NewScrollView(self, tbControls.goAwardTemplate, nil, false, true)
+  self.tbDailyFundList = Ui:NewScrollView(self, tbControls.goFundTemplate, nil, false, true)
+  self.tbReturnerActivity = Ui:NewScrollView(self, tbControls.goExtraAwardTemplate, nil, false, true)
+  self.tbWareScroll = Ui:NewLoopScrollView(self, tbControls.goItemCell, "Cell")
+  self.nRow = 4
+  if FriendsReturn:CheckIsPlayerSpecialReturner(me) then
+    self.bIsSpActivity = true
+  else
+    self.bIsSpActivity = false
+  end
+  self:SetButtonGroupInfo()
+end
+
+function tbWnd:OnOpen()
+  self:UpdateView()
+  local nReturnerStartTime = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerStartTime)
+  local nReturnerEndTime = nReturnerStartTime + FriendsReturn.Cfg.nReturnerContinueTIme
+  if nReturnerEndTime < GetTime() then
+    self.tbButtonGroup:OnClickElement(3)
+  elseif self.bIsSpActivity then
+    self.tbButtonGroup:OnClickElement(1)
+  else
+    self.tbButtonGroup:OnClickElement(2)
+  end
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ReturnerFirstTime)
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:UpdateView()
+  self:CheckIsSpecialActivity()
+  self:SetDailySignIn()
+  self:SetDailyFund()
+  self:SetReturnerActivity()
+  self:UpdateShopItemList()
+end
+
+local tbButtonGroupName = {
+  [1] = function()
+    return i18n.EasyGet("\229\134\141\233\151\175\230\177\159\230\185\150")
+  end,
+  [2] = function()
+    return i18n.EasyGet("\230\180\187\232\183\131\231\164\188")
+  end,
+  [3] = function()
+    return i18n.EasyGet("\229\155\158\229\189\146\229\159\186\233\135\145")
+  end,
+  [4] = function()
+    return i18n.EasyGet("\229\155\158\229\189\146\229\149\134\229\186\151")
+  end,
+  [5] = function()
+    return i18n.EasyGet("\232\181\132\230\186\144\229\138\169\229\138\155")
+  end
+}
+local tbButtonGroupRedPoint = {
+  [2] = {
+    RedPointMgr.EVENT.ReturnerDailySignIn
+  },
+  [3] = {
+    RedPointMgr.EVENT.ReturnerDailyFund
+  }
+}
+
+function tbWnd:SetButtonGroupInfo()
+  self.tbButtonGroup:Reset()
+  for k, v in ipairs(tbButtonGroupName) do
+    self.tbButtonGroup:SetElement(k, function(tbElement)
+      self:UpdateButtonGroupTemplate(k, v(), tbElement)
+    end)
+  end
+end
+
+function tbWnd:UpdateButtonGroupTemplate(nCount, szText, tbElement)
+  local pPanel = tbElement.pPanel
+  pPanel:Label_SetText("text", szText)
+  local nReturnerStartTime = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerStartTime)
+  local nReturnerEndTime = nReturnerStartTime + FriendsReturn.Cfg.nReturnerContinueTIme
+  if not self.bIsSpActivity and 1 == nCount then
+    pPanel:SetActive("Main", false)
+    return
+  end
+  if nReturnerEndTime < GetTime() and 3 ~= nCount then
+    pPanel:SetActive("Main", false)
+    return
+  end
+  if tbButtonGroupRedPoint[nCount] then
+    RedPointMgr:DynamicRegisteRedPoint(pPanel, "Main", tbButtonGroupRedPoint[nCount])
+  end
+end
+
+function tbWnd:CheckIsSpecialActivity()
+  if FriendsReturn:CheckIsPlayerSpecialReturner(me) then
+    self.bIsSpActivity = true
+  else
+    self.bIsSpActivity = false
+  end
+  local bCanGetClothingAward = FriendsReturn:CheckIfPlayerCanGetSpecialClothingGift(me)
+  if not bCanGetClothingAward then
+    self.pPanel:SetActive(tbControls.btnGet, false)
+    self.pPanel:SetActive(tbControls.imgHave, true)
+  else
+    self.pPanel:SetActive(tbControls.btnGet, true)
+    self.pPanel:SetActive(tbControls.imgHave, false)
+  end
+  self.ClothingItemGrid = Ui:NewExistItemGrid(self, tbControls.goJiangHuItemGrid)
+  local tbAwardInfo = Lib:GetAwardFromString(FriendsReturn.Cfg.SpecialActivity.szClothingGiftData)
+  local nAwardTemplateId = tbAwardInfo[1][2] or 0
+  local szDesc = Award:GetAwardDescCount(me, tbAwardInfo[1], false, false)
+  self.ClothingItemGrid:SetItemByTemplate(nAwardTemplateId, 0)
+  self.ClothingItemGrid:SetClickEnable(true)
+  self.pPanel:Label_SetText(tbControls.txtReward, i18n.Parse(szDesc))
+  local nCurMaxLevel = FriendsReturn:GetMaxLevel()
+  local nTargetLevel = nCurMaxLevel - 10
+  self.pPanel:Label_SetText(tbControls.txtContent, i18n.EasyGet("\231\173\137\231\186\167\228\189\142\228\186\142<color=#0A6F32>{0}</color>\231\186\167\231\154\132\231\142\169\229\174\182\239\188\140\229\143\175\229\137\141\229\190\128\233\151\168\230\180\190\229\164\132\239\188\140\230\142\165\229\143\151\233\151\168\230\180\190\230\142\140\233\151\168\228\188\160\229\138\159\239\188\140\228\188\160\229\138\159\229\174\140\230\136\144\229\144\142\239\188\140\229\164\167\228\190\160\231\173\137\231\186\167\229\176\134\231\155\180\230\142\165\230\143\144\229\141\135\232\135\179<color=#0A6F32>{1}</color>\231\186\167", Lib:GetLevelText(nTargetLevel), Lib:GetLevelText(nTargetLevel)))
+end
+
+function tbWnd:SetDailySignIn()
+  for k, v in pairs(self.tbAwardListGroup) do
+    v:Clear()
+  end
+  self.tbAwardListGroup = {}
+  self.tbDailySignInList:Clear()
+  local bIsSpecialReturner = FriendsReturn:CheckIsPlayerSpecialReturner(me)
+  local nNowSignInDay = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerDailySignInCheck)
+  local nNowSignInCanGetDay = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerDailySignInCanGetCheck)
+  local nReturnerStartTime = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerStartTime)
+  local nLeftTime = nReturnerStartTime + FriendsReturn.Cfg.nReturnerContinueTIme - GetTime()
+  local tbSignInAwardInfo = FriendsReturn.tbDailySignInInfo
+  if bIsSpecialReturner then
+    tbSignInAwardInfo = FriendsReturn.tbSpecialDailySignInInfo
+  end
+  local nListCount = 1
+  for i = 1, Lib:CountTB(tbSignInAwardInfo) do
+    if nNowSignInDay < i then
+      self.tbDailySignInList:SetElement(nListCount, function(tbElement)
+        self:UpdateDailySignInTemplate(i, tbElement, tbSignInAwardInfo[i], nNowSignInDay, nNowSignInCanGetDay)
+      end)
+      nListCount = nListCount + 1
+    end
+  end
+  for i = 1, Lib:CountTB(tbSignInAwardInfo) do
+    if nNowSignInDay >= i then
+      self.tbDailySignInList:SetElement(nListCount, function(tbElement)
+        self:UpdateDailySignInTemplate(i, tbElement, tbSignInAwardInfo[i], nNowSignInDay, nNowSignInCanGetDay)
+      end)
+      nListCount = nListCount + 1
+    end
+  end
+  self.pPanel:Label_SetText(tbControls.txtDailySignInTips, i18n.EasyGet("\229\137\169\228\189\153\231\187\147\230\157\159\230\151\182\233\151\180 {0}\239\188\140\230\175\143\229\164\169\230\180\187\232\183\131\229\186\166\230\187\161{1}\229\143\175\233\162\134\229\143\150\229\165\150\229\138\177", Lib:TimeDesc5(nLeftTime), FriendsReturn.Cfg.nDailySignActivePoint))
+end
+
+function tbWnd:UpdateDailySignInTemplate(nDay, tbElement, szInfo, nNowSignInDay, nNowSignInCanGetDay)
+  local pPanel = tbElement.pPanel
+  local tbAwardsList = Ui:NewItemGridView(tbElement, "ItemList/item")
+  table.insert(self.tbAwardListGroup, tbAwardsList)
+  local tbAwardInfo = Lib:GetAwardFromString(szInfo)
+  pPanel:Label_SetText("txtDay", i18n.EasyGet("\231\172\172{0}\229\164\169", nDay))
+  for nId, tbAward in pairs(tbAwardInfo) do
+    tbAwardsList:SetItem(nId, tbAward, true)
+  end
+  if nDay <= nNowSignInDay then
+    pPanel:SetActive("btnGet", false)
+    pPanel:SetActive("imgComplete", true)
+  elseif nDay <= nNowSignInCanGetDay then
+    pPanel:SetActive("btnGet", true)
+    pPanel:Button_SetEnable("btnGet", true)
+    pPanel:Label_SetText("btnGet/Text", i18n.EasyGet("\233\162\134\229\143\150"))
+    pPanel:Button_BindEvent("btnGet", function()
+      FriendsReturn:GetReturnerDailyAwardReq()
+    end)
+    RedPointMgr:DynamicRegisteRedPoint(pPanel, "btnGet", {
+      RedPointMgr.EVENT.ReturnerDailySignIn
+    })
+  else
+    pPanel:SetActive("btnGet", true)
+    pPanel:Button_SetEnable("btnGet", false)
+    pPanel:Label_SetText("btnGet/Text", i18n.EasyGet("\230\156\170\232\190\190\229\136\176"))
+  end
+end
+
+function tbWnd:SetDailyFund()
+  self.tbDailyFundList:Clear()
+  local nPayRewards = 0
+  local szShowPrice = ""
+  local tbProduct = Recharge:GetReturnerFundSetting()
+  if tbProduct then
+    local tbProductSetting = Recharge:GetProductSettingById(tbProduct.nProductId)
+    if tbProductSetting and tbProductSetting.tbFirstExtraAwards then
+      local szRewardType, nRewardVal = table.unpack(tbProductSetting.tbFirstExtraAwards[1])
+      nPayRewards = "YuanBao" == szRewardType and nRewardVal or 0
+      szShowPrice = Recharge:GetShowPrice(tbProductSetting)
+    end
+  end
+  local nBuyFund = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerDailyFundBuy)
+  local nNowFundDay = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerDailyFundCheck)
+  local nNowFundCanGetDay = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerDailyFundCanGetCheck)
+  local nListCount = 1
+  for i = 1, Lib:CountTB(FriendsReturn.tbDailyFundInfo) do
+    if nNowFundDay < i then
+      self.tbDailyFundList:SetElement(nListCount, function(tbElement)
+        self:UpdateDailyFundTemplate(i, tbElement, FriendsReturn.tbDailyFundInfo[i], nBuyFund, nNowFundDay, nNowFundCanGetDay)
+      end)
+      nListCount = nListCount + 1
+    end
+  end
+  for i = 1, Lib:CountTB(FriendsReturn.tbDailyFundInfo) do
+    if nNowFundDay >= i then
+      self.tbDailyFundList:SetElement(nListCount, function(tbElement)
+        self:UpdateDailyFundTemplate(i, tbElement, FriendsReturn.tbDailyFundInfo[i], nBuyFund, nNowFundDay, nNowFundCanGetDay)
+      end)
+      nListCount = nListCount + 1
+    end
+  end
+  local nExpandTime = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerDailyFundExpandTime) - GetTime()
+  if nExpandTime <= 0 then
+    local nReturnerStartTime = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerStartTime)
+    nExpandTime = nReturnerStartTime + FriendsReturn.Cfg.nReturnerContinueTIme - GetTime()
+  end
+  self.pPanel:Label_SetText(tbControls.txtDailyFundTips, i18n.EasyGet("\229\137\169\228\189\153\231\187\147\230\157\159\230\151\182\233\151\180 {0}\227\128\130\232\180\173\228\185\176\229\155\158\229\189\146\229\159\186\233\135\145\239\188\140\231\171\139\229\190\151{1}\229\133\131\229\174\157\239\188\140\230\175\143\230\151\165\231\153\187\229\189\149\228\186\171\232\191\148\229\136\169", Lib:TimeDesc5(nExpandTime), nPayRewards))
+  self.pPanel:Label_SetText(tbControls.txtFundBuyText, szShowPrice)
+  if 1 == nBuyFund then
+    self.pPanel:SetActive(tbControls.btnFundBuy, false)
+  else
+    self.pPanel:SetActive(tbControls.btnFundBuy, true)
+  end
+end
+
+function tbWnd:UpdateDailyFundTemplate(nDay, tbElement, szInfo, nBuyFund, nNowFundDay, nNowFundCanGetDay)
+  local pPanel = tbElement.pPanel
+  local tbAwardInfo = Lib:GetAwardFromString(szInfo)
+  pPanel:Label_SetText("txtDay", i18n.EasyGet("\231\153\187\229\189\149{0}\229\164\169", nDay))
+  pPanel:Label_SetText("Price/txtPriceValue", tbAwardInfo[1][2])
+  if 0 == nBuyFund then
+    pPanel:SetActive("btnGet", true)
+    pPanel:Button_SetEnable("btnGet", false)
+    pPanel:Label_SetText("btnGet/Text", i18n.EasyGet("\230\156\170\232\180\173\228\185\176"))
+  elseif nDay <= nNowFundDay then
+    pPanel:SetActive("btnGet", false)
+    pPanel:SetActive("imgComplete", true)
+  elseif nDay <= nNowFundCanGetDay then
+    pPanel:SetActive("btnGet", true)
+    pPanel:Button_SetEnable("btnGet", true)
+    pPanel:Label_SetText("btnGet/Text", i18n.EasyGet("\233\162\134\229\143\150"))
+    pPanel:Button_BindEvent("btnGet", function()
+      FriendsReturn:GetReturnerFundAwardReq()
+    end)
+    RedPointMgr:DynamicRegisteRedPoint(pPanel, "btnGet", {
+      RedPointMgr.EVENT.ReturnerDailyFund
+    })
+  else
+    pPanel:SetActive("btnGet", true)
+    pPanel:Button_SetEnable("btnGet", false)
+    pPanel:Label_SetText("btnGet/Text", i18n.EasyGet("\230\156\170\232\190\190\229\136\176"))
+  end
+end
+
+function tbWnd:SetReturnerActivity()
+  local nDayLeft = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerDayOffset)
+  local nVipLevel = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerVipLevel)
+  local tbActivityInfo = {
+    [1] = {
+      szTitle = i18n.EasyGet("10\229\128\141\228\191\174\231\130\188\230\151\182\233\151\180"),
+      szTitleDesc = i18n.EasyGet("\229\133\141\232\180\185\232\142\183\229\190\1511\229\176\143\230\151\182\231\154\13210\229\128\141\228\191\174\231\130\188\230\151\182\233\151\180"),
+      szTimeDesc = i18n.EasyGet("\230\172\161\230\149\176"),
+      nCurCount = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerXiuLianTimeLeft),
+      nMaxCount = FriendsReturn:CalcPlayerReturnerAwardTime(FriendsReturn.Cfg.AwardCount.tbXiuLianTime, FriendsReturn.Cfg.AwardVipEffect.tbXiuLianTime, nDayLeft, nVipLevel),
+      fOnClick = function()
+        FriendsReturn:GetReturnerXiuLianRestoreReq()
+      end,
+      szBtnText = i18n.EasyGet("\233\135\141\231\189\174")
+    },
+    [2] = {
+      szTitle = i18n.EasyGet("\229\174\182\230\151\143\230\141\144\231\140\174"),
+      szTitleDesc = i18n.EasyGet("\229\143\175\228\187\165\233\135\141\231\189\174\228\187\138\229\164\169\231\154\132\230\141\144\231\140\174\230\172\161\230\149\176"),
+      szTimeDesc = i18n.EasyGet("\230\172\161\230\149\176"),
+      nCurCount = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerJiaZuJuanXianTimeLeft),
+      nMaxCount = FriendsReturn:CalcPlayerReturnerAwardTime(FriendsReturn.Cfg.AwardCount.tbJiaZuJuanXianTime, FriendsReturn.Cfg.AwardVipEffect.tbJiaZuJuanXianTime, nDayLeft, nVipLevel),
+      fOnClick = function()
+        FriendsReturn:GetReturnerJiaZuJuanXianRestoreReq()
+      end,
+      szBtnText = i18n.EasyGet("\233\135\141\231\189\174")
+    },
+    [3] = {
+      szTitle = i18n.EasyGet("\232\162\171\228\188\160\229\138\159\230\172\161\230\149\176\233\135\141\231\189\174"),
+      szTitleDesc = i18n.EasyGet("\233\135\141\231\189\174\229\189\147\229\137\141\232\162\171\228\188\160\229\138\159\230\172\161\230\149\176\239\188\140\232\142\183\229\190\151\230\155\180\229\164\154\231\154\132\232\162\171\228\188\160\229\138\159\230\156\186\228\188\154"),
+      szTimeDesc = i18n.EasyGet("\230\172\161\230\149\176"),
+      nCurCount = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerChuanGongTimeLeft),
+      nMaxCount = FriendsReturn:CalcPlayerReturnerAwardTime(FriendsReturn.Cfg.AwardCount.tbChuanGongTime, FriendsReturn.Cfg.AwardVipEffect.tbChuanGongTime, nDayLeft, nVipLevel),
+      fOnClick = function()
+        FriendsReturn:GetReturnerChuanGongRestoreReq()
+      end,
+      szBtnText = i18n.EasyGet("\233\135\141\231\189\174")
+    },
+    [4] = {
+      szTitle = i18n.EasyGet("\230\139\155\232\180\162\232\191\155\229\174\157"),
+      szTitleDesc = i18n.EasyGet("\230\182\136\232\128\151\229\133\141\232\180\185\230\172\161\230\149\176\232\191\155\232\161\140\230\145\135\233\146\177\230\160\145"),
+      szTimeDesc = i18n.EasyGet("\230\172\161\230\149\176"),
+      nCurCount = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerYaoQianShuTimeLeft),
+      nMaxCount = FriendsReturn:CalcPlayerReturnerAwardTime(FriendsReturn.Cfg.AwardCount.tbYaoQianShuTime, FriendsReturn.Cfg.AwardVipEffect.tbYaoQianShuTime, nDayLeft, nVipLevel),
+      fOnClick = function()
+        FriendsReturn:GetReturnerYaoQianShuRestoreReq()
+      end,
+      szBtnText = i18n.EasyGet("\229\133\141\232\180\185\230\145\135\233\146\177")
+    },
+    [5] = {
+      szTitle = i18n.EasyGet("\229\174\139\233\135\145\230\136\152\229\156\186"),
+      szTitleDesc = i18n.EasyGet("\229\143\175\228\187\165\233\135\141\231\189\174\228\187\138\229\164\169\231\154\132\229\174\139\233\135\145\230\136\152\229\156\186\229\143\175\229\143\130\228\184\142\230\172\161\230\149\176"),
+      szTimeDesc = i18n.EasyGet("\230\172\161\230\149\176"),
+      nCurCount = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerSongJinTimeLeft),
+      nMaxCount = FriendsReturn:CalcPlayerReturnerAwardTime(FriendsReturn.Cfg.AwardCount.tbSongJinTime, FriendsReturn.Cfg.AwardVipEffect.tbSongJinTime, nDayLeft, nVipLevel),
+      fOnClick = function()
+        FriendsReturn:GetReturnerSongJinRestoreReq()
+      end,
+      szBtnText = i18n.EasyGet("\233\135\141\231\189\174")
+    },
+    [6] = {
+      szTitle = i18n.EasyGet("\228\188\160\229\138\159\228\184\185"),
+      szTitleDesc = i18n.EasyGet("\229\143\175\228\187\165\229\162\158\229\138\160\228\187\138\229\164\169\231\154\132\228\188\160\229\138\159\228\184\185\229\143\175\229\143\130\228\184\142\230\172\161\230\149\176"),
+      szTimeDesc = i18n.EasyGet("\230\172\161\230\149\176"),
+      nCurCount = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerChuanGongDanTimeLeft),
+      nMaxCount = FriendsReturn:CalcPlayerReturnerAwardTime(FriendsReturn.Cfg.AwardCount.tbChuanGongDanTime, FriendsReturn.Cfg.AwardVipEffect.tbChuanGongDanTime, nDayLeft, nVipLevel),
+      fOnClick = function()
+        FriendsReturn:GetReturnerChuanGongDanRestoreReq()
+      end,
+      szBtnText = i18n.EasyGet("\229\162\158\229\138\160")
+    },
+    [7] = {
+      szTitle = i18n.EasyGet("\228\191\174\231\130\188\228\184\185"),
+      szTitleDesc = i18n.EasyGet("\229\143\175\228\187\165\229\162\158\229\138\160\228\187\138\229\164\169\231\154\132\228\191\174\231\130\188\228\184\185\229\143\175\229\143\130\228\184\142\230\172\161\230\149\176"),
+      szTimeDesc = i18n.EasyGet("\230\172\161\230\149\176"),
+      nCurCount = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerXiuLianDanTimeLeft),
+      nMaxCount = FriendsReturn:CalcPlayerReturnerAwardTime(FriendsReturn.Cfg.AwardCount.tbXiuLianDanTime, FriendsReturn.Cfg.AwardVipEffect.tbXiuLianDanTime, nDayLeft, nVipLevel),
+      fOnClick = function()
+        FriendsReturn:GetReturnerXiuLianDanRestoreReq()
+      end,
+      szBtnText = i18n.EasyGet("\229\162\158\229\138\160")
+    },
+    [8] = {
+      szTitle = i18n.EasyGet("\230\137\147\229\157\144\229\134\165\230\131\179"),
+      szTitleDesc = i18n.EasyGet("\229\143\130\228\184\142\228\184\128\230\172\161\230\137\147\229\157\144\229\134\165\230\131\179\229\143\175\228\187\165\232\142\183\229\190\1512\230\172\161\233\162\157\229\164\150\229\165\150\229\138\177"),
+      szTimeDesc = i18n.EasyGet("\230\172\161\230\149\176"),
+      nCurCount = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerDaZuoMingXiangDoubleLeft),
+      nMaxCount = FriendsReturn:CalcPlayerReturnerAwardTime(FriendsReturn.Cfg.AwardCount.tbDaZuoMingXiangDouble, FriendsReturn.Cfg.AwardVipEffect.tbDaZuoMingXiangDouble, nDayLeft, nVipLevel),
+      fOnClick = function()
+        Ui:OpenWindow("UIActivity")
+      end,
+      szBtnText = i18n.EasyGet("\230\159\165\231\156\139\230\180\187\229\138\168")
+    },
+    [9] = {
+      szTitle = i18n.EasyGet("\229\184\174\228\188\154\230\140\145\230\136\152"),
+      szTitleDesc = i18n.EasyGet("\229\143\130\228\184\142\228\184\128\230\172\161\229\184\174\228\188\154\230\140\145\230\136\152\229\143\175\228\187\165\232\142\183\229\190\1512\230\172\161\233\162\157\229\164\150\229\165\150\229\138\177"),
+      szTimeDesc = i18n.EasyGet("\230\172\161\230\149\176"),
+      nCurCount = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerBangHuiTiaoZhanDoubleLeft),
+      nMaxCount = FriendsReturn:CalcPlayerReturnerAwardTime(FriendsReturn.Cfg.AwardCount.tbBangHuiTiaoZhanDouble, FriendsReturn.Cfg.AwardVipEffect.tbBangHuiTiaoZhanDouble, nDayLeft, nVipLevel),
+      fOnClick = function()
+        Ui:OpenWindow("UIActivity")
+      end,
+      szBtnText = i18n.EasyGet("\230\159\165\231\156\139\230\180\187\229\138\168")
+    },
+    [10] = {
+      szTitle = i18n.EasyGet("\233\162\134\229\156\159\230\136\152"),
+      szTitleDesc = i18n.EasyGet("\229\143\130\228\184\142\228\184\128\230\172\161\233\162\134\229\156\159\230\136\152\229\143\175\228\187\165\232\142\183\229\190\1512\230\172\161\233\162\157\229\164\150\229\165\150\229\138\177"),
+      szTimeDesc = i18n.EasyGet("\230\172\161\230\149\176"),
+      nCurCount = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerLingTuZhanDoubleLeft),
+      nMaxCount = FriendsReturn:CalcPlayerReturnerAwardTime(FriendsReturn.Cfg.AwardCount.tbLingTuZhanDouble, FriendsReturn.Cfg.AwardVipEffect.tbLingTuZhanDouble, nDayLeft, nVipLevel),
+      fOnClick = function()
+        Ui:OpenWindow("UIActivity")
+      end,
+      szBtnText = i18n.EasyGet("\230\159\165\231\156\139\230\180\187\229\138\168")
+    },
+    [11] = {
+      szTitle = i18n.EasyGet("\229\149\134\228\188\154\228\187\187\229\138\161"),
+      szTitleDesc = i18n.EasyGet("\229\174\140\230\136\144\228\184\128\230\172\161\229\149\134\228\188\154\228\187\187\229\138\161\229\143\175\228\187\165\232\142\183\229\190\1512\230\172\161\233\162\157\229\164\150\229\165\150\229\138\177"),
+      szTimeDesc = i18n.EasyGet("\230\172\161\230\149\176"),
+      nCurCount = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerShangHuiRenWuDoubleLeft),
+      nMaxCount = FriendsReturn:CalcPlayerReturnerAwardTime(FriendsReturn.Cfg.AwardCount.tbShangHuiRenWuDouble, FriendsReturn.Cfg.AwardVipEffect.tbShangHuiRenWuDouble, nDayLeft, nVipLevel),
+      fOnClick = function()
+        Ui:OpenWindow("UIActivity")
+      end,
+      szBtnText = i18n.EasyGet("\230\159\165\231\156\139\230\180\187\229\138\168")
+    },
+    [12] = {
+      szTitle = i18n.EasyGet("\230\165\188\229\133\176\229\143\164\229\159\142"),
+      szTitleDesc = i18n.EasyGet("\229\174\140\230\136\144\228\184\128\230\172\161\230\165\188\229\133\176\229\143\164\229\159\142\229\143\175\228\187\165\232\142\183\229\190\1512\230\172\161\233\162\157\229\164\150\229\165\150\229\138\177"),
+      szTimeDesc = i18n.EasyGet("\230\172\161\230\149\176"),
+      nCurCount = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerLouLanGuChengDoubleLeft),
+      nMaxCount = FriendsReturn:CalcPlayerReturnerAwardTime(FriendsReturn.Cfg.AwardCount.tbLouLanGuChengDouble, FriendsReturn.Cfg.AwardVipEffect.tbLouLanGuChengDouble, nDayLeft, nVipLevel),
+      fOnClick = function()
+        Ui:OpenWindow("UIActivity")
+      end,
+      szBtnText = i18n.EasyGet("\230\159\165\231\156\139\230\180\187\229\138\168")
+    }
+  }
+  self.tbReturnerActivity:Clear()
+  for i, tbInfo in pairs(tbActivityInfo) do
+    self.tbReturnerActivity:SetElement(i, function(tbElement)
+      self:UpdateActivityTemplate(i, tbElement, tbInfo)
+    end)
+  end
+end
+
+function tbWnd:UpdateActivityTemplate(nId, tbElement, tbActivityInfo)
+  local pPanel = tbElement.pPanel
+  pPanel:Label_SetText("txtName", tbActivityInfo.szTitle)
+  pPanel:Label_SetText("txtDesc", tbActivityInfo.szTitleDesc)
+  pPanel:Label_SetText("txtNumTip", tbActivityInfo.szTimeDesc)
+  pPanel:Label_SetText("txtNumTip/txtNumValue", tbActivityInfo.nCurCount .. "/" .. tbActivityInfo.nMaxCount)
+  pPanel:Label_SetText("btnOperation/Text", tbActivityInfo.szBtnText)
+  pPanel:Button_BindEvent("btnOperation", tbActivityInfo.fOnClick)
+  if tbActivityInfo.nCurCount <= 0 then
+    pPanel:Button_SetEnable("btnOperation", false)
+  else
+    pPanel:Button_SetEnable("btnOperation", true)
+  end
+end
+
+function tbWnd:UpdateShopItemList()
+  self.tbWareList = {}
+  self.tbWareList = Shop:GetReturnerWareAvaliableList()
+  local nCount = Lib:CountTB(self.tbWareList)
+  if nCount <= 0 then
+    self.pPanel:SetActive(tbControls.goNotInfo, true)
+    self.pPanel:SetActive(tbControls.goPnlContant, false)
+  else
+    self.pPanel:SetActive(tbControls.goNotInfo, false)
+    self.pPanel:SetActive(tbControls.goPnlContant, true)
+  end
+  
+  local function fnSetItem(tbLoopScroll, nIndex)
+    local nCol = nCount - self.nRow * (nIndex - 1)
+    if nCol > self.nRow then
+      nCol = self.nRow
+    end
+    for i = 1, self.nRow do
+      if i <= nCol then
+        local tbElement = tbLoopScroll:GetGridElement(nIndex, i)
+        local curIndex = (nIndex - 1) * self.nRow + i
+        local tbInfo = self.tbWareList[curIndex]
+        tbElement.pPanel:SetActive("Main", true)
+        local pPanel = tbElement.pPanel
+        local tbWare = Shop:GetAWare(tbInfo.nWareId) or {}
+        tbElement.tbData = tbWare
+        local nPrice = Shop:GetPrice(tbWare, tbWare.szShopType, me)
+        pPanel:Label_SetText("txtMoneyNum", nPrice)
+        if nPrice == tbWare.nPrice then
+          pPanel:SetActive("imgZK", false)
+          pPanel:Label_SetText("imgZK/txtZK", "")
+        else
+          pPanel:SetActive("imgZK", true)
+          pPanel:Label_SetText("imgZK/txtZK", i18n.GetDiscountText(math.floor(10 * nPrice / tbWare.nPrice + 0.5)))
+        end
+        local szName = KItem.GetItemShowInfo(tbWare.nItemId, me.nFaction, me.nFactionSect, me.nSex)
+        local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        itemGrid:SetItemByTemplate(tbWare.nItemId)
+        itemGrid:SetClickEnable(true, function()
+          self:OnItemClick(tbElement)
+        end)
+        pPanel:Label_SetText("txtTitle", i18n.Parse(szName))
+        if tbWare.szHotText and "" ~= tbWare.szHotText then
+          pPanel:SetActive("imgGiftMark", true)
+          pPanel:Label_SetText("imgGiftMark/txtTip", i18n.Parse(tbWare.szHotText))
+        else
+          pPanel:SetActive("imgGiftMark", false)
+        end
+        local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+        if -1 == nRemainCount then
+          pPanel:SetActive("Limit", false)
+          pPanel:Label_SetText("Limit/txtLimitNum", "")
+        else
+          pPanel:SetActive("Limit", true)
+          pPanel:Label_SetText("Limit/txtLimitNum", tostring(nRemainCount))
+        end
+        if 0 == nRemainCount then
+          pPanel:SetActive("imgSoldOutBg", true)
+          pPanel:SetActive("imgSoldOutMark", true)
+        else
+          pPanel:SetActive("imgSoldOutBg", false)
+          pPanel:SetActive("imgSoldOutMark", false)
+        end
+        local nDayLeft = me.GetUserValue(FriendsReturn.Def.nGroup, FriendsReturn.Def.KEY.nReturnerStartTime) + FriendsReturn.Cfg.nReturnerContinueTIme
+        pPanel:SetActive("txtTimeLimit", true)
+        pPanel:Label_SetText("txtTimeLimit", i18n.EasyGet("{0}\229\144\142\228\184\139\230\158\182", Lib:TimeDesc14(nDayLeft - GetTime())))
+        local szMoney, szMoneyAtlas = Currency:GetIcon(tbWare.szCurrencyType)
+        pPanel:Sprite_SetSprite("imgMoney", szMoney)
+        Ui:Button_BindEvent(pPanel, "", function()
+          self:OnItemClick(tbElement)
+        end, self)
+      else
+        tbLoopScroll:GetGridElement(nIndex, i).pPanel:SetActive("Main", false)
+      end
+    end
+  end
+  
+  self.tbWareScroll:SetElement(math.ceil(nCount / self.nRow), fnSetItem)
+end
+
+function tbWnd:OnItemClick(tbElement)
+  local nRemainCount = Shop:GetShopRemainCount(tbElement.tbData, me)
+  if 0 == nRemainCount then
+    me.CenterMsg(i18n.Get(Shop.Terms.InsufficientRemainInventory))
+    return
+  end
+  Ui:OpenWindow("UIShopBuy", tbElement.tbData, true, nRemainCount)
+end
+
+function tbWnd:OnSelect(nIndex)
+  if 1 == nIndex then
+    self.pPanel:SetActive(tbControls.goJiangHu, true)
+    self.pPanel:SetActive(tbControls.goActiveAward, false)
+    self.pPanel:SetActive(tbControls.goReturnFund, false)
+    self.pPanel:SetActive(tbControls.goDiscountShop, false)
+    self.pPanel:SetActive(tbControls.goExtraAward, false)
+  end
+  if 2 == nIndex then
+    self.pPanel:SetActive(tbControls.goJiangHu, false)
+    self.pPanel:SetActive(tbControls.goActiveAward, true)
+    self.pPanel:SetActive(tbControls.goReturnFund, false)
+    self.pPanel:SetActive(tbControls.goDiscountShop, false)
+    self.pPanel:SetActive(tbControls.goExtraAward, false)
+  end
+  if 3 == nIndex then
+    self.pPanel:SetActive(tbControls.goJiangHu, false)
+    self.pPanel:SetActive(tbControls.goActiveAward, false)
+    self.pPanel:SetActive(tbControls.goReturnFund, true)
+    self.pPanel:SetActive(tbControls.goDiscountShop, false)
+    self.pPanel:SetActive(tbControls.goExtraAward, false)
+  end
+  if 4 == nIndex then
+    self.pPanel:SetActive(tbControls.goJiangHu, false)
+    self.pPanel:SetActive(tbControls.goActiveAward, false)
+    self.pPanel:SetActive(tbControls.goReturnFund, false)
+    self.pPanel:SetActive(tbControls.goDiscountShop, true)
+    self.pPanel:SetActive(tbControls.goExtraAward, false)
+  end
+  if 5 == nIndex then
+    self.pPanel:SetActive(tbControls.goJiangHu, false)
+    self.pPanel:SetActive(tbControls.goActiveAward, false)
+    self.pPanel:SetActive(tbControls.goReturnFund, false)
+    self.pPanel:SetActive(tbControls.goDiscountShop, false)
+    self.pPanel:SetActive(tbControls.goExtraAward, true)
+  end
+end

@@ -1,0 +1,291 @@
+local tbWnd = Ui:CreateWindow("UINpcDialog")
+local nMaxOptionCount = 20
+local nTimeScale = 1000
+local fMinCloseTime = 0.5
+local fMaxCloseTime = 5
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_DIALOG_AUTO_PLAY_CHANGE,
+      self.OnAutoPlayChange,
+      self
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  btnClose = "Panel/imgBG/btnClose",
+  imgAutoNextPlay = "Panel/imgBG/btnAutoNext/imgPlay",
+  imgAutoNextPause = "Panel/imgBG/btnAutoNext/imgPause",
+  btnAutoNext = "Panel/imgBG/btnAutoNext",
+  txtCountdown = "Panel/imgBG/btnAutoNext/txtPlay/txtCountdown",
+  txtMsg = "Panel/imgBG/top/txtMsg",
+  txtNpcName = "Panel/imgBG/top/txtNpcName",
+  btnOptionTemplate = "Panel/imgBG/panelButton/options/options/btnOptionTemplate",
+  Empty4Raycast = "Panel/Empty4Raycast",
+  imgBG = "Panel/imgBG",
+  btnSkip = "Panel/btnSkip"
+}
+local tbControls = tbWnd.tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnAutoNext = function(self)
+    self:UICallSwitchAutoNext()
+  end,
+  btnSkip = function(self)
+    self:EndTalk()
+  end,
+  Empty4Raycast = function(self)
+    self:NextStep()
+  end,
+  imgBG = function(self)
+    self:NextStep()
+  end
+}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.btnOptionTemplate, function(self, nIndex, tbElement)
+    if self.nCloseTimer then
+      print("UINpcDialog:OnClick fail", nIndex)
+      return
+    end
+    self:OnSelectOption(nIndex)
+  end, false, true)
+end
+
+function tbWnd:OnOpen(tbDlgToClient, bIsClient, szNpcName, nNpcTemplate, nSoundId, nNpcID, bNeedLastStepDelay)
+  self.bAutoNextDlg = false
+  self.nCurDlgBeginTime = nil
+  self.bNeedLastStepDelay = bNeedLastStepDelay
+  self:UpdateDialog(tbDlgToClient, bIsClient, szNpcName, nNpcTemplate, nSoundId, nNpcID)
+  self:SetBottomControlsActive(false)
+end
+
+function tbWnd:UpdateDialog(tbDlgToClient, bIsClient, szNpcName, nNpcTemplate, nSoundId, nNpcID)
+  szNpcName = i18n.Parse(szNpcName)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_NPC_NOT_IN_TALK_RANGE, 0, 0)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TALK_TO_NPC, nNpcTemplate)
+  self.bAutoNextDlg = false
+  local szDlgToClientText = i18n.Parse(tbDlgToClient.Text)
+  self:CloseTimer()
+  if not szDlgToClientText or "" == szDlgToClientText then
+    local tbNpcTemplateInfo = KNpc.GetNpcTemplateInfo(nNpcTemplate)
+    if tbNpcTemplateInfo then
+      local szClassName = tbNpcTemplateInfo.szClassName
+      local szDefaultDialogMsg = ClientNpc:GetDefaultMsg(szClassName)
+      local szMsg = "\227\128\128\227\128\128" .. szDefaultDialogMsg
+      self.pPanel:Label_SetText(self.txtMsg, szMsg)
+    end
+  else
+    local szMsg = "\227\128\128\227\128\128" .. szDlgToClientText
+    if Lib:StrStartWith(szDlgToClientText, "<auto_next>") then
+      self.bAutoNextDlg = true
+      self.nCurDlgBeginTime = GetTime()
+      szDlgToClientText = string.sub(szDlgToClientText, string.len("<auto_next>") + 1)
+      szMsg = "\227\128\128\227\128\128" .. szDlgToClientText
+      if Ui:IsDlgAutoNext() then
+        self:StartAutoNext()
+      end
+    end
+    self.pPanel:Label_SetText(tbControls.txtMsg, szMsg)
+  end
+  self.pPanel:Label_SetText(tbControls.txtNpcName, szNpcName .. "\239\188\154")
+  self.tbDlgToClient = tbDlgToClient
+  self.bIsClient = bIsClient
+  self.tbScrollView:Reset()
+  if 0 == #tbDlgToClient.OptList then
+    table.insert(tbDlgToClient.OptList, {
+      Text = i18n.Get("OptEnd"),
+      Callback = 0,
+      Type = "Script"
+    })
+  end
+  for i = 1, #tbDlgToClient.OptList do
+    self.tbScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("Text", i18n.Parse(tbDlgToClient.OptList[i].Text))
+    end)
+  end
+  if nNpcID and nNpcID > 0 then
+    local pNpc = KNpc.GetById(nNpcID)
+    if pNpc then
+      pNpc.SetDirToNpc(me.GetNpc().nId)
+    end
+  end
+  local tbWndMiniMap = Ui:GetWindow("UIMiniMap")
+  if tbWndMiniMap then
+    tbWndMiniMap:SetAutoPathFlagVisible(false)
+  end
+  AutoPath.bProcessAutoPath = false
+  self:UpdateAutoNextBtnState()
+end
+
+function tbWnd:DelayClose()
+  if self.nCloseTimer then
+    Timer:Close(self.nCloseTimer)
+    self.nCloseTimer = nil
+  end
+  local fCloseTime = GetPingDelay() * 2 / nTimeScale
+  if self.bNeedLastStepDelay then
+    fCloseTime = fCloseTime + Task.Cfg.fLastStepDelayCloseTime
+  end
+  fCloseTime = math.max(fMinCloseTime, fCloseTime)
+  fCloseTime = math.min(fMaxCloseTime, fCloseTime)
+  self.nCloseTimer = Timer:Register(Env.GAME_FPS * fCloseTime, self.Close, self)
+end
+
+function tbWnd:CloseTimer()
+  if self.nCloseTimer then
+    Timer:Close(self.nCloseTimer)
+    self.nCloseTimer = nil
+  end
+  if self.nAutoNextTimer and self.nAutoNextTimer > 0 then
+    Timer:Close(self.nAutoNextTimer)
+    self.nAutoNextTimer = nil
+  end
+end
+
+function tbWnd:StartAutoNext()
+  if self.nAutoNextTimer ~= nil then
+    Timer:Close(self.nAutoNextTimer)
+  end
+  self.nDialogEndTime = GetTime() + Task.Cfg.nDialogAutoNextTime
+  self:UpdateUICountDown(Task.Cfg.nDialogAutoNextTime)
+  self.nAutoNextTimer = Timer:Register(Env.GAME_FPS, self.OnAutoNextTimerUpdate, self)
+end
+
+function tbWnd:StopAutoNext()
+  if self.nAutoNextTimer ~= nil then
+    Timer:Close(self.nAutoNextTimer)
+    self.nAutoNextTimer = nil
+  end
+  self.nDialogEndTime = nil
+  self:UpdateUICountDown(nil)
+end
+
+function tbWnd:OnClose()
+  self:CloseTimer()
+  self:SetBottomControlsActive(true)
+end
+
+function tbWnd:OnAutoNextTimerUpdate()
+  local nLeftSecond
+  if self.nDialogEndTime ~= nil then
+    nLeftSecond = self.nDialogEndTime - GetTime()
+  end
+  if nil ~= self.nAutoNextTimer then
+    Timer:Close(self.nAutoNextTimer)
+  end
+  if nil ~= nLeftSecond and nLeftSecond > 0 then
+    self:UpdateUICountDown(nLeftSecond)
+    self.nAutoNextTimer = Timer:Register(Env.GAME_FPS, self.OnAutoNextTimerUpdate, self)
+  else
+    self:AutoSelect()
+    self.nAutoNextTimer = nil
+  end
+end
+
+function tbWnd:UpdateUICountDown(nSecond)
+  local szCountDownText
+  if nil ~= nSecond then
+    szCountDownText = i18n.EasyGet("({0}\231\167\146)", tostring(nSecond))
+  else
+    szCountDownText = ""
+  end
+  self.pPanel:Label_SetText(tbControls.txtCountdown, szCountDownText)
+end
+
+function tbWnd:OnAutoPlayChange()
+  local bDialogAutoNext = Ui:IsDlgAutoNext()
+  if bDialogAutoNext then
+    if self.bAutoNextDlg then
+      self:StartAutoNext()
+    end
+  else
+    self:StopAutoNext()
+  end
+  self:UpdateAutoNextBtnState()
+end
+
+function tbWnd:AutoSelect()
+  local nOptNum = Lib:CountTB(self.tbDlgToClient.OptList)
+  if 1 ~= nOptNum then
+    return
+  end
+  self:OnSelectOption(1)
+end
+
+function tbWnd:UpdateAutoNextBtnState()
+  self.pPanel:SetActive(tbControls.btnAutoNext, self.bAutoNextDlg)
+  self.pPanel:SetActive(tbControls.Empty4Raycast, self.bAutoNextDlg)
+  self.pPanel:SetActive(tbControls.btnSkip, self.bAutoNextDlg and not self.bIsClient)
+  local bDialogAutoNext = Ui:IsDlgAutoNext()
+  self.pPanel:SetActive(tbControls.imgAutoNextPause, bDialogAutoNext)
+  self.pPanel:SetActive(tbControls.imgAutoNextPlay, not bDialogAutoNext)
+end
+
+function tbWnd:UICallSwitchAutoNext()
+  Ui:SetIsDlgAutoNext(not Ui:IsDlgAutoNext())
+end
+
+function tbWnd:NextStep()
+  if self.nCloseTimer or not self.bAutoNextDlg then
+    print("UINpcDialog:OnClick fail")
+    return
+  end
+  local nOptNum = Lib:CountTB(self.tbDlgToClient.OptList)
+  if 1 ~= nOptNum then
+    return
+  end
+  self:OnSelectOption(1)
+end
+
+function tbWnd:OnSelectOption(nIndex)
+  local callBack = self.tbDlgToClient.OptList[nIndex].Callback
+  if not callBack or 0 == callBack then
+    self:Close()
+  end
+  self:DelayClose()
+  if self.bIsClient then
+    Dialog:OnDialogSelect(nIndex)
+  else
+    RemoteServer.OnDialogSelect(nIndex)
+  end
+end
+
+function tbWnd:EndTalk()
+  local nOptNum = Lib:CountTB(self.tbDlgToClient.OptList)
+  if 1 ~= nOptNum then
+    return
+  end
+  local nSelectIndex = 1
+  local callBack = self.tbDlgToClient.OptList[nSelectIndex].Callback
+  if not callBack or 0 == callBack then
+    self:Close()
+  end
+  if not self.bIsClient then
+    RemoteServer.OnEndTalk()
+    self:Close()
+  end
+end
+
+function tbWnd:SetBottomControlsActive(bActive)
+  local tbHud = Ui:GetWindow("UIHud")
+  if nil ~= tbHud then
+    tbHud:SetRideButtonActive(bActive)
+  end
+  if bActive then
+    Ui:OpenWindow("UIHudChat")
+    Ui:OpenWindow("UIHudRightBottom")
+    Ui:OpenWindow("UIJoyStick")
+  else
+    Ui:CloseWindow("UIHudChat")
+    Ui:CloseWindow("UIHudRightBottom")
+    Ui:CloseWindow("UIHudRightSkill")
+    Ui:CloseWindow("UIJoyStick")
+  end
+end

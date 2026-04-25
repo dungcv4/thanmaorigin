@@ -1,0 +1,250 @@
+Require("CommonScript/WuXue/WXHuShiCommon.lua")
+local tbItem = Item:GetClass("WXHuShiItem")
+tbItem.BASE_RANDOM_ATTR_BEGIN = WXHuShi.nBaseAttrSaveBegin
+tbItem.BASE_RANDOM_ATTR_END = WXHuShi.nBaseAttrSaveEnd
+tbItem.EXT_RANDOM_ATTR_BEGIN = WXHuShi.nExtAttrSaveBegin
+tbItem.EXT_RANDOM_ATTR_END = WXHuShi.nExtAttrSaveEnd
+tbItem.EXT_ATTR_MAX_UPGRADE_BEGIN = WXHuShi.nEnhanceMaxUpgradeBegin
+tbItem.EXT_ATTR_MAX_UPGRADE_END = WXHuShi.nEnhanceMaxUpgradeEnd
+tbItem.ENHANCE_LEVEL = WXHuShi.nEnhanceLevelSaveId
+
+function tbItem:OnCreate(pHuShi)
+  self:OnAddRandomExtAttri(pHuShi)
+end
+
+function tbItem:SetEnhanceMaxUpgradeAttrIndex(pItem, nTimes, nAttrIndex)
+  pItem.SetIntValue(self.EXT_ATTR_MAX_UPGRADE_BEGIN + nTimes - 1, nAttrIndex)
+end
+
+function tbItem:GetEnhanceMaxUpgradeData(pItem)
+  local tbAttrIndexUpgradeCount = {
+    0,
+    0,
+    0,
+    0
+  }
+  for nTimes = 1, WXHuShi.nMaxExtAttrCount do
+    local nAttrIndex = pItem.GetIntValue(self.EXT_ATTR_MAX_UPGRADE_BEGIN + nTimes - 1)
+    if nAttrIndex > 0 then
+      tbAttrIndexUpgradeCount[nAttrIndex] = tbAttrIndexUpgradeCount[nAttrIndex] + 1
+    end
+  end
+  return tbAttrIndexUpgradeCount
+end
+
+function tbItem:SetHuShiData(pItem, nEnhanceLevel, tbBaseAttr, tbExtAttr)
+  pItem.SetIntValue(self.ENHANCE_LEVEL, nEnhanceLevel)
+  self:SetRandomBaseAttrInfo(pItem, tbBaseAttr)
+  for nIndex, tbV in ipairs(tbExtAttr) do
+    self:SetRandomExtAttrInfo(pItem, nIndex, tbV[1], tbV[2])
+  end
+end
+
+function tbItem:GetHuShiData(pItem)
+  local nEnhanceLevel = self:GetEnhanceLevel(pItem)
+  local tbRandomBaseAttr = self:GetRandomBaseAttrInfo(pItem)
+  local tbRandomExtAttr = self:GetRandomExtAttrInfo(pItem)
+  local tbAttrIndexUpgradeCount = self:GetEnhanceMaxUpgradeData(pItem)
+  return {
+    nEnhanceLevel,
+    tbRandomBaseAttr,
+    tbRandomExtAttr,
+    tbAttrIndexUpgradeCount
+  }
+end
+
+function tbItem:OnAddRandomExtAttri(pItem)
+  if not pItem or pItem.szClass ~= "WXHuShiItem" then
+    return
+  end
+  local tbCfg, nAttrNum = WXHuShi:GetHuShiExtAttrCfg(pItem.dwTemplateId)
+  if not tbCfg then
+    LogErr("Can't find HuShiBaseAttrCfg by templateId = ", pItem.dwTemplateId)
+    return
+  end
+  local pFunc = Lib:GetRandomSelect2(tbCfg)
+  for i = 1, nAttrNum do
+    local nIndex = pFunc()
+    local nAttrId = tbCfg[nIndex].nAttrId
+    local szAttrType = WXHuShi.Cfg.tbAttrId2AttrType[nAttrId]
+    if not szAttrType then
+      LogErr("OnAddRandomExtAttri Can't find AttrType by attrId = ", nAttrId)
+    end
+    local tbV = {}
+    for i = 1, 3 do
+      if "basic_damage_v" == szAttrType and 3 == i then
+        tbV[i] = tbV[1]
+      else
+        local nMin = tbCfg[nIndex]["nAttrValueMin" .. i]
+        local nMax = tbCfg[nIndex]["nAttrValueMax" .. i]
+        if nMax and nMin and nMin <= nMax then
+          tbV[i] = MathRandom(0, nMax - nMin) + nMin
+        else
+          tbV[i] = 0
+        end
+      end
+    end
+    self:SetRandomExtAttrInfo(pItem, i, nAttrId, tbV)
+  end
+end
+
+function tbItem:SetRandomExtAttrInfo(pItem, nIndex, nAttrId, tbV, nOffSet)
+  nOffSet = nOffSet or 0
+  pItem.SetIntValue((nIndex - 1) * WXHuShi.ATTR_SAVE_OFFSET + self.EXT_RANDOM_ATTR_BEGIN + nOffSet, nAttrId)
+  for j = 1, 3 do
+    pItem.SetIntValue((nIndex - 1) * WXHuShi.ATTR_SAVE_OFFSET + self.EXT_RANDOM_ATTR_BEGIN + j + nOffSet, tbV[j] or 0)
+  end
+end
+
+function tbItem:GetRandomExtAttrInfo(pItem, nOffSet)
+  nOffSet = nOffSet or 0
+  local tbRet = {}
+  for i = 1, WXHuShi.nMaxExtAttrCount do
+    local nAttrId = pItem.GetIntValue((i - 1) * WXHuShi.ATTR_SAVE_OFFSET + tbItem.EXT_RANDOM_ATTR_BEGIN + nOffSet)
+    if nAttrId > 0 then
+      local tbV = {}
+      for j = 1, 3 do
+        tbV[j] = pItem.GetIntValue((i - 1) * WXHuShi.ATTR_SAVE_OFFSET + tbItem.EXT_RANDOM_ATTR_BEGIN + j + nOffSet)
+      end
+      tbRet[i] = {nAttrId, tbV}
+    end
+  end
+  return tbRet
+end
+
+function tbItem:GetRandomBaseAttrInfo(pItem, nOffSet)
+  nOffSet = nOffSet or 0
+  local tbRet = {}
+  for i = 1, WXHuShi.nMaxBaseAttrCount do
+    local nAttrId = pItem.GetIntValue((i - 1) * WXHuShi.ATTR_SAVE_OFFSET + tbItem.BASE_RANDOM_ATTR_BEGIN + nOffSet)
+    if nAttrId > 0 then
+      local tbV = {}
+      for j = 1, 3 do
+        tbV[j] = pItem.GetIntValue((i - 1) * WXHuShi.ATTR_SAVE_OFFSET + tbItem.BASE_RANDOM_ATTR_BEGIN + j + nOffSet)
+      end
+      tbRet[i] = {nAttrId, tbV}
+    end
+  end
+  return tbRet
+end
+
+function tbItem:GetItemAttr(pItem)
+  local tbRet = self:GetItemAttrByTemplateId(pItem.dwTemplateId, self:GetHuShiData(pItem))
+  return tbRet
+end
+
+function tbItem:GetItemAttrByTemplateId(dwTemplateId, tbWXHuShiData)
+  local nEnhanceLevel = tbWXHuShiData[1]
+  local tbRandomBaseAttr = tbWXHuShiData[2]
+  local tbRandomExtAttr = tbWXHuShiData[3]
+  local tbMaxUpgradeData = tbWXHuShiData[4]
+  local tbRet = {}
+  local nQuality = Item:GetQuality(dwTemplateId)
+  local nItemLevel = Item:GetLevel(dwTemplateId)
+  local nAttrLevel = 0
+  if nEnhanceLevel > 0 then
+    nAttrLevel = WXHuShi.Cfg.tbEnhanceAttr[nQuality][nEnhanceLevel][nItemLevel]
+  end
+  table.insert(tbRet, {
+    i18n.EasyGet("\229\159\186\231\161\128\229\177\158\230\128\167")
+  })
+  for i, tbV in ipairs(tbRandomBaseAttr) do
+    local nAttrId = tbV[1]
+    local szAttrType = WXHuShi.Cfg.tbAttrId2AttrType[nAttrId]
+    local szFinalName, szAttrValue = FightSkill:GetMagicDescSplit(szAttrType, tbV[2])
+    if nAttrLevel > 0 then
+      local tbEnhanceAttrValue = WXHuShi.tbEnhanceAttrPoolCfg[nAttrId][nAttrLevel]
+      local _, szV = FightSkill:GetMagicDescSplit(szAttrType, tbEnhanceAttrValue)
+      szAttrValue = FightSkill:StringValueAddResult(szAttrValue, szV)
+    end
+    local szDesc = string.format("%s : %s", szFinalName, szAttrValue)
+    if szDesc and "" ~= szDesc then
+      local szAttrbColor = Item.tbTipsColorDef.EquipBaseAttrb.ColorName or "Red"
+      table.insert(tbRet, {szDesc, szAttrbColor})
+    end
+  end
+  table.insert(tbRet, {
+    i18n.EasyGet("\233\154\143\230\156\186\229\177\158\230\128\167")
+  })
+  for nAttrIndex, tbV in ipairs(tbRandomExtAttr) do
+    local nAttrId = tbV[1]
+    local szAttrType = WXHuShi.Cfg.tbAttrId2AttrType[tbV[1]]
+    local szFinalName, szAttrValue = FightSkill:GetMagicDescSplit(szAttrType, tbV[2])
+    if nAttrLevel > 0 then
+      local tbEnhanceAttrValue = WXHuShi.tbEnhanceAttrPoolCfg[nAttrId][nAttrLevel]
+      local _, szV = FightSkill:GetMagicDescSplit(szAttrType, tbEnhanceAttrValue)
+      szAttrValue = FightSkill:StringValueAddResult(szAttrValue, szV)
+    end
+    local nMaxAddTimes = tbMaxUpgradeData[nAttrIndex]
+    local nCfgIndex = nMaxAddTimes * WXHuShi.nEnhanceMaxUpgradeLevel
+    if WXHuShi.Cfg.tbEnhanceAttrExt[nQuality][nCfgIndex] then
+      local nMaxAttrLevel = WXHuShi.Cfg.tbEnhanceAttrExt[nQuality][nCfgIndex][nItemLevel]
+      local tbMaxAttrValue = WXHuShi.tbEnhanceAttrPoolCfg[nAttrId][nMaxAttrLevel]
+      local _, szV = FightSkill:GetMagicDescSplit(szAttrType, tbMaxAttrValue)
+      szAttrValue = FightSkill:StringValueAddResult(szAttrValue, szV)
+    end
+    local szDesc = string.format("%s : %s", szFinalName, szAttrValue)
+    if szDesc and "" ~= szDesc then
+      local szAttrbColor = Item.tbTipsColorDef.EquipBaseAttrb.ColorName or "Red"
+      table.insert(tbRet, {szDesc, szAttrbColor})
+    end
+  end
+  return tbRet
+end
+
+function tbItem:SetRandomBaseAttrInfo(pHuShi, tbRandomBaseAttr)
+  for nIndex, tbV in ipairs(tbRandomBaseAttr) do
+    Item:GetClass("WXHuShiItemSeed"):SetRandomBaseAttrInfo(pHuShi, nIndex, tbV[1], tbV[2], self.BASE_RANDOM_ATTR_BEGIN - 1)
+  end
+end
+
+function tbItem:GetEnhanceLevel(pHuShi)
+  if not pHuShi then
+    return 0
+  end
+  return pHuShi.GetIntValue(self.ENHANCE_LEVEL)
+end
+
+function tbItem:SetEnhanceLevel(pHuShi, nLevel)
+  if not pHuShi or nLevel < 0 then
+    return
+  end
+  return pHuShi.SetIntValue(self.ENHANCE_LEVEL, nLevel)
+end
+
+function tbItem:GetUseSetting(nItemTemplateId, nItemId)
+  if not nItemId then
+    return
+  end
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  local tbSetting = {}
+  tbSetting.szFirstName = i18n.EasyGet("\233\149\182\229\181\140")
+  
+  function tbSetting.fnFirst()
+    local nSeries = WXHuShi:GetHuShiSeries(nItemTemplateId)
+    Ui:OpenWindow("UIMartialArtsStone", 1, nSeries, nItemId)
+    Ui:CloseWindow("UIItemTips")
+  end
+  
+  tbSetting.szSecondName = i18n.EasyGet("\229\188\186\229\140\150")
+  
+  function tbSetting.fnSecond()
+    local nSeries = WXHuShi:GetHuShiSeries(nItemTemplateId)
+    Ui:OpenWindow("UIMartialArtsStrengthen", 1, nSeries, nItemId)
+    Ui:CloseWindow("UIItemTips")
+  end
+  
+  return tbSetting
+end
+
+function tbItem:GetChatLinkInfo(pItem)
+  if pItem.szClass ~= "WXHuShiItem" then
+    return
+  end
+  local tbInfo = {}
+  tbInfo.tbWXHuShiData = self:GetHuShiData(pItem)
+  return tbInfo
+end

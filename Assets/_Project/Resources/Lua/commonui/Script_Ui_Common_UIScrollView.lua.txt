@@ -1,0 +1,363 @@
+local tbWnd = {}
+Ui:SetClass("UIScrollView", tbWnd)
+
+function Ui:NewScrollView(tbOwner, ...)
+  local tbClass = Ui:NewClass(Ui:GetClass("UIScrollView"))
+  tbClass.tbOwner = tbOwner
+  tbClass:OnCreate(...)
+  return tbClass
+end
+
+function tbWnd:OnCreate(szTemplateKey, func, bFixCount, bNoHighlight)
+  self.szTemplateKey = szTemplateKey
+  self.tbOwner.pPanel:SetActive(szTemplateKey, false)
+  self.tbElementList = {}
+  self.funcCallback = func
+  self.bFixCount = bFixCount
+  self.bNoHighlight = bNoHighlight
+  self.bIsInit = false
+  if not self.tbOwner._tbScrollViewList then
+    self.tbOwner._tbScrollViewList = {}
+  end
+  self.tbOwner._tbScrollViewList[self] = 1
+end
+
+function tbWnd:SetElement(nIndex, funcSet, bUseTemplatePos)
+  local tbElement
+  if not self.tbElementList[nIndex] then
+    local szKey
+    if bUseTemplatePos then
+      szKey = self.tbOwner.pPanel:CloneObjectAsSamePosition(self.szTemplateKey, "Element" .. nIndex)
+    else
+      szKey = self.tbOwner.pPanel:CloneObject(self.szTemplateKey, "Element" .. nIndex)
+    end
+    tbElement = Ui:CreateSimplePanel(self.tbOwner, szKey)
+    funcSet(tbElement, nIndex)
+    self.tbElementList[nIndex] = tbElement
+    if self.funcCallback then
+      Ui:Button_BindEvent(self.tbOwner.pPanel, szKey, self.OnClickElement, self, nIndex)
+    end
+  else
+    tbElement = self.tbElementList[nIndex]
+    funcSet(tbElement, nIndex)
+    self.tbElementList[nIndex] = tbElement
+    if not self.bFixCount then
+      tbElement.pPanel:SetActive("Main", true)
+    end
+  end
+end
+
+function tbWnd:PlayAnimation()
+  for i = 1, #self.tbElementList do
+    local tbElement = self.tbElementList[i]
+    local elemGo = self.tbOwner.pPanel:GetObject(tbElement.szKey)
+    local parent = elemGo.transform.parent
+    local animator = parent:GetComponent(Ui.ScrollAnimator)
+    if animator then
+      animator:OnSetElement(elemGo)
+    end
+  end
+end
+
+function tbWnd:PlayItemGridAnimation()
+  local nCount = self:GetShowCount()
+  local bInitCount = false
+  for i = 1, nCount do
+    local tbElement = self.tbElementList[i]
+    if not tbElement then
+      return
+    end
+    local elemGo = self.tbOwner.pPanel:GetObject(tbElement.szKey)
+    local parent = elemGo.transform.parent
+    local animator = parent:GetComponent(Ui.ItemGridTweenAnimation)
+    if not animator then
+      return
+    end
+    if not bInitCount then
+      bInitCount = true
+      animator:InitArray(nCount)
+    end
+    animator:OnSetElement(elemGo)
+  end
+end
+
+function tbWnd:StopAnimation()
+  local _, tbElement = next(self.tbElementList)
+  if not tbElement then
+    return
+  end
+  local elemGo = self.tbOwner.pPanel:GetObject(tbElement.szKey)
+  local parent = elemGo.transform.parent
+  local animator = parent:GetComponent(Ui.ItemGridTweenAnimation)
+  if not animator then
+    return
+  end
+  animator:ShowAllGrid()
+end
+
+function tbWnd:GetElement(nIndex)
+  return self.tbElementList[nIndex]
+end
+
+function tbWnd:GetAllElement()
+  return self.tbElementList
+end
+
+function tbWnd:Reset()
+  self:ClearSelected()
+  if not self.bFixCount then
+    for k, v in pairs(self.tbElementList) do
+      v.pPanel:SetActive("Main", false)
+    end
+  end
+end
+
+function tbWnd:ResetFrom(nStartIndex)
+  if not nStartIndex or nStartIndex <= 0 then
+    nStartIndex = 1
+  end
+  self:ClearSelected()
+  for i = nStartIndex, #self.tbElementList do
+    self.tbElementList[i].pPanel:SetActive("Main", false)
+  end
+end
+
+function tbWnd:OnDestroy()
+  self:Clear()
+  self.tbOwner._tbScrollViewList[self] = nil
+end
+
+function tbWnd:Clear()
+  for k, tbElement in pairs(self.tbElementList) do
+    Ui.ClearUIPanel(tbElement)
+    self.tbOwner.pPanel:DeleteObject(tbElement.szKey)
+  end
+  self.tbElementList = {}
+end
+
+function tbWnd:SelectElement(nIndex)
+  self.OnClickElement(self, nIndex)
+end
+
+function tbWnd:OnOpenDoHightLight(nIndex)
+  if not self.bNoHighlight and self.tbElementList[nIndex] then
+    self.tbOwner.pPanel:Button_SetEnable(self.tbElementList[nIndex].szKey, false)
+    local btn = self.tbOwner.pPanel:GetObject(self.tbElementList[nIndex].szKey)
+    local trans = btn:GetComponent(Ui.BGroupTrans)
+    if trans then
+      trans:OnSelected()
+    end
+  end
+end
+
+function tbWnd:OnClickElement(nIndex)
+  self.nIndex = nIndex
+  if not self.bNoHighlight then
+    for k, v in pairs(self.tbElementList) do
+      self.tbOwner.pPanel:Button_SetEnable(v.szKey, k ~= nIndex)
+      local btn = self.tbOwner.pPanel:GetObject(v.szKey)
+      local trans = btn:GetComponent(Ui.BGroupTrans)
+      if trans then
+        if k == nIndex then
+          trans:OnSelected()
+        else
+          trans:OnUnSelected()
+        end
+      end
+    end
+  end
+  if self.funcCallback then
+    self.funcCallback(self.tbOwner, nIndex, self.tbElementList[nIndex])
+  end
+end
+
+function tbWnd:ClearSelected()
+  if not self:GetIndex() then
+    return
+  end
+  if self.nIndex and self.tbElementList[self.nIndex] and not self.bNoHighlight then
+    self.tbOwner.pPanel:Button_SetEnable(self.tbElementList[self.nIndex].szKey, true)
+    local btn = self.tbOwner.pPanel:GetObject(self.tbElementList[self.nIndex].szKey)
+    local trans = btn:GetComponent(Ui.BGroupTrans)
+    if trans then
+      trans:OnUnSelected()
+    end
+  end
+  self.nIndex = nil
+end
+
+function tbWnd:GetIndex()
+  return self.nIndex
+end
+
+function tbWnd:GetCount()
+  return #self.tbElementList
+end
+
+function tbWnd:GetShowCount()
+  local nRet = 0
+  for i, tbElement in ipairs(self.tbElementList) do
+    if tbElement.pPanel:IsActive("Main") then
+      nRet = nRet + 1
+    end
+  end
+  return nRet
+end
+
+function tbWnd:GoTop()
+  self:SetScrollViewRectPos(self.szTemplateKey, 1.0)
+end
+
+function tbWnd:GoBottom()
+  self:SetScrollViewRectPos(self.szTemplateKey, 0.0)
+end
+
+function tbWnd:GoLeft()
+  local scrollView, _ = self:GetScrollViewRect(self.szTemplateKey)
+  scrollView.horizontalNormalizedPosition = 0
+end
+
+function tbWnd:SetScrollViewRectPos(szTemplateKey, nPos)
+  local scrollView, _ = self:GetScrollViewRect(szTemplateKey)
+  scrollView.verticalNormalizedPosition = nPos
+end
+
+function tbWnd:GetScrollViewRect(szTemplateKey)
+  szTemplateKey = self:GetKeyPath(szTemplateKey)
+  local scrollView = self.tbOwner.pPanel:GetObject(szTemplateKey):GetComponent("ScrollRect")
+  if scrollView then
+    return scrollView, szTemplateKey
+  else
+    return self:GetScrollViewRect(szTemplateKey)
+  end
+end
+
+function tbWnd:GetKeyPath(szTemplateKey)
+  local szReverse = string.reverse(szTemplateKey)
+  local i = string.find(szReverse, "/")
+  local m = string.len(szReverse) - i
+  local szKey = string.sub(szTemplateKey, 1, m)
+  return szKey
+end
+
+function tbWnd:ScrollToIndex(nIndex, isSelect)
+  if true == isSelect then
+    self.OnClickElement(self, nIndex)
+  end
+  local nItemCount = #self.tbElementList
+  local nHideCount = 0
+  for i = 1, #self.tbElementList do
+    local elemGo = self.tbOwner.pPanel:GetObject(self.tbElementList[i].szKey)
+    if elemGo.activeSelf == false then
+      nItemCount = nItemCount - 1
+      if i < nIndex then
+        nHideCount = nHideCount + 1
+      end
+    end
+  end
+  nIndex = nIndex - nHideCount
+  nIndex = nIndex - 1
+  if false == self.bIsInit then
+    self.scrollRect, self.scrollRectObj = self:GetScrollViewRect(self.szTemplateKey)
+    self.scrollRectTransForm = self.scrollRect:GetComponent("RectTransform")
+  end
+  local itemRect = self.tbOwner.pPanel:GetRectTransform(self.szTemplateKey)
+  local nItemRectWidth = itemRect.rect.width
+  local nItemRectHeight = itemRect.rect.height
+  local nViewportHeight, nViewportWidth
+  if false == self.bIsInit then
+    self.contentRect = self.scrollRect.content:GetComponent("RectTransform")
+  end
+  local nContentHeight = self.contentRect.rect.height
+  local nContentWidth = self.contentRect.rect.width
+  if false == self.bIsInit then
+    self.contentSizeFitter = self.scrollRect.content:GetComponent("ContentSizeFitter")
+  end
+  local isHaveHorizontalSizeFitter = true
+  local isHaveVerticalSizeFitter = true
+  if self.contentSizeFitter == nil or self.contentSizeFitter.horizontalFit.value__ ~= Ui.ContentSizeFitterFitMode.PreferredSize then
+    isHaveHorizontalSizeFitter = false
+  end
+  if self.contentSizeFitter == nil or self.contentSizeFitter.verticalFit.value__ ~= Ui.ContentSizeFitterFitMode.PreferredSize then
+    isHaveVerticalSizeFitter = false
+  end
+  if false == Lib:IsUnityObjNil(self.scrollRect.viewport) then
+    nViewportHeight = self.scrollRect.viewport.rect.size.y
+    nViewportWidth = self.scrollRect.viewport.rect.size.x
+  else
+    nViewportHeight = self.scrollRectTransForm.rect.size.y
+    nViewportWidth = self.scrollRectTransForm.rect.size.x
+  end
+  if false == self.bIsInit then
+    self.verticalLayout = self.scrollRect.content:GetComponent("VerticalLayoutGroup")
+  end
+  if nil ~= self.verticalLayout then
+    self.bIsInit = true
+    local nSpacing = self.verticalLayout.spacing
+    local nElementHeight = nItemRectHeight + nSpacing
+    local nTargetHeight = nElementHeight * nIndex
+    if true == isHaveVerticalSizeFitter then
+      nContentHeight = nItemCount * nItemRectHeight + nSpacing * (nItemCount - 1) + self.verticalLayout.padding.top + self.verticalLayout.padding.bottom
+    end
+    local diff = nContentHeight - nViewportHeight
+    self.scrollRect.verticalNormalizedPosition = Lib.Clamp01(1 - nTargetHeight / diff)
+    return
+  end
+  if false == self.bIsInit then
+    self.horizontalLayout = self.scrollRect.content:GetComponent("HorizontalLayoutGroup")
+  end
+  if nil ~= self.horizontalLayout then
+    self.bIsInit = true
+    local nSpacing = self.horizontalLayout.spacing
+    local nElementWidth = nItemRectWidth + nSpacing
+    local nTargetWidth = nElementWidth * nIndex
+    if true == isHaveHorizontalSizeFitter then
+      nContentWidth = nItemCount * nItemRectWidth + nSpacing * (nItemCount - 1) + self.horizontalLayout.padding.right + self.horizontalLayout.padding.left
+    end
+    local diff = nContentWidth - nViewportWidth
+    self.scrollRect.horizontalNormalizedPosition = Lib.Clamp01(nTargetWidth / diff)
+    return
+  end
+  if false == self.bIsInit then
+    self.gridLayout = self.scrollRect.content:GetComponent("GridLayoutGroup")
+  end
+  if nil ~= self.gridLayout then
+    self.bIsInit = true
+    nItemRectWidth = self.gridLayout.cellSize.x
+    nItemRectHeight = self.gridLayout.cellSize.y
+    local nSpacingWidth = self.gridLayout.spacing.x
+    local nSpacingHeidgt = self.gridLayout.spacing.y
+    local nHeightIndex, nWidthIndex, nHeightItemCount, nWidthItemCount
+    if self.gridLayout.constraint.value__ == Ui.GridLayoutGroupConstraint.FixedColumnCount then
+      local nConstraintCount = self.gridLayout.constraintCount
+      nHeightIndex = math.floor(nIndex / nConstraintCount)
+      nWidthIndex = nIndex % nConstraintCount
+      nHeightItemCount = math.floor((nItemCount - 1) / nConstraintCount + 1)
+      nWidthItemCount = nItemCount > nConstraintCount and nConstraintCount or nItemCount
+    elseif self.gridLayout.constraint.value__ == Ui.GridLayoutGroupConstraint.FixedRowCount then
+      local nConstraintCount = self.gridLayout.constraintCount
+      nHeightIndex = nIndex % nConstraintCount
+      nWidthIndex = math.floor(nIndex / nConstraintCount)
+      nHeightItemCount = nItemCount > nConstraintCount and nConstraintCount or nItemCount
+      nWidthItemCount = math.floor((nItemCount - 1) / nConstraintCount + 1)
+    else
+      Log("Flexible mode not supported")
+      return
+    end
+    local nElementHeight = nItemRectHeight + nSpacingHeidgt
+    local nTargetHeight = nElementHeight * nHeightIndex
+    if true == isHaveVerticalSizeFitter then
+      nContentHeight = nHeightItemCount * nItemRectHeight + nSpacingHeidgt * (nHeightItemCount - 1) + self.gridLayout.padding.top + self.gridLayout.padding.bottom
+    end
+    local diff = nContentHeight - nViewportHeight
+    self.scrollRect.verticalNormalizedPosition = Lib.Clamp01(1 - nTargetHeight / diff)
+    local nElementWidth = nItemRectWidth + nSpacingWidth
+    local nTargetWidth = nElementWidth * nWidthIndex
+    if true == isHaveHorizontalSizeFitter then
+      nContentWidth = nWidthItemCount * nItemRectWidth + nSpacingWidth * (nWidthItemCount - 1) + self.gridLayout.padding.right + self.gridLayout.padding.left
+    end
+    local diff = nContentWidth - nViewportWidth
+    self.scrollRect.horizontalNormalizedPosition = Lib.Clamp01(1 - nTargetWidth / diff)
+    return
+  end
+end

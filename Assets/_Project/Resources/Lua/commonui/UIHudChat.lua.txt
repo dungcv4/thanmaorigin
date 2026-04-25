@@ -1,0 +1,661 @@
+Require("CommonScript/Chat/ChatTerm.lua")
+local tbWnd = Ui:CreateWindow("UIHudChat")
+local tbControls = {
+  btnChatSetting = "imgBG/bottomChat/ChatContainer/btnChatSetting",
+  NormalChat = "imgBG/bottomChat/ChatContainer/NormalChat",
+  btnChatHandle = "imgBG/bottomChat/ChatContainer/NormalChat/btnChatHandle",
+  ChatScrollView = "imgBG/bottomChat/ChatContainer/NormalChat/ChatScrollView",
+  Viewport = "imgBG/bottomChat/ChatContainer/NormalChat/ChatScrollView/Viewport",
+  ChatScrollViewItem = "imgBG/bottomChat/ChatContainer/NormalChat/ChatScrollView/Viewport/Content/Item",
+  btnNewMsg = "imgBG/bottomChat/ChatContainer/BtnGroup/groupMsgBtn/btnNewMsg",
+  objNewMsgCount = "imgBG/bottomChat/ChatContainer/BtnGroup/groupMsgBtn/btnNewMsg/imgNewMsgCount",
+  txtNewMsgCount = "imgBG/bottomChat/ChatContainer/BtnGroup/groupMsgBtn/btnNewMsg/imgNewMsgCount/txtNewMsgCount",
+  btnNewChat = "imgBG/bottomChat/ChatContainer/BtnGroup/groupMsgBtn/btnNewChat",
+  txtNewChatCount = "imgBG/bottomChat/ChatContainer/BtnGroup/groupMsgBtn/btnNewChat/imgNewMsgCount/txtNewMsgCount",
+  btnTeamMsg = "imgBG/bottomChat/ChatContainer/BtnGroup/groupMsgBtn/btnTeam",
+  txtTeamMsgCount = "imgBG/bottomChat/ChatContainer/BtnGroup/groupMsgBtn/btnTeam/imgNewMsgCount/txtNewMsgCount",
+  btnMail = "imgBG/bottomChat/btnMail",
+  btnFriend = "imgBG/bottomChat/btnFriend",
+  ColorMsgContainer = "imgBG/bottomChat/ChatContainer/imgColorBg",
+  btnOfflineTongVoice = "imgBG/bottomChat/ChatContainer/BtnGroup/VoiceGroup/btnOfflineTongVoice",
+  btnOfflineKinVoice = "imgBG/bottomChat/ChatContainer/BtnGroup/VoiceGroup/btnOfflineKinVoice",
+  btnOfflineTeamBattle = "imgBG/bottomChat/ChatContainer/BtnGroup/VoiceGroup/btnOfflineTeamBattle",
+  btnListChannel = "imgBG/bottomChat/ChatContainer/NormalChat/btnListChannel",
+  btnChannelAll = "imgBG/bottomChat/ChatContainer/NormalChat/btnListChannel/btnAll",
+  btnChannelTeam = "imgBG/bottomChat/ChatContainer/NormalChat/btnListChannel/btnTeam",
+  btnChannelKin = "imgBG/bottomChat/ChatContainer/NormalChat/btnListChannel/btnKin",
+  btnChannelTong = "imgBG/bottomChat/ChatContainer/NormalChat/btnListChannel/btnTong"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnChatSetting = function(self)
+    Ui:OpenWindow("UIChatSetting")
+  end,
+  btnChatHandle = function(self)
+    self.bChatExpend = not self.bChatExpend
+    self:UpdateChannelBtn(true)
+  end,
+  btnNewMsg = function(self)
+    Ui:OpenWindow("UINotifyMsgList")
+  end,
+  btnFriend = function(self)
+    if Ui.bInZone then
+      me.CenterMsg(i18n.EasyGet("\232\183\168\230\156\141\228\184\173\230\151\160\230\179\149\232\191\155\232\161\140\229\189\147\229\137\141\230\147\141\228\189\156"))
+      return
+    end
+    Ui:OpenWindow("UISocial")
+  end,
+  btnMail = function(self)
+    Ui:OpenWindow("UIChat", ChatMgr.ChannelType.System, true)
+    self:UpdateUnreadMail(true)
+  end,
+  btnNewChat = function(self)
+    Ui:OpenWindow("UIChat", ChatMgr.ChannelType.Private)
+    ChatMgr.PrivateChatRedPointNum = 0
+    self:UpdatePrivateMsg()
+  end,
+  btnTeamMsg = function(self)
+    self.pPanel:SetActive(self.btnTeamMsg, false)
+    Ui:OpenWindow("UITeamInvitedMsg")
+  end
+}
+local MsgColor = "#FFFFCC"
+local SysMsgColor = "#EFEBC5"
+local Channel2Name = {
+  [ChatMgr.ChannelType.System] = ChatMgr.Terms.SystemChannelName,
+  [ChatMgr.ChannelType.Public] = ChatMgr.tbChannelSetting[ChatMgr.ChannelType.Public].szChannelName,
+  [ChatMgr.ChannelType.Nearby] = ChatMgr.tbChannelSetting[ChatMgr.ChannelType.Nearby].szChannelName,
+  [ChatMgr.ChannelType.Kin] = ChatMgr.tbChannelSetting[ChatMgr.ChannelType.Kin].szChannelName,
+  [ChatMgr.ChannelType.Tong] = ChatMgr.tbChannelSetting[ChatMgr.ChannelType.Tong].szChannelName,
+  [ChatMgr.ChannelType.Team] = ChatMgr.tbChannelSetting[ChatMgr.ChannelType.Team].szChannelName,
+  [ChatMgr.ChannelType.Friend] = ChatMgr.tbChannelSetting[ChatMgr.ChannelType.Friend].szChannelName,
+  [ChatMgr.ChannelType.Private] = ChatMgr.tbChannelSetting[ChatMgr.ChannelType.Private].szChannelName,
+  [ChatMgr.ChannelType.Color] = ChatMgr.tbChannelSetting[ChatMgr.ChannelType.Color].szChannelName,
+  [ChatMgr.ChannelType.Map] = ChatMgr.tbChannelSetting[ChatMgr.ChannelType.Map].szChannelName,
+  [ChatMgr.ChannelType.Recruit] = ChatMgr.tbChannelSetting[ChatMgr.ChannelType.Recruit].szChannelName,
+  [ChatMgr.ChannelType.Hawk] = ChatMgr.tbChannelSetting[ChatMgr.ChannelType.Hawk].szChannelName
+}
+
+function tbWnd:OnCreate()
+  self.nChannelType = ChatMgr.ChannelType.System
+  self.objChatBGTransform = self.pPanel:GetRectTransform(tbControls.NormalChat)
+  self.objChatBGHeight = self.objChatBGTransform.rect.height
+  self.ViewportTransform = self.pPanel:GetRectTransform(tbControls.Viewport)
+  self.objChatExpend = self.pPanel:GetObject(tbControls.btnChatHandle)
+  self.objChatBG = self.pPanel:GetObject(tbControls.ChatScrollView)
+  local listenerChat = Ui.UIEventListener.Get(self.objChatBG)
+  
+  function listenerChat.Click(objChatBG, eventData)
+    self:onClickChat()
+  end
+  
+  self.btnListChannelHeight = self.pPanel:GetRectTransform(tbControls.btnListChannel).rect.height
+  self.nCurPage = 1
+  self.btListChannelBtnGroup = Ui:NewButtonGroup(self, {
+    [1] = tbControls.btnChannelAll,
+    [2] = tbControls.btnChannelTeam,
+    [3] = tbControls.btnChannelKin,
+    [4] = tbControls.btnChannelTong
+  }, true, self.onSwitchPage)
+  self.btListChannelBtnGroup:Select(self.nCurPage)
+  self.tbChatMsgScrollView = Ui:NewSuperListView(self, tbControls.ChatScrollViewItem, self.SetChatMsgItem)
+  self.pPanel:SetActive(tbControls.btnNewMsg, false)
+  self.pPanel:SetActive(tbControls.btnMail, false)
+  self.pPanel:SetActive(tbControls.btnNewChat, false)
+  self.pPanel:SetActive(tbControls.btnTeamMsg, false)
+  self.pPanel:SetActive(tbControls.btnOfflineKinVoice, Kin:HasKin())
+  self.pPanel:SetActive(tbControls.btnOfflineTongVoice, Tong:HasTong())
+  self.pPanel:SetActive(tbControls.btnOfflineTeamBattle, Legion:HasLegion())
+  self.pPanel:SetActive(tbControls.btnChatSetting, true)
+  self:UpdateProcessMsgNum()
+  self.nNotifyMsgTimerID = Timer:Register(Env.GAME_FPS * 60, function()
+    self:UpdateProcessMsgNum()
+    return true
+  end)
+  self:UpdateUnreadMail()
+  self:UpdatePrivateMsg()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnFriend, {
+    RedPointMgr.EVENT.FriendApply,
+    RedPointMgr.EVENT.MP_TeacherApply,
+    RedPointMgr.EVENT.MP_TaskReport
+  })
+  Sdk:onEnterGame()
+end
+
+function tbWnd:OnOpenEnd()
+  self.bChatExpend = false
+  self.LastChannelChatDataKey = nil
+  self:UpdateChannelBtn()
+  self:UpdateRedPoint()
+  self:SetIconsShow()
+end
+
+function tbWnd:OnClose()
+  if self.bChatExpend then
+    self.bChatExpend = false
+    self.objChatExpend.transform.localEulerAngles = Ui.Vector3.zero
+    self.objChatBGTransform.sizeDelta = Ui.Vector2(self.objChatBGTransform.rect.width, self.objChatBGHeight)
+    self:UpdateChannelBtn()
+  end
+  if self.nOnNewMsgTimer then
+    Timer:Close(self.nOnNewMsgTimer)
+    self.nOnNewMsgTimer = nil
+  end
+end
+
+function tbWnd:OnDestroy()
+  if self.nNotifyMsgTimerID and self.nNotifyMsgTimerID > 0 then
+    Timer:Close(self.nNotifyMsgTimerID)
+    self.nNotifyMsgTimerID = nil
+  end
+  self.tbChatMsgScrollView = nil
+end
+
+function tbWnd:onClickChat()
+  Ui:OpenWindow("UIChat", self.nChannelIndex)
+end
+
+function tbWnd:onSwitchPage(nPage)
+  if self.nCurPage == nPage then
+    return
+  end
+  self.nCurPage = nPage
+  if 1 == self.nCurPage then
+    self.nChannelIndex = nil
+  elseif 2 == self.nCurPage then
+    self.nChannelIndex = ChatMgr.ChannelType.Team
+  elseif 3 == self.nCurPage then
+    self.nChannelIndex = ChatMgr.ChannelType.Kin
+  elseif 4 == self.nCurPage then
+    self.nChannelIndex = ChatMgr.ChannelType.Tong
+  end
+  self:OnNewMsg()
+end
+
+function tbWnd:GetChannelName(nChannelId, nExtra)
+  local v = Channel2Name[nChannelId]
+  local tv = type(v)
+  if "string" == tv then
+    return i18n.Get(v)
+  elseif "function" == tv then
+    return v(nExtra)
+  else
+    local tbDyn = ChatMgr.tbDynamicChannel[nChannelId]
+    return tbDyn and i18n.Get(ChatMgr.Terms.DynamicChannelName, tbDyn.szName) or ""
+  end
+end
+
+function tbWnd:onChatDataCahnged()
+  self.bChatDataChanged = true
+end
+
+function tbWnd:_OnNewMsg(nRealChannel, tbMsg, nExtra, bTips)
+  if self.nOnNewMsgTimer then
+    self.bHadNewMsg = true
+    return
+  end
+  self:OnNewMsg(nRealChannel, tbMsg, nExtra, bTips)
+  self.nOnNewMsgTimer = Timer:Register(9, self._OnNewMsgTimerCall, self, nRealChannel, tbMsg, nExtra, bTips)
+end
+
+function tbWnd:_OnNewMsgTimerCall(nRealChannel, tbMsg, nExtra, bTips)
+  self.nOnNewMsgTimer = nil
+  if self.bHadNewMsg then
+    self.bHadNewMsg = false
+    self:OnNewMsg(nRealChannel, tbMsg, nExtra, bTips)
+  end
+end
+
+function tbWnd:OnNewMsg(nRealChannel, tbMsg, nExtra, bTips)
+  if (not (not nRealChannel or ChatMgr:CheckShowInSmall(nRealChannel, nExtra, nRealChannel)) or bTips) and (nRealChannel ~= ChatMgr.ChannelType.Kin or 1 ~= nExtra) then
+    return
+  end
+  local key = self.nChannelIndex and self.nChannelIndex or ChatMgr.chatSmall
+  if key ~= self.LastChannelChatDataKey then
+    local tbItems = ChatMgr:GetChannelChatData(key)
+    self.tbChatMsgScrollView:SetAllElement(tbItems)
+    self.tbChatMsgScrollView:MovePanelToLastItem()
+    self.LastChannelChatDataKey = key
+  elseif self.tbChatMsgScrollView:RefreshAllItem() or self.bChatDataChanged then
+    self.bChatDataChanged = false
+    self.tbChatMsgScrollView:MovePanelToLastItem()
+  end
+end
+
+function tbWnd:SetChatMsgItem(tbElement, tbMsg)
+  local szColorMsg = ""
+  local szCurBg, szCurBgColor
+  local txtEmoji = tbElement.pPanel:GetEmojiText("txtChatContent")
+  local tbLinkInfo = tbMsg and tbMsg.tbLinkInfo or {}
+  txtEmoji.onClickLink = nil
+  txtEmoji.raycastTarget = false
+  local szTempMsg = tbMsg.szMsg
+  if not tbLinkInfo.nLinkType or not ChatMgr.tbLinkClickFns[tbLinkInfo.nLinkType] then
+    txtEmoji.onClickLink = nil
+    txtEmoji.raycastTarget = false
+  else
+    txtEmoji.raycastTarget = true
+    
+    function txtEmoji.onClickLink(param)
+      tbMsg.bClickLink = true
+      if tbLinkInfo.nLinkType and ChatMgr.tbLinkClickFns[tbLinkInfo.nLinkType] then
+        ChatMgr.tbLinkClickFns[tbLinkInfo.nLinkType](tbLinkInfo, tonumber(param), tbMsg)
+      end
+    end
+    
+    local bSuccess, szShowMsg = Lib:CallBack({
+      ChatMgr.DealMsgWithLinkUpdate,
+      ChatMgr,
+      szTempMsg,
+      tbLinkInfo
+    })
+    if bSuccess then
+      szTempMsg = szShowMsg
+    end
+    bSuccess, szShowMsg = Lib:CallBack({
+      ChatMgr.DealMsgWithLinkColor,
+      ChatMgr,
+      szTempMsg,
+      tbLinkInfo,
+      tbMsg,
+      true
+    })
+    if bSuccess then
+      szTempMsg = szShowMsg
+    end
+  end
+  local dzIdent = ""
+  if (tbMsg.nChannelType == ChatMgr.ChannelType.Kin or tbMsg.nChannelType == ChatMgr.ChannelType.Tong) and tbMsg.tbExtra and tbMsg.tbExtra.szIdent then
+    dzIdent = i18n.Parse(tbMsg.tbExtra.szIdent)
+  elseif (tbMsg.nChannelType == ChatMgr.ChannelType.Zone or tbMsg.nChannelType == ChatMgr.ChannelType.Zone_Legion) and tbMsg.tbExtra and tbMsg.tbExtra.szServerName then
+    if tbMsg.tbExtra.szServerName == GetServerName(SERVER_ID) then
+      dzIdent = i18n.Get(ChatMgr.Terms.MyServerName)
+    else
+      dzIdent = i18n.Get(ChatMgr.Terms.OtherServerName, tbMsg.tbExtra.szServerName)
+    end
+  end
+  if tbMsg.nChannelType == ChatMgr.ChannelType.System then
+    if ChatMgr.ChannelSystemBg[tbMsg.nSenderId] then
+      szCurBg = ChatMgr.ChannelSystemBg[tbMsg.nSenderId]
+    else
+      szCurBg = ChatMgr.ChannelBg[tbMsg.nChannelType]
+    end
+    szCurBgColor = ChatMgr.ChannelTagColor[szCurBg] or SysMsgColor
+    self.nChannelType = ChatMgr.SystemTypeChannel[tbMsg.nSenderId]
+    szColorMsg = string.format("<color=%s>%s</color>", szCurBgColor, szTempMsg or ChatMgr:Time2Str(tbMsg.nTime))
+  else
+    szCurBg = ChatMgr.ChannelBg[tbMsg.nChannelType]
+    szCurBgColor = ChatMgr.ChannelTagColor[szCurBg] or MsgColor
+    self.nChannelType = tbMsg.nChannelType
+    szColorMsg = string.format("<color=%s>%s</color>", szCurBgColor, szTempMsg)
+  end
+  szCurBg = string.format("<color=%s>%s</color>", szCurBgColor, i18n.Get(szCurBg) or "")
+  local szMsg
+  local szRemarkName = FriendShip:GetPlayerRemarkName(tbMsg.nSenderId)
+  local szHudChatName = tbMsg.szSenderName
+  if "" ~= szRemarkName then
+    szHudChatName = szRemarkName
+  end
+  local szSenderName = szHudChatName
+  local szNamePrefix
+  if tbMsg.tbExtra and tbMsg.tbExtra.nChatTitlePrefixId and 0 ~= tbMsg.tbExtra.nChatTitlePrefixId then
+    local tbCfg = ChatMgr:GetStaticChatTitlePrefixConfig(tbMsg.tbExtra.nChatTitlePrefixId)
+    local szName = tbCfg.szName
+    local nColor = tbCfg.nColorIdInChat
+    if szName and nColor then
+      szNamePrefix = string.format("<color=#%s>[%s]</color>", Ui.tbColor:GetColorHexBySettingId(nColor), i18n.Parse(szName))
+    elseif szName then
+      szNamePrefix = string.format("[%s]", i18n.Parse(szName))
+    end
+  elseif tbMsg.tbExtra and tbMsg.tbExtra.nCurrPrefix then
+    local szName = ChatMgr:GetNamePrefix(tbMsg.tbExtra.nCurrPrefix)
+    local nColor = ChatMgr:GetNamePrefixColor(tbMsg.tbExtra.nCurrPrefix)
+    if szName and nColor then
+      szNamePrefix = string.format("<color=#%s>[%s]</color>", Ui.tbColor:GetColorHexBySettingId(nColor), i18n.Parse(szName))
+    elseif szName then
+      szNamePrefix = string.format("[%s]", i18n.Parse(szName))
+    end
+  end
+  if szNamePrefix then
+    szSenderName = szNamePrefix .. szHudChatName
+  else
+    szSenderName = szHudChatName
+  end
+  if not (not szSenderName or Lib:IsEmptyStr(szSenderName)) or dzIdent and not Lib:IsEmptyStr(dzIdent) then
+    if tbMsg.szMsgVoiceFileId then
+      szMsg = string.format("%s%s%s\239\188\154#v7u2ic5e%s", szCurBg, dzIdent, szSenderName or "", szColorMsg)
+    else
+      szMsg = string.format("%s%s%s\239\188\154%s", szCurBg, dzIdent, szSenderName or "", szColorMsg)
+    end
+  else
+    szMsg = string.format("%s%s", szCurBg, szColorMsg)
+  end
+  txtEmoji.text = szMsg
+  local objText = tbElement.pPanel:GetObject("txtChatContent")
+  objText:GetComponent(Ui.ContentSizeFitter):SetLayoutVertical()
+  tbElement.pPanel:ContentSizeFitter_Refresh("txtChatContent")
+  local transformText = objText:GetComponent(Ui.RectTransform)
+  local objElem = self.pPanel:GetObject(tbElement.szKey)
+  local transformElem = objElem:GetComponent(Ui.RectTransform)
+  transformElem.sizeDelta = Ui.Vector2(transformElem.sizeDelta.x, transformText.sizeDelta.y)
+end
+
+function tbWnd:UpdateProcessMsgNum()
+  if Ui.bInZone then
+    self.pPanel:SetActive(tbControls.btnNewMsg, false)
+    return
+  end
+  if self.nNotifyMsgTimerID and self.nNotifyMsgTimerID > 0 then
+    Timer:Close(self.nNotifyMsgTimerID)
+    self.nNotifyMsgTimerID = nil
+  end
+  if not self.pPanel then
+    return
+  end
+  local nCurTime = GetTime()
+  local nUnReadNum = 0
+  local nMinTimeOut = 0
+  local tbDel = {}
+  for nIndex, tbData in pairs(Ui.tbNotifyMsgDatas) do
+    if tbData.nTimeOut and tbData.nTimeOut > 0 then
+      if nCurTime >= tbData.nTimeOut then
+        table.insert(tbDel, nIndex)
+      else
+        nUnReadNum = nUnReadNum + 1
+        if nMinTimeOut > tbData.nTimeOut or nMinTimeOut <= 0 then
+          nMinTimeOut = tbData.nTimeOut
+        end
+      end
+    else
+      nUnReadNum = nUnReadNum + 1
+    end
+  end
+  for i = #tbDel, 1, -1 do
+    table.remove(Ui.tbNotifyMsgDatas, tbDel[i])
+  end
+  if nMinTimeOut > 0 then
+    self.nNotifyMsgTimerID = Timer:Register(Env.GAME_FPS * (nMinTimeOut - nCurTime), function()
+      self:UpdateProcessMsgNum()
+      return true
+    end)
+  end
+  if nUnReadNum > 0 then
+    self.pPanel:SetActive(tbControls.btnNewMsg, true)
+    if Ui.nUnReadNotifyMsgNum > 0 then
+      self.pPanel:SetActive(tbControls.objNewMsgCount, true)
+      self.pPanel:Label_SetText(tbControls.txtNewMsgCount, nUnReadNum)
+    else
+      self.pPanel:SetActive(tbControls.objNewMsgCount, false)
+    end
+  else
+    self.pPanel:SetActive(tbControls.btnNewMsg, false)
+    self.pPanel:SetActive(tbControls.objNewMsgCount, false)
+  end
+end
+
+function tbWnd:onKinSyncData(szAction)
+  self.pPanel:SetActive(tbControls.btnOfflineKinVoice, Kin:HasKin())
+  if "Quit" == szAction then
+    self.pPanel:SetActive(tbControls.btnOfflineTongVoice, false)
+  elseif "JoinKins" == szAction or "New" == szAction or "BaseInfo" == szAction then
+    self.pPanel:SetActive(tbControls.btnOfflineTongVoice, Tong:HasTong())
+  end
+  self:UpdateChannelBtn()
+end
+
+function tbWnd:onTongSyncData()
+  self.pPanel:SetActive(tbControls.btnOfflineTongVoice, Tong:HasTong())
+  self:UpdateChannelBtn()
+end
+
+function tbWnd:onLegionSyncData(szAction)
+  self.pPanel:SetActive(tbControls.btnOfflineTeamBattle, Legion:HasLegion())
+  if "Quit" == szAction then
+    self.pPanel:SetActive(tbControls.btnOfflineTeamBattle, false)
+  end
+  self:UpdateChannelBtn()
+end
+
+function tbWnd:UpdateColorMsg()
+  local tbColorMsg = ChatMgr:GetColorMsg()
+  if tbColorMsg.szMsg then
+    local szMsg = string.format("%s%s\239\188\154%s", i18n.Get(ChatMgr.ChannelTap.TapColor), tbColorMsg.szSenderName, tbColorMsg.szMsg)
+    self.pPanel:Label_SetText(tbControls.ColorMsgContainer .. "/ColorMsgContainer/txtColorMsg", szMsg)
+    self.pPanel:SetActive(tbControls.ColorMsgContainer, true)
+  else
+    self.pPanel:Label_SetText(tbControls.ColorMsgContainer .. "/ColorMsgContainer/txtColorMsg", "")
+    self.pPanel:SetActive(tbControls.ColorMsgContainer, false)
+  end
+end
+
+function tbWnd:UpdatePrivateMsg()
+  local nRedPointNum = ChatMgr.PrivateChatRedPointNum
+  if nRedPointNum <= 0 then
+    self.pPanel:SetActive(tbControls.btnNewChat, false)
+  else
+    self.pPanel:SetActive(tbControls.btnNewChat, true)
+    if nRedPointNum <= 99 then
+      self.pPanel:Label_SetText(tbControls.txtNewChatCount, tostring(nRedPointNum))
+    else
+      self.pPanel:Label_SetText(tbControls.txtNewChatCount, "99+")
+    end
+  end
+end
+
+function tbWnd:UpdatePriveMsg()
+  self:UpdatePrivateMsg()
+end
+
+function tbWnd:UpdateNewMail(bFromSvr)
+  if bFromSvr and not Ui:WindowVisible("UIChat") then
+    self:UpdateUnreadMail()
+  end
+  if not bFromSvr and 0 == Mail:GetUnreadCount() then
+    self:UpdateUnreadMail()
+  end
+end
+
+function tbWnd:UpdateUnreadMail(bForceHide)
+  if bForceHide then
+    self.pPanel:SetActive(tbControls.btnMail, false)
+  elseif Mail:GetUnreadCount() > 0 then
+    self.pPanel:SetActive(tbControls.btnMail, true)
+  else
+    self.pPanel:SetActive(tbControls.btnMail, false)
+  end
+end
+
+function tbWnd:UpdateTeamMsg(szParam)
+  if szParam and ("new" == szParam or "quite" == szParam) then
+    self:UpdateChannelBtn()
+  end
+  if szParam and ("NewInvite" == szParam or "new" == szParam) then
+    if TeamMgr:HasTeam() then
+      self.pPanel:SetActive(tbControls.btnTeamMsg, false)
+    else
+      local nNum = #TeamMgr:GetInviteList()
+      if 0 == nNum then
+        self.pPanel:SetActive(tbControls.btnTeamMsg, false)
+      else
+        self.pPanel:SetActive(tbControls.btnTeamMsg, true)
+        self.pPanel:Label_SetText(tbControls.txtTeamMsgCount, nNum)
+      end
+    end
+  end
+end
+
+function tbWnd:UpdateRedPoint()
+  self:UpdateRedPoint_Friend()
+end
+
+function tbWnd:UpdateRedPoint_Friend()
+  if me.nLevel < FriendShip.SHOW_LEVEL then
+    return
+  end
+  local tbAllRequet = FriendShip:GetAllFriendRequestData()
+  if #tbAllRequet > 0 then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.FriendApply)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.FriendApply)
+  end
+end
+
+function tbWnd:UpdateChannelBtn(bChanged)
+  if bChanged then
+    if self.bChatExpend then
+      self.objChatExpend.transform.localEulerAngles = Ui.Vector3(0, 0, 180)
+      self.objChatBGTransform.sizeDelta = Ui.Vector2(self.objChatBGTransform.rect.width, self.objChatBGHeight * 2)
+    else
+      self.objChatExpend.transform.localEulerAngles = Ui.Vector3.zero
+      self.objChatBGTransform.sizeDelta = Ui.Vector2(self.objChatBGTransform.rect.width, self.objChatBGHeight)
+    end
+  end
+  local bOldShow = self.pPanel:IsActive(tbControls.btnListChannel)
+  local bShow = self.bChatExpend
+  if bOldShow ~= bShow then
+    self.pPanel:SetActive(tbControls.btnListChannel, bShow)
+    if bShow then
+      self.ViewportTransform.offsetMin = Ui.Vector2(0, 0)
+      self.ViewportTransform.offsetMax = Ui.Vector2(0, -self.btnListChannelHeight)
+    else
+      self.ViewportTransform.offsetMin = Ui.Vector2(0, 0)
+      self.ViewportTransform.offsetMax = Ui.Vector2(0, 0)
+    end
+  end
+  if bChanged or bOldShow ~= bShow then
+    self.LastChannelChatDataKey = nil
+  end
+  self:OnNewMsg()
+end
+
+function tbWnd:OnChatRefresh()
+  self.bChatDataChanged = true
+  self:OnNewMsg()
+end
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_CHAT_NEW_MSG,
+      self._OnNewMsg
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_KIN_DATA,
+      self.onKinSyncData
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TONG_BASEINFO,
+      self.onTongSyncData
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TONG_QUIT,
+      self.onTongSyncData
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_LEGION_BASEINFO,
+      self.onLegionSyncData
+    },
+    {
+      EventNotify.emNOTIFY_NOTIFY_PROCESS_MSG,
+      self.UpdateProcessMsgNum
+    },
+    {
+      EventNotify.emNoTIFY_NEW_PRIVATE_MSG,
+      self.UpdatePriveMsg
+    },
+    {
+      EventNotify.emNOTIFY_PRIVATE_MSG_NUM_CHANGE,
+      self.UpdatePrivateMsg
+    },
+    {
+      EventNotify.emNOTIFY_CHAT_COLOR_MSG,
+      self.UpdateColorMsg
+    },
+    {
+      EventNotify.emNOTIFY_TEAM_UPDATE,
+      self.UpdateTeamMsg
+    },
+    {
+      EventNotify.emNOTIFY_TEAM_REMOVE_INVITE,
+      self.UpdateTeamMsg
+    },
+    {
+      EventNotify.emNOTIFY_TEAM_CLEAR_INVITE,
+      self.UpdateTeamMsg
+    },
+    {
+      EventNotify.emNOTIFY_NOTIFY_NEW_MAIL,
+      self.UpdateNewMail
+    },
+    {
+      EventNotify.emNoTIFY_SYNC_FRIEND_DATA,
+      self.UpdateRedPoint_Friend
+    },
+    {
+      EventNotify.emNOTIFY_CHAT_DATA_CHANGE,
+      self.onChatDataCahnged
+    },
+    {
+      EventNotify.emNOTIFY_LOGIN_ZONE,
+      self.OnLoginZone
+    },
+    {
+      EventNotify.emNOTIFY_LOGOUT_ZONE,
+      self.OnLogoutZone
+    },
+    {
+      EventNotify.emNOTIFY_SUPER_VIEW_REFRESH,
+      self.OnChatRefresh
+    },
+    {
+      EventNotify.emNOTIFY_CHAT_LINK_UPDATE,
+      self.OnChatRefresh
+    }
+  }
+end
+
+function tbWnd:SetIconsShow()
+  self.pPanel:SetActive(tbControls.btnFriend, not Ui.bInZone)
+  if Ui.bInZone then
+    self.pPanel:SetActive(tbControls.btnNewMsg, false)
+  end
+end
+
+function tbWnd:OnLoginZone()
+  self:SetIconsShow()
+end
+
+function tbWnd:OnLogoutZone()
+  self:SetIconsShow()
+end
+
+function tbWnd:UpdateFightFlagAndPathFlagVisible()
+  self.pPanel:SetActive(tbControls.AutoFightFlag, self.bIsShowAutoFightFlag)
+  self.pPanel:SetActive(tbControls.AutoPathFlag, self.bIsAutoPath and not self.bIsShowAutoFightFlag)
+end
+
+function tbWnd:UpdateAFKState(nState)
+  local szShowText
+  if AFK:IsLeadFightRunning() then
+    if nState == AFK.LeadFightStateTB.emAutoFight then
+      szShowText = i18n.EasyGet("\232\135\170\229\138\168\230\136\152\230\150\151\228\184\173")
+    elseif nState == AFK.LeadFightStateTB.emGoToSafePos then
+      szShowText = i18n.EasyGet("\229\137\141\229\190\128\229\174\137\229\133\168\229\140\186")
+    elseif nState == AFK.LeadFightStateTB.emSupplyWare then
+      szShowText = i18n.EasyGet("\232\161\165\231\187\153\232\141\175\229\147\129\228\184\173")
+    end
+  end
+  if AFK:IsFollowFightRunning() and nil == szShowText and nState ~= AFK.LeadFightStateTB.emNone and nState ~= AFK.LeadFightStateTB.emGoToFightPos then
+    szShowText = i18n.EasyGet("\232\183\159\230\136\152\228\184\173")
+  end
+  self.bIsShowAutoFightFlag = nil ~= szShowText
+  self:UpdateFightFlagAndPathFlagVisible()
+  if self.bIsShowAutoFightFlag then
+    self.pPanel:Label_SetText(tbControls.AutoFightFlag .. "/Text", szShowText)
+  end
+end
+
+function tbWnd:SetAutoPathFlagVisible(bVisible)
+  self.bIsAutoPath = bVisible
+  self:UpdateFightFlagAndPathFlagVisible()
+end

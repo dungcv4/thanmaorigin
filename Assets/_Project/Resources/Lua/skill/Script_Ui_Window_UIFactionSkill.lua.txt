@@ -1,0 +1,659 @@
+local tbWnd = Ui:CreateClass("UIFactionSkill", "UIPanel")
+local AFKSkillMgr = AFK.AFKSkillMgr
+local tbControls = {
+  BaseSkillTemplate = "group/BaseSkill/maskLayer/Viewport/paneBG/SkillTemplate",
+  btnFactionSect0 = "FactionSect/btnFaction1",
+  btnFactionSect1 = "FactionSect/btnFaction2",
+  txtSkillPoint = "group/QuickAdd/imgBG/txtSkillPoint",
+  btnTransFactionSect = "group/QuickAdd/imgBG/btnTransFactionSect",
+  btnQuickAdd = "group/QuickAdd/imgBG/btnQuickAdd",
+  btnReset = "group/QuickAdd/imgBG/btnReset",
+  txtSeries = "group/txtSeries",
+  btnSkillSupplement = "group/QuickAdd/imgBG/btnSkillSupplement",
+  FactionSect = "FactionSect",
+  QuickAdd = "group/QuickAdd",
+  btnConfirm = "group/Btn/btnOk",
+  btnCancel = "group/Btn/btnCancel"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnReset = function(self)
+    self:OnClickReset()
+  end,
+  btnQuickAdd = function(self)
+    if me.nFactionSect == self.nFactionSectSelec then
+      self:onClickQuickAddSkillPoint()
+    end
+  end,
+  btnTransFactionSect = function(self)
+    if me.nFactionSect ~= self.nFactionSectSelec then
+      self:onClickChangeFactionSect()
+    end
+  end,
+  btnSkillSupplement = function(self)
+    Ui:OpenWindow("UISkillSupplement")
+  end,
+  btnConfirm = function(self)
+    self:OnClickConfirm()
+  end,
+  btnCancel = function(self)
+    self:OnClickCancel()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbBaseSkillView = Ui:NewSuperListView(self, self.BaseSkillTemplate, self.SetSkillElementInfo)
+  self.tbFactionGroup = Ui:NewButtonGroup(self, {
+    [1] = self.btnFactionSect0,
+    [2] = self.btnFactionSect1
+  }, true, function(self, nIndex)
+    self:ChangeFactionSectSelec(nIndex - 1)
+  end)
+end
+
+function tbWnd:OnOpen(bEnteringWithKin, bEnteringWithHanWu)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SKILL_LEVELUP, self.OnResponseSkillLevelUp, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_DATA, self.OnSyncData, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_FACTION_SECT, self.OnResponseFactionSectChanged, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SKILL_EXTEND, self.OnResponseSkillLevelExtend, self)
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnQuickAdd, {
+    RedPointMgr.EVENT.FactionSkill
+  })
+  if 0 == me.nFactionSect then
+    self.tbFactionGroup:Select(1)
+    RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnFactionSect0, {
+      RedPointMgr.EVENT.FactionSkill
+    })
+  elseif 1 == me.nFactionSect then
+    self.tbFactionGroup:Select(2)
+    RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnFactionSect1, {
+      RedPointMgr.EVENT.FactionSkill
+    })
+  end
+  self.nFactionSectSelec = me.nFactionSect
+  self.pPanel:Button_SetText(self.btnFactionSect0, Faction:GetSectName(me.nFaction, 0), "Text")
+  if me.HasFaction() then
+    self.pPanel:SetActive(self.btnFactionSect1, true)
+    self.pPanel:Button_SetText(self.btnFactionSect1, Faction:GetSectName(me.nFaction, 1), "Text")
+  else
+    self.pPanel:SetActive(self.btnFactionSect1, false)
+  end
+  self.pPanel:Label_SetText(self.txtSeries, Faction:GetSectDesc(me.nFaction, me.nFactionSect))
+  self:UpdateSkillList()
+  self.pPanel:SetActive(self.FactionSect, true)
+  self.pPanel:SetActive(self.QuickAdd, true)
+  if true == bEnteringWithHanWu then
+    self.pPanel:SetActive(self.FactionSect, false)
+    self.pPanel:SetActive(self.QuickAdd, false)
+  end
+end
+
+function tbWnd:UpdateView()
+  self:OnClose()
+  self:OnOpen()
+end
+
+function tbWnd:OnClose()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SKILL_LEVELUP, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_DATA, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_FACTION_SECT, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SKILL_EXTEND, self)
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.btnQuickAdd)
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.btnFactionSect0)
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.btnFactionSect1)
+  if self.nCanClickConfirmTimer then
+    Timer:Close(self.nCanClickConfirmTimer)
+    self.nCanClickConfirmTimer = nil
+  end
+end
+
+function tbWnd:onClickViewSkill(nIndex)
+  local tbSkillInfo = Lib:CopyTB(self.tbSkillList[nIndex])
+  self:DealShowSkillInfo(tbSkillInfo)
+  Ui:OpenWindow("UISkillShow", tbSkillInfo, me.nFactionSect == self.nFactionSectSelec, true)
+end
+
+function tbWnd:ChangeFactionSectSelec(nFactionSect)
+  if me.nFactionSect == nFactionSect then
+    FightSkill:UpdateFactionSkillRedPoint()
+    self.pPanel:SetActive(self.btnQuickAdd, true)
+    self.pPanel:SetActive(self.btnTransFactionSect, false)
+  else
+    self.pPanel:SetActive(self.btnQuickAdd, false)
+    self.pPanel:SetActive(self.btnTransFactionSect, true)
+  end
+  if nFactionSect == self.nFactionSectSelec then
+    return
+  end
+  self.nFactionSectSelec = nFactionSect
+  self.pPanel:Label_SetText(self.txtSeries, Faction:GetSectDesc(me.nFaction, nFactionSect))
+  self:UpdateSkillList()
+end
+
+function tbWnd:UpdateSkillList(nUpgradeSkillId)
+  self.pPanel:Label_SetText(self.txtSkillPoint, me.GetSkillPoint())
+  self.tbSkillList = FightSkill:GetPlayerAllSkillInfo(self.nFactionSectSelec)
+  table.sort(self.tbSkillList, function(item1, item2)
+    return item1.nSort < item2.nSort
+  end)
+  self:ResetTobeComfirmSkill()
+  self:UpdateSkillListShow(nUpgradeSkillId)
+end
+
+function tbWnd:ResetTobeComfirmSkill()
+  self.tbConfirmedSkillPoints = {}
+  for _, tbSkill in pairs(self.tbSkillList) do
+    self.tbConfirmedSkillPoints[tbSkill.nId] = tbSkill.nLevel
+  end
+  self.nCanClickConfirm = true
+  self.nHaveSkillPoint = me.GetSkillPoint()
+  if self.nHaveSkillPoint > 0 and me.nFactionSect == self.nFactionSectSelec then
+    self.pPanel:SetActive(tbControls.btnCancel, true)
+    self.pPanel:SetActive(tbControls.btnConfirm, true)
+    self.pPanel:Button_SetEnable(tbControls.btnCancel, false)
+    self.pPanel:Button_SetEnable(tbControls.btnConfirm, false)
+  else
+    self.pPanel:SetActive(tbControls.btnCancel, false)
+    self.pPanel:SetActive(tbControls.btnConfirm, false)
+  end
+end
+
+function tbWnd:UpdateSkillListShow(nUpgradeSkillId)
+  local tbBaseSkill = {}
+  for i = 1, #self.tbSkillList do
+    local tbSkill = self.tbSkillList[i]
+    if 1 == tbSkill.nSkillGroup then
+      tbSkill.nIndex = i
+      tbSkill.nUpgradeSkillId = nUpgradeSkillId
+      table.insert(tbBaseSkill, tbSkill)
+    end
+  end
+  self.tbBaseSkillView:SetAllElement(tbBaseSkill)
+  local nElementIndex = 1
+  for i = 1, #self.tbSkillList do
+    local tbSkill = self.tbSkillList[i]
+    if 2 == tbSkill.nSkillGroup then
+      local szPathPrefix = "group/FactionSkill/Skill" .. nElementIndex + 1 .. "/"
+      self:UpdateFactionSkillInfo(tbSkill, szPathPrefix, i, nUpgradeSkillId)
+      nElementIndex = nElementIndex + 1
+    end
+  end
+  for i = 1, #self.tbSkillList do
+    local tbSkill = self.tbSkillList[i]
+    if 3 == tbSkill.nSkillGroup then
+      local szPathPrefix = "group/DaChengSkill/Skill1/"
+      self:UpdateFactionSkillInfo(tbSkill, szPathPrefix, i, nUpgradeSkillId)
+    end
+  end
+  if Ui:WindowVisible("UISkillShow") then
+    local tbSkillShow = Ui:GetWindow("UISkillShow")
+    if tbSkillShow and tbSkillShow.tbSkillInfo then
+      local tbInfo = self:GetSkillInfo(tbSkillShow.tbSkillInfo.nId)
+      if tbInfo then
+        self:DealShowSkillInfo(tbInfo)
+        tbSkillShow:UpdateInfo(tbInfo)
+      end
+    end
+  end
+end
+
+function tbWnd:DealShowSkillInfo(tbSkillInfo)
+  if self.tbConfirmedSkillPoints[tbSkillInfo.nId] ~= tbSkillInfo.nLevel then
+    tbSkillInfo.nLevel = self.tbConfirmedSkillPoints[tbSkillInfo.nId]
+    local nNotConfirmBaseLevel = self:GetConfirmBaseLevel(tbSkillInfo.nId)
+    tbSkillInfo.bMax = nNotConfirmBaseLevel >= FightSkill:GetSkillMaxLevel(me, tbSkillInfo.nId)
+    tbSkillInfo.szCurMagicDesc, tbSkillInfo.szNextMagicDesc = FightSkill:FormatMagicDesc(tbSkillInfo.nId, tbSkillInfo.nLevel)
+  end
+end
+
+function tbWnd:GetConfirmBaseLevel(nSkillId)
+  local nConfirmLevel = self.tbConfirmedSkillPoints[nSkillId]
+  local nTrueLevel, nBaseLevel = me.GetSkillLevel(nSkillId)
+  return nConfirmLevel - nTrueLevel + nBaseLevel
+end
+
+function tbWnd:UpdateFactionSkillInfo(tbSkill, szPathPrefix, nSkillIndex, nUpgradeSkillId)
+  local bIsCurFationSect = me.nFactionSect == self.nFactionSectSelec
+  Ui:Button_BindEvent(self.pPanel, szPathPrefix .. "SkillIcon/btnSkill", self.onClickViewSkill, self, nSkillIndex)
+  Ui:Button_BindEvent(self.pPanel, szPathPrefix .. "btnMinus", self.OnClickMinusPoint, self, nSkillIndex)
+  Ui:Button_BindEvent(self.pPanel, szPathPrefix .. "btnAddPoint", self.onClickAddPoint, self, nSkillIndex)
+  self.pPanel:SetActive(szPathPrefix .. "SkillIcon/btnSkill", true)
+  self.pPanel:Sprite_SetSprite(szPathPrefix .. "SkillIcon/btnSkill", tbSkill.szIconAltlas)
+  self.pPanel:Label_SetText(szPathPrefix .. "txtMessage/txtSkillName", i18n.Parse(tbSkill.szName))
+  local nReqBaseLevel = FightSkill:GetSkillLevelUpNeed(tbSkill.nId, 0)
+  if FightSkill:CheckSkillLevelExtendOpen(me, tbSkill.nId) and nReqBaseLevel <= me.nLevel and bIsCurFationSect and not Ui.bInZone then
+    self.pPanel:SetActive(szPathPrefix .. "SkillIcon/Img_LVUp", true)
+    Ui:Button_BindEvent(self.pPanel, szPathPrefix .. "SkillIcon/Img_LVUp", function()
+      self:OnClickExtendSkill(tbSkill.nId)
+    end)
+  else
+    self.pPanel:SetActive(szPathPrefix .. "SkillIcon/Img_LVUp", false)
+  end
+  local nReqLevel = FightSkill:GetSkillLevelUpNeed(tbSkill.nId, tbSkill.nLevel)
+  local nReqBaseLevel = FightSkill:GetSkillLevelUpNeed(tbSkill.nId, 0)
+  local bCanBaseLevelUp = nReqBaseLevel <= me.nLevel
+  local bCanLevelUp = nReqLevel <= me.nLevel
+  local bGet = tbSkill.nLevel >= 0
+  if nUpgradeSkillId and nUpgradeSkillId == tbSkill.nId then
+    self.pPanel:SetActive(szPathPrefix .. "SkillIcon/UpSkilllEffect", false)
+    self.pPanel:SetActive(szPathPrefix .. "SkillIcon/UpSkilllEffect", true)
+  else
+    self.pPanel:SetActive(szPathPrefix .. "SkillIcon/UpSkilllEffect", false)
+  end
+  if bGet and bCanBaseLevelUp then
+    self.pPanel:SetActive(szPathPrefix .. "txtMessage/txtNotLearn", not bIsCurFationSect or false)
+    self.pPanel:SetActive(szPathPrefix .. "btnAddPoint", bIsCurFationSect and not tbSkill.bMax)
+    self.pPanel:SetActive(szPathPrefix .. "btnMinus", bIsCurFationSect and self.tbConfirmedSkillPoints[tbSkill.nId] > tbSkill.nLevel)
+    self.pPanel:SetActive(szPathPrefix .. "txtMessage/txtSkillLevel", bIsCurFationSect and true)
+    self.pPanel:SetActive(szPathPrefix .. "SkillIcon/imgInvalid", false)
+    self:ComfirmSkillBtnShow(tbSkill, nil, szPathPrefix)
+    if not bIsCurFationSect then
+      self.pPanel:Label_SetText(szPathPrefix .. "txtMessage/txtNotLearn", i18n.Get(FightSkill.Terms.NotLearned))
+      self.pPanel:SetActive(szPathPrefix .. "SkillIcon/imgInvalid", true)
+    end
+    self.pPanel:Label_SetText(szPathPrefix .. "txtMessage/txtSkillLevel", i18n.Get(FightSkill.Terms.LevelLabel, self.tbConfirmedSkillPoints[tbSkill.nId], FightSkill:GetSkillMaxLevel(me, tbSkill.nId)))
+    self.tbSkillInfo = tbSkill
+  else
+    self.tbSkillInfo = nil
+    local szReqBaseLevel = string.format("%.1f", nReqBaseLevel)
+    szReqBaseLevel = string.gsub(szReqBaseLevel, "%.0", "")
+    self.pPanel:SetActive(szPathPrefix .. "txtMessage/txtNotLearn", true)
+    self.pPanel:Label_SetText(szPathPrefix .. "txtMessage/txtNotLearn", i18n.Get(FightSkill.Terms.LevelRequire, szReqBaseLevel))
+    if not bIsCurFationSect then
+      self.pPanel:Label_SetText(szPathPrefix .. "txtMessage/txtNotLearn", i18n.Get(FightSkill.Terms.NotLearned))
+    end
+    self.pPanel:SetActive(szPathPrefix .. "txtMessage/txtSkillLevel", false)
+    self.pPanel:SetActive(szPathPrefix .. "btnMinus", false)
+    self.pPanel:SetActive(szPathPrefix .. "btnAddPoint", false)
+    self.pPanel:SetActive(szPathPrefix .. "SkillIcon/imgInvalid", true)
+  end
+end
+
+function tbWnd:SetSkillElementInfo(tbElement, tbSkill, nIndex)
+  local pPanel = tbElement.pPanel
+  if not tbSkill then
+    pPanel:Label_SetText("txtSkillName", "")
+    pPanel:Label_SetText("txtSkillLevel", "")
+    pPanel:SetActive("btnMinus", false)
+    pPanel:SetActive("btnAddPoint", false)
+    pPanel:SetActive("AddInvalid", false)
+    pPanel:SetActive("txtNotLearn", false)
+    pPanel:SetActive("btnSkill", false)
+    return
+  end
+  local bIsCurFationSect = me.nFactionSect == self.nFactionSectSelec
+  Ui:Button_BindEvent(pPanel, "btnSkill", self.onClickViewSkill, self, tbSkill.nIndex)
+  Ui:Button_BindEvent(pPanel, "btnMinus", self.OnClickMinusPoint, self, tbSkill.nIndex)
+  Ui:Button_BindEvent(pPanel, "btnAddPoint", self.onClickAddPoint, self, tbSkill.nIndex)
+  pPanel:SetActive("btnSkill", true)
+  pPanel:Sprite_SetSprite("btnSkill", tbSkill.szIconAltlas)
+  pPanel:Label_SetText("txtSkillName", i18n.Parse(tbSkill.szName))
+  local nReqBaseLevel = FightSkill:GetSkillLevelUpNeed(tbSkill.nId, 0)
+  if FightSkill:CheckSkillLevelExtendOpen(me, tbSkill.nId) and nReqBaseLevel <= me.nLevel and bIsCurFationSect and not Ui.bInZone then
+    pPanel:SetActive("Img_LVUp", true)
+    Ui:Button_BindEvent(pPanel, "Img_LVUp", function()
+      self:OnClickExtendSkill(tbSkill.nId)
+    end)
+  else
+    pPanel:SetActive("Img_LVUp", false)
+  end
+  if tbSkill.nUpgradeSkillId and tbSkill.nUpgradeSkillId == tbSkill.nId then
+    pPanel:SetActive("UpSkilllEffect", false)
+    pPanel:SetActive("UpSkilllEffect", true)
+  else
+    pPanel:SetActive("UpSkilllEffect", false)
+  end
+  local nReqBaseLevel = FightSkill:GetSkillLevelUpNeed(tbSkill.nId, 0)
+  local bCanBaseLevelUp = nReqBaseLevel <= me.nLevel
+  local bGet = tbSkill.nLevel >= 0
+  if bGet and bCanBaseLevelUp then
+    pPanel:SetActive("txtNotLearn", not bIsCurFationSect or false)
+    pPanel:SetActive("btnAddPoint", bIsCurFationSect and not tbSkill.bMax)
+    pPanel:SetActive("btnMinus", bIsCurFationSect and self.tbConfirmedSkillPoints[tbSkill.nId] > tbSkill.nLevel)
+    pPanel:SetActive("AddInvalid", false)
+    pPanel:SetActive("txtSkillLevel", bIsCurFationSect and true)
+    pPanel:SetActive("imgInvalid", false)
+    self:ComfirmSkillBtnShow(tbSkill, pPanel)
+    if not bIsCurFationSect then
+      pPanel:Label_SetText("txtNotLearn", i18n.Get(FightSkill.Terms.NotLearned))
+      pPanel:SetActive("imgInvalid", true)
+    end
+  else
+    self.tbSkillInfo = nil
+    local szReqBaseLevel = string.format("%.1f", nReqBaseLevel)
+    szReqBaseLevel = string.gsub(szReqBaseLevel, "%.0", "")
+    pPanel:SetActive("txtNotLearn", true)
+    pPanel:Label_SetText("txtNotLearn", i18n.Get(FightSkill.Terms.LevelRequire, szReqBaseLevel))
+    if not bIsCurFationSect then
+      pPanel:Label_SetText("txtNotLearn", i18n.Get(FightSkill.Terms.NotLearned))
+    end
+    pPanel:SetActive("txtSkillLevel", false)
+    pPanel:SetActive("btnMinus", false)
+    pPanel:SetActive("btnAddPoint", false)
+    pPanel:SetActive("AddInvalid", false)
+    pPanel:SetActive("imgInvalid", true)
+    return
+  end
+  if tbSkill.bMax then
+    pPanel:Label_SetText("txtSkillLevel", i18n.Get(FightSkill.Terms.LevelLabel, self.tbConfirmedSkillPoints[tbSkill.nId], FightSkill:GetSkillMaxLevel(me, tbSkill.nId)))
+  else
+    pPanel:Label_SetText("txtSkillLevel", i18n.Get(FightSkill.Terms.LevelLabel, self.tbConfirmedSkillPoints[tbSkill.nId], FightSkill:GetSkillMaxLevel(me, tbSkill.nId)))
+  end
+  self.tbSkillInfo = tbSkill
+end
+
+function tbWnd:ComfirmSkillBtnShow(tbSkill, pPanel, szPrefix)
+  pPanel = pPanel or self.pPanel
+  szPrefix = szPrefix or ""
+  if me.nFactionSect == self.nFactionSectSelec and self.tbConfirmedSkillPoints[tbSkill.nId] > tbSkill.nLevel and me.GetSkillPoint() > 0 then
+    pPanel:Button_SetEnable(szPrefix .. "btnMinus", true)
+    pPanel:Sprite_SetColorByName(szPrefix .. "btnMinus", "White")
+  else
+    pPanel:Button_SetEnable(szPrefix .. "btnMinus", false)
+    pPanel:Sprite_SetColorByName(szPrefix .. "btnMinus", "Gray")
+  end
+  if me.GetSkillPoint() <= 0 then
+    pPanel:Button_SetEnable(szPrefix .. "btnAddPoint", false)
+    pPanel:Sprite_SetColorByName(szPrefix .. "btnAddPoint", "Gray")
+  else
+    pPanel:Button_SetEnable(szPrefix .. "btnAddPoint", true)
+    pPanel:Sprite_SetColorByName(szPrefix .. "btnAddPoint", "White")
+  end
+end
+
+function tbWnd:onClickAddPoint(nIndex)
+  if GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    me.CenterMsg(i18n.EasyGet("\230\138\128\232\131\189\229\141\135\231\186\167\229\164\177\232\180\165\239\188\140\232\175\183\232\191\148\229\155\158\229\142\159\230\156\141\230\147\141\228\189\156"))
+    return
+  end
+  if self.nHaveSkillPoint <= 0 then
+    self.nHaveSkillPoint = 0
+    me.CenterMsg(i18n.EasyGet("\230\138\128\232\131\189\231\130\185\228\184\141\232\182\179"))
+    return
+  end
+  local tbSkillInfo = self.tbSkillList[nIndex]
+  local nSkillId = tbSkillInfo.nId
+  local bRet, szMsg = FightSkill:CheckBaseSkillLeveUp(me, nSkillId, self:GetConfirmBaseLevel(nSkillId))
+  if not bRet then
+    me.CenterMsg(szMsg)
+    return
+  end
+  self.nHaveSkillPoint = self.nHaveSkillPoint - 1
+  self.tbConfirmedSkillPoints[nSkillId] = self.tbConfirmedSkillPoints[nSkillId] + 1
+  self:UpdateSkillListShow()
+  local bChangeSkillPoint = self.nHaveSkillPoint ~= me.GetSkillPoint()
+  self.pPanel:Button_SetEnable(tbControls.btnCancel, bChangeSkillPoint)
+  self.pPanel:Button_SetEnable(tbControls.btnConfirm, bChangeSkillPoint)
+  self.pPanel:Label_SetText(tbControls.txtSkillPoint, self.nHaveSkillPoint)
+end
+
+function tbWnd:OnClickMinusPoint(nIndex)
+  if GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    me.CenterMsg(i18n.EasyGet("\230\138\128\232\131\189\229\141\135\231\186\167\229\164\177\232\180\165\239\188\140\232\175\183\232\191\148\229\155\158\229\142\159\230\156\141\230\147\141\228\189\156"))
+    return
+  end
+  local tbSkillInfo = self.tbSkillList[nIndex]
+  local nSkillId = tbSkillInfo.nId
+  local nTrueLevel, _ = me.GetSkillLevel(nSkillId)
+  local nCurLevel = self.tbConfirmedSkillPoints[nSkillId]
+  if nTrueLevel < nCurLevel then
+    self.nHaveSkillPoint = self.nHaveSkillPoint + 1
+    self.tbConfirmedSkillPoints[nSkillId] = math.max(nCurLevel - 1, 0)
+    self:UpdateSkillListShow()
+    local bChangeSkillPoint = self.nHaveSkillPoint ~= me.GetSkillPoint()
+    self.pPanel:Button_SetEnable(tbControls.btnCancel, bChangeSkillPoint)
+    self.pPanel:Button_SetEnable(tbControls.btnConfirm, bChangeSkillPoint)
+    self.pPanel:Label_SetText(tbControls.txtSkillPoint, self.nHaveSkillPoint)
+  end
+end
+
+function tbWnd:onClickQuickAddSkillPoint()
+  if GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    me.CenterMsg(i18n.EasyGet("\230\138\128\232\131\189\229\141\135\231\186\167\229\164\177\232\180\165\239\188\140\232\175\183\232\191\148\229\155\158\229\142\159\230\156\141\230\147\141\228\189\156"))
+    return
+  end
+  local szMsg = i18n.EasyGet("\231\161\174\229\174\154\232\166\129\228\184\128\233\148\174\229\141\135\231\186\167\229\144\151\239\188\159")
+  
+  local function fnOK()
+    if me.GetSkillPoint() <= 0 then
+      me.CenterMsg(i18n.EasyGet("\230\138\128\232\131\189\231\130\185\228\184\141\232\182\179"))
+      return
+    end
+    if not self:checkSkillCanLvUp() then
+      me.CenterMsg(i18n.EasyGet("\230\151\160\229\143\175\229\141\135\231\186\167\230\138\128\232\131\189"))
+      return
+    end
+    RemoteServer.SkillUpAtOneTime()
+  end
+  
+  Ui:OpenWindow("UIMessageBox", szMsg, {
+    {fnOK},
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function tbWnd:onClickChangeFactionSect()
+  if GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    me.CenterMsg(i18n.EasyGet("\229\136\135\230\141\162\229\164\177\232\180\165\239\188\140\232\175\183\232\191\148\229\155\158\229\142\159\230\156\141\230\147\141\228\189\156"))
+    return
+  end
+  if me.nMapId == XiSuiDao.Def.nMapId then
+    me.CenterMsg(i18n.Get(XiSuiDao.Msg.FreeChangeSect))
+    ChangeFaction:ApplyChangeFaction(me.nFaction, self.nFactionSectSelec, me.nSex)
+  else
+    ChangeFaction:ApplyChangeFactionSect(self.nFactionSectSelec)
+  end
+end
+
+function tbWnd:OnResponseFactionSectChanged()
+  self:OnClose()
+  self:OnOpen()
+end
+
+function tbWnd:OnSyncData(szType)
+  if "SkillPanelUpdate" == szType then
+    self:UpdateSkillList()
+    FightSkill:UpdateFactionSkillRedPoint()
+    AFKSkillMgr:UpdateSkill(true)
+  elseif "SkillPanelUpdateLast" == szType then
+    self:OnSkillPanelUpdateLastShow()
+  end
+end
+
+function tbWnd:OnSkillPanelUpdateLastShow()
+  local bPlayerManual = Player:GetServerSyncData("SkillPanelUpdateLast")
+  if bPlayerManual and self.tbBeforeResetSkill then
+    local nSkillPoint = me.GetSkillPoint()
+    for nSkillId, nLevel in pairs(self.tbBeforeResetSkill) do
+      self.tbConfirmedSkillPoints[nSkillId] = nLevel
+      local nTrueLevel = me.GetSkillLevel(nSkillId)
+      nSkillPoint = nSkillPoint - nLevel + nTrueLevel
+    end
+    self.tbBeforeResetSkill = nil
+    self.nHaveSkillPoint = nSkillPoint
+    self.tbSkillList = FightSkill:GetPlayerAllSkillInfo(self.nFactionSectSelec)
+    table.sort(self.tbSkillList, function(item1, item2)
+      return item1.nSort < item2.nSort
+    end)
+    self:UpdateSkillListShow()
+    self.pPanel:SetActive(tbControls.btnCancel, true)
+    self.pPanel:SetActive(tbControls.btnConfirm, true)
+    self.pPanel:Button_SetEnable(tbControls.btnCancel, true)
+    self.pPanel:Button_SetEnable(tbControls.btnConfirm, true)
+    self.pPanel:Label_SetText(tbControls.txtSkillPoint, self.nHaveSkillPoint)
+  else
+    self:UpdateSkillList()
+    FightSkill:UpdateFactionSkillRedPoint()
+    AFKSkillMgr:UpdateSkill(false)
+  end
+end
+
+function tbWnd:OnResponseSkillLevelUp(bSuccess, szMsg, param1, param2)
+  if not Lib:IsEmptyStr(szMsg) then
+    me.CenterMsg(szMsg)
+  end
+  if not bSuccess then
+    return
+  end
+  local nSkillId = param1
+  self:UpdateSkillList(nSkillId)
+  FightSkill:UpdateFactionSkillRedPoint()
+  AFKSkillMgr:UpdateSkill(false)
+end
+
+function tbWnd:checkSkillCanLvUp()
+  if self.nFactionSectSelec and me.nFactionSect ~= self.nFactionSectSelec then
+    return false
+  end
+  local nMyLevel = me.nLevel
+  local tbFactionSkill = FightSkill:GetFactionSkill(me.nFaction, me.nFactionSect)
+  local bHasSkillLvUp = false
+  if not tbFactionSkill then
+    return false
+  end
+  for _, v in pairs(tbFactionSkill) do
+    local nSkillId = v.SkillId
+    local tbLevelUp = FightSkill.tbSkillLevelUp[nSkillId]
+    local nSkillMaxLevel = FightSkill:GetSkillMaxLevel(me, nSkillId)
+    local _, nBaseLevel = me.GetSkillLevel(nSkillId)
+    if tbLevelUp and nBaseLevel >= 0 then
+      local nNextSkillLevel = nBaseLevel + 1
+      if nSkillMaxLevel < nNextSkillLevel then
+        nNextSkillLevel = nSkillMaxLevel
+      end
+      local tbNeed = tbLevelUp[nNextSkillLevel]
+      if not tbNeed then
+        LogErr(nSkillId, ",SkillLevelUp config is error!")
+        break
+      end
+      local nReqLevel = tbNeed[1]
+      if nMyLevel >= nReqLevel then
+        bHasSkillLvUp = true
+        break
+      end
+    end
+  end
+  return bHasSkillLvUp
+end
+
+function tbWnd:GetSkillInfo(nSkillId)
+  for _, tbInfo in pairs(self.tbSkillList) do
+    if tbInfo.nId == nSkillId then
+      return tbInfo
+    end
+  end
+end
+
+function tbWnd:OnClickReset()
+  if GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    me.CenterMsg(i18n.EasyGet("\233\135\141\231\189\174\229\164\177\232\180\165\239\188\140\232\175\183\232\191\148\229\155\158\229\142\159\230\156\141\230\147\141\228\189\156"))
+    return
+  end
+  if me.GetSkillPoint() == me.nLevel - 1 then
+    me.CenterMsg(i18n.EasyGet("\230\151\160\233\156\128\230\180\151\231\130\185"))
+    return
+  end
+  local szMsg = ""
+  local bInXiSuiDao = me.nMapId == XiSuiDao.Def.nMapId
+  if me.nLevel >= FightSkill.nCostGoldLevelResetSkill and not bInXiSuiDao then
+    szMsg = i18n.EasyGet("\230\152\175\229\144\166\232\138\177\232\180\185<color=#ffff0e>{0}\229\133\131\229\174\157</color> \233\135\141\231\189\174\229\189\147\229\137\141\229\183\178\229\136\134\233\133\141\230\138\128\232\131\189\231\130\185\239\188\140\233\135\141\231\189\174\229\144\142\232\191\155\232\161\140\233\135\141\230\150\176\229\136\134\233\133\141\239\188\159", FightSkill.nCostGoldResetSkill)
+  elseif bInXiSuiDao then
+    szMsg = i18n.EasyGet("\230\180\151\233\171\147\229\178\155\229\134\133\229\143\175\228\187\165\229\133\141\232\180\185\233\135\141\231\189\174")
+  else
+    szMsg = i18n.EasyGet("\230\152\175\229\144\166\233\135\141\231\189\174\229\189\147\229\137\141\229\183\178\229\136\134\233\133\141\230\138\128\232\131\189\231\130\185\239\188\140\233\135\141\231\189\174\229\144\142\232\191\155\232\161\140\233\135\141\230\150\176\229\136\134\233\133\141\239\188\159\n<color=#ffff0e>{0}\231\186\167\229\137\141\229\143\175\229\133\141\232\180\185\233\135\141\231\189\174</color>", FightSkill.nCostGoldLevelResetSkill)
+  end
+  me.MsgBox(szMsg, {
+    {
+      i18n.szOk,
+      function()
+        self.tbBeforeResetSkill = {}
+        for _, tbSkill in pairs(self.tbSkillList) do
+          self.tbBeforeResetSkill[tbSkill.nId] = tbSkill.nLevel
+        end
+        RemoteServer.ResetSkillPoint()
+      end
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function tbWnd:OnClickExtendSkill(nSkillId)
+  local function fnOK(nSkillId)
+    FightSkill:SkillLevelExtend(nSkillId)
+  end
+  
+  local function fnCancel()
+  end
+  
+  local nItemId, nCostNum = FightSkill:GetSkillExtendCost(me, nSkillId)
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\228\189\160\230\152\175\229\144\166\232\138\177\232\180\185{0}\228\184\170{1}\230\176\184\228\185\133\230\143\144\229\141\135\230\138\128\232\131\189\229\141\135\231\186\167\228\184\138\233\153\144\239\188\159\232\189\172\233\151\168\230\180\190\229\146\140\229\136\135\230\141\162\232\183\175\231\186\191\233\131\189\229\143\175\231\148\159\230\149\136\227\128\130", nCostNum, KItem.GetItemShowInfo(nItemId)), {
+    {fnOK, nSkillId},
+    {fnCancel}
+  }, {
+    i18n.szOK,
+    i18n.szCancel
+  })
+end
+
+function tbWnd:OnClickConfirm()
+  if GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    me.CenterMsg(i18n.EasyGet("\230\147\141\228\189\156\229\164\177\232\180\165\239\188\140\232\175\183\232\191\148\229\155\158\229\142\159\230\156\141\230\147\141\228\189\156"))
+    return
+  end
+  if self.nHaveSkillPoint == me.GetSkillPoint() then
+    me.CenterMsg(i18n.EasyGet("\230\156\170\228\191\174\230\148\185\230\138\128\232\131\189\231\173\137\231\186\167"))
+    return
+  end
+  if not self.nCanClickConfirm then
+    return
+  end
+  self.nCanClickConfirm = false
+  local tbLevelUp = {}
+  for nSkillId, nLevel in pairs(self.tbConfirmedSkillPoints) do
+    local nTrueLevel, nBaseLevel = me.GetSkillLevel(nSkillId)
+    if nLevel > nTrueLevel then
+      local nNewBaseLevel = self:GetConfirmBaseLevel(nSkillId)
+      tbLevelUp[nSkillId] = nNewBaseLevel - nBaseLevel
+    end
+  end
+  if not Lib:IsEmptyTB(tbLevelUp) then
+    local bCanLevelUp = true
+    for nSkillId, nAdd in pairs(tbLevelUp) do
+      local bRet, szMsg = FightSkill:CheckSkillBatchLevelUp(me, nSkillId, nAdd)
+      if not bRet then
+        bCanLevelUp = bRet
+        if szMsg then
+          me.CenterMsg(szMsg)
+        end
+        break
+      end
+    end
+    if bCanLevelUp then
+      RemoteServer.BatchModifySkillPoints(tbLevelUp)
+    end
+  end
+  if self.nCanClickConfirmTimer then
+    Timer:Close(self.nCanClickConfirmTimer)
+    self.nCanClickConfirmTimer = nil
+  end
+  self.nCanClickConfirmTimer = Timer:Register(Env.GAME_FPS, function(self)
+    self.nCanClickConfirm = true
+  end, self)
+end
+
+function tbWnd:OnClickCancel()
+  if GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    me.CenterMsg(i18n.EasyGet("\230\147\141\228\189\156\229\164\177\232\180\165\239\188\140\232\175\183\232\191\148\229\155\158\229\142\159\230\156\141\230\147\141\228\189\156"))
+    return
+  end
+  self:UpdateSkillList()
+end
+
+function tbWnd:OnResponseSkillLevelExtend(bSuccess, nSkillId, nSkillExtendLevel)
+  self:UpdateSkillList(nSkillId)
+end

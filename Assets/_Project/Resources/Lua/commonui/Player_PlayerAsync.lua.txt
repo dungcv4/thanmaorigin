@@ -1,0 +1,115 @@
+PlayerAsync.VALUEID_BEGIN = 1
+PlayerAsync.VALUEID_ASYNC_CALL = 1
+PlayerAsync.VALUEID_END = 2
+
+function PlayerAsync:GetSeriesList(tbEquipList)
+  local tbSeries = {
+    0,
+    0,
+    0,
+    0,
+    0
+  }
+  for nPos = Item.EQUIPPOS_HELM, Item.EQUIPPOS_AMULET do
+    local pEquip = tbEquipList[nPos]
+    if pEquip then
+      local nSeries = pEquip.GetSeries()
+      tbSeries[nSeries] = tbSeries[nSeries] + 1
+    end
+  end
+  return tbSeries
+end
+
+function PlayerAsync:OnCreateNpc(pPlayerAsync, pNpc, tbEquipList, tbExtEquipList)
+  local nAllLianHuaLevel = 0
+  for nEquipPos = Item.EQUIPPOS_HELM, Item.EQUIPPOS_AMULET do
+    local nLevel = pPlayerAsync.GetLianHua(nEquipPos + 1)
+    nAllLianHuaLevel = nAllLianHuaLevel + nLevel
+  end
+  pPlayerAsync.tbSecretBookExtraSkillLevel = {}
+  local bCanAddSecretBook, bCanAddPartner = Item.EquipLianHua:CheckCanAddGradeScoreEffect(Item.EquipLianHua.szLHGradeScoreTimeFrame, nAllLianHuaLevel)
+  if bCanAddSecretBook then
+    for nRank = 1, #Item.SecretBook.tbRankToSlot do
+      pPlayerAsync.tbSecretBookExtraSkillLevel[nRank] = Item.EquipLianHua.nSecretAddSkillLevel
+    end
+  end
+  pPlayerAsync.nPartnerProtectExtraLevel = 0
+  if bCanAddPartner then
+    pPlayerAsync.nPartnerProtectExtraLevel = Item.EquipLianHua.nPartnerProtectAddSkillLevel
+  end
+  local nFaction = pPlayerAsync.GetFaction()
+  local nFactionSect = pPlayerAsync.GetFactionSect()
+  local tbSeries = self:GetSeriesList(tbEquipList)
+  Item.EquipForge:UpdateAllEquipAttr(pNpc, tbSeries, tbEquipList, true, nFaction)
+  for nPos = Item.EQUIPPOS_HELM, Item.EQUIPPOS_AMULET do
+    local pEquip = tbEquipList[nPos]
+    if pEquip then
+      Item:GetClass("EquipForgeSeed"):ApplyRandomAttr(pNpc, pEquip)
+      Item.EquipEnhance:ApplyAttrib(pNpc, pEquip, pPlayerAsync.GetEnhance(nPos + 1) or 0)
+      Item.EquipWuLian:ApplyAttrib(pNpc, pEquip, pPlayerAsync.GetWuLian(nPos + 1) or 0)
+      Item.EquipJingZhu:ApplyAttrib(pNpc, pEquip, pPlayerAsync.GetJingZhu(nPos + 1) or 0)
+      for i = 1, Item.Stone.INSET_COUNT_MAX do
+        local nStoneTemplateId = pPlayerAsync.GetStone((i - 1) * Item.EQUIPPOS_MAIN_NUM + nPos + 1)
+        if nStoneTemplateId and nStoneTemplateId > 0 then
+          Item.Stone:ApplyPerStoneAttrib(pNpc, nStoneTemplateId)
+        end
+      end
+      Item.QiHun:ApplyQiHunAttrib(pNpc, pPlayerAsync.GetQiHun(nPos + 1) or 0)
+    end
+  end
+  Item.EquipSeriesActive:UpdateAllEquipAttr(pNpc, true, tbSeries)
+  for nPos, nNpcPart in pairs(Item.EQUIPPOS_TO_NPC_RES_PART) do
+    local pEquip = tbEquipList[nPos]
+    if pEquip and nPos ~= Item.EQUIPPOS_HORSE then
+      local _, _, _, _, nResId = KItem.GetItemShowInfo(pEquip.dwTemplateId, pPlayerAsync.GetFaction(), pPlayerAsync.GetFactionSect(), pPlayerAsync.GetSex())
+      if nResId > 0 then
+        pNpc.ModifyPartFeatureEquip(Item.EQUIPPOS_TO_NPC_RES_PART[nPos], nResId)
+      end
+    end
+  end
+  for szAttrXSEquipModule, tbAttrXSEquipModule in pairs(Item.tbAttrXSEquipModules) do
+    if tbAttrXSEquipModule and tbAttrXSEquipModule.onApplyRobotNpcAllEquip then
+      tbAttrXSEquipModule:onApplyRobotNpcAllEquip(pPlayerAsync, pNpc, tbEquipList, tbExtEquipList, tbSeries)
+    else
+      LogErr("PlayerAsync:OnCreateNpc error!", string.format("szAttrXSEquipModule:%s not had onApplyRobotNpcAllEquip function", szAttrXSEquipModule))
+    end
+  end
+  for nEquipPos, pEquip in pairs(tbEquipList) do
+    if Item.tbEquipModules[nEquipPos] then
+      for szEquipModule, tbEquipModule in pairs(Item.tbEquipModules[nEquipPos]) do
+        if not Item.tbAttrXSEquipModules[szEquipModule] and tbEquipModule and tbEquipModule.onApplyRobotNpcEquip then
+          tbEquipModule:onApplyRobotNpcEquip(pPlayerAsync, pNpc, pEquip)
+        end
+      end
+    end
+  end
+  for nEquipPos, pEquip in pairs(tbExtEquipList) do
+    if Item.tbExtEquipModules[nEquipPos] then
+      for szExtEquipModule, tbExtEquipModule in pairs(Item.tbExtEquipModules[nEquipPos]) do
+        if not Item.tbAttrXSEquipModules[szExtEquipModule] and tbExtEquipModule and tbExtEquipModule.onApplyRobotNpcEquip then
+          tbExtEquipModule:onApplyRobotNpcEquip(pPlayerAsync, pNpc, pEquip)
+        end
+      end
+    end
+  end
+  Horse:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  AttributeModule:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  if MODULE_GAMESERVER then
+    local szKinName, szKinCareerName = Kin:GetTitle(pPlayerAsync.dwID)
+    local szTongName, szTongCareerName = Tong:GetTitle(pPlayerAsync.dwID)
+    if szTongName then
+      pNpc.SetKinOrTongName(szTongName)
+      pNpc.SetCareerName(szTongCareerName)
+    elseif szKinName then
+      pNpc.SetKinOrTongName(szKinName)
+      pNpc.SetCareerName(szKinCareerName)
+    end
+  else
+  end
+end
+
+function PlayerAsync:InitCacheOne(pPlayerAsync)
+end
+
+function PlayerAsync:SaveCacheOne(pPlayerAsync)
+end

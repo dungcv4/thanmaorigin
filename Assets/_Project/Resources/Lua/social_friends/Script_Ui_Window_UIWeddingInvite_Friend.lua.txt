@@ -1,0 +1,118 @@
+local tbWnd = Ui:CreateClass("UIWeddingInvite_Friend", "UIPanel")
+local tbControls = {
+  FriendTemplate = "FriendScrollView/paneBG/FriendTemplate"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self.tbFriendScrollView = Ui:NewLoopScrollView(self, tbControls.FriendTemplate)
+end
+
+function tbWnd:OnOpen()
+  self:Refresh()
+end
+
+local tbSrotWeight = {
+  Online_NotInvite = 1,
+  Online_Invite = 2,
+  NotOnline_Invite = 3,
+  NotOnline_NotInvite = 4
+}
+
+local function FnSort(tbMemberA, tbMemberB)
+  if tbMemberA.nSort ~= tbMemberB.nSort then
+    return tbMemberA.nSort < tbMemberB.nSort
+  end
+  return tbMemberA.nImity > tbMemberB.nImity
+end
+
+function tbWnd:Refresh()
+  self.tbFriendList = Lib:CopyTB(FriendShip:GetAllFriendData())
+  if 0 == #self.tbFriendList then
+    return
+  end
+  for i = #self.tbFriendList, 1, -1 do
+    local bOnLine = self.tbFriendList[i].nState == Player.emPLAYER_STATE_NORMAL
+    local bInvite = Marry.tbInvite[self.tbFriendList[i].dwID]
+    if bOnLine then
+      if bInvite then
+        self.tbFriendList[i].nSort = tbSrotWeight.Online_Invite
+      else
+        self.tbFriendList[i].nSort = tbSrotWeight.Online_NotInvite
+      end
+    elseif bInvite then
+      self.tbFriendList[i].nSort = tbSrotWeight.NotOnline_Invite
+    else
+      self.tbFriendList[i].nSort = tbSrotWeight.NotOnline_NotInvite
+    end
+    if self.tbFriendList[i].dwID == me.dwID or self.tbFriendList[i].dwID == Marry.tbMarryData.dwLoverID then
+      table.remove(self.tbFriendList, i)
+    end
+  end
+  table.sort(self.tbFriendList, FnSort)
+  self.tbFriendScrollView:Clear()
+  self.tbFriendScrollView:SetElement(#self.tbFriendList, function(tbLoopScroll, i)
+    local tbElement = tbLoopScroll:GetElement(i)
+    local pPanel = tbElement.pPanel
+    local tbPortraitObjPanel = Ui:NewExistPortraitObjPanel(tbElement, "PortraitObj")
+    tbPortraitObjPanel:SetRoleIcon(self.tbFriendList[i].nPortrait)
+    tbPortraitObjPanel:SetPortraitFrame(self.tbFriendList[i].nPortraitFrame)
+    tbPortraitObjPanel:SetFactionIcon(self.tbFriendList[i].nFaction)
+    tbPortraitObjPanel:SetLevel(self.tbFriendList[i].nLevel)
+    tbPortraitObjPanel:SetOutlineObjActive(self.tbFriendList[i].nState ~= Player.emPLAYER_STATE_NORMAL)
+    tbPortraitObjPanel:SetOutlineText(Lib:IIF(self.tbFriendList[i].nState == Player.emPLAYER_STATE_ZONE, i18n.EasyGet("\232\183\168\230\156\141"), i18n.EasyGet("\231\166\187\231\186\191")))
+    pPanel:Label_SetText("info/txtPlayerName", self.tbFriendList[i].szName)
+    Ui:SetVipLevelEffect(pPanel, self.tbFriendList[i].nVipLevel, "info/txtPlayerName")
+    local szHonorName, szHonorColor = HonorLevel:GetHonorNameByStarLevel(self.tbFriendList[i].nHonorStarLevel, false)
+    local obj = pPanel:GetObject("info/HonorTitle")
+    local pHonorTitle = obj:GetComponent(Ui.UIHonorTitle)
+    pHonorTitle:SetHonorTitle(i18n.Parse(szHonorName), szHonorColor)
+    pPanel:Label_SetText("info/txtQinMiDuLevel", self.tbFriendList[i].nImityLevel)
+    pPanel:Label_SetText("info/txtQinMiDuValue", string.format("%d/%d", self.tbFriendList[i].nImity, self.tbFriendList[i].nMaxImity))
+    pPanel:Sprite_SetFill("info/imgQinMiDu", self.tbFriendList[i].nImity / self.tbFriendList[i].nMaxImity)
+    local bNotOnLine = self.tbFriendList[i].nState ~= Player.emPLAYER_STATE_NORMAL
+    local bInAlready = Marry.tbInvite[self.tbFriendList[i].dwID] ~= nil
+    local bInNewInvite = nil ~= Marry.tbNewInvite[self.tbFriendList[i].dwID]
+    pPanel:SetActive("info/txtFinish", bInAlready or bNotOnLine)
+    pPanel:Label_SetText("info/txtFinish", i18n.EasyGet("\229\183\178\233\130\128\232\175\183"))
+    pPanel:SetActive("info/ToggleColthes", not bInAlready and not bNotOnLine)
+    if bNotOnLine then
+      pPanel:Label_SetText("info/txtFinish", i18n.EasyGet("\229\183\178\231\166\187\231\186\191"))
+    end
+    Ui:Toggle_BindEvent(pPanel, "info/ToggleColthes", function(this, isOn)
+      self:OnSelect(i, isOn)
+    end, self)
+    pPanel:Toggle_SetChecked("info/ToggleColthes", bInNewInvite)
+  end)
+end
+
+function tbWnd:OnSelect(nIndex, bSelect)
+  local dwID = self.tbFriendList[nIndex].dwID
+  if bSelect then
+    Marry.tbNewInvite[dwID] = 1
+  else
+    Marry.tbNewInvite[dwID] = nil
+  end
+  local nSelect = Lib:CountTB(Marry.tbNewInvite)
+  self.tbOwner:InitInfo(Marry.nInviteTimes, Marry.nInviteTimes - nSelect, nSelect)
+end
+
+function tbWnd:SelectOnline(isOn)
+  for nIndex, tbInfo in ipairs(self.tbFriendList) do
+    local bInAlready = Marry.tbInvite[tbInfo.dwID] ~= nil
+    local bInNewInvite = nil ~= Marry.tbNewInvite[tbInfo.dwID]
+    if isOn then
+      if tbInfo.nState == Player.emPLAYER_STATE_NORMAL and not bInAlready and not bInNewInvite then
+        local tbElement = self.tbFriendScrollView:GetElement(nIndex)
+        if tbElement then
+          tbElement.pPanel:Toggle_SetChecked("info/ToggleColthes", true)
+        end
+      end
+    elseif bInNewInvite then
+      local tbElement = self.tbFriendScrollView:GetElement(nIndex)
+      if tbElement then
+        tbElement.pPanel:Toggle_SetChecked("info/ToggleColthes", false)
+      end
+    end
+  end
+end

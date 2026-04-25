@@ -1,0 +1,589 @@
+local tbWnd = Ui:CreateWindow("UIBaiBaoXiang")
+local tbControls = {
+  btnStart = "node/imgBg/Right/btnStart",
+  btnGetShell = "node/imgBg/Right/btnGetShell",
+  btnGetAward = "node/imgBg/Right/btnGetAward",
+  btnShellType = "node/imgBg/Right/btnBetList/btnGetShell0",
+  btnClose = "node/imgBg/btnClose",
+  btnHelp = "node/imgBg/Title/txtTitle/btnHelp",
+  btnAdd = "node/imgBg/Right/btnAdd",
+  txtLeiJiCaiChi = "node/imgBg/Right/txtLeiJiCaiChi",
+  txtCaiChiValue = "node/imgBg/Right/txtLeiJiCaiChiValue",
+  txtOwnShellNum = "node/imgBg/Right/txtOwnShellNum",
+  txtTips = "node/imgBg/Left/ChouJiang/txtTips",
+  txtBetNum = "node/imgBg/Right/txtBetNum",
+  item = "node/imgBg/Left/item",
+  itemLight = "node/imgBg/Left/LightEffect/Light",
+  contStarVal = "node/imgBg/Left/ChouJiang/ChouJiangList/Viewport/Content/Template",
+  Lights = "node/BgGroup/Lights",
+  Ranking = "node/imgBg/Left/Ranking",
+  RankTemplate = "node/imgBg/Left/Ranking/RankingList/Viewport/Content/Template"
+}
+tbWnd.tbControls = tbControls
+tbWnd.GRID_CFG = {
+  [1] = {2, 1},
+  [2] = {3, 3},
+  [3] = {3, 1},
+  [4] = {5, 1},
+  [5] = {2, 2},
+  [6] = {3, 1},
+  [7] = {1, 3},
+  [8] = {1, 1},
+  [9] = {4, 1},
+  [10] = {2, 1},
+  [11] = {3, 2},
+  [12] = {1, 1},
+  [13] = {4, 3},
+  [14] = {4, 1},
+  [15] = {5, 1},
+  [16] = {1, 2},
+  [17] = {4, 1},
+  [18] = {2, 3},
+  [19] = {2, 1},
+  [20] = {3, 1},
+  [21] = {1, 1},
+  [22] = {4, 2}
+}
+tbWnd.nUpdatePoolTime = 10
+
+function tbWnd:OnClickBetType(nBetType)
+  local bOk = false
+  if self.nTimes > 0 then
+    bOk = true
+  elseif 0 ~= nBetType then
+    local nCurNum = me.GetItemCountByTypeInBag(TreasureChest.nShellTemplateId)
+    local nNeed = TreasureChest.tbBetTypeSetting[nBetType][2]
+    if nCurNum >= nNeed then
+      bOk = true
+    end
+  end
+  if false == bOk then
+    if 0 == self.nBetType then
+      self.tbBetTypeBtnGroup:ClearSelected()
+    else
+      self.tbBetTypeBtnGroup:Select(self.nBetType)
+    end
+    me.CenterMsg(i18n.EasyGet("\230\130\168\231\154\132\232\180\157\229\163\179\230\149\176\233\135\143\228\184\141\232\182\179\227\128\130"))
+    return
+  end
+  self.nBetType = nBetType
+  self:SetBetReadyState()
+end
+
+tbWnd.tbOnClick = {
+  btnHelp = function(self)
+    Ui:OnHelpClicked("BaiBaoXiangHelp")
+  end,
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnAdd = function(self)
+    Ui:OpenWindow("UIBaiBaoXiangForge")
+    self:Close()
+  end,
+  btnGetAward = function(self)
+    TreasureChest:GetAward_C()
+  end,
+  btnGetShell = function(self)
+    TreasureChest:GetShell_C()
+  end,
+  btnStart = function(self)
+    TreasureChest:Start_C(self.nBetType)
+  end
+}
+
+function tbWnd.VoidFunc()
+end
+
+function tbWnd:SetGridSprite()
+  self.tbItemGrid = {}
+  for nId, tbInfo in ipairs(self.GRID_CFG) do
+    local nType, nLevel = table.unpack(tbInfo)
+    local nItemTempalteId = TreasureChest.tbTypeCfg[nType]["ShowTemplateId" .. nLevel]
+    self.tbItemGrid[nId] = Ui:NewExistItemGrid(self, string.format("%s%.2d/UIItemGrid", tbControls.item, nId))
+    self.tbItemGrid[nId]:SetItemByTemplate(nItemTempalteId, nil, nil, nil, {bShowTip = false})
+    self.tbItemGrid[nId]:SetClickEnable(true)
+    local tbAwdLevelScrollView = Ui:NewScrollView(self, string.format("%s%.2d/StarGroup/Template", tbControls.item, nId), nil, nLevel)
+    for i = 1, nLevel do
+      tbAwdLevelScrollView:SetElement(i, self.VoidFunc)
+    end
+  end
+end
+
+function tbWnd:ApplyGetPoolCnt()
+  RemoteServer.RequestTreasureChest(TreasureChest.Protocol.GetPoolCoin)
+  self.nTimerUpdateID = Timer:Register(self.nUpdatePoolTime * Env.GAME_FPS, self.OnTimerUpdate, self)
+end
+
+function tbWnd:OnTimerUpdate()
+  RemoteServer.RequestTreasureChest(TreasureChest.Protocol.GetPoolCoin)
+  return true
+end
+
+function tbWnd:UpdatePoolCoin(nCoin)
+  if not nCoin or nCoin < TreasureChest.MIN_SHELL then
+    nCoin = TreasureChest.MIN_SHELL
+  end
+  self.pPanel:Label_SetText(tbControls.txtCaiChiValue, i18n.EasyGet("{0}\232\180\157\229\163\179", nCoin))
+end
+
+function tbWnd:OnCreate()
+  self:SetGridSprite()
+  self.tbAwardResultScrollView = Ui:NewScrollView(self, tbControls.contStarVal, nil, TreasureChest.MAX_LEVEL)
+  self.tbRankScrollView = Ui:NewScrollView(self, tbControls.RankTemplate, nil, TreasureChest.RANK_NUM)
+  local tbTypeBtn = {}
+  for nId, _ in ipairs(TreasureChest.tbBetTypeSetting) do
+    table.insert(tbTypeBtn, string.format("%s%d", tbControls.btnShellType, nId))
+  end
+  self.tbBetTypeBtnGroup = Ui:NewButtonGroup(self, tbTypeBtn, true, function(self, nIndex)
+    self:OnClickBetType(nIndex)
+  end)
+  self.nPanelOpen = 0
+  self.nBetType = 0
+  self.nTimeMoveID = 0
+  self.nTimerDelayID = 0
+  self.nTimerResetID = 0
+  self.nTimerUpdateID = 0
+  self.nLevel = 0
+  self.nTimes = 0
+  self.nType = 0
+  self.nTouzhu = 0
+  self.nResult = 0
+  self.nOverflow = 0
+  self.nContinue = 0
+  self.nCurrGrid = 1
+  self.nEndGrid = 1
+  self.nRandGrid = 0
+  self.tbMoveFrame = {
+    [1] = 1,
+    [2] = 2,
+    [3] = 4,
+    [4] = 6
+  }
+  self.tbGrid = {}
+end
+
+function tbWnd:OnOpen()
+  self.nPanelOpen = 1
+  self:ApplyGetPoolCnt()
+  self:UpdateView()
+end
+
+function tbWnd:UpdateOwnShellNum()
+  local nCurNum = me.GetItemCountByTypeInBag(TreasureChest.nShellTemplateId)
+  self.pPanel:Label_SetText(tbControls.txtOwnShellNum, tostring(nCurNum))
+end
+
+function tbWnd:CheckRecover()
+  local nTimes = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_TIMES)
+  if nTimes > 0 then
+    return 1
+  end
+  return 0
+end
+
+function tbWnd:UpdateInfoPlayerState()
+  if 1 == self:CheckRecover() then
+    self:Recover()
+  else
+    self:State_Begin()
+  end
+end
+
+function tbWnd:FindGridByResult(nType, nLevel, nRandGrid)
+  if not nType then
+    return 1
+  end
+  local tbResult = {}
+  for nId, tbInfo in ipairs(self.GRID_CFG) do
+    if nType == tbInfo[1] and nLevel == tbInfo[2] then
+      table.insert(tbResult, nId)
+    end
+  end
+  if 0 == #tbResult then
+    return 1
+  end
+  if #tbResult > 1 and nRandGrid > 0 then
+    if nRandGrid >= 1 and nRandGrid <= #tbResult then
+      return tbResult[nRandGrid]
+    else
+      return tbResult[1]
+    end
+  else
+    return tbResult[1]
+  end
+end
+
+function tbWnd:SetItemGrey(bGrey)
+  for nId, tbInfo in ipairs(self.GRID_CFG) do
+    self.tbItemGrid[nId]:CDLabyer_SetActive(bGrey)
+  end
+end
+
+function tbWnd:State_Begin()
+  self.tbGrid = {}
+  self:SetItemGrey(false)
+  self:DisableAllButton()
+  self.pPanel:Button_SetText(tbControls.btnStart, i18n.EasyGet("\229\188\128\229\167\139"), "Text")
+  self.tbAwardResultScrollView:Clear()
+  for nId, _ in ipairs(TreasureChest.tbBetTypeSetting) do
+    self.pPanel:Button_SetEnable(string.format("%s%d", tbControls.btnShellType, nId), true)
+  end
+  self.pPanel:SetActive(tbControls.txtTips, false)
+  local nCurNum = me.GetItemCountByTypeInBag(TreasureChest.nShellTemplateId)
+  local nUseCount = (TreasureChest.tbBetTypeSetting[self.nBetType] or {})[2]
+  if nUseCount and nCurNum >= nUseCount then
+    self:SetBetReadyState()
+  else
+    self.nBetType = 0
+  end
+  self:SetBetTypeState(self.nBetType)
+  self:ShowRanking()
+end
+
+function tbWnd:ShowRanking()
+  self.pPanel:SetActive(tbControls.Ranking, true)
+  self.tbRankScrollView:Clear()
+  RemoteServer.RequestTreasureChest(TreasureChest.Protocol.GetRankList)
+end
+
+function tbWnd:UpdateRankList(tbRankData)
+  self.tbRankData = tbRankData
+  self.tbRankScrollView:Clear()
+  for i, tbInfo in ipairs(tbRankData) do
+    self.tbRankScrollView:SetElement(i, self.funcSetRankInfo, true)
+  end
+end
+
+function tbWnd.funcSetRankInfo(tbElement, nIndex)
+  local uiWnd = Ui:GetWindow("UIBaiBaoXiang")
+  local tbInfo = uiWnd.tbRankData[nIndex]
+  assert(tbInfo)
+  local szMsg
+  local szServerName = ""
+  if tbInfo[6] then
+    szServerName = i18n.EasyGet("{0}\230\156\141", tbInfo[5])
+  end
+  if tbInfo[4] == TreasureChest.tbTypeCfg[TreasureChest.AWD_TYPE_CHEST].Name then
+    local _, szColor = Item:GetQualityColor(TreasureChest.nChestQuality)
+    szMsg = i18n.EasyGet("{0}-{1}:<color=#{2}>{3}\229\128\141</color>\230\138\189\228\184\173<color=#{4}>{5}\229\165\150\229\138\177</color>", szServerName, tbInfo[1], TreasureChest:GetMultColor(tbInfo[2]), tbInfo[2], szColor, i18n.Parse(tbInfo[4]))
+  else
+    szMsg = i18n.EasyGet("{0}-{1}:<color=#{2}>{3}\229\128\141</color>\230\138\189\228\184\173<color=#{4}>{5}\230\152\159</color>{6}", szServerName, tbInfo[1], TreasureChest:GetMultColor(tbInfo[2]), tbInfo[2], TreasureChest:GetLevelColor(tbInfo[3]), tbInfo[3], i18n.Parse(tbInfo[4]))
+  end
+  tbElement.pPanel:Label_SetText("Main", szMsg)
+end
+
+function tbWnd:HideRanking()
+  self.pPanel:SetActive(tbControls.Ranking, false)
+end
+
+function tbWnd:CloseBtnStartAnimator()
+  self.pPanel:Animator_SetEnable(tbControls.btnStart, false)
+end
+
+function tbWnd:State_WaitResult()
+  self.pPanel:Animator_SetEnable(tbControls.btnStart, true)
+  local Animator = self.pPanel:GetAnimator(tbControls.btnStart)
+  Animator:Play("BtnStart", 0, 0)
+  Timer:Register(15, self.CloseBtnStartAnimator, self)
+  self:DisableAllButton()
+  self:SetItemGrey(true)
+  for _, nGrid in ipairs(self.tbGrid) do
+    self.tbItemGrid[nGrid]:CDLabyer_SetActive(false)
+  end
+  self.nTimeMoveID = Timer:Register(1, self.OnTimerMove, self, true)
+  self:HideRanking()
+end
+
+function tbWnd:OnTimerMove(bLoop)
+  if self.nCurrGrid > 0 then
+    local szLightControl = string.format("%s%.2d", tbControls.itemLight, self.nCurrGrid)
+    local Animator = self.pPanel:GetAnimator(szLightControl)
+    Animator:Play("LuckyDial_LightAni", 0, 0)
+    Animator:Update(5)
+  end
+  self.nCurrGrid = self.nCurrGrid + 1
+  if self.nCurrGrid > #self.GRID_CFG then
+    self.nCurrGrid = self.nCurrGrid - #self.GRID_CFG
+  end
+  return bLoop
+end
+
+function tbWnd:OnTimerDelay(nStep)
+  Timer:Close(self.nTimeMoveID)
+  self.nTimeMoveID = 0
+  self.nTimerDelayID = 0
+  if nStep >= #self.tbMoveFrame then
+    Timer:Register(self.tbMoveFrame[nStep], self.State_GetResult, self, self.nLastTimes)
+  else
+    self.nTimerDelayID = Timer:Register(self.tbMoveFrame[nStep + 1], self.OnTimerDelay, self, nStep + 1)
+  end
+  if nStep > 1 then
+    self:OnTimerMove(false)
+  end
+  return false
+end
+
+function tbWnd:CacMoveGrid(nBeginGrid, nEndGrid)
+  local nMoveGrid = nEndGrid - nBeginGrid + #self.GRID_CFG * 2 + 1 - (#self.tbMoveFrame - 1)
+  return nMoveGrid
+end
+
+function tbWnd:Recover()
+  self.nLevel = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_LEVEL)
+  self.nTimes = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_TIMES)
+  self.nType = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_TYPE)
+  self.nBetType = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_BET_TYPE)
+  self.nResult = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_GRID)
+  self.nOverflow = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_OVERFLOW)
+  self.nContinue = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_CONTINUE)
+  self.nLastType = self.nType
+  self.nLastLevel = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_LASTLEVEL)
+  self.nRandGrid = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_GRID)
+  self.nEndGrid = self:FindGridByResult(self.nLastType, self.nLastLevel, self.nRandGrid)
+  self.nCurrGrid = self.nEndGrid
+  self.nLastTimes = self.nTimes
+  if self.nBetType > 0 then
+    self:SetBetReadyState()
+  end
+  self:SetBetTypeState(self.nBetType)
+  self:State_GetResult(self.nTimes)
+end
+
+function tbWnd:SetFrameGrid(nEndGrid)
+  if nEndGrid < 1 or nEndGrid >= #self.GRID_CFG then
+    return
+  end
+  self.tbItemGrid[nEndGrid]:CDLabyer_SetActive(false)
+end
+
+function tbWnd:State_GetResult(nTimes)
+  self:SetItemGrey(true)
+  self:DisableAllButton()
+  self.pPanel:Button_SetEnable(tbControls.btnGetAward, true)
+  self.pPanel:Button_SetEnable(tbControls.btnGetShell, true)
+  self.pPanel:Button_SetEnable(tbControls.btnStart, true)
+  self.pPanel:Button_SetText(tbControls.btnStart, i18n.EasyGet("\231\187\167\231\187\173"), "Text")
+  self.pPanel:SetActive(tbControls.btnStart .. "/Hud_Effect", true)
+  self:SetFrameGrid(self.nEndGrid)
+  local szLightControl = string.format("%s%.2d", tbControls.itemLight, self.nEndGrid)
+  local Animator = self.pPanel:GetAnimator(szLightControl)
+  Animator:Play("LuckyDial_LightAni_On", 0, 0)
+  self.nLevel = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_LEVEL)
+  self.nContinue = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_CONTINUE)
+  local nLevel, nContinue = self.nLevel, self.nContinue
+  if 1 == nTimes then
+    self:State_FirstOrSameResult(nTimes, nContinue)
+  elseif nTimes > 1 then
+    if nLevel == TreasureChest.MAX_LEVEL then
+      self:State_FirstOrSameResult(nTimes, nContinue)
+    elseif 1 == nContinue then
+      self:State_FirstOrSameResult(nTimes, nContinue)
+    elseif 0 == nContinue then
+      self:State_DifferResult()
+    end
+  end
+end
+
+function tbWnd:State_FirstOrSameResult(nTimes, nContinue)
+  self.tbGrid = self:FindGridByType(self.nLastType)
+  if #self.tbGrid <= 0 then
+    return
+  end
+  for _, nGrid in ipairs(self.tbGrid) do
+    self.tbItemGrid[nGrid]:CDLabyer_SetActive(false)
+  end
+  self.pPanel:Button_SetEnable(tbControls.btnStart, 1 == nContinue)
+  if self.nLastType == TreasureChest.AWD_TYPE_CHEST then
+    self.pPanel:Button_SetEnable(tbControls.btnGetShell, false)
+  end
+  if nTimes > 1 then
+    local Animator = self.pPanel:GetAnimator(tbControls.Lights)
+    Animator:Play("Lights", 0, 0)
+    Animator:Update(Env.GAME_FPS * 3)
+  end
+  if 0 == nContinue then
+    self.pPanel:SetActive(tbControls.btnStart .. "/Hud_Effect", false)
+  end
+  self:UpdateAward()
+end
+
+function tbWnd:State_DifferResult()
+  self:DisableAllButton()
+  self.tbAwardResultScrollView:Clear()
+  local szTips = i18n.EasyGet("\230\130\168\232\191\153\230\172\161\232\191\144\230\176\148\229\183\174\228\186\134\229\176\145\232\174\184\239\188\140\229\134\141\229\138\160\230\138\138\229\138\178\232\175\149\232\175\149\229\144\167\239\188\129")
+  self.pPanel:Label_SetText(tbControls.txtTips, szTips)
+  self.nTimerResetID = Timer:Register(Env.GAME_FPS * 3, self.OnTimerReset, self)
+end
+
+function tbWnd:OnTimerReset()
+  self.pPanel:SetActive(tbControls.txtTips, false)
+  Timer:Close(self.nTimerResetID)
+  self.nTimerResetID = 0
+  self:State_Begin()
+end
+
+function tbWnd:OnRecvResult(tbResult)
+  if not tbResult then
+    return
+  end
+  self.nLastType = tbResult.Type
+  self.nLastLevel = tbResult.Level
+  self.nLastTimes = tbResult.Times
+  self.nRandGrid = tbResult.Grid
+  self.nEndGrid = self:FindGridByResult(self.nLastType, self.nLastLevel, self.nRandGrid)
+  self.tbMoveFrame[1] = self:CacMoveGrid(self.nCurrGrid, self.nEndGrid)
+  if 1 == self.nPanelOpen then
+    self:UpdateOwnShellNum()
+    self.nTimerDelayID = Timer:Register(self.tbMoveFrame[1], self.OnTimerDelay, self, 1)
+  else
+    self:State_GetResult(self.nLastTimes)
+  end
+end
+
+function tbWnd:OnReset()
+  self:UpdateOwnShellNum()
+  self:State_GetAward()
+end
+
+function tbWnd:State_GetAward()
+  self:DisableAllButton()
+  self:SetItemGrey(true)
+  self.nTimerResetID = Timer:Register(Env.GAME_FPS * 3, self.OnTimerReset, self)
+end
+
+function tbWnd:GetAwdTips(nAwardId, nKeyId, nMult)
+  local tbAward = Award:GetAward(nAwardId, nKeyId)[1]
+  return Award:GetAwardDescCount(me, tbAward, false, true, nMult)
+end
+
+function tbWnd.funcSetScrollInfo(tbElement, nIndex)
+  local uiWnd = Ui:GetWindow("UIBaiBaoXiang")
+  local nFinalType = uiWnd.nType
+  local nTotalLevel = uiWnd.nLevel
+  local tbAwardValue = TreasureChest.tbAwardValue[nFinalType]
+  local nMultiple = TreasureChest.tbBetTypeSetting[uiWnd.nBetType][1]
+  local tbAwdInfo = tbAwardValue[nIndex]
+  local szAwdTips = uiWnd:GetAwdTips(tbAwdInfo.nAwardId, tbAwdInfo.tbBetTypeKey[1])
+  local pContPanel = tbElement.pPanel
+  for i = 1, TreasureChest.MAX_LEVEL do
+    pContPanel:SetActive(string.format("star%.2d", i), i <= nIndex)
+  end
+  pContPanel:Label_SetText("txtGoldenValue", i18n.Parse(szAwdTips))
+  pContPanel:Label_SetText("txtMagnification", "x" .. nMultiple)
+  pContPanel:SetActive("imgSlected", nTotalLevel == nIndex)
+end
+
+function tbWnd:UpdateAward()
+  if 0 == self.nPanelOpen then
+    return
+  end
+  self.nLevel = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_LEVEL)
+  self.nType = me.GetUserValue(TreasureChest.SAVE_GROUP, TreasureChest.SAVE_TYPE)
+  local nTotalLevel = self.nLevel
+  local nFinalType = self.nType
+  local tbAwardValue = TreasureChest.tbAwardValue[nFinalType]
+  self.tbAwardResultScrollView:Clear()
+  for nLevel, tbInfo in ipairs(tbAwardValue) do
+    self.tbAwardResultScrollView:SetElement(nLevel, self.funcSetScrollInfo, true)
+  end
+  local tbAwdInfo = tbAwardValue[nTotalLevel]
+  local nMultiple = TreasureChest.tbBetTypeSetting[self.nBetType][1]
+  local szAwdTips = self:GetAwdTips(tbAwdInfo.nAwardId, tbAwdInfo.tbBetTypeKey[1], nMultiple)
+  local szTips
+  if nFinalType == TreasureChest.AWD_TYPE_CHEST then
+    szTips = i18n.EasyGet("\230\129\173\229\150\156\230\130\168\229\143\175\228\187\165\233\162\134\229\143\150<color=green>{0}</color>\239\188\129", i18n.Parse(szAwdTips))
+  else
+    local tbShellInfo = TreasureChest.tbAwardValue[TreasureChest.AWD_TYPE_SHELL][nTotalLevel]
+    local szCoin = self:GetAwdTips(tbShellInfo.nAwardId, tbShellInfo.tbBetTypeKey[1], nMultiple)
+    szTips = i18n.EasyGet("\230\129\173\229\150\156\230\130\168\229\143\175\228\187\165\233\162\134\229\143\150<color=green>{0}</color>\230\136\150\232\128\133<color=green>{1}</color>\239\188\129\239\188\129", i18n.Parse(szAwdTips), i18n.Parse(szCoin))
+  end
+  self.pPanel:SetActive(tbControls.txtTips, true)
+  self.pPanel:Label_SetText(tbControls.txtTips, szTips)
+end
+
+function tbWnd:FindGridByType(nType)
+  local tbResult = {}
+  for nId, tbInfo in ipairs(self.GRID_CFG) do
+    if tbInfo[1] == nType then
+      table.insert(tbResult, nId)
+    end
+  end
+  return tbResult
+end
+
+function tbWnd:DisableAllButton()
+  for nId, _ in ipairs(TreasureChest.tbBetTypeSetting) do
+    self.pPanel:Button_SetEnable(string.format("%s%d", tbControls.btnShellType, nId), false)
+  end
+  self.pPanel:Button_SetEnable(tbControls.btnStart, false)
+  self.pPanel:Button_SetEnable(tbControls.btnGetAward, false)
+  self.pPanel:Button_SetEnable(tbControls.btnGetShell, false)
+  self.pPanel:SetActive(tbControls.btnStart .. "/Hud_Effect", false)
+end
+
+function tbWnd:SetBetTypeState(nBetType)
+  if 0 == nBetType then
+    self.tbBetTypeBtnGroup:ClearSelected()
+    local szTips = i18n.EasyGet("\232\175\183\233\128\137\230\139\169\230\138\149\230\179\168\230\149\176\233\135\143")
+    self.pPanel:Label_SetText(tbControls.txtBetNum, szTips)
+  else
+    self.tbBetTypeBtnGroup:Select(nBetType)
+  end
+end
+
+function tbWnd:SetBetReadyState()
+  self.pPanel:Button_SetEnable(tbControls.btnGetShell, false)
+  self.pPanel:Button_SetEnable(tbControls.btnGetAward, false)
+  self.pPanel:Button_SetEnable(tbControls.btnStart, true)
+  self.pPanel:SetActive(tbControls.btnStart .. "/Hud_Effect", true)
+  local nNeed = TreasureChest.tbBetTypeSetting[self.nBetType][2]
+  local szTips = i18n.EasyGet("\230\138\149\230\179\168\233\162\157\239\188\154{0}\232\180\157\229\163\179\239\188\129", nNeed)
+  self.pPanel:Label_SetText(tbControls.txtBetNum, szTips)
+  self.tbAwardResultScrollView:Clear()
+end
+
+function tbWnd:UpdateView()
+  self:UpdateOwnShellNum()
+  self:UpdateInfoPlayerState()
+end
+
+function tbWnd:OnClose()
+  self.nPanelOpen = 0
+  self.nBetType = 0
+  if self.nTimeMoveID > 0 then
+    Timer:Close(self.nTimeMoveID)
+    self.nTimeMoveID = 0
+  end
+  if self.nTimerDelayID > 0 then
+    Timer:Close(self.nTimerDelayID)
+    self.nTimerDelayID = 0
+  end
+  if self.nTimerResetID > 0 then
+    Timer:Close(self.nTimerResetID)
+    self.nTimerResetID = 0
+  end
+  if self.nTimerUpdateID > 0 then
+    Timer:Close(self.nTimerUpdateID)
+    self.nTimerUpdateID = 0
+  end
+end
+
+function tbWnd:OnChangeTreasureChestOnOff()
+end
+
+function tbWnd:CloseEffect()
+  Timer:Close(self.nTimeMoveID)
+  self.nTimeMoveID = 0
+  self:OnTimerMove(false)
+  self:OnOpen()
+end
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_TREASURE_CHEST_ONOFF,
+      self.OnChangeTreasureChestOnOff
+    }
+  }
+end

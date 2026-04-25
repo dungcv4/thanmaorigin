@@ -1,0 +1,148 @@
+function Blessing:SyncBlessingResult(nNewBlessingId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_BLESSING_RESULT, nNewBlessingId)
+  
+  self:StartTimer()
+end
+
+function Blessing:ReqNewBlessing()
+  local nLeftCount = self:GetLeftCount(me)
+  if nLeftCount <= 0 then
+    me.CenterMsg(i18n.EasyGet("\228\187\138\230\151\165\231\165\136\231\166\143\230\172\161\230\149\176\229\183\178\231\148\168\229\176\189"))
+    return
+  end
+  local bFree = self:CheckFreeBlessing(me)
+  local bHasYesterdayBlessing = 0 ~= self:GetBlessingId(me) and Lib:IsSameDay(14400, self:GetBlessingEndTime(me))
+  if bFree then
+    if bHasYesterdayBlessing then
+      local szMsg = i18n.EasyGet("\230\152\168\230\151\165\231\165\136\231\166\143\230\149\136\230\158\156\230\156\170\232\191\135\230\156\159\239\188\140\230\152\175\229\144\166\231\161\174\232\174\164\232\191\155\232\161\140\229\133\141\232\180\185\231\165\136\231\166\143\239\188\159\n<color=#c50505>\239\188\136\231\165\136\231\166\143\229\144\142\232\139\165\231\187\167\231\187\173\228\191\157\231\149\153\230\151\167\231\165\136\231\166\143\230\149\136\230\158\156\239\188\140\230\151\167\231\165\136\231\166\143\230\151\182\233\151\180\228\184\141\228\188\154\233\135\141\231\189\174\239\188\137</color>")
+      Ui:OpenWindow("UIMessageBoxBig", szMsg, {
+        function()
+          RemoteServer.RequestBlessing("C2S_ReqNewBlessing")
+        end,
+        function()
+        end
+      })
+    else
+      RemoteServer.RequestBlessing("C2S_ReqNewBlessing")
+    end
+  else
+    local nHasBlessedCount = self.Cfg.DAILY_MAX_TIME - nLeftCount
+    local nCost = self:GetBlessingCost(nHasBlessedCount + 1)
+    local szMsg = ""
+    if bHasYesterdayBlessing then
+      szMsg = i18n.EasyGet("\230\156\172\230\172\161\231\165\136\231\166\143\233\156\128\230\182\136\232\128\151<color=#c50505>{0}{1}</color>\239\188\140\230\152\168\230\151\165\231\165\136\231\166\143\230\149\136\230\158\156\230\156\170\232\191\135\230\156\159\239\188\140\230\152\175\229\144\166\231\161\174\232\174\164\232\191\155\232\161\140\231\165\136\231\166\143\239\188\159\n<color=#c50505>\239\188\136\231\165\136\231\166\143\229\144\142\232\139\165\231\187\167\231\187\173\228\191\157\231\149\153\230\151\167\231\165\136\231\166\143\230\149\136\230\158\156\239\188\140\230\151\167\231\165\136\231\166\143\230\151\182\233\151\180\228\184\141\228\188\154\233\135\141\231\189\174\239\188\137</color>", nCost, Currency:GetName("YuanBao"))
+    else
+      szMsg = i18n.EasyGet("\230\152\175\229\144\166\232\138\177\232\180\185<color=#c50505>{0}{1}</color>\232\191\155\232\161\140\233\128\134\229\164\169\230\148\185\229\145\189\239\188\159\n\229\137\169\228\189\153\233\128\134\229\164\169\230\148\185\229\145\189\230\172\161\230\149\176\239\188\154<color=#c50505>{2}</color>", nCost, Currency:GetName("YuanBao"), nLeftCount)
+    end
+    Ui:OpenWindow("UIMessageBoxBig", szMsg, {
+      function()
+        RemoteServer.RequestBlessing("C2S_ReqNewBlessing")
+      end,
+      function()
+      end
+    })
+  end
+end
+
+function Blessing:ApplyNewBlessing(bReplace)
+  RemoteServer.RequestBlessing("C2S_ApplyNewBlessing", bReplace)
+end
+
+function Blessing:ApplyNewBlessingSuccess()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_BLESSING_CHANGE)
+  self:StartTimer()
+end
+
+function Blessing:ClientApplyPlayerAttrib()
+  local nBlessingId = me.GetUserValue(self.KEY_GROUP, self.KEY_BLESSING_ID)
+  local nLevel = me.GetUserValue(self.KEY_GROUP, self.KEY_PLAYER_LEVEL)
+  self:ApplyAttrib(me.GetNpc(), nBlessingId, nLevel)
+end
+
+function Blessing:ClientRemovePlayerAttrib()
+  local nBlessingId = me.GetUserValue(self.KEY_GROUP, self.KEY_BLESSING_ID)
+  local nLevel = me.GetUserValue(self.KEY_GROUP, self.KEY_PLAYER_LEVEL)
+  self:RemoveAttrib(me.GetNpc(), nBlessingId, nLevel)
+end
+
+function Blessing:OnPlayerFirstLoginToday()
+  if 1 ~= GetTimeFrameState(self.Cfg.OPEN_TIMEFRAME) then
+    return
+  end
+  if me.nLevel < self.Cfg.LEVEL_LIMIT then
+    return
+  end
+  if self.bShowNotifyMsg ~= false then
+    self:NotifyMsg()
+  end
+end
+
+function Blessing:NotifyMsg()
+  local tbMsgData = {}
+  tbMsgData.szType = "Blessing"
+  local nNextDayBlessTime = self:GetNextDayBlessTime()
+  local nTimeOut = nNextDayBlessTime > 43200 and 43200 or nNextDayBlessTime
+  tbMsgData.nTimeOut = GetTime() + nTimeOut
+  Ui:SynNotifyMsg(tbMsgData)
+end
+
+function Blessing:NotifyTimeOut()
+  self.bShowNotifyMsg = true
+end
+
+function Blessing:Init()
+  if self.bHasInitialized then
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_FIRST_LOGIN_TODAY, self)
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Blessing)
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, Blessing)
+  end
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_FIRST_LOGIN_TODAY, self.OnPlayerFirstLoginToday, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Blessing.OnPlayerReturnToLogin, Blessing)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, Blessing.OnPlayerLogin, Blessing)
+  self.bHasInitialized = true
+end
+
+function Blessing:OnPlayerLogin()
+  if 1 ~= GetTimeFrameState(self.Cfg.OPEN_TIMEFRAME) then
+    return
+  end
+  if me.nLevel < self.Cfg.LEVEL_LIMIT then
+    return
+  end
+  if 0 ~= self:GetBlessingId(me) then
+    self:StartTimer()
+  end
+  if self.bShowNotifyMsg then
+    self:NotifyMsg()
+    self.bShowNotifyMsg = false
+  end
+end
+
+function Blessing:OnPlayerReturnToLogin()
+  self:CloseTimer()
+  self.bShowNotifyMsg = nil
+end
+
+function Blessing:CloseTimer()
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+end
+
+function Blessing:StartTimer()
+  self:CloseTimer()
+  self.nTimer = Timer:Register(Env.GAME_FPS, function()
+    if Blessing:CheckBlessingTimeOut(me) then
+      RemoteServer.RequestBlessing("C2S_ClientCheckTimeOut")
+    end
+    if 0 == self:GetBlessingId(me) then
+      self:NotifyMsg()
+      return false
+    else
+      return true
+    end
+  end)
+end
+
+Blessing:Init()

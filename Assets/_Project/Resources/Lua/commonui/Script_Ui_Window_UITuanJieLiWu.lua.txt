@@ -1,0 +1,149 @@
+local tbWnd = Ui:CreateWindow("UITuanJieLiWu")
+tbWnd.EffectBeginX = -330
+tbWnd.EffectEndX = 330
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_TuanJieLiWu_DATA_SYNC,
+      self.OnUpdateGiftGiftList
+    },
+    {
+      EventNotify.emNOTIFY_SHOP_BUY_RESULT,
+      self.OnAfterBuyGood
+    }
+  }
+end
+
+local tbControls = {
+  txtTime = "node/imgBG/Content/ActivtyTime/txtTime",
+  txtActivtyDetails = "node/imgBG/Content/txtActivtyDetails",
+  GiftListTemplate = "node/imgBG/Content/Detail/GiftList/Viewport/Content/Template",
+  btnClose = "node/imgBG/btnClose",
+  btnHelp = "node/imgBG/txtTitle/btnHelp"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("TuanJieLiWu")
+  end
+}
+
+function tbWnd:OnOpen(nId)
+  self.nId = nId
+  self:ShowTimeAndDetailInfo()
+  self:DoUpdateGiftList()
+end
+
+function tbWnd:OnClose()
+  if self.TuanJieLiWuScrollView then
+    self.TuanJieLiWuScrollView:Clear()
+    self.TuanJieLiWuScrollView = nil
+  end
+end
+
+function tbWnd:ShowTimeAndDetailInfo()
+  local pInstance = ActivityMgr:GetInstanceById(self.nId)
+  local szTimeInfo, szActivityDetail = pInstance:GetTimeAndDetailInfo()
+  if szTimeInfo and szActivityDetail then
+    self.pPanel:Label_SetText(tbControls.txtTime, szTimeInfo, szActivityDetail)
+    self.pPanel:SetActive(tbControls.txtTime, true)
+    self.pPanel:SetActive(tbControls.txtActivtyDetails, true)
+  else
+    self.pPanel:SetActive(tbControls.txtTime, false)
+    self.pPanel:SetActive(tbControls.txtActivtyDetails, false)
+  end
+end
+
+function tbWnd:DoUpdateGiftList()
+  local pInstance = ActivityMgr:GetInstanceById(self.nId)
+  self.pPanel:SetActive(tbControls.GiftListTemplate, false)
+  pInstance:GetDiscountInfo(me.dwID)
+end
+
+function tbWnd:OnAfterBuyGood(bSuccess)
+  if bSuccess then
+    self:DoUpdateGiftList()
+  end
+end
+
+function tbWnd:OnUpdateGiftGiftList(tbGiftListInfo)
+  if not self.TuanJieLiWuScrollView then
+    self.TuanJieLiWuScrollView = Ui:NewScrollView(self, tbControls.GiftListTemplate, nil, false, false)
+  end
+  local nCounter = 1
+  for nGoodId, tbInfo in pairs(tbGiftListInfo) do
+    self.TuanJieLiWuScrollView:SetElement(nCounter, function(tbElement)
+      self:SetGiftListElement(tbElement, nGoodId, tbInfo)
+    end)
+    nCounter = nCounter + 1
+  end
+end
+
+function tbWnd:SetGiftListElement(tbElement, nGoodId, tbInfo)
+  local pInstance = ActivityMgr:GetInstanceById(self.nId)
+  local tbWare = Shop:GetAWare(nGoodId)
+  if tbWare then
+    local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+    itemGrid:SetItemByTemplate(tbWare.nItemId)
+    itemGrid:SetClickEnable(true)
+    if pInstance and pInstance.tbConfig and pInstance.tbConfig.tbGoodInfo and pInstance.tbConfig.tbGoodInfo[tbWare.nId] then
+      local nNum = pInstance.tbConfig.tbGoodInfo[tbWare.nId].nNum
+      if nNum then
+        itemGrid:SetRBCornerText(nNum)
+      end
+    end
+    tbElement.pPanel:Label_SetText("PriceBefore/txtValue", tbInfo.nOrgPrice)
+    tbElement.pPanel:SetActive("PriceBefore/txtValue/imgLine", false)
+    tbElement.pPanel:Label_SetText("PriceReward/txtValue", tbInfo.nReward)
+    tbElement.pPanel:Label_SetText("Limit/txtLimitValue", string.format("%s/%s", tbInfo.nPlayerBuyCount, tbInfo.nMaxBuyCount))
+    local nRemain = Shop:GetShopRemainCount(tbWare, me)
+    if pInstance:IsBuyEndTime() or 0 == nRemain or me.nLevel < pInstance.tbConfig.nLimitLevel then
+      tbElement.pPanel:Button_SetEnable("btnBuy", false)
+      tbElement.pPanel:Label_SetText("btnBuy/Text", i18n.EasyGet("\232\180\173\228\185\176"))
+      Ui:Button_UnBindEvent(tbElement.pPanel, "btnBuy")
+    else
+      Ui:Button_BindEvent(tbElement.pPanel, "btnBuy", function(tbWareInfo)
+        if not pInstance:IsBuyEndTime() then
+          local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+          Ui:OpenWindow("UIShopBuy", tbWareInfo, true, nRemainCount)
+        else
+          me.CenterMsg(i18n.EasyGet("\230\156\170\229\156\168\232\180\173\228\185\176\230\151\182\233\151\180\229\134\133"))
+          self:DoUpdateGiftList()
+        end
+      end, tbWare)
+      tbElement.pPanel:Button_SetEnable("btnBuy", true)
+    end
+    for i = 1, pInstance.tbConfig.nDiscountStage do
+      tbElement.pPanel:Label_SetText("Progress/imgPercentBg0" .. i .. "/txtPercent0" .. i, tbInfo.nAllDisCount[i] .. "%")
+    end
+    local nFiilRate, nEffectRate = self:CalcProcessRate(nGoodId, tbInfo.nAllBuyCount)
+    tbElement.pPanel:Sprite_SetFill("Progress/imgProgressBarBg/imgProgressBar", nFiilRate)
+    tbElement.pPanel:Object_SetLocalPosition("Progress/TrailEffect", Ui.Vector3(nEffectRate, 0, 0))
+  end
+end
+
+function tbWnd:CalcProcessRate(nGoodId, nAllBuyCount)
+  local pInstance = ActivityMgr:GetInstanceById(self.nId)
+  if nGoodId and nAllBuyCount then
+    if pInstance.tbConfig and pInstance.tbConfig.tbDiscountInfo and pInstance.tbConfig.tbDiscountInfo[nGoodId] then
+      local tbInfo = pInstance.tbConfig.tbDiscountInfo[nGoodId]
+      for i = 1, pInstance.tbConfig.nDiscountStage do
+        if nAllBuyCount <= tbInfo["nLevel" .. i .. "Count"] then
+          local nFillRate = (nAllBuyCount - (tbInfo["nLevel" .. i - 1 .. "Count"] or 0)) / tbInfo["nLevel" .. i .. "Count"] * 0.3333333333333333 + (i - 1) / 3
+          local nEffectRate = (self.EffectEndX - self.EffectBeginX) * nFillRate + self.EffectBeginX
+          return nFillRate, nEffectRate
+        end
+      end
+      return 1, self.EffectEndX
+    else
+      LogErr("UITuanJieLiWu: CalcProcessRate failed, discount config Error")
+      return 0, self.EffectBeginX
+    end
+  else
+    return 0, self.EffectBeginX
+  end
+end

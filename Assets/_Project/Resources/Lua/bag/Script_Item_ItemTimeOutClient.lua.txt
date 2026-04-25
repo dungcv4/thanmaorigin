@@ -1,0 +1,51 @@
+Require("Script/EventSystem/EventNotify.lua")
+local tbTimeOutCache = {}
+
+function Item:NewItemNeedTimeOut(pItem)
+  local bHas, nGenTime, nTimeOut = self:GetTimeOut(pItem)
+  if bHas then
+    Log("NewItemNeedTimeOut", pItem.dwId, nGenTime, nTimeOut, nTimeOut - nGenTime, pItem.nItemType, pItem.dwTemplateId, pItem.nCount, pItem.nDetailType, pItem.nEquipPos, pItem.nPos)
+    local nCurTime = GetTime()
+    local nEndTime = nTimeOut
+    local nLeftTime = nEndTime - nCurTime
+    local dwId = pItem.dwId
+    Log("NewItemNeedTimeOut:LeftTime", dwId, pItem.dwTemplateId, nLeftTime, tbTimeOutCache[dwId])
+    if nil == tbTimeOutCache[dwId] then
+      local function fnPlayerReq()
+        Log("ItemTimeOutDelete:", dwId)
+        
+        RemoteServer.OnItemTimeOut(dwId)
+        tbTimeOutCache[dwId] = 0
+      end
+      
+      if nLeftTime > -4 then
+        tbTimeOutCache[dwId] = Timer:Register((nLeftTime + 5 + math.random(1, 60)) * Env.GAME_FPS, fnPlayerReq)
+      else
+        fnPlayerReq()
+      end
+    end
+  end
+end
+
+function Item:OnSyncItemTimeOut(dwId, bNewItem, nAddCount)
+  local pItem = me.GetItemInAllSpace(dwId)
+  if nil ~= pItem then
+    Item:NewItemNeedTimeOut(pItem)
+  end
+end
+
+function Item:OnClearItemTimeOut()
+  for _, nTimer in pairs(tbTimeOutCache) do
+    if 0 ~= nTimer then
+      Timer:Close(nTimer)
+    end
+  end
+  tbTimeOutCache = {}
+end
+
+local function Init()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, Item.OnSyncItemTimeOut, Item)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Item.OnClearItemTimeOut, Item)
+end
+
+Init()

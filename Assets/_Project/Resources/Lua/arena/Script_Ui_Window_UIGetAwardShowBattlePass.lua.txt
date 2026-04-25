@@ -1,0 +1,164 @@
+local tbWnd = Ui:CreateWindow("UIGetAwardShowBattlePass")
+
+function tbWnd:NotifyEvents()
+end
+
+local tbControls = {
+  awardItemTemplate = "imgBG/ItemPanel/Scroll View/Viewport/Content/Template",
+  previewAwarditemTemplate = "imgBG/itemPanel2/itemTemplate",
+  txtGetTips = "imgBG/txtGetTips",
+  itemPanel2 = "imgBG/itemPanel2"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.pAwardItemScorllView = Ui:NewScrollView(self, self.awardItemTemplate, function(_, nIndex, tbElement)
+  end, false, false)
+  self.pPreviewAwardItemScorllView = Ui:NewScrollView(self, self.previewAwarditemTemplate, function(_, nIndex, tbElement)
+  end, false, false)
+end
+
+function tbWnd:OnOpen(tbAllAwards)
+  self:InitAwardItemScorllView(tbAllAwards)
+  local nCurType = BattlePassNew:GetBattlePassPlayerType()
+  if nCurType < BattlePassNew.AwardTag.Legend then
+    self.pPanel:SetActive(self.txtGetTips, true)
+    self.pPanel:SetActive(self.itemPanel2, true)
+    self:InitPreviewAwardItemScorllView()
+  else
+    self.pPanel:SetActive(self.txtGetTips, false)
+    self.pPanel:SetActive(self.itemPanel2, false)
+  end
+end
+
+function tbWnd:InitAwardItemScorllView(tbAllAwards)
+  self.pAwardItemScorllView:Clear()
+  for i, tbAwardData in ipairs(tbAllAwards) do
+    self.pAwardItemScorllView:SetElement(i, function(tbElement)
+      self:SetAwardItemElementInfo(tbElement, tbAwardData)
+    end)
+  end
+  self.pAwardItemScorllView:PlayItemGridAnimation()
+end
+
+function tbWnd:SetAwardItemElementInfo(tbElement, tbAwardData)
+  local tbItemGrid = tbElement.tbItemGrid
+  tbItemGrid = tbItemGrid or Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  tbElement.pPanel:SetActive("Effect/Quality1", false)
+  tbElement.pPanel:SetActive("Effect/Quality2", false)
+  local szType = tbAwardData[1]
+  if szType == Player.AwardType2Name[Player.award_type_item] or szType == Player.AwardType2Name[Player.award_type_item_Unsafe] or szType == Player.AwardType2Name[Player.award_type_itemshow] then
+    local szName, nIcon, nView, nQuality = KItem.GetItemShowInfo(tbAwardData[2], me.nFaction, me.nFactionSect)
+    if nQuality >= 6 then
+      tbElement.pPanel:SetActive("Effect/Quality2", true)
+    elseif nQuality >= 4 then
+      tbElement.pPanel:SetActive("Effect/Quality1", true)
+    end
+    tbItemGrid:SetItemByTemplate(tbAwardData[2], tbAwardData[3])
+  else
+    tbItemGrid:SetDigitalItem(szType, tbAwardData[2])
+  end
+  tbItemGrid:SetClickEnable(true)
+end
+
+local function SortFunc(tbBattlePassPreviewAwardDataA, tbBattlePassPreviewAwardDataB)
+  local nItemTemplateIdA = tbBattlePassPreviewAwardDataA.nItemTempletedId
+  local nItemTemplateIdB = tbBattlePassPreviewAwardDataB.nItemTempletedId
+  local szNameA, nIconA, nViewA, nQualityA = KItem.GetItemShowInfo(nItemTemplateIdA, me.nFaction, me.nFactionSect)
+  local szNameB, nIconB, nViewB, nQualityB = KItem.GetItemShowInfo(nItemTemplateIdB, me.nFaction, me.nFactionSect)
+  if nil == nQualityA then
+    nQualityA = 0
+  end
+  if nil == nQualityB then
+    nQualityB = 0
+  end
+  if nQualityA ~= nQualityB then
+    return nQualityA > nQualityB
+  end
+  local nItemValueA = KItem.GetBaseValue(nItemTemplateIdA)
+  local nItemValueB = KItem.GetBaseValue(nItemTemplateIdB)
+  if nItemValueA ~= nItemValueB then
+    return nItemValueA > nItemValueB
+  end
+  return nItemTemplateIdA < nItemTemplateIdB
+end
+
+function tbWnd:InitPreviewAwardItemScorllView()
+  local nCurLv = BattlePassNew:GetBattlePassPlayerLv()
+  local nCurType = BattlePassNew:GetBattlePassPlayerType()
+  local tbPreviewAwards = {}
+  for nLv, battlePassLvCfgData in ipairs(BattlePassNew.tbBattlePassLvCfg) do
+    if nLv <= nCurLv then
+      for i, nAwardTag in pairs(BattlePassNew.AwardTag) do
+        if nAwardTag > nCurType then
+          local nAwardIndex = 0
+          if nAwardTag == BattlePassNew.AwardTag.Normal then
+            nAwardIndex = battlePassLvCfgData.nAwardKeyN
+          elseif nAwardTag == BattlePassNew.AwardTag.Elite then
+            nAwardIndex = battlePassLvCfgData.nAwardKeyM
+          elseif nAwardTag == BattlePassNew.AwardTag.Legend then
+            nAwardIndex = battlePassLvCfgData.nAwardKeyH
+          else
+            LogErr("[BattlePassNew:OnReceiveAward] failed, nAwardTag" .. nAwardTag)
+            break
+          end
+          local tbAwardParam = {
+            nLogReason = Env.LogWay_BattlePassAward
+          }
+          Award:GenerateDefaultAwardParam(tbAwardParam)
+          local tbAwards = Award:GetAward(BattlePassNew.AwardListId, nAwardIndex, {
+            nLogReason = Env.LogWay_BattlePassAward,
+            tbItemExtParams = {
+              nAwardTime = BattlePassNew.battlePassPlayerData.nBeginDay
+            }
+          })
+          for i, v in ipairs(tbAwards) do
+            table.insert(tbPreviewAwards, v)
+          end
+        end
+      end
+    end
+  end
+  local tbAllMergetPreviewAwards = {}
+  tbAllMergetPreviewAwards = Award:MergetSameTypeAward(tbPreviewAwards)
+  local tbPreviewAwardsList = {}
+  local tbPreviewAwardsTempList = {}
+  for i, tb in ipairs(tbAllMergetPreviewAwards) do
+    local tbBattlePassPreviewAwardData = {}
+    tbBattlePassPreviewAwardData.szType = tb[1]
+    if tb[1] == Player.AwardType2Name[Player.award_type_item] or szType == Player.AwardType2Name[Player.award_type_item_Unsafe] or szType == Player.AwardType2Name[Player.award_type_itemshow] then
+      tbBattlePassPreviewAwardData.nItemTempletedId = tb[2]
+      tbBattlePassPreviewAwardData.nNum = tb[3]
+      table.insert(tbPreviewAwardsList, tbBattlePassPreviewAwardData)
+    else
+      tbBattlePassPreviewAwardData.nItemTempletedId = -1
+      tbBattlePassPreviewAwardData.nNum = tb[2]
+      table.insert(tbPreviewAwardsTempList, tbBattlePassPreviewAwardData)
+    end
+  end
+  table.sort(tbPreviewAwardsList, SortFunc)
+  Lib:MergeTable(tbPreviewAwardsList, tbPreviewAwardsTempList)
+  local nMaxIndex = 7
+  local nIndex = math.min(#tbPreviewAwardsList, nMaxIndex)
+  for i = 1, nIndex do
+    local tbBattlePassPreviewAwardData = tbPreviewAwardsList[i]
+    self.pPreviewAwardItemScorllView:SetElement(i, function(tbElement)
+      self:SetPreviewAwardItemElementInfo(tbElement, tbBattlePassPreviewAwardData)
+    end)
+  end
+  self.pPreviewAwardItemScorllView:PlayItemGridAnimation()
+end
+
+function tbWnd:SetPreviewAwardItemElementInfo(tbElement, tbBattlePassPreviewAwardData)
+  local tbItemGrid = tbElement.tbItemGrid
+  tbItemGrid = tbItemGrid or Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  local szType = tbBattlePassPreviewAwardData.szType
+  if szType == Player.AwardType2Name[Player.award_type_item] or szType == Player.AwardType2Name[Player.award_type_item_Unsafe] or szType == Player.AwardType2Name[Player.award_type_itemshow] then
+    tbItemGrid:SetItemByTemplate(tbBattlePassPreviewAwardData.nItemTempletedId, tbBattlePassPreviewAwardData.nNum)
+  else
+    tbItemGrid:SetDigitalItem(szType, tbBattlePassPreviewAwardData.nNum)
+  end
+  tbItemGrid:SetClickEnable(true)
+end

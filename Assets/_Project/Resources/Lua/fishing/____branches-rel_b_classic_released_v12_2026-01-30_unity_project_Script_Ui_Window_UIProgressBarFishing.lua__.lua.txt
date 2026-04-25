@@ -1,0 +1,117 @@
+local tbWnd = Ui:CreateWindow("UIProgressBarFishing")
+local WND_NAME = tbWnd.ClassName
+Ui.ProgressBarFishing = {}
+Ui.ProgressBarFishing._instance = tbWnd
+local tbControls = {
+  Img_PerfectTime = "Fishing/FishingSlider/Img_PerfectTime",
+  btnLiftingRod = "Fishing/btnLiftingRod"
+}
+local nBarLength = 288
+local tbPerfectCfg = {
+  nLeftX = -148,
+  nY = -1,
+  nZ = 0,
+  nHeight = 10
+}
+
+function Ui.ProgressBarFishing:OpenAutoProgressBar(szTitleName, nFinishTime, nStartSec, nEndSec, funCallBack, argsCallback)
+  if nFinishTime < 0 then
+    LogErr("Error! nFinishTime Can not less than 0 !!")
+    return
+  end
+  if nEndSec <= nStartSec then
+    LogErr("Error! nEndSec Can not less than nStartSec !!")
+    return
+  end
+  if nFinishTime < nEndSec then
+    LogErr("Error! nFinishTime Can not less than nEndSec !!")
+    return
+  end
+  self._funCallBack = funCallBack
+  self._argsCallBack = argsCallback
+  Ui:OpenWindowWithCallback(WND_NAME, function(_, ins)
+    local MaxProcess = ins.cscript:GetMaxProcess()
+    local nSpeed = MaxProcess / nFinishTime
+    if szTitleName and "" ~= szTitleName then
+      ins.cscript:SetTitle(i18n.Parse(szTitleName))
+    end
+    self:_initBarWnd(nStartSec, nEndSec, nFinishTime / 1000)
+    ins.cscript:Init()
+    ins.cscript:SetSpeed(nSpeed)
+    ins.cscript:SetTarget(MaxProcess)
+    AFK:WaitTime(nFinishTime / 1000 + 1)
+  end)
+end
+
+function Ui.ProgressBarFishing:_initBarWnd(nStartSec, nEndSec, nFinishTime)
+  local tbUi = Ui:GetWindow(WND_NAME)
+  if tbUi then
+    tbUi.pPanel:SetActive(tbControls.btnLiftingRod .. "/Effect", false)
+    local nAreaRatio = (nEndSec - nStartSec) / nFinishTime
+    local nPerfectLength = nBarLength * nAreaRatio
+    tbUi.pPanel:Sprite_SetSize(tbControls.Img_PerfectTime, nPerfectLength, tbPerfectCfg.nHeight)
+    tbUi.pPanel:Object_SetLocalPosition(tbControls.Img_PerfectTime, Ui.Vector3(nBarLength * (nStartSec / nFinishTime) + tbPerfectCfg.nLeftX + nPerfectLength / 2, tbPerfectCfg.nY, tbPerfectCfg.nZ))
+    tbUi.pPanel:Button_BindEvent(tbControls.btnLiftingRod, RemoteServer.FinishFishingBar)
+    if self.nBtnEffectStartTimer then
+      Timer:Close(self.nBtnEffectStartTimer)
+    end
+    self.nBtnEffectStartTimer = Timer:Register(Env.GAME_FPS * nStartSec, function()
+      tbUi.pPanel:SetActive(tbControls.btnLiftingRod .. "/Effect", true)
+      Timer:Close(self.nBtnEffectStartTimer)
+      self.nBtnEffectStartTimer = nil
+      return false
+    end)
+    if self.nBtnEffectEndTimer then
+      Timer:Close(self.nBtnEffectEndTimer)
+    end
+    self.nBtnEffectEndTimer = Timer:Register(Env.GAME_FPS * nEndSec, function()
+      tbUi.pPanel:SetActive(tbControls.btnLiftingRod .. "/Effect", false)
+      Timer:Close(self.nBtnEffectEndTimer)
+      self.nBtnEffectEndTimer = nil
+      return false
+    end)
+  end
+end
+
+function Ui.ProgressBarFishing:GetInstance()
+  return self._instance
+end
+
+function Ui.ProgressBarFishing:GetCallBackFunction()
+  return self._funCallBack
+end
+
+function Ui.ProgressBarFishing:Close()
+  self._funCallBack = nil
+  self._argsCallBack = nil
+  if self.nBtnEffectStartTimer then
+    Timer:Close(self.nBtnEffectStartTimer)
+    self.nBtnEffectStartTimer = nil
+  end
+  if self.nBtnEffectEndTimer then
+    Timer:Close(self.nBtnEffectEndTimer)
+    self.nBtnEffectEndTimer = nil
+  end
+  Ui:CloseWindow(WND_NAME)
+  AFK:WaitTime(1)
+end
+
+function Ui.ProgressBarFishing:OnProgressFinished()
+  if self._funCallBack ~= nil then
+    if nil ~= self._argsCallBack then
+      self._funCallBack(table.unpack(self._argsCallBack))
+    else
+      self._funCallBack()
+    end
+    self._funCallBack = nil
+    self._argsCallBack = nil
+  end
+end
+
+function tbWnd:OnOpen()
+  tbWnd.cscript = self.pPanel:GetComponent("UIProgressBar")
+end
+
+function tbWnd:Close()
+  Ui:CloseWindow(WND_NAME)
+end

@@ -1,0 +1,208 @@
+local tbWnd = Ui:CreateWindow("UITongSetting")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_TONG_KINLIST,
+      self.OnSyncKinList
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TONG_QUIT,
+      self.Close
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TONG_TODO,
+      self.OnUpdateApprovals
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  TitleTemplate = "node/imgBG/Content/TitlePanel/ScrollView/List/Template",
+  MemberTemplate = "node/imgBG/Content/MemberPanel/imgList/List/Template",
+  btnTongTitle = "node/imgBG/Content/btnList/btnTongTitle",
+  btnTongSetting = "node/imgBG/Content/btnList/btnTongSetting",
+  TitlePanel = "node/imgBG/Content/TitlePanel",
+  MemberPanel = "node/imgBG/Content/MemberPanel",
+  btnSaveChange = "node/imgBG/Content/TitlePanel/btnSaveChange",
+  btnSetting = "node/imgBG/Content/MemberPanel/btnSetting"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnSaveChange = function(self)
+    local tbTitle = {}
+    local nCount = self.tbTitleManagerScrollView:GetCount()
+    for i = 1, nCount do
+      local tbElement = self.tbTitleManagerScrollView:GetElement(i)
+      local nKinId = tbElement.nKinId
+      local pPanel = tbElement.pPanel
+      local szTitle = pPanel:Input_GetText("InputField") or ""
+      tbTitle[nKinId] = szTitle
+    end
+    return Tong:ModifyTitle(tbTitle)
+  end,
+  btnSetting = function(self)
+    local tbApprovals = Tong:GetApprovals()
+    if #tbApprovals <= 0 then
+      return
+    end
+    local tbInfo = tbApprovals[1]
+    local nKinId = tbInfo.nKinId
+    local nId = tbInfo.nId
+    local nType = tbInfo.nType
+    if nType == Tong.Def.Approval_Exile then
+      Ui:OpenWindow("UIMessageBox", i18n.Get(Tong.Cfg.Msg.ApprovalExile, Tong:GetKinName(nKinId)), {
+        {
+          self.Reject,
+          self,
+          nId
+        },
+        {
+          self.Approve,
+          self,
+          nId
+        }
+      }, {
+        i18n.EasyGet("\230\139\146\231\187\157"),
+        i18n.EasyGet("\229\144\140\230\132\143")
+      })
+    elseif nType == Tong.Def.Approval_Quit then
+      Ui:OpenWindow("UIMessageBox", i18n.Get(Tong.Cfg.Msg.ApprovalQuit, Tong:GetKinName(nKinId)), {
+        {
+          self.Reject,
+          self,
+          nId
+        },
+        {
+          self.Approve,
+          self,
+          nId
+        }
+      }, {
+        i18n.EasyGet("\230\139\146\231\187\157"),
+        i18n.EasyGet("\229\144\140\230\132\143")
+      })
+    end
+  end
+}
+
+function tbWnd:Approve(nId)
+  Tong:Approve(nId)
+  self:OnUpdateApprovals()
+end
+
+function tbWnd:Reject(nId)
+  Tong:Reject(nId)
+  self:OnUpdateApprovals()
+end
+
+function tbWnd:OnCreate()
+  local tbPageButton = {
+    [1] = self.btnTongTitle,
+    [2] = self.btnTongSetting
+  }
+  self.tbPagePanel = {
+    [1] = {
+      szKey = self.TitlePanel,
+      tbCallBack = {
+        self.OnUpdateTitlePanel,
+        self
+      }
+    },
+    [2] = {
+      szKey = self.MemberPanel,
+      tbCallBack = {
+        self.OnUpdateMemberPanel,
+        self
+      }
+    }
+  }
+  self.tbPanelList = Ui:NewButtonGroup(self, tbPageButton, true, function(self, nIndex)
+    for i = 1, #self.tbPagePanel do
+      if i == nIndex then
+        self.pPanel:SetActive(self.tbPagePanel[i].szKey, true)
+      else
+        self.pPanel:SetActive(self.tbPagePanel[i].szKey, false)
+      end
+    end
+    self.nPage = nIndex
+    Lib:CallBack(self.tbPagePanel[nIndex].tbCallBack)
+  end)
+  self.tbTitleManagerScrollView = Ui:NewScrollView(self, self.TitleTemplate)
+  self.tbKinManagerScrollView = Ui:NewScrollView(self, self.MemberTemplate)
+  self.nPage = 2
+end
+
+function tbWnd:OnOpen()
+  self.tbPanelList:Select(self.nPage)
+  self:OnUpdateTitlePanel()
+  self:OnUpdateMemberPanel()
+  self:OnUpdateApprovals()
+  Tong:SyncKinInfoList()
+  Tong:SyncApprovals()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnSetting, {
+    RedPointMgr.EVENT.TongManager
+  })
+end
+
+function tbWnd:OnClose()
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.btnSetting)
+end
+
+function tbWnd:OnUpdateTitlePanel()
+  local bAuthority = Tong:HasTong() and Tong:CheckMyAuthority(Tong.Def.Authority_EditTitle)
+  self.pPanel:SetActive(self.btnSaveChange, bAuthority)
+  self.tbTitleManagerScrollView:Clear()
+  local tbKinList = Tong:GetKinInfoList()
+  for i = 1, #tbKinList do
+    self.tbTitleManagerScrollView:SetElement(i, function(tbElement)
+      local nKinId = tbKinList[i].nKinId
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtKinName", tbKinList[i].szName)
+      tbElement.nKinId = nKinId
+      local szTitle = tbKinList[i].szTitle
+      szTitle = szTitle or i18n.Get(Tong.Cfg.Title.Title_Normal)
+      pPanel:Input_SetText("InputField", szTitle)
+      pPanel:Input_SetEnable("InputField", bAuthority)
+    end)
+  end
+end
+
+function tbWnd:OnUpdateMemberPanel()
+  self.tbKinManagerScrollView:Clear()
+  local tbKinList = Tong:GetKinInfoList()
+  for i = 1, #tbKinList do
+    self.tbKinManagerScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtKinName", tbKinList[i].szName, "Text")
+      pPanel:Label_SetText("txtKinNum", tbKinList[i].nCount)
+      pPanel:Label_SetText("txtFightPowerNum", tbKinList[i].nFightPower)
+      pPanel:Label_SetText("txtActivityNum", tbKinList[i].nWeekActive)
+      pPanel:Label_SetText("txtKinMasterName", tbKinList[i].szMasterName, "Text")
+      Ui:Button_BindEvent(pPanel, "txtKinName", self.OpenKinMenu, self, tbKinList[i].nKinId, i)
+    end)
+  end
+end
+
+function tbWnd:OnSyncKinList()
+  local nIndex = self.nPage
+  Lib:CallBack(self.tbPagePanel[nIndex].tbCallBack)
+end
+
+function tbWnd:OnUpdateApprovals()
+  local tbApprovals = Tong:GetApprovals()
+  local nCount = #tbApprovals
+  self.pPanel:Button_SetEnable(self.btnSetting, nCount > 0)
+end
+
+function tbWnd:OpenKinMenu(nKinId, nIndex)
+  if Tong:CheckApplyQuitAuthority(nKinId) or Tong:CheckApplyExileAuthority(nKinId) or Tong:CheckAppointAuthority(nKinId) then
+    Ui:OpenWindowWithCallback("UIRightPopUpMenu2", function(caller, tbWnd)
+      local pos = self.tbKinManagerScrollView:GetElement(nIndex).pPanel:GetTransform("txtKinName").position
+      tbWnd:SetPos(pos.x, pos.y)
+    end, self, "tongSetting", {dwKinId = nKinId}, self)
+  end
+end

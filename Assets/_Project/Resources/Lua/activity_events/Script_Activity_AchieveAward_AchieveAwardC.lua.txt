@@ -1,0 +1,273 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.AchieveAward)
+local Protocol = {
+  [tbActivity.Protocol.OnGetExtraAwardResp] = "OnGetExtraAwardResp",
+  [tbActivity.Protocol.OnSyncAchieveDataResp] = "OnSyncAchieveDataResp"
+}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    LogErr("AchieveAwardC: ServerRequest failed, invalid Protocol = ", nProtocol)
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:OnOpen()
+  self:OnPlayerLogin()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self.OnPlayerLogin, self)
+end
+
+function tbActivity:OnClientClose()
+  self.tbAchieveData = nil
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self)
+  local szRedPointEventId = self:GetRedPointEvent()
+  if szRedPointEventId then
+    RedPointMgr:FadeRedPoint(szRedPointEventId)
+  end
+end
+
+function tbActivity:OnPlayerLogin()
+  if not self.nEndTime or GetTime() < self.nEndTime then
+    ActivityMgr:CallServerScript(self.nId, self.Protocol.OnSyncAchieveDataReq)
+  end
+end
+
+function tbActivity:GetExtraAward(nAchieveId)
+  if self:CheckIsFinishById(nAchieveId, me, self.tbAchieveData) then
+    if not self:CheckIsAwardById(nAchieveId, me, self.tbAchieveData) then
+      if self.tbConfig.tbAchieveAward[nAchieveId].nPrice > 0 then
+        local szCurrencyType = self.tbConfig.tbAchieveAward[nAchieveId].szCurrencyType
+        local nPrice = self.tbConfig.tbAchieveAward[nAchieveId].nPrice
+        local szDesc = i18n.EasyGet("\230\130\168\231\161\174\229\174\154\232\138\177\232\180\185{0}{1}\230\157\165\232\142\183\229\190\151\232\175\165\229\165\150\229\138\177\229\144\151\239\188\159", nPrice, Currency:GetName(szCurrencyType))
+        
+        local function pFunc(szCurrencyType2, nPrice2)
+          if nPrice2 > me.GetMoney(szCurrencyType2) then
+            local function fnCurrencyOK()
+              GainCurrency:DirectJump(szCurrencyType2)
+            end
+            
+            local function fnCancel()
+            end
+            
+            Ui:OpenWindow("UIMessageBox", i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\232\142\183\229\143\150\239\188\159", Currency:GetName(szCurrencyType2)), {
+              {fnCurrencyOK},
+              {fnCancel}
+            }, {
+              i18n.szOK,
+              i18n.szCancel
+            })
+            return true
+          else
+            ActivityMgr:CallServerScript(self.nId, self.Protocol.OnGetExtraAwardReq, nAchieveId)
+          end
+        end
+        
+        Ui:OpenWindow("UIMessageBox", szDesc, {
+          {
+            pFunc,
+            szCurrencyType,
+            nPrice
+          },
+          {}
+        })
+      else
+        ActivityMgr:CallServerScript(self.nId, self.Protocol.OnGetExtraAwardReq, nAchieveId)
+      end
+    else
+      me.CenterMsg(i18n.EasyGet("\230\130\168\229\183\178\233\162\134\229\143\150\232\191\135\232\175\165\229\165\150\229\138\177"))
+      self:OnGetExtraAwardResp()
+    end
+  else
+    me.CenterMsg(i18n.EasyGet("\230\130\168\232\191\152\230\156\170\230\187\161\232\182\179\231\155\184\229\186\148\230\157\161\228\187\182"))
+    self:OnGetExtraAwardResp()
+  end
+end
+
+function tbActivity:OnGetExtraAwardResp(tbAchieveData)
+  self:OnSyncAchieveDataResp(tbAchieveData)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UPDATE_EXTRA_AWARD)
+end
+
+function tbActivity:GetExtraAwardList()
+  local tbAllExtraAward = {}
+  for nAchieveId, tbInfo in pairs(self.tbConfig.tbAchieveAward) do
+    local tbAward = Award:GetAward(tbInfo.nAwardId, tbInfo.nAwardKey)
+    local bSuccess = self:CheckIsFinishById(nAchieveId, me, self.tbAchieveData)
+    local bHasAward = self:CheckIsAwardById(nAchieveId, me, self.tbAchieveData)
+    if tbInfo.szAchieveType == self.AchievementType.Use then
+      local nUsedCount = self:GetUsedCountById(nAchieveId, me, self.tbAchieveData)
+      table.insert(tbAllExtraAward, {
+        nAchieveId = nAchieveId,
+        szInfo = tbInfo.szDesc,
+        tbAward = tbAward,
+        bSuccess = bSuccess,
+        bHasAward = bHasAward,
+        nNeedCount = tbInfo.tbParams[2],
+        nFinishCount = nUsedCount,
+        szCurrencyType = tbInfo.szCurrencyType,
+        nPrice = tbInfo.nPrice
+      })
+    elseif tbInfo.szAchieveType == self.AchievementType.Collect then
+      local tbCollectCount = self:GetNotCollectIdList(nAchieveId, me, self.tbAchieveData)
+      table.insert(tbAllExtraAward, {
+        nAchieveId = nAchieveId,
+        szInfo = tbInfo.szDesc,
+        tbAward = tbAward,
+        bSuccess = bSuccess,
+        bHasAward = bHasAward,
+        nNeedCount = #tbInfo.tbParams,
+        nFinishCount = #tbInfo.tbParams - #tbCollectCount,
+        szCurrencyType = tbInfo.szCurrencyType,
+        nPrice = tbInfo.nPrice
+      })
+    elseif tbInfo.szAchieveType == self.AchievementType.CollectEx then
+      local nFinishCount = self:GetCollectExCnt(nAchieveId, me, self.tbAchieveData)
+      local nNeedCount = self:GetCollectExNeedCnt(nAchieveId)
+      table.insert(tbAllExtraAward, {
+        nAchieveId = nAchieveId,
+        szInfo = tbInfo.szDesc,
+        tbAward = tbAward,
+        bSuccess = bSuccess,
+        bHasAward = bHasAward,
+        nNeedCount = nNeedCount,
+        nFinishCount = nFinishCount,
+        szCurrencyType = tbInfo.szCurrencyType,
+        nPrice = tbInfo.nPrice
+      })
+    end
+  end
+  table.sort(tbAllExtraAward, function(tbFirst, tbSecond)
+    if tbFirst.bHasAward ~= tbSecond.bHasAward then
+      return not tbFirst.bHasAward
+    end
+    if tbFirst.bSuccess ~= tbSecond.bSuccess then
+      return tbFirst.bSuccess
+    end
+    return tbFirst.nAchieveId < tbSecond.nAchieveId
+  end)
+  return tbAllExtraAward
+end
+
+function tbActivity:CanGetExtraAward()
+  for nAchieveId in pairs(self.tbConfig.tbAchieveAward) do
+    if self:CheckIsFinishById(nAchieveId, me, self.tbAchieveData) and not self:CheckIsAwardById(nAchieveId, me, self.tbAchieveData) then
+      return true
+    end
+  end
+  return false
+end
+
+function tbActivity:HasGottenAllExtraAward()
+  for nAchieveId in pairs(self.tbConfig.tbAchieveAward) do
+    if not self:CheckIsAwardById(nAchieveId, me, self.tbAchieveData) then
+      return false
+    end
+  end
+  return true
+end
+
+function tbActivity:GetRedPointEventId()
+  return {
+    self:GetRedPointEvent()
+  }
+end
+
+function tbActivity:GetRedPointEvent()
+  if not self.tbConfig.szRedPointEvent or Lib:IsEmptyStr(self.tbConfig.szRedPointEvent) or not RedPointMgr.EVENT[self.tbConfig.szRedPointEvent] then
+    return
+  end
+  return RedPointMgr.EVENT[self.tbConfig.szRedPointEvent]
+end
+
+function tbActivity:CheckRedPoint()
+  local nRedPointEventId = self:GetRedPointEvent()
+  if not nRedPointEventId then
+    return
+  end
+  for nAchieveId, tbAchieveInfo in pairs(self.tbConfig.tbAchieveAward) do
+    if self:CheckIsFinishById(nAchieveId, me, self.tbAchieveData) and not self:CheckIsAwardById(nAchieveId, me, self.tbAchieveData) then
+      if tbAchieveInfo.nPrice <= 0 then
+        RedPointMgr:LightRedPoint(nRedPointEventId)
+      end
+      return
+    else
+      RedPointMgr:FadeRedPoint(nRedPointEventId)
+    end
+  end
+end
+
+function tbActivity:OnSyncAchieveDataResp(tbAchieveData)
+  self.tbAchieveData = tbAchieveData or self.tbAchieveData
+  self:CheckRedPoint()
+end
+
+function tbActivity:GetAchieveData()
+  return self.tbAchieveData or {}
+end
+
+function tbActivity:UpdateLevelList(tbWnd, nActId)
+  self.pAchieveActInstance = ActivityMgr:GetInstanceById(nActId)
+  if not self.pAchieveActInstance or not self.pAchieveActInstance:IsOpen() then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return 0
+  end
+  local tbAwardList = self.pAchieveActInstance:GetExtraAwardList()
+  for nIndex, tbAwardInfo in ipairs(tbAwardList) do
+    tbWnd.tbLevelList:SetElement(nIndex, function(tbElement)
+      self:__SetElement(tbElement, tbAwardInfo)
+    end)
+  end
+end
+
+function tbActivity:__SetElement(tbElement, tbAwardInfo)
+  if not tbElement.tbItemGridView then
+    tbElement.tbItemGridView = Ui:NewItemGridView(tbElement, "rewardList/reward")
+  else
+    tbElement.tbItemGridView:Clear()
+  end
+  for nIndex, tbAward in ipairs(tbAwardInfo.tbAward) do
+    tbElement.tbItemGridView:SetItem(nIndex, tbAward, true)
+  end
+  tbElement.pPanel:Label_SetText("txtNumber", i18n.Parse(tbAwardInfo.szInfo))
+  if tbAwardInfo.bSuccess and not tbAwardInfo.bHasAward then
+    tbElement.pPanel:SetActive("imgComplete", false)
+    tbElement.pPanel:SetActive("prg", false)
+    tbElement.pPanel:SetActive("btnGet", true)
+    tbElement.pPanel:Button_BindEvent("btnGet", function(nAchieveId)
+      self.pAchieveActInstance:GetExtraAward(nAchieveId)
+    end, tbAwardInfo.nAchieveId)
+  elseif tbAwardInfo.bSuccess and tbAwardInfo.bHasAward then
+    tbElement.pPanel:SetActive("imgComplete", true)
+    tbElement.pPanel:SetActive("prg", false)
+    tbElement.pPanel:SetActive("btnGet", false)
+  else
+    tbElement.pPanel:Label_SetText("prg/txtPrg", string.format("%s/%s", tbAwardInfo.nFinishCount, tbAwardInfo.nNeedCount))
+    tbElement.pPanel:Sprite_SetFillAmount("prg/imgBar", 0, tbAwardInfo.nFinishCount / tbAwardInfo.nNeedCount, 1, true)
+    tbElement.pPanel:SetActive("prg", true)
+    tbElement.pPanel:SetActive("imgComplete", false)
+    tbElement.pPanel:SetActive("btnGet", false)
+  end
+end
+
+function tbActivity:UpdateOtherInfo(tbWnd)
+  tbWnd.pPanel:SetActive(tbWnd.Cont_TxtAll, false)
+  tbWnd.pPanel:SetActive(tbWnd.btnGo, false)
+  tbWnd.pPanel:SetActive(tbWnd.btnAdd, false)
+  tbWnd.pPanel:SetActive(tbWnd.Template, false)
+  tbWnd.pPanel:SetActive(tbWnd.btnHelp, false)
+  tbWnd.pPanel:Label_SetText(tbWnd.txtTitleNumber, i18n.EasyGet("\232\190\190\230\136\144\230\157\161\228\187\182"))
+end
+
+function tbActivity:OnUiEvent(tbWnd, szEvent, ...)
+  if tbWnd.ClassName ~= "UIReward_Newyear" then
+    return
+  end
+  local tbParam = {
+    ...
+  }
+  if "OnOpen" == szEvent or "UpdateReward" == szEvent then
+    local nActId = tbParam[1]
+    self:UpdateLevelList(tbWnd, nActId)
+    self:UpdateOtherInfo(tbWnd)
+  end
+end

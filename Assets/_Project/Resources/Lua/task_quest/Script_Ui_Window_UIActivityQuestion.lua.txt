@@ -1,0 +1,136 @@
+local tbWnd = Ui:CreateWindow("UIActivityQuestion")
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  txtQuestionTitle = "node/imgBG/Content/Question/txtQuestionTitle",
+  txtQuestion = "node/imgBG/Content/Question/txtQuestion",
+  AccuracyValue = "node/imgBG/Content/Progress/AccuracyTitle/AccuracyValue",
+  ProgressValue = "node/imgBG/Content/Progress/ProgressTitle/ProgressValue",
+  imgBoxClose = "node/imgBG/Content/Progress/award/imgBoxClose",
+  imgLevel = "node/imgBG/Content/Progress/award/imgLevel",
+  imgBoxOpen = "node/imgBG/Content/Progress/award/imgBoxOpen",
+  AwardItem = "node/imgBG/Content/Award/AwardItemGroup/Item",
+  btnHelp = "node/imgBG/txtTitle/btnHelp"
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL,
+      self.UpdateAward
+    }
+  }
+end
+
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("JianXiaCiDianHelp")
+  end
+}
+tbWnd.tbAnswerBtnGroupKey = {
+  [1] = "node/imgBG/Content/AnswerBtn/BtnAnswer1",
+  [2] = "node/imgBG/Content/AnswerBtn/BtnAnswer2",
+  [3] = "node/imgBG/Content/AnswerBtn/BtnAnswer3",
+  [4] = "node/imgBG/Content/AnswerBtn/BtnAnswer4"
+}
+
+function tbWnd:OnCreate()
+  self.tbAnswerBtnGroup = Ui:NewButtonGroup(self, self.tbAnswerBtnGroupKey, true, function(self, nIndex)
+    self:AnswerQuestion(nIndex)
+  end)
+  self.tbAwardItemGroup = Ui:NewItemGridScrollView(self, self.AwardItem, 3, 1)
+  self.tbAwardItemGroup:Reset()
+end
+
+function tbWnd:OnOpen(tbInfo, tbAward, tbQuestion, tbCallBack)
+  self.nAnsweredQustionNum = tbInfo.nAnsweredQustionNum
+  self.nTotalNum = tbInfo.nTotalNum
+  self.nCorrectNum = tbInfo.nCorrectNum
+  self.nTimeOutSec = tbInfo.nTimeOutSec
+  self.tbQuestion = tbQuestion
+  self.tbCallBack = tbCallBack
+  self.tbAward = tbAward
+  self:UpdateQuestion()
+  self.pPanel:SetActive(self.imgBoxOpen, false)
+  self:UpdateAward()
+end
+
+function tbWnd:UpdateAward()
+  self.tbAwardItemGroup:Reset()
+  self.tbAwardItemGroup:UpdateGenericItem(self.tbAward)
+end
+
+function tbWnd:UpdateQuestion()
+  self:ResetAllChoices()
+  self.pPanel:Label_SetText(self.txtQuestionTitle, self.nAnsweredQustionNum + 1)
+  self.pPanel:Label_SetText(self.txtQuestion, i18n.Parse(self.tbQuestion.Question))
+  self.pPanel:Label_SetText(self.ProgressValue, string.format("%d/%d", self.nAnsweredQustionNum + 1, self.nTotalNum))
+  self.pPanel:Sprite_SetFill(self.imgLevel, self.nAnsweredQustionNum / self.nTotalNum)
+  self.pPanel:Label_SetText(self.AccuracyValue, string.format("%d/%d", self.nCorrectNum, self.nAnsweredQustionNum))
+  for i = 1, #self.tbAnswerBtnGroupKey do
+    self.pPanel:Label_SetText(self.tbAnswerBtnGroupKey[i] .. "/txtAnswer", i18n.Parse(self.tbQuestion["Choice_" .. i]))
+  end
+  self.nCloseTimer = Timer:Register(Env.GAME_FPS * self.nTimeOutSec, self.AnswerQuestion, self, 1)
+end
+
+function tbWnd:ShowAnswer(nCorrectIndex, tbQuestion)
+  self.pPanel:SetActive(string.format("%s/imgCorrect", self.tbAnswerBtnGroupKey[nCorrectIndex]), true)
+  if self.nChooseIndex and self.nChooseIndex ~= nCorrectIndex then
+    self.pPanel:SetActive(string.format("%s/imgWrong", self.tbAnswerBtnGroupKey[self.nChooseIndex]), true)
+    me.CenterMsg(i18n.EasyGet("\229\155\158\231\173\148\233\148\153\232\175\175\239\188\140\232\175\183\229\164\167\228\190\160\229\134\141\230\142\165\229\134\141\229\142\137\239\188\129"))
+  else
+    self.nCorrectNum = self.nCorrectNum + 1
+    me.CenterMsg(i18n.EasyGet("\229\155\158\231\173\148\230\173\163\231\161\174\239\188\140\229\164\167\228\190\160\231\156\159\230\152\175\230\150\135\230\173\166\229\143\140\229\133\168\239\188\129"))
+  end
+  self.nAnsweredQustionNum = self.nAnsweredQustionNum + 1
+  self.pPanel:Label_SetText(self.AccuracyValue, string.format("%d/%d", self.nCorrectNum, self.nAnsweredQustionNum))
+  self.pPanel:Sprite_SetFill(self.imgLevel, self.nAnsweredQustionNum / self.nTotalNum)
+  if self.nAnsweredQustionNum < self.nTotalNum then
+    self.tbQuestion = tbQuestion
+    self.nCloseTimer = Timer:Register(Env.GAME_FPS * 2, self.UpdateQuestion, self)
+  else
+    self.pPanel:SetActive(self.imgBoxOpen, true)
+    self.pPanel:SetActive(self.imgBoxClose, false)
+    self.nCloseTimer = Timer:Register(Env.GAME_FPS * 2, self.Finish, self)
+  end
+end
+
+function tbWnd:ResetAllChoices()
+  self.nChooseIndex = nil
+  for i = 1, #self.tbAnswerBtnGroupKey do
+    self.pPanel:SetActive(string.format("%s/imgCorrect", self.tbAnswerBtnGroupKey[i]), false)
+    self.pPanel:SetActive(string.format("%s/imgWrong", self.tbAnswerBtnGroupKey[i]), false)
+    self.pPanel:SetActive(string.format("%s/imgChoose", self.tbAnswerBtnGroupKey[i]), false)
+    self.pPanel:Button_SetEnable(self.tbAnswerBtnGroupKey[i], true)
+  end
+end
+
+function tbWnd:AnswerQuestion(nChoiceIndex)
+  self.nChooseIndex = nChoiceIndex
+  self.pPanel:SetActive(self.tbAnswerBtnGroupKey[self.nChooseIndex] .. "/imgChoose", true)
+  for i = 1, #self.tbAnswerBtnGroupKey do
+    self.pPanel:Button_SetEnable(self.tbAnswerBtnGroupKey[i], false)
+  end
+  local tbParams = Lib:CopyTB1(self.tbCallBack.tbParams)
+  table.insert(tbParams, self.nChooseIndex)
+  self.tbCallBack.pCallBack(table.unpack(tbParams))
+  self:CloseTimer()
+end
+
+function tbWnd:Finish()
+  me.CenterMsg(i18n.EasyGet("\231\173\148\233\162\152\229\183\178\229\174\140\230\136\144\227\128\130"))
+  self:Close()
+end
+
+function tbWnd:OnClose()
+  self:CloseTimer()
+end
+
+function tbWnd:CloseTimer()
+  if self.nCloseTimer then
+    Timer:Close(self.nCloseTimer)
+    self.nCloseTimer = nil
+  end
+end

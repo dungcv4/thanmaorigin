@@ -1,0 +1,473 @@
+Require("CommonScript/CustomHotkey/CustomHotkey.lua")
+local TouchHotKeyControlType = {
+  Ignore = 0,
+  On = 1,
+  Off = 2
+}
+
+local function _Value2ControlState(value)
+  if nil == value then
+    return TouchHotKeyControlType.Ignore
+  else
+    return value and TouchHotKeyControlType.On or TouchHotKeyControlType.Off
+  end
+end
+
+CustomHotkey.EditBattleHotkey = {}
+CustomHotkey.EditCommonHotkey = {}
+CustomHotkey.HotkeyBinding = {}
+CustomHotkey.KeyUIDisplayName = {}
+CustomHotkey.targetPlayform = Sdk.eOSType_Windows
+CustomHotkey.tbFunctionLimit = {}
+
+local function _InitHotkey()
+  for i = 1, #CustomHotkey.DefaultBattleHotkey do
+    local keyInfo = CustomHotkey.DefaultBattleHotkey[i]
+    CustomHotkey.HotkeyBinding[keyInfo.KeyName] = Lib:CopyTB(keyInfo)
+    CustomHotkey.EditBattleHotkey[i] = {
+      KeyName = keyInfo.KeyName,
+      DisplayName = keyInfo.DisplayName,
+      KeyCode = keyInfo.KeyCode
+    }
+  end
+  for i = 1, #CustomHotkey.DefaultCommonHotkey do
+    local keyInfo = CustomHotkey.DefaultCommonHotkey[i]
+    CustomHotkey.HotkeyBinding[keyInfo.KeyName] = Lib:CopyTB(keyInfo)
+    CustomHotkey.EditCommonHotkey[i] = {
+      KeyName = keyInfo.KeyName,
+      DisplayName = keyInfo.DisplayName,
+      KeyCode = keyInfo.KeyCode
+    }
+  end
+  for _, value in pairs(CustomHotkey.SupportHotkey) do
+    CustomHotkey.KeyUIDisplayName[value.KeyCode] = {}
+    CustomHotkey.KeyUIDisplayName[value.KeyCode].keyCodeGameDisplayName = value.GameDisplayName
+    CustomHotkey.KeyUIDisplayName[value.KeyCode].keyCodeSettingDisplayName = value.SettingDisplayName
+  end
+  local tbFuncLimit = Lib:EasyLoadTabFile("Setting/UI/UIHudRightBottomBtn.tab")
+  for _, value in ipairs(tbFuncLimit) do
+    CustomHotkey.tbFunctionLimit[value.szBtnName] = value.nLevel
+  end
+end
+
+_InitHotkey()
+
+local function _CheckRepeatBattleHotkey(keyName, keyCode)
+  if not (keyName and "" ~= keyName and keyCode) or "" == keyCode then
+    return
+  end
+  for _, v in pairs(CustomHotkey.EditBattleHotkey) do
+    if v.KeyName ~= keyName and v.KeyCode == keyCode then
+      v.KeyCode = ""
+    end
+  end
+end
+
+local function _CheckRepeatCommonHotkey(keyName, keyCode)
+  if not (keyName and "" ~= keyName and keyCode) or "" == keyCode then
+    return
+  end
+  for _, v in pairs(CustomHotkey.EditCommonHotkey) do
+    if v.KeyName ~= keyName and v.KeyCode == keyCode then
+      v.KeyCode = ""
+    end
+  end
+end
+
+local function _CheckRepeatHotkey(keyName, keyCode)
+  if not (keyName and "" ~= keyName and keyCode) or "" == keyCode then
+    return
+  end
+  _CheckRepeatBattleHotkey(keyName, keyCode)
+  _CheckRepeatCommonHotkey(keyName, keyCode)
+end
+
+function CustomHotkey:RegisterHotKeyBinding()
+  Client.InputModule.ClearHotKey()
+  for k, v in pairs(CustomHotkey.HotkeyBinding) do
+    Client.InputModule.RegisterHotKey(k, v.KeyCode, v.Axis, _Value2ControlState(v.Ctrl), _Value2ControlState(v.Shift), _Value2ControlState(v.Alt), v.KeyDown ~= nil, nil ~= v.KeyUp, nil ~= v.KeyOnType, nil ~= v.GetAxis)
+  end
+end
+
+if MODULE_GAMECLIENT then
+  CustomHotkey:RegisterHotKeyBinding()
+end
+
+function CustomHotkey:OnUISettingClose()
+  if not self:CheckPlatform() then
+    return
+  end
+  self:RegisterHotKeyBinding()
+  self:UploadHotkeyData()
+  if Ui:WindowVisible("UIJoyStick") then
+    Ui:GetWindow("UIJoyStick"):RefreshHotkeyDisplay()
+  end
+  if Ui:WindowVisible("UIHudRightSkill") then
+    Ui:GetWindow("UIHudRightSkill"):RefreshHotkeyDisplay()
+  end
+  if Ui:WindowVisible("UIHud") then
+    Ui:GetWindow("UIHud"):RefreshHotkeyDisplay()
+  end
+end
+
+local function _RegistSupportHotkey()
+  Client.InputModule.ClearHotKey()
+  for k, v in pairs(CustomHotkey.SupportHotkey) do
+    Client.InputModule.RegisterHotKey(k, v.KeyCode, v.Axis, _Value2ControlState(v.Ctrl), _Value2ControlState(v.Shift), _Value2ControlState(v.Alt), v.KeyDown ~= nil, nil ~= v.KeyUp, nil ~= v.KeyOnType, nil ~= v.GetAxis)
+  end
+end
+
+function CustomHotkey:InitEditHotkey()
+  if not self:CheckPlatform() then
+    return
+  end
+  _RegistSupportHotkey()
+  for _, keyInfo in pairs(CustomHotkey.EditBattleHotkey) do
+    keyInfo.KeyCode = CustomHotkey.HotkeyBinding[keyInfo.KeyName].KeyCode
+  end
+  for _, keyInfo in pairs(CustomHotkey.EditCommonHotkey) do
+    keyInfo.KeyCode = CustomHotkey.HotkeyBinding[keyInfo.KeyName].KeyCode
+  end
+end
+
+function CustomHotkey:ApplyEditBattleHotkey()
+  for _, keyInfo in pairs(CustomHotkey.EditBattleHotkey) do
+    CustomHotkey.HotkeyBinding[keyInfo.KeyName].KeyCode = keyInfo.KeyCode
+  end
+end
+
+function CustomHotkey:ApplyEditCommonHotkey()
+  for _, keyInfo in pairs(CustomHotkey.EditCommonHotkey) do
+    CustomHotkey.HotkeyBinding[keyInfo.KeyName].KeyCode = keyInfo.KeyCode
+  end
+end
+
+function CustomHotkey:RestoreEditBattleHotKey()
+  for i = 1, #CustomHotkey.DefaultBattleHotkey do
+    local editKeyInfo = CustomHotkey.EditBattleHotkey[i]
+    editKeyInfo.KeyCode = CustomHotkey.DefaultBattleHotkey[i].KeyCode
+    _CheckRepeatCommonHotkey(editKeyInfo.KeyName, editKeyInfo.KeyCode)
+  end
+end
+
+function CustomHotkey:RestoreEditCommonHotKey()
+  for i = 1, #CustomHotkey.DefaultCommonHotkey do
+    local editKeyInfo = CustomHotkey.EditCommonHotkey[i]
+    editKeyInfo.KeyCode = CustomHotkey.DefaultCommonHotkey[i].KeyCode
+    _CheckRepeatBattleHotkey(editKeyInfo.KeyName, editKeyInfo.KeyCode)
+  end
+end
+
+function CustomHotkey:EditHotkey(keyName)
+  if not self:CheckPlatform() then
+    return
+  end
+  local uiSetting = Ui:GetWindow("UISetting")
+  local keyInfo = CustomHotkey.SupportHotkey[keyName]
+  if uiSetting and uiSetting:GetUISetting_CustomHotkeyPanel():IsEdit() and keyInfo then
+    local customHotkeyPanel = uiSetting:GetUISetting_CustomHotkeyPanel()
+    local key = customHotkeyPanel:CurEditKeyName()
+    if not key or "" == key then
+      return
+    end
+    for _, value in pairs(CustomHotkey.EditBattleHotkey) do
+      if value.KeyName == key then
+        value.KeyCode = keyInfo.KeyCode
+        break
+      end
+    end
+    for _, value in pairs(CustomHotkey.EditCommonHotkey) do
+      if value.KeyName == key then
+        value.KeyCode = keyInfo.KeyCode
+        break
+      end
+    end
+    _CheckRepeatHotkey(key, keyInfo.KeyCode)
+    customHotkeyPanel:NeedSaved(self:CheckEditChanged())
+    customHotkeyPanel:RefreshBattleHotkeyDisplay()
+    customHotkeyPanel:RefreshCommonHotkeyDisplay()
+  end
+end
+
+function CustomHotkey:CheckEditChanged()
+  for _, keyInfo in ipairs(CustomHotkey.EditBattleHotkey) do
+    if keyInfo.KeyCode ~= CustomHotkey.HotkeyBinding[keyInfo.KeyName].KeyCode then
+      return true
+    end
+  end
+  for _, keyInfo in ipairs(CustomHotkey.EditCommonHotkey) do
+    if keyInfo.KeyCode ~= CustomHotkey.HotkeyBinding[keyInfo.KeyName].KeyCode then
+      return true
+    end
+  end
+  return false
+end
+
+function CustomHotkey:OnRequestData(tbData)
+  if not self:CheckPlatform() or not tbData then
+    return
+  end
+  if Ui:WindowVisible("UISetting") then
+    local uiCustomHotkeyPanel = Ui:GetWindow("UISetting"):GetUISetting_CustomHotkeyPanel()
+    if uiCustomHotkeyPanel and uiCustomHotkeyPanel:IsEdit() then
+      return
+    end
+  end
+  for keyName, keyInfo in pairs(CustomHotkey.HotkeyBinding) do
+    keyInfo.KeyCode = tbData.tbHotkeyBinding[keyName]
+  end
+  CustomHotkey:RegisterHotKeyBinding()
+end
+
+function CustomHotkey:UploadHotkeyData()
+  if not self:CheckPlatform() then
+    return
+  end
+  local tbData = {}
+  for keyName, keyInfo in pairs(CustomHotkey.HotkeyBinding) do
+    tbData[keyName] = keyInfo.KeyCode
+  end
+  RemoteServer.UploadCustomHotkeyData(tbData)
+end
+
+function CustomHotkey:GetHotkeyCode(szKeyName)
+  return self.HotkeyBinding[szKeyName].KeyCode
+end
+
+function CustomHotkey:GetKeycodeGameDisplayName(szKeyName)
+  local keyCode = self.HotkeyBinding[szKeyName].KeyCode
+  local displayInfo = self.KeyUIDisplayName[keyCode]
+  local displayName = ""
+  if displayInfo then
+    displayName = displayInfo.keyCodeGameDisplayName()
+  end
+  if not displayName or "" == displayName then
+    displayName = keyCode
+  end
+  return displayName
+end
+
+function CustomHotkey:CheckPlatform()
+  return Sdk.GetOsType() == self.targetPlayform
+end
+
+function CustomHotkey:Sit(self)
+  local uiHud = Ui:GetWindow("UIHud")
+  if not uiHud or not uiHud:CanSit() then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\228\184\141\232\131\189\228\189\191\231\148\168\230\137\147\229\157\144"))
+    return
+  end
+  local nDoing = me.GetDoing()
+  if nDoing == Npc.Doing.sit then
+    RemoteServer.RestoreAction()
+    if 1 == IsAlone() then
+      me.GetNpc().RestoreAction()
+    end
+    return
+  end
+  if 1 == me.nRideState then
+    uiHud:onClickSwitchRide(0)
+  end
+  if nDoing == Npc.Doing.stand or nDoing == Npc.Doing.run or nDoing == Npc.Doing.skill then
+    me.UseSkill(101, -1, me.GetNpc().nId)
+  else
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\228\184\141\232\131\189\228\189\191\231\148\168\230\137\147\229\157\144"))
+  end
+end
+
+function CustomHotkey:OpenBag()
+  CustomHotkey:CloseOtherWindowIfOpen({UIBag = 1})
+  if Ui:WindowVisible("UIBag") then
+    local uiBag = Ui:GetWindow("UIBag")
+    if uiBag:IsOpenBagPanel() then
+      Ui:CloseWindow("UIBag")
+    else
+      uiBag:SelectPanel(1)
+    end
+  else
+    Ui:OpenWindow("UIBag", 1)
+  end
+end
+
+function CustomHotkey:OpenPlayerAttribute()
+  CustomHotkey:CloseOtherWindowIfOpen({UIBag = 1})
+  if Ui:WindowVisible("UIBag") then
+    local uiBag = Ui:GetWindow("UIBag")
+    if uiBag:IsOpenAttributePanel() then
+      Ui:CloseWindow("UIBag")
+    else
+      uiBag:SelectPanel(2)
+    end
+  else
+    Ui:OpenWindow("UIBag", 2)
+  end
+end
+
+function CustomHotkey:OpenSkill()
+  CustomHotkey:CloseOtherWindowIfOpen({UISkill = 1})
+  local uiHubRightBottom = Ui:GetWindow("UIHudRightBottom")
+  if Ui:WindowVisible("UISkill") then
+    Ui:CloseWindow("UISkill")
+  else
+    Ui:OpenWindow("UISkill")
+    uiHubRightBottom:OnClickCloseEffect("btnSkill")
+  end
+end
+
+function CustomHotkey:OpenRanking()
+  local limitLevel = self.tbFunctionLimit.btnRanking
+  if limitLevel > me.nLevel then
+    me.CenterMsg(i18n.EasyGet("\230\142\146\232\161\140\230\166\156{0}\231\186\167\229\144\142\229\188\128\230\148\190", limitLevel))
+    return
+  end
+  CustomHotkey:CloseOtherWindowIfOpen({UIRanking = 1})
+  local uiHubRightBottom = Ui:GetWindow("UIHudRightBottom")
+  if Ui:WindowVisible("UIRanking") then
+    Ui:CloseWindow("UIRanking")
+  else
+    Ui:OpenWindow("UIRanking")
+    uiHubRightBottom:OnClickCloseEffect("btnRanking")
+  end
+end
+
+function CustomHotkey:OpenParter()
+  local limitLevel = self.tbFunctionLimit.btnPartner
+  if limitLevel > me.nLevel then
+    me.CenterMsg(i18n.EasyGet("\229\144\140\228\188\180{0}\231\186\167\229\144\142\229\188\128\230\148\190", limitLevel))
+    return
+  end
+  CustomHotkey:CloseOtherWindowIfOpen({
+    UIPartnerNew = 1,
+    UICardPickingNew = 1,
+    UISkillBookPickingNew = 1
+  })
+  local uiHubRightBottom = Ui:GetWindow("UIHudRightBottom")
+  if Ui:WindowVisible("UIPartnerNew") or Ui:WindowVisible("UICardPickingNew") or Ui:WindowVisible("UISkillBookPickingNew") then
+    Ui:CloseWindow("UIPartnerNew")
+    Ui:CloseWindow("UICardPickingNew")
+    Ui:CloseWindow("UISkillBookPickingNew")
+  else
+    Partner:OpenPartnerMainUI()
+    uiHubRightBottom:OnClickCloseEffect("btnPartner")
+  end
+end
+
+function CustomHotkey:OpenLifeSkill()
+  local limitLevel = self.tbFunctionLimit.btnLifeSkill
+  if limitLevel > me.nLevel then
+    me.CenterMsg(i18n.EasyGet("\230\137\147\233\128\160{0}\231\186\167\229\144\142\229\188\128\230\148\190", limitLevel))
+    return
+  end
+  CustomHotkey:CloseOtherWindowIfOpen({UILifeSkill = 1})
+  local uiHubRightBottom = Ui:GetWindow("UIHudRightBottom")
+  if Ui:WindowVisible("UILifeSkill") then
+    Ui:CloseWindow("UILifeSkill")
+  else
+    Ui:OpenWindow("UILifeSkill")
+    uiHubRightBottom:OnClickCloseEffect("btnLifeSkill")
+  end
+end
+
+function CustomHotkey:OpenHonor()
+  local limitLevel = self.tbFunctionLimit.btnHonorLevel
+  if limitLevel > me.nLevel then
+    me.CenterMsg(i18n.EasyGet("\229\164\180\232\161\148{0}\231\186\167\229\144\142\229\188\128\230\148\190", limitLevel))
+    return
+  end
+  CustomHotkey:CloseOtherWindowIfOpen({UIHonorLevel = 1})
+  local uiHubRightBottom = Ui:GetWindow("UIHudRightBottom")
+  if Ui:WindowVisible("UIHonorLevel") then
+    Ui:CloseWindow("UIHonorLevel")
+  else
+    Ui:OpenWindow("UIHonorLevel")
+    uiHubRightBottom:OnClickCloseEffect("btnHonorLevel")
+  end
+end
+
+function CustomHotkey:OpenKin()
+  local limitLevel = self.tbFunctionLimit.btnKin
+  if limitLevel > me.nLevel then
+    me.CenterMsg(i18n.EasyGet("\229\174\182\230\151\143{0}\231\186\167\229\144\142\229\188\128\230\148\190", limitLevel))
+    return
+  end
+  CustomHotkey:CloseOtherWindowIfOpen({UIKin = 1})
+  local uiHubRightBottom = Ui:GetWindow("UIHudRightBottom")
+  if Ui:WindowVisible("UIKin") then
+    Ui:CloseWindow("UIKin")
+  else
+    if Ui.bInZone then
+      me.CenterMsg(i18n.EasyGet("\232\183\168\230\156\141\228\184\173\230\151\160\230\179\149\232\191\155\232\161\140\229\189\147\229\137\141\230\147\141\228\189\156"))
+      return
+    end
+    Kin:OpenKinWindow()
+    uiHubRightBottom:OnClickCloseEffect("btnKin")
+  end
+end
+
+function CustomHotkey:OpenAchievement()
+  local limitLevel = self.tbFunctionLimit.btnAchievement
+  if limitLevel > me.nLevel then
+    me.CenterMsg(i18n.EasyGet("\230\136\144\229\176\177{0}\231\186\167\229\144\142\229\188\128\230\148\190", limitLevel))
+    return
+  end
+  CustomHotkey:CloseOtherWindowIfOpen({UIAchievement = 1})
+  local uiHubRightBottom = Ui:GetWindow("UIHudRightBottom")
+  if Ui:WindowVisible("UIAchievement") then
+    Ui:CloseWindow("UIAchievement")
+  else
+    Ui:OpenWindow("UIAchievement")
+    uiHubRightBottom:OnClickCloseEffect("btnAchievement")
+  end
+end
+
+function CustomHotkey:OpenTong()
+  local limitLevel = self.tbFunctionLimit.btnTong
+  if limitLevel > me.nLevel then
+    me.CenterMsg(i18n.EasyGet("\229\184\174\228\188\154{0}\231\186\167\229\144\142\229\188\128\230\148\190", limitLevel))
+    return
+  end
+  CustomHotkey:CloseOtherWindowIfOpen({UITong = 1})
+  local uiHubRightBottom = Ui:GetWindow("UIHudRightBottom")
+  if Ui:WindowVisible("UITong") then
+    Ui:CloseWindow("UITong")
+  else
+    Ui:OpenWindow("UITong")
+    uiHubRightBottom:OnClickCloseEffect("btnTong")
+  end
+end
+
+function CustomHotkey:CloseOtherWindowIfOpen(tbUIName)
+  if not tbUIName.UIBag and Ui:WindowVisible("UIBag") then
+    Ui:CloseWindow("UIBag")
+  end
+  if not tbUIName.UIRanking and Ui:WindowVisible("UIRanking") then
+    Ui:CloseWindow("UIRanking")
+  end
+  if not tbUIName.UIPartnerNew and Ui:WindowVisible("UIPartnerNew") then
+    Ui:CloseWindow("UIPartnerNew")
+  end
+  if not tbUIName.UICardPickingNew and Ui:WindowVisible("UICardPickingNew") then
+    Ui:CloseWindow("UICardPickingNew")
+  end
+  if not tbUIName.UISkillBookPickingNew and Ui:WindowVisible("UISkillBookPickingNew") then
+    Ui:CloseWindow("UISkillBookPickingNew")
+  end
+  if not tbUIName.UIHonorLevel and Ui:WindowVisible("UIHonorLevel") then
+    Ui:CloseWindow("UIHonorLevel")
+  end
+  if not tbUIName.UIAchievement and Ui:WindowVisible("UIAchievement") then
+    Ui:CloseWindow("UIAchievement")
+  end
+  if not tbUIName.UISkill and Ui:WindowVisible("UISkill") then
+    Ui:CloseWindow("UISkill")
+  end
+  if not tbUIName.UILifeSkill and Ui:WindowVisible("UILifeSkill") then
+    Ui:CloseWindow("UILifeSkill")
+  end
+  if not tbUIName.UIKinList and Ui:WindowVisible("UIKinList") then
+    Ui:CloseWindow("UIKinList")
+  end
+  if not tbUIName.UITongList and Ui:WindowVisible("UITongList") then
+    Ui:CloseWindow("UITongList")
+  end
+end

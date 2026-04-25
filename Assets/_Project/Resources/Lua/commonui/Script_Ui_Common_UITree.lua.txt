@@ -1,0 +1,421 @@
+local tbWnd = {}
+Ui:SetClass("UITree", tbWnd)
+tbWnd.LINE_SPAGE_BIG = 10
+tbWnd.LINE_SPACE_SMALL = 5
+tbWnd.LINE_SPACE_BIGSMALL = 10
+tbWnd.BTNSIZE_WIDTH = 200
+tbWnd.BTNSIZE_HEIGHT = 52
+tbWnd.tbButtonList = {}
+
+function Ui:NewTree(tbOwner, szKey, ...)
+  local tbClass = Ui:NewClass(Ui:GetClass("UITree"))
+  tbClass.tbOwner = tbOwner
+  tbClass.pPanel = Ui:CreateSimplePanel(tbOwner, szKey).pPanel
+  tbClass:OnCreate(...)
+  return tbClass
+end
+
+function tbWnd:OnCreate(funcBig, funcSmall)
+  self.szScrollViewContent = "ScrollView/Viewport/Content"
+  self.szBigTemplateKey = "ScrollView/Viewport/Content/btnTemplateBig"
+  self.szSmallTemplateKey = "ScrollView/Viewport/Content/btnTemplateSmall"
+  local pRectTransform = self.pPanel:GetRectTransform(self.szBigTemplateKey).sizeDelta
+  self.BTNSIZE_WIDTH = pRectTransform.x
+  self.BTNSIZE_HEIGHT = pRectTransform.y
+  self.funcBig = funcBig
+  self.funcSmall = funcSmall
+  self.pPanel:SetActive(self.szBigTemplateKey, false)
+  self.pPanel:SetActive(self.szSmallTemplateKey, false)
+  if not self.tbOwner._tbTree then
+    self.tbOwner._tbTree = {}
+  end
+  self.tbOwner._tbTree[self] = 1
+end
+
+function tbWnd:SetData(tbBigData, tbSmallData, pFunBigCallBack, pFunSmallCallBack, bForceUpdateTree)
+  self.tbBigData = self.tbBigData or nil
+  self.tbSmallData = self.tbSmallData or nil
+  local bNeedUpdateTree = false
+  if self.tbBigData == nil or #tbBigData ~= #self.tbBigData then
+    bNeedUpdateTree = true
+  else
+    for nBigIndex, tbBigInfo in ipairs(tbBigData) do
+      if self.tbBigData[nBigIndex] == nil or self.tbBigData[nBigIndex].szText ~= tbBigInfo.szText or #self.tbBigData[nBigIndex].tbInfo ~= #tbBigInfo.tbInfo then
+        bNeedUpdateTree = true
+        break
+      end
+    end
+  end
+  if not bNeedUpdateTree then
+    if self.tbSmallData == nil or #tbSmallData ~= #self.tbSmallData then
+      bNeedUpdateTree = true
+    else
+      for nSmallIndex, tbSmallInfo in ipairs(tbSmallData) do
+        if self.tbSmallData[nSmallIndex] == nil or self.tbSmallData[nSmallIndex].szText ~= tbSmallInfo.szText or self.tbSmallData[nSmallIndex].nType ~= tbSmallInfo.nType or #self.tbSmallData[nSmallIndex].tbInfo ~= #tbSmallInfo.tbInfo then
+          bNeedUpdateTree = true
+          break
+        end
+      end
+    end
+  end
+  bNeedUpdateTree = bForceUpdateTree or bNeedUpdateTree
+  if bNeedUpdateTree then
+    for _, v in pairs(self.tbButtonList) do
+      self.pPanel:DeleteObject(v[1])
+    end
+    self.tbButtonList = {}
+    self.tbBigData = tbBigData
+    self.tbSmallData = tbSmallData
+    for nBigIndex, tbBigInfo in ipairs(self.tbBigData) do
+      local szBigKey = self.pPanel:CloneObject(self.szBigTemplateKey, string.format("Big%d", nBigIndex))
+      self.pPanel:Label_SetText(szBigKey .. "/Text", tbBigInfo.szText)
+      self.pPanel:Object_SetSize(szBigKey, self.BTNSIZE_WIDTH, self.BTNSIZE_HEIGHT)
+      if tbBigInfo.tbRedPoint then
+        RedPointMgr:DynamicRegisteRedPoint(self.pPanel, szBigKey, tbBigInfo.tbRedPoint)
+      end
+      Ui:Toggle_BindEvent(self.pPanel, szBigKey, function(self, isOn)
+        if isOn and not self.bAlwayExpand then
+          self:OnClickBigButton(nBigIndex, tbBigInfo.tbInfo)
+        end
+      end, self)
+      if pFunBigCallBack then
+        pFunBigCallBack(self, szBigKey, tbBigInfo.tbCallBackInfo)
+      end
+      local tbBigButtonListInfo = {
+        szBigKey,
+        1,
+        nBigIndex,
+        false
+      }
+      table.insert(self.tbButtonList, tbBigButtonListInfo)
+      for nSmallIndex, tbSmallInfo in ipairs(self.tbSmallData) do
+        if tbSmallInfo.nType == tbBigInfo.nType then
+          local szSmallKey = self.pPanel:CloneObject(self.szSmallTemplateKey, string.format("Small%d", nSmallIndex))
+          self.pPanel:SetScale(szSmallKey, 0.9)
+          self.pPanel:Object_SetSize(szSmallKey, self.BTNSIZE_WIDTH, self.BTNSIZE_HEIGHT)
+          Ui:Toggle_BindEvent(self.pPanel, szSmallKey, function(self, isOn)
+            if isOn then
+              self:OnClickSmallButton(nSmallIndex, tbSmallInfo.tbInfo)
+            end
+          end, self)
+          self.pPanel:Label_SetText(szSmallKey .. "/Text", tbSmallInfo.szText)
+          table.insert(self.tbButtonList, {
+            szSmallKey,
+            2,
+            nBigIndex,
+            nSmallIndex
+          })
+          self.pPanel:SetActive(szSmallKey, false)
+          if pFunSmallCallBack then
+            pFunSmallCallBack(self, szSmallKey, tbSmallInfo.tbCallBackInfo)
+          end
+          if tbSmallInfo.tbRedPoint then
+            RedPointMgr:DynamicRegisteRedPoint(self.pPanel, szSmallKey, tbSmallInfo.tbRedPoint)
+          end
+          tbBigButtonListInfo[4] = true
+        end
+      end
+      tbBigInfo.bExpand = false
+    end
+  end
+  self:Update()
+end
+
+function tbWnd:UpdateBtnPos(nSelectBigIndex, bExpand)
+  local tbMainObj = self.pPanel:GetObject("Main")
+  local objBigBtn = self.pPanel:GetObject(self.szBigTemplateKey)
+  local objSmallBtn = self.pPanel:GetObject(self.szSmallTemplateKey)
+  local mainScale = tbMainObj.transform.localScale
+  local bigBtnSacle = objBigBtn.transform.localScale
+  local smallBtnSacle = objSmallBtn.transform.localScale
+  local nLineSapceBig = Lib:MathRound(self.LINE_SPAGE_BIG * mainScale.y * bigBtnSacle.y)
+  local nLineSapceSmall = Lib:MathRound(self.LINE_SPACE_SMALL * mainScale.y * smallBtnSacle.y)
+  local bigBtnWidth = self.BTNSIZE_WIDTH
+  local bigBtnHeight = self.BTNSIZE_HEIGHT
+  local smallBtnWidth = Lib:MathRound(self.BTNSIZE_WIDTH * mainScale.x * smallBtnSacle.x)
+  local smallBtnHeight = Lib:MathRound(self.BTNSIZE_HEIGHT * mainScale.y * smallBtnSacle.y)
+  local nBigIndent = 0
+  local nSmallIndent = Lib:MathRound((bigBtnWidth - smallBtnWidth) / 2)
+  local nLastPosY = 0
+  self.tbBtnPos = {}
+  for _, v in ipairs(self.tbButtonList) do
+    local nX = 0
+    local nY = 0
+    local nBtnHeight = 0
+    local nCurBtnType = v[2]
+    local bShow = 1 == nCurBtnType or 2 == nCurBtnType and nSelectBigIndex == v[3] and bExpand
+    if bShow then
+      if 1 == nCurBtnType then
+        nX = nBigIndent
+        nY = nLastPosY - nLineSapceBig
+        nBtnHeight = bigBtnHeight
+      else
+        nX = nSmallIndent
+        nY = nLastPosY - nLineSapceSmall
+        nBtnHeight = smallBtnHeight
+      end
+      nLastPosY = nY - nBtnHeight
+      table.insert(self.tbBtnPos, {
+        nX,
+        nY,
+        0
+      })
+    else
+      table.insert(self.tbBtnPos, {
+        0,
+        0,
+        0
+      })
+    end
+  end
+  self.contentRectTransform = self.pPanel:GetRectTransform(self.szScrollViewContent)
+  self.nTotalWidth = self.contentRectTransform.sizeDelta.x
+  self.nTotalHeight = -nLastPosY
+end
+
+function tbWnd:Update(nBigIndex, bExpand)
+  self:UpdateBtnPos(nBigIndex, bExpand)
+  self.pPanel:Object_SetSize(self.szScrollViewContent, self.nTotalWidth, self.nTotalHeight)
+  for i, v in pairs(self.tbButtonList) do
+    if 2 == v[2] then
+      if v[3] == nBigIndex then
+        self.pPanel:SetActive(v[1], bExpand)
+      else
+        self.pPanel:SetActive(v[1], false)
+      end
+      if v[4] == self.nClickSmallIndex then
+        self.pPanel:Toggle_SetChecked(v[1], true)
+      else
+        self.pPanel:Toggle_SetChecked(v[1], false)
+      end
+    end
+    local tbPos = self.tbBtnPos[i]
+    assert(tbPos, string.format("can not find btn pos, index = %s", i))
+    local nX, nY, nZ = table.unpack(tbPos)
+    self.pPanel:Object_SetLocalPosition(v[1], Ui.Vector3(nX, nY, nZ))
+    if 1 == v[2] then
+      local szBigKey, nBtnType, nIndex, bHaveChild = table.unpack(v)
+      if not bHaveChild then
+        self.pPanel:SetActive(szBigKey .. "/btnDown", false)
+        self.pPanel:SetActive(szBigKey .. "/btnUp", false)
+        if nIndex == nBigIndex then
+          self.nClickSmallIndex = 0
+        end
+      elseif nIndex ~= nBigIndex then
+        self.pPanel:SetActive(szBigKey .. "/btnDown", true)
+        self.pPanel:SetActive(szBigKey .. "/btnUp", false)
+      elseif not bExpand then
+        self.pPanel:SetActive(szBigKey .. "/btnDown", true)
+        self.pPanel:SetActive(szBigKey .. "/btnUp", false)
+      else
+        self.pPanel:SetActive(szBigKey .. "/btnDown", false)
+        self.pPanel:SetActive(szBigKey .. "/btnUp", true)
+      end
+    end
+  end
+end
+
+function tbWnd:OnClickBigButton(nBigIndex, tbInfo, bAlwayExpand)
+  local bExpand = false
+  for nIndex, tbBigInfo in pairs(self.tbBigData) do
+    if nIndex ~= nBigIndex then
+      tbBigInfo.bExpand = false
+    else
+      if nil ~= bAlwayExpand then
+        tbBigInfo.bExpand = bAlwayExpand
+      else
+        tbBigInfo.bExpand = not tbBigInfo.bExpand
+      end
+      bExpand = tbBigInfo.bExpand
+    end
+  end
+  local szKey = string.format("ScrollView/Viewport/Content/Big%d", nBigIndex)
+  if not self.pPanel:Toggle_GetChecked(szKey) then
+    self.bAlwayExpand = bAlwayExpand
+    self.pPanel:Toggle_SetChecked(szKey, true)
+    self.bAlwayExpand = nil
+  end
+  self:Update(nBigIndex, bExpand)
+  if self.funcBig then
+    self.funcBig(self.tbOwner, tbInfo, nBigIndex)
+  end
+end
+
+function tbWnd:GetSmallDataInfoByIndex(nBigType, nSmallIndex)
+  local tbSmall = {}
+  for nIndex, tbSmallData in pairs(self.tbSmallData) do
+    if tbSmallData.nType == nBigType then
+      table.insert(tbSmall, nIndex)
+    end
+  end
+  local nRealIndex = tbSmall[nSmallIndex] and tbSmall[nSmallIndex] or tbSmall[1]
+  return self.tbSmallData[nRealIndex] and self.tbSmallData[nRealIndex].tbInfo
+end
+
+function tbWnd:OnClickSmallButton(nSmallIndex, tbInfo)
+  self.nClickSmallIndex = nSmallIndex
+  local szKey = string.format("ScrollView/Viewport/Content/Small%d", nSmallIndex)
+  if not self.pPanel:Toggle_GetChecked(szKey) then
+    self.pPanel:Toggle_SetChecked(szKey, true)
+  end
+  if self.funcSmall then
+    self.funcSmall(self.tbOwner, tbInfo, nSmallIndex)
+  end
+end
+
+function tbWnd:SelectNode(nBigIndex, nSmallIndex, bAlwayExpand)
+  if not nBigIndex then
+    return
+  end
+  if not self.tbBigData or not self.tbBigData[nBigIndex] then
+    return
+  end
+  local nTotalIndex = nBigIndex
+  self:OnClickBigButton(nBigIndex, self.tbBigData[nBigIndex].tbInfo, bAlwayExpand)
+  local nBigType = self.tbBigData[nBigIndex].nType
+  if nSmallIndex and nSmallIndex > 0 then
+    local tbSmall = {}
+    for nIndex, tbSmallData in pairs(self.tbSmallData) do
+      if tbSmallData.nType == nBigType then
+        table.insert(tbSmall, nIndex)
+      end
+    end
+    if not Lib:IsEmptyTB(tbSmall) then
+      local nRealIndex = tbSmall[nSmallIndex] and tbSmall[nSmallIndex] or tbSmall[1]
+      self:OnClickSmallButton(nRealIndex, self.tbSmallData[nRealIndex].tbInfo)
+      nTotalIndex = nTotalIndex + nRealIndex
+    end
+  end
+  local tbPos = self.tbBtnPos[nTotalIndex]
+  if not tbPos then
+    error(string.format("selectnote can not find btn pos, index = %s", nTotalIndex))
+    return
+  end
+  self.pPanel:ScrollRect_SetVerticalNormalizedPosition("ScrollView", tbPos[2] / self.nTotalHeight + 1)
+end
+
+function tbWnd:RawSelectNode(nBigIndex, nSmallIndex, bAlwayExpand)
+  if not nBigIndex then
+    return
+  end
+  if not self.tbBigData or not self.tbBigData[nBigIndex] then
+    return
+  end
+  local nTotalIndex = nBigIndex
+  self:OnClickBigButton(nBigIndex, self.tbBigData[nBigIndex].tbInfo, bAlwayExpand)
+  local nBigType = self.tbBigData[nBigIndex].nType
+  if nSmallIndex and nSmallIndex > 0 then
+    self:OnClickSmallButton(nSmallIndex, self.tbSmallData[nSmallIndex].tbInfo)
+    nTotalIndex = nTotalIndex + nSmallIndex
+  end
+  local tbPos = self.tbBtnPos[nTotalIndex]
+  if not tbPos then
+    error(string.format("selectnote can not find btn pos, index = %s", nTotalIndex))
+    return
+  end
+  self.pPanel:ScrollRect_SetVerticalNormalizedPosition("ScrollView", tbPos[2] / self.nTotalHeight + 1)
+end
+
+function tbWnd:AutoSelect()
+  local nBigIndex
+  for _, tbInfo in pairs(self.tbButtonList) do
+    if 1 == tbInfo[2] and tbInfo[4] then
+      nBigIndex = tbInfo[3]
+      break
+    end
+  end
+  if not nBigIndex then
+    return false
+  end
+  local nBigType = self.tbBigData[nBigIndex].nType
+  self.tbBigData[nBigIndex].bExpand = false
+  self:SelectNode(nBigIndex)
+  local bRet, nSmallIndex = self:AutoSelectSmall(nBigType)
+  return bRet, nBigType, nSmallIndex
+end
+
+function tbWnd:AutoSelectSmall(nBigType)
+  if not nBigType then
+    return false
+  end
+  for nIndex, tbSmallData in pairs(self.tbSmallData) do
+    if tbSmallData.nType == nBigType then
+      self:OnClickSmallButton(nIndex, tbSmallData.tbInfo)
+      return true, nIndex
+    end
+  end
+  return true, nil
+end
+
+function tbWnd:SelectSmallByIndex(nBigType, nSmallIndex)
+  if not nBigType then
+    return false
+  end
+  local nTotalIndex = nBigType
+  if nSmallIndex and nSmallIndex > 0 then
+    local tbSmall = {}
+    for nIndex, tbSmallData in pairs(self.tbSmallData) do
+      if tbSmallData.nType == nBigType then
+        table.insert(tbSmall, nIndex)
+      end
+    end
+    if not Lib:IsEmptyTB(tbSmall) then
+      local nRealIndex = tbSmall[nSmallIndex] and tbSmall[nSmallIndex] or tbSmall[1]
+      self:OnClickSmallButton(nRealIndex, self.tbSmallData[nRealIndex].tbInfo)
+      nTotalIndex = nTotalIndex + nRealIndex
+    end
+  end
+  local tbPos = self.tbBtnPos[nTotalIndex]
+  if not tbPos then
+    error(string.format("selectnote can not find btn pos, index = %s", nTotalIndex))
+    return
+  end
+  self.pPanel:ScrollRect_SetVerticalNormalizedPosition("ScrollView", tbPos[2] / self.nTotalHeight + 1)
+end
+
+function tbWnd:GoTop()
+  self:SetScrollViewRectPos(1.0)
+end
+
+function tbWnd:GoBottom()
+  self:SetScrollViewRectPos(0.0)
+end
+
+function tbWnd:SetScrollViewRectPos(nPos)
+  local scrollView = self.pPanel:GetObject("ScrollView")
+  if scrollView then
+    local scrollRect = scrollView:GetComponent("ScrollRect")
+    if scrollRect then
+      scrollRect.verticalNormalizedPosition = nPos
+    end
+  end
+end
+
+function tbWnd:OnDestroy()
+  for _, v in pairs(self.tbButtonList) do
+    RedPointMgr:DynamicUnRegist(self.pPanel, v[1])
+    Ui:Toggle_UnBindEvent(self.pPanel, v[1])
+    self.pPanel:DeleteObject(v[1])
+  end
+  self.tbOwner._tbTree[self] = nil
+  self.tbButtonList = nil
+  self.pPanel = nil
+end
+
+function tbWnd:UpdateBtnText(tbBigText, tbSmallText)
+  if #self.tbBigData ~= #tbBigText or #tbSmallText ~= #self.tbSmallData then
+    return
+  end
+  for nIndex, tbV in pairs(self.tbButtonList) do
+    local szKey = tbV[1]
+    if 1 == tbV[2] then
+      local nBigIndex = tbV[3]
+      self.tbBigData[nBigIndex].szText = tbBigText[nBigIndex]
+      self.pPanel:Label_SetText(szKey .. "/Text", tbBigText[nBigIndex])
+    else
+      local nSmallIndex = tbV[4]
+      self.tbSmallData[nSmallIndex].szText = tbSmallText[nSmallIndex]
+      self.pPanel:Label_SetText(szKey .. "/Text", tbSmallText[nSmallIndex])
+    end
+  end
+end

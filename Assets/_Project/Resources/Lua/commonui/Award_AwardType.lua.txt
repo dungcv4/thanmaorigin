@@ -1,0 +1,169 @@
+local function ConsumeItem(pPlayer, nConsume, nLogReason, nLogReason2, szType, nItemId, nCount)
+  if not pPlayer then
+    return false
+  end
+  local nTotal = nCount * nConsume
+  local nRealConsume = pPlayer.ConsumeItemInBag(nItemId, nTotal, nLogReason)
+  if nRealConsume ~= nTotal then
+    Log("CosumeItem fail", pPlayer.dwID, nConsume, nLogReason, nLogReason2, szType, nItemId, nCount)
+    return false
+  else
+    return true
+  end
+end
+
+local function CosumeMoney(pPlayer, nConsume, nLogReason, nLogReason2, szType, nCount)
+  if not pPlayer then
+    return false
+  end
+  local nTotal = nCount * nConsume
+  if not pPlayer.CostMoney(szType, nTotal, nLogReason, nLogReason2) then
+    Log("CosumeMoney fail", pPlayer.dwID, nConsume, nLogReason, nLogReason2, szType, nCount)
+    return false
+  else
+    return true
+  end
+end
+
+local function GetItemCount(pPlayer, szType, nItemId, nCount)
+  return pPlayer.GetItemCountByTypeInBag(nItemId)
+end
+
+local function GetMoneyCount(pPlayer, szType, nCount)
+  return pPlayer.GetMoney(szType)
+end
+
+local function IsItemEnough(pPlayer, nNeed, szType, nItemId, nCount)
+  local nNeedTotal = nCount * nNeed
+  local nHaveCount = pPlayer.GetItemCountByTypeInBag(nItemId)
+  if nNeedTotal > nHaveCount then
+    local szName = Item:GetName(nItemId, pPlayer)
+    local szInfo
+    local tbBaseProp = Item:GetItemBaseProp(nItemId)
+    if tbBaseProp and tbBaseProp.szSource then
+      szInfo = i18n.EasyGet("\233\129\147\229\133\183<color=#ffff0e>{0}</color>\230\149\176\233\135\143\228\184\141\232\182\179,\232\175\183\233\128\154\232\191\135<color=#ffff0e>{1}</color>\232\142\183\229\190\151", szName, tbBaseProp.szSource)
+    else
+      szInfo = i18n.EasyGet("\233\129\147\229\133\183<color=#ffff0e>{0}</color>\230\149\176\233\135\143\228\184\141\232\182\179", szName)
+    end
+    return false, szInfo
+  else
+    return true
+  end
+end
+
+local function IsMoneyEnough(pPlayer, nNeed, szType, nCount)
+  local nNeedTotal = nCount * nNeed
+  local nHaveCount = pPlayer.GetMoney(szType)
+  if nNeedTotal > nHaveCount then
+    return false, i18n.EasyGet("{0}\228\184\141\232\182\179{1}", Currency:GetName(szType), nNeedTotal)
+  else
+    return true
+  end
+end
+
+local function CheckItemValid(szType, nItemTemplateId, nCount)
+  if not Item:IsExist(nItemTemplateId) then
+    return false, string.format("item=%d not exist", nItemTemplateId)
+  end
+  if not nCount or nCount < 0 then
+    return false, string.format("item=%d count=%s not right", nItemTemplateId, tostring(nCount))
+  end
+  return true
+end
+
+local function CheckMoneyValid(szType, nCount)
+  if not Currency:Valid(szType) then
+    return false, string.format("currency=%s not exist", szType)
+  end
+  if not nCount or nCount < 0 then
+    return false, string.format("currency=%s count=%s not right", szType, tostring(nCount))
+  end
+  return true
+end
+
+local function CheckAwardTypeVaild(szType, nAwardId, nAwardKey)
+  if not Award.tbAllAwards[nAwardId] then
+    return false, string.format("award=%d not exist", nAwardId)
+  end
+  local tbRandAwards = Award.tbAllAwards[nAwardId].tbRandAwards
+  local tbFixAwards = Award.tbAllAwards[nAwardId].tbFixAwards
+  if (not tbRandAwards or not tbRandAwards[nAwardKey]) and (not tbFixAwards or not tbFixAwards[nAwardKey]) then
+    return false, string.format("award=%d key=%d not exist", nAwardId, nAwardKey)
+  end
+  return true
+end
+
+local function GetItemNameAndIcon(pPlayer, szType, nItemId, nCount)
+  local szProductName, nProductIconImage, _, _, _ = KItem.GetItemShowInfo(nItemId, pPlayer.nFaction, pPlayer.nFactionSect, pPlayer.nSex)
+  return szProductName, nProductIconImage
+end
+
+local function GetMoneyNameAndIcon(szType, nAwardId, nAwardKey)
+end
+
+Award.Type2ConsumeFunc = {
+  [Player.award_type_item] = ConsumeItem,
+  [Player.award_type_money] = CosumeMoney
+}
+Award.Type2AwardCountFunc = {
+  [Player.award_type_item] = GetItemCount,
+  [Player.award_type_money] = GetMoneyCount
+}
+Award.Type2CheckIsEnough = {
+  [Player.award_type_item] = IsItemEnough,
+  [Player.award_type_money] = IsMoneyEnough
+}
+Award.Type2CheckValid = {
+  [Player.award_type_item] = CheckItemValid,
+  [Player.award_type_money] = CheckMoneyValid,
+  [Player.award_type_award] = CheckAwardTypeVaild
+}
+Award.Type2GetNameAndIcon = {
+  [Player.award_type_item] = GetItemNameAndIcon,
+  [Player.award_type_money] = GetMoneyNameAndIcon
+}
+
+function Award:Consume(pPlayer, nConsume, nLogReason, nLogReason2, szType, ...)
+  local awardType = Player.AwardType[szType] or Player.award_type_unkonw
+  local fnConsume = self.Type2ConsumeFunc[awardType]
+  if not fnConsume then
+    return false
+  end
+  return fnConsume(pPlayer, nConsume, nLogReason, nLogReason2, szType, ...)
+end
+
+function Award:CheckIsEnough(pPlayer, nNeed, szType, ...)
+  local awardType = Player.AwardType[szType] or Player.award_type_unkonw
+  local fnCheckIsEnough = self.Type2CheckIsEnough[awardType]
+  if not fnCheckIsEnough then
+    return false
+  end
+  return fnCheckIsEnough(pPlayer, nNeed, szType, ...)
+end
+
+function Award:GetAwardNameAndIcon(pPlayer, szType, ...)
+  local awardType = Player.AwardType[szType] or Player.award_type_unkonw
+  local fnGetNameAndIcon = self.Type2GetNameAndIcon[awardType]
+  if not fnGetNameAndIcon then
+    return "", ""
+  end
+  return fnGetNameAndIcon(pPlayer, szType, ...)
+end
+
+function Award:CheckAwardVaild(szType, ...)
+  local awardType = Player.AwardType[szType] or Player.award_type_unkonw
+  local fnCheckValid = self.Type2CheckValid[awardType]
+  if not fnCheckValid then
+    return true
+  end
+  return fnCheckValid(szType, ...)
+end
+
+function Award:GetAwardCount(pPlayer, szType, ...)
+  local awardType = Player.AwardType[szType] or Player.award_type_unkonw
+  local fnAwardCountFunc = self.Type2AwardCountFunc[awardType]
+  if not fnAwardCountFunc then
+    return 0
+  end
+  return fnAwardCountFunc(pPlayer, szType, ...)
+end

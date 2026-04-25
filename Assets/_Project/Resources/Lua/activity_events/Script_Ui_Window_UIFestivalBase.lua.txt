@@ -1,0 +1,130 @@
+local tbWnd = Ui:CreateWindow("UIFestivalBase")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_SWITCH,
+      self.Close,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_LOGIN_ZONE,
+      self.Close,
+      self
+    }
+  }
+end
+
+tbWnd.nMaxButton = 5
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:OnCreate()
+end
+
+function tbWnd:OnOpen(nEntranceIndex, nCommonEntryID)
+  if self.nEntranceIndex ~= nEntranceIndex then
+    self:InitPanelSetting(nEntranceIndex)
+    self.tbTabControl = Ui:NewTabControl(self, self.PANEL_SETTING)
+    self.nEntranceIndex = nEntranceIndex
+  else
+    self:InitPanelSetting(nEntranceIndex)
+    self.tbTabControl:UpdateData(self.PANEL_SETTING)
+  end
+  for index, szPath in pairs(self.tbCommonEntryID2SubPanel) do
+    self.pPanel:SetActive(szPath, false)
+  end
+  for index, szPath in pairs(self.tbBtnEffectPath) do
+    self.pPanel:SetActive(szPath, false)
+  end
+  local nIndex = self.tbCommonEntryID2BtnId[nCommonEntryID or self.nMainCommonEntryID]
+  self.nCurLightIndex = nIndex
+  self.tbTabControl:OnOpen(nIndex, nEntranceIndex, self.tbBtnId2ActListId[self.nCurLightIndex], self.ClassName)
+  if self.PANEL_SETTING[self.nCurLightIndex].EFFECT then
+    self.pPanel:SetActive(self.PANEL_SETTING[self.nCurLightIndex].EFFECT, true)
+  end
+  if self.SetMainOutline then
+    self:SetMainOutline()
+  end
+end
+
+function tbWnd:OnPanelChange(index)
+  if self.PANEL_SETTING[self.nCurLightIndex].EFFECT then
+    self.pPanel:SetActive(self.PANEL_SETTING[self.nCurLightIndex].EFFECT, false)
+  end
+  self.nCurLightIndex = index
+  if self.PANEL_SETTING[self.nCurLightIndex].EFFECT then
+    self.pPanel:SetActive(self.PANEL_SETTING[self.nCurLightIndex].EFFECT, true)
+  end
+  self.tbTabControl:UpdateSubPanel(index, "UpdateInfo", self.nEntranceIndex, self.tbBtnId2ActListId[index], self.ClassName)
+  if self.SetMainOutline then
+    self:SetMainOutline()
+  end
+end
+
+function tbWnd:InitPanelSetting(nEntranceIndex)
+  self.nEntranceIndex = nEntranceIndex
+  self.PANEL_SETTING = {}
+  self.tbBtnId2ActListId = {}
+  self.tbCommonEntryID2BtnId = {}
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(nEntranceIndex)
+  for nIndex, szPath in pairs(self.tbBtnPath) do
+    self.pPanel:SetActive(szPath, false)
+    self.pPanel:SetActive(self.tbBtnTextPath[nIndex], false)
+  end
+  if Lib:CountTB(self.tbActivityList) ~= #self.tbActivityList then
+    LogErr("Activity EntranceScheduleCfg index is not continuous", nEntranceIndex)
+  end
+  for index, tbInfo in ipairs(self.tbActivityList) do
+    local pInst = ActivityMgr:GetInstanceById(tbInfo.nId)
+    pInst = pInst or ActivityMgr.EntranceSchedule:BuildInstance(tbInfo.nId, ActivityMgr.Def.ClassNameList[tbInfo.szClassName])
+    local tbSettings = {}
+    local nNow = GetTime()
+    local bOpen = pInst and nNow <= pInst.nEndTime and nNow >= pInst.nStartTime
+    if self.tbCommonEntryID2UiName[tbInfo.nId] and bOpen and tbInfo.nId ~= self.nMainCommonEntryID then
+      tbSettings.CLASS = self.tbCommonEntryID2UiName[tbInfo.nId]
+      tbSettings.OBJ = self.tbCommonEntryID2SubPanel[tbInfo.nId]
+      tbSettings.BTN = self.tbBtnPath[#self.PANEL_SETTING + 1]
+      
+      function tbSettings.OpenFunc()
+        local bLevelLimit = me.nLevel >= tbInfo.nLevel
+        return bLevelLimit
+      end
+      
+      tbSettings.EFFECT = self.tbBtnEffectPath[#self.PANEL_SETTING + 1]
+      self.pPanel:SetActive(self.tbBtnPath[#self.PANEL_SETTING + 1], true)
+      self.pPanel:SetActive(self.tbBtnTextPath[#self.PANEL_SETTING + 1], true)
+      self.pPanel:Label_SetText(self.tbBtnTextPath[#self.PANEL_SETTING + 1], tbInfo.szName)
+      table.insert(self.PANEL_SETTING, tbSettings)
+      self.tbBtnId2ActListId[#self.PANEL_SETTING] = index
+      self.tbCommonEntryID2BtnId[tbInfo.nId] = #self.PANEL_SETTING
+    end
+  end
+  local tbMainSetting = {}
+  tbMainSetting.CLASS = self.tbCommonEntryID2UiName[self.nMainCommonEntryID]
+  tbMainSetting.OBJ = self.tbCommonEntryID2SubPanel[self.nMainCommonEntryID]
+  tbMainSetting.BTN = self.tbBtnPath[self.nMainCommonEntryID]
+  
+  function tbMainSetting.OpenFunc()
+    return true
+  end
+  
+  tbMainSetting.EFFECT = self.tbBtnEffectPath[self.nMainCommonEntryID]
+  table.insert(self.PANEL_SETTING, tbMainSetting)
+  self.tbBtnId2ActListId[#self.PANEL_SETTING] = self.nMainCommonEntryID
+  self.tbCommonEntryID2BtnId[self.nMainCommonEntryID] = #self.PANEL_SETTING
+  self.pPanel:SetActive(self.tbBtnPath[self.nMainCommonEntryID], true)
+  self.pPanel:SetActive(self.tbBtnTextPath[self.nMainCommonEntryID], true)
+  self.pPanel:Label_SetText(self.tbBtnTextPath[self.nMainCommonEntryID], ActivityMgr.EntranceSchedule:GetTitle(self.nEntranceIndex))
+end
+
+function tbWnd:OnClose()
+  self.tbTabControl:OnClose()
+end
+
+function tbWnd:OnDestroy()
+  self.nEntranceIndex = nil
+end

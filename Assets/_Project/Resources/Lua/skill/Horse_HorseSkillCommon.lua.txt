@@ -1,0 +1,451 @@
+HorseSkillMgr.nOldMaxGrade = 5
+HorseSkillMgr.nSyncValueOffset = 50
+HorseSkillMgr.nSyncSkillLevel = 1
+HorseSkillMgr.SKILL_DATA_TYPE_OFFSET = 10
+HorseSkillMgr.SKILL_LEVEL = 1
+HorseSkillMgr.SKILL_ATTR_MAX_UPGRADE_BEGIN = 2
+HorseSkillMgr.SKILL_ATTR_MAX_UPGRADE_END = 5
+HorseSkillMgr.nMaxSkillNum = 5
+HorseSkillMgr.nMaxGrade = 10
+HorseSkillMgr.nMaxAttrNum = 5
+HorseSkillMgr.nMaxSkillStoneNum = 5
+HorseSkillMgr.nMaxSkillStoneLevel = 10
+HorseSkillMgr.nMaxSkillStoneStar = 5
+HorseSkillMgr.nLevelAttrIndexCfgOffSet = 2
+HorseSkillMgr.tbSaveGroupKey = {}
+HorseSkillMgr.tbHorseSkillKey = {}
+for i = 1, HorseSkillMgr.nMaxSkillNum do
+  HorseSkillMgr.tbHorseSkillKey[i] = "HorseSkill" .. i
+end
+for i = 1, HorseSkillMgr.nMaxSkillNum do
+  HorseSkillMgr.tbSaveGroupKey[i] = GetGroupKey(HorseSkillMgr.tbHorseSkillKey[i])
+end
+
+function HorseSkillMgr:IsHorseSkillStone(pEquip)
+  local nSlot = Item:GetExtEquipSlot(pEquip)
+  if nSlot >= Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE1 and nSlot <= Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE5 then
+    return true
+  else
+    return false
+  end
+end
+
+function HorseSkillMgr:IsHorseSkillOpen(pPlayer)
+  pPlayer = pPlayer or me
+  if 1 ~= GetTimeFrameState(self.tbUpgradeTimeframe[1].szTimeFrame) then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\229\176\154\230\156\170\229\188\128\229\144\175")
+  end
+  return true
+end
+
+function HorseSkillMgr:GetSkillLevel(pPlayer, nSkillIndex, nGrade)
+  if not self.tbSaveGroupKey[nSkillIndex] then
+    return 0
+  end
+  local nLevel = pPlayer.GetUserValue(self.tbSaveGroupKey[nSkillIndex], self.SKILL_LEVEL + self.SKILL_DATA_TYPE_OFFSET * (nGrade - 1))
+  return nLevel
+end
+
+function HorseSkillMgr:GetAllSkillLevel(pPlayer, nSkillIndex)
+  local nRet = 0
+  for i = 1, self.nMaxGrade do
+    local nLevel = self:GetSkillLevel(pPlayer, nSkillIndex, i)
+    if nLevel > 0 then
+      nRet = nRet + nLevel
+    end
+  end
+  return nRet
+end
+
+function HorseSkillMgr:GetSkillMaxUpgradeAttrIndex(pPlayer, nSkillIndex, nGrade, nTimes)
+  if not self.tbSaveGroupKey[nSkillIndex] then
+    return 0
+  end
+  local nAttrIndex = pPlayer.GetUserValue(self.tbSaveGroupKey[nSkillIndex], self.SKILL_ATTR_MAX_UPGRADE_BEGIN + (nTimes - 1) + self.SKILL_DATA_TYPE_OFFSET * (nGrade - 1))
+  return nAttrIndex or 0
+end
+
+function HorseSkillMgr:GetHSOpenGrade()
+  local nOpenGrade = 0
+  for index, tbV in ipairs(self.tbUpgradeTimeframe) do
+    if 1 == GetTimeFrameState(tbV.szTimeFrame) then
+      nOpenGrade = tbV.nGrade
+    end
+  end
+  return nOpenGrade
+end
+
+function HorseSkillMgr:CanSkillUpgrade(pPlayer, nSkillIndex, nGrade)
+  if nSkillIndex <= 0 or nSkillIndex > self.nMaxSkillNum then
+    return false
+  end
+  if nGrade <= 0 or nGrade > self.nMaxGrade then
+    return false
+  end
+  local nOpenGrade = self:GetHSOpenGrade()
+  if nGrade > nOpenGrade then
+    return false, i18n.EasyGet("\229\177\130\230\149\176{0}\230\154\130\230\156\170\229\188\128\230\148\190", nGrade)
+  end
+  local nAttrCfgIndex = self:GetSkillAttrCfg(nSkillIndex, nGrade)
+  if not nAttrCfgIndex then
+    return false
+  end
+  local tbCfg = self.tbUpgradeLevelCfg[nAttrCfgIndex]
+  local nSkillLevel = self:GetSkillLevel(pPlayer, nSkillIndex, nGrade)
+  if nSkillLevel >= #tbCfg then
+    return false, i18n.EasyGet("\230\138\128\232\131\189\229\183\178\230\187\161\231\186\167")
+  end
+  local nNeedItemId = self.HorseSkillCfg.nUpgradeNeedItemId
+  local nNeedItemNum = tbCfg[nSkillLevel + 1][1]
+  local nCurNum = pPlayer.GetItemCountByTypeInBag(nNeedItemId)
+  if nNeedItemNum > nCurNum then
+    return false, i18n.EasyGet("\230\130\168\231\154\132{0}\228\184\141\232\182\179", Item:GetName(nNeedItemId, pPlayer))
+  end
+  return true
+end
+
+function HorseSkillMgr:CanResetHorseSkill(pPlayer, nSkillIndex, nGrade)
+  if nSkillIndex <= 0 or nSkillIndex > self.nMaxSkillNum then
+    return false
+  end
+  if nGrade <= 0 or nGrade > self.nMaxGrade then
+    return false
+  end
+  local nSkillLevel = self:GetSkillLevel(pPlayer, nSkillIndex, nGrade)
+  if nSkillLevel <= 0 then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\230\138\128\232\131\189\230\151\160\233\156\128\233\135\141\231\189\174")
+  end
+  local nNeedItemId = HorseSkillMgr.HorseSkillCfg.nResetItemId
+  local nNeedItemNum = HorseSkillMgr.HorseSkillCfg.nResetItemNum
+  local nCurNum = pPlayer.GetItemCountByTypeInBag(nNeedItemId)
+  if nNeedItemNum > nCurNum then
+    return false, i18n.EasyGet("\230\130\168\231\154\132{0}\228\184\141\232\182\179", Item:GetName(nNeedItemId, pPlayer)), true
+  end
+  return true
+end
+
+function HorseSkillMgr:RefreshLevelAttr(pNpc, nSkillIndex, nGrade, nCurSkillLevel, nNextSkillLevel, nPlayerId)
+  self:UpdateLevelAttr(pNpc, nSkillIndex, nGrade, nCurSkillLevel, false, nPlayerId)
+  self:UpdateLevelAttr(pNpc, nSkillIndex, nGrade, nNextSkillLevel, true, nPlayerId)
+end
+
+function HorseSkillMgr:GetSkillAttrCfg(nSkillIndex, nGrade)
+  if not self.tbGrade2CfgIndex[nSkillIndex] or not self.tbGrade2CfgIndex[nSkillIndex][nGrade] then
+    return
+  end
+  return self.tbGrade2CfgIndex[nSkillIndex][nGrade]
+end
+
+function HorseSkillMgr:UpdateLevelAttr(pNpc, nSkillIndex, nGrade, nSkillLevel, bIsApply, nPlayerId)
+  local nAttrCfgIndex = self:GetSkillAttrCfg(nSkillIndex, nGrade)
+  if not nAttrCfgIndex then
+    return
+  end
+  if not self.tbUpgradeLevelCfg[nAttrCfgIndex] or not self.tbUpgradeLevelCfg[nAttrCfgIndex][nSkillLevel] then
+    return
+  end
+  local tbAttr = self.tbUpgradeLevelCfg[nAttrCfgIndex][nSkillLevel]
+  for nAttrIndex, tbV in pairs(self.tbSkillAttrCfg[nAttrCfgIndex]) do
+    if bIsApply then
+      pNpc.ApplyMagicAttrib(tbV.szAttrType, table.unpack(tbAttr[self.nLevelAttrIndexCfgOffSet + nAttrIndex]))
+      if nPlayerId then
+        AttributeHelp:LogAttrApply(nPlayerId, "HorseSkillMgr", tbV.szAttrType, table.unpack(tbAttr[self.nLevelAttrIndexCfgOffSet + nAttrIndex]))
+      end
+    else
+      pNpc.RemoveMagicAttrib(tbV.szAttrType, table.unpack(tbAttr[self.nLevelAttrIndexCfgOffSet + nAttrIndex]))
+      if nPlayerId then
+        AttributeHelp:LogAttrRemove(nPlayerId, "HorseSkillMgr", tbV.szAttrType, table.unpack(tbAttr[self.nLevelAttrIndexCfgOffSet + nAttrIndex]))
+      end
+    end
+  end
+end
+
+function HorseSkillMgr:UpdateMaxUpgradeAttr(pNpc, nSkillIndex, nGrade, nAttrIndex, nTimes, bIsApply, nPlayerId)
+  local nAttrCfgIndex = self:GetSkillAttrCfg(nSkillIndex, nGrade)
+  if not nAttrCfgIndex then
+    return
+  end
+  if nTimes <= 0 then
+    return
+  end
+  local tbV = self.tbSkillAttrCfg[nAttrCfgIndex][nAttrIndex]
+  local tbV2 = self.tbSkillQualityAttrCfg[nAttrCfgIndex][nTimes][nAttrIndex]
+  if bIsApply then
+    pNpc.ApplyMagicAttrib(tbV.szAttrType, table.unpack(tbV2))
+    if nPlayerId then
+      AttributeHelp:LogAttrApply(nPlayerId, "HorseSkillMgr", tbV.szAttrType, table.unpack(tbV2))
+    end
+  else
+    pNpc.RemoveMagicAttrib(tbV.szAttrType, table.unpack(tbV2))
+    if nPlayerId then
+      AttributeHelp:LogAttrRemove(nPlayerId, "HorseSkillMgr", tbV.szAttrType, table.unpack(tbV2))
+    end
+  end
+end
+
+function HorseSkillMgr:GetStoneSkillId(tbSeriesList)
+  for _, tbV in ipairs(self.tbPassiveSkillId) do
+    local bFlag = true
+    for nHole, nSeries in ipairs(tbV.tbSeries) do
+      if tbSeriesList[nHole] ~= nSeries then
+        bFlag = false
+        break
+      end
+    end
+    if bFlag then
+      return tbV.nSkillId
+    end
+  end
+  return 0
+end
+
+function HorseSkillMgr:StatSeries(pPlayer, pTakeOffEquip)
+  local tbSeriesList = {}
+  local nTakeOffSlot = 0
+  if pTakeOffEquip then
+    nTakeOffSlot = Item:GetExtEquipSlot(pTakeOffEquip)
+  end
+  for nSlot = Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE1, Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE5 do
+    local pEquip = pPlayer.GetEquipByPos(Item.EQUIPPOS_EXTEND, nSlot)
+    local nHole = nSlot - Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE1 + 1
+    if nTakeOffSlot == nSlot then
+      tbSeriesList[nHole] = pTakeOffEquip.GetSeries()
+    elseif pEquip then
+      tbSeriesList[nHole] = pEquip.GetSeries()
+    else
+      tbSeriesList[nHole] = 0
+    end
+  end
+  return tbSeriesList
+end
+
+function HorseSkillMgr:GetStoneSkillGrade(pPlayer)
+  local nAllGrade = 0
+  for nSlot = Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE1, Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE5 do
+    local pEquip = pPlayer.GetEquipByPos(Item.EQUIPPOS_EXTEND, nSlot)
+    if pEquip then
+      nAllGrade = nAllGrade + pEquip.nLevel
+    end
+  end
+  local nRet = math.floor(nAllGrade / self.nMaxSkillStoneNum + 0.5)
+  return nRet
+end
+
+function HorseSkillMgr:GetStoneSkillStar(pPlayer)
+  local nAllStar = 0
+  for nSlot = Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE1, Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE5 do
+    local pEquip = pPlayer.GetEquipByPos(Item.EQUIPPOS_EXTEND, nSlot)
+    if pEquip then
+      nAllStar = nAllStar + pEquip.nQuality - 1
+    end
+  end
+  return nAllStar
+end
+
+function HorseSkillMgr:GetSkillStoneIdAndLevel(pPlayer, pEquip)
+  local tbSeriesList = self:StatSeries(pPlayer, pEquip)
+  local nSkillId = self:GetStoneSkillId(tbSeriesList)
+  if nSkillId > 0 then
+    local nGrade = self:GetStoneSkillGrade(pPlayer)
+    local nAllStar = self:GetStoneSkillStar(pPlayer)
+    local nShowLevel = 1
+    for i = 2, #self.tbPassiveSkillLevelCfg[nGrade] do
+      if nAllStar >= self.tbPassiveSkillLevelCfg[nGrade][i][1] then
+        nShowLevel = i
+      end
+    end
+    return nSkillId, self.tbPassiveSkillLevelCfg[nGrade][nShowLevel], nShowLevel
+  end
+  return 0, 0
+end
+
+function HorseSkillMgr:ApplyAllItemAttrib(pPlayer)
+  if not Item.bAttrApplyLock then
+    self:ApplyOrRemoveSkillStone(pPlayer, true)
+  end
+end
+
+function HorseSkillMgr:RemoveAllItemAttrib(pPlayer)
+  if not Item.bAttrRemoveLock then
+    self:ApplyOrRemoveSkillStone(pPlayer, false)
+  end
+end
+
+function HorseSkillMgr:onApplyRobotNpcAllEquip(pPlayerAsync, pNpc, tbEquipList, tbExtEquipList, tbSeries)
+  local tbSeriesList = {}
+  local nAllStar = 0
+  local nGrade = math.maxinteger
+  for nSlot = Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE1, Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE5 do
+    local pEquip = tbExtEquipList[nSlot]
+    local nHole = nSlot - Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE1 + 1
+    if pEquip then
+      local nSeries = pEquip.GetSeries()
+      tbSeriesList[nHole] = nSeries
+      nAllStar = nAllStar + pEquip.nQuality - 1
+      nGrade = math.min(nGrade, pEquip.nLevel)
+    else
+      tbSeriesList[nHole] = 0
+    end
+  end
+  local nSkillId = self:GetStoneSkillId(tbSeriesList)
+  if nSkillId <= 0 then
+    return
+  end
+  local nSkillLevel = self.tbPassiveSkillLevelCfg[nGrade][1][2]
+  for i = 2, #self.tbPassiveSkillLevelCfg[nGrade] do
+    if nAllStar >= self.tbPassiveSkillLevelCfg[nGrade][i][1] then
+      nSkillLevel = self.tbPassiveSkillLevelCfg[nGrade][i][2]
+    end
+  end
+  pNpc.AddSkill(nSkillId, nSkillLevel, 0, 1)
+end
+
+function HorseSkillMgr:ApplyOrRemoveSkillStone(pPlayer, bIsApply, pEquip)
+  local nSkillId, tbCfg, nShowLevel = self:GetSkillStoneIdAndLevel(pPlayer, pEquip)
+  if nSkillId > 0 then
+    if bIsApply then
+      if pPlayer.nHSSkillTimer then
+        Timer:Close(pPlayer.nHSSkillTimer)
+        pPlayer.nHSSkillTimer = nil
+      end
+      pPlayer.nHSSkillTimer = Timer:Register(Env.GAME_FPS * 60, function(nNPCId)
+        local pNpc = KNpc.GetById(nNPCId)
+        if pNpc then
+          pNpc.AddSkill(nSkillId, tbCfg[2], 0, 1)
+        end
+      end, pPlayer.GetNpc().nId)
+      if MODULE_GAMESERVER and pEquip then
+        local nSlot = Item:GetExtEquipSlot(pEquip)
+        local nGrade = self:GetStoneSkillGrade(pPlayer)
+        local nAllStar = self:GetStoneSkillStar(pPlayer)
+        Lib:TrackEvent(pPlayer.dwID, Env.track_horse_skillstone_equip, nSlot - Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE1 + 1, pEquip.dwTemplateId, pEquip.GetSeries(), pEquip.nQuality - 1, pEquip.nLevel, nSkillId, nGrade, nShowLevel, nAllStar)
+      end
+    else
+      pPlayer.GetNpc().RemoveSkill(nSkillId)
+      if pPlayer.nHSSkillTimer then
+        Timer:Close(pPlayer.nHSSkillTimer)
+        pPlayer.nHSSkillTimer = nil
+      end
+    end
+  end
+end
+
+function HorseSkillMgr:onApplyEquip(pPlayer, pEquip)
+  if Item.bAttrApplyLock then
+    return
+  end
+  self:ApplyOrRemoveSkillStone(pPlayer, true, pEquip)
+end
+
+function HorseSkillMgr:onRemoveEquip(pPlayer, pEquip)
+  if Item.bAttrRemoveLock then
+    return
+  end
+  self:ApplyOrRemoveSkillStone(pPlayer, false, pEquip)
+end
+
+Item:RegisterExtEquipModule({
+  Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE1,
+  Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE2,
+  Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE3,
+  Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE4,
+  Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE5
+}, "HorseSkill", HorseSkillMgr)
+Item:RegisterAttrXSEquipModule("HorseSkill", HorseSkillMgr)
+
+function HorseSkillMgr:OnApplyOrRemoveLevelAttr(pPlayer, bIsApply)
+  for nSkillIndex = 1, self.nMaxSkillNum do
+    for nGrade = 1, self.nMaxGrade do
+      local nLevel = self:GetSkillLevel(pPlayer, nSkillIndex, nGrade)
+      if nLevel > 0 then
+        self:UpdateLevelAttr(pPlayer.GetNpc(), nSkillIndex, nGrade, nLevel, bIsApply, pPlayer.dwID)
+        for i = self.SKILL_ATTR_MAX_UPGRADE_BEGIN, self.SKILL_ATTR_MAX_UPGRADE_END do
+          local nTimes = i - self.SKILL_ATTR_MAX_UPGRADE_BEGIN + 1
+          local nAttrIndex = pPlayer.GetUserValue(self.tbSaveGroupKey[nSkillIndex], i + self.SKILL_DATA_TYPE_OFFSET * (nGrade - 1))
+          if nAttrIndex > 0 then
+            self:UpdateMaxUpgradeAttr(pPlayer.GetNpc(), nSkillIndex, nGrade, nAttrIndex, nTimes, bIsApply, pPlayer.dwID)
+          end
+        end
+      end
+    end
+  end
+end
+
+function HorseSkillMgr:OnEquip(pPlayer)
+  self:OnApplyOrRemoveLevelAttr(pPlayer, true)
+end
+
+function HorseSkillMgr:OnUnEquip(pPlayer)
+  self:OnApplyOrRemoveLevelAttr(pPlayer, false)
+end
+
+function HorseSkillMgr:GetSyncSkillLevel(pPlayerAsync, nSkillIndex, nGrade)
+  local nLevel = 0
+  if nGrade <= self.nOldMaxGrade then
+    nLevel = pPlayerAsync.GetHorseSkill(self.nSyncValueOffset * (nSkillIndex - 1) + self.nSyncSkillLevel + self.SKILL_DATA_TYPE_OFFSET * (nGrade - 1))
+  else
+    nLevel = pPlayerAsync.GetHorseSkill2(self.nSyncValueOffset * (nSkillIndex - 1) + self.nSyncSkillLevel + self.SKILL_DATA_TYPE_OFFSET * (nGrade - 1 - self.nOldMaxGrade))
+  end
+  return nLevel
+end
+
+function HorseSkillMgr:GetSyncSkillAttrMaxUpIndex(pPlayerAsync, nSkillIndex, nGrade, nSaveIndex)
+  local nAttrIndexSave = 0
+  if nGrade <= self.nOldMaxGrade then
+    nAttrIndexSave = pPlayerAsync.GetHorseSkill(self.nSyncValueOffset * (nSkillIndex - 1) + nSaveIndex + self.SKILL_DATA_TYPE_OFFSET * (nGrade - 1))
+  else
+    nAttrIndexSave = pPlayerAsync.GetHorseSkill2(self.nSyncValueOffset * (nSkillIndex - 1) + nSaveIndex + self.SKILL_DATA_TYPE_OFFSET * (nGrade - 1 - self.nOldMaxGrade))
+  end
+  return nAttrIndexSave or 0
+end
+
+function HorseSkillMgr:GetSyncSkillAttrQuality(pPlayerAsync, nSkillIndex, nGrade, nAttrIndex)
+  local nAttrQuality = 0
+  for i = self.SKILL_ATTR_MAX_UPGRADE_BEGIN, self.SKILL_ATTR_MAX_UPGRADE_END do
+    local nAttrIndexSave = self:GetSyncSkillAttrMaxUpIndex(pPlayerAsync, nSkillIndex, nGrade, i)
+    if nAttrIndex == nAttrIndexSave then
+      nAttrQuality = nAttrQuality + 1
+    end
+  end
+  return nAttrQuality or 0
+end
+
+function HorseSkillMgr:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  for nSkillIndex = 1, self.nMaxSkillNum do
+    for nGrade = 1, self.nMaxGrade do
+      local nLevel = self:GetSyncSkillLevel(pPlayerAsync, nSkillIndex, nGrade)
+      if nLevel > 0 then
+        self:UpdateLevelAttr(pNpc, nSkillIndex, nGrade, nLevel, true)
+        for i = self.SKILL_ATTR_MAX_UPGRADE_BEGIN, self.SKILL_ATTR_MAX_UPGRADE_END do
+          local nTimes = i - self.SKILL_ATTR_MAX_UPGRADE_BEGIN + 1
+          local nAttrIndex = self:GetSyncSkillAttrMaxUpIndex(pPlayerAsync, nSkillIndex, nGrade, i)
+          if nAttrIndex > 0 then
+            self:UpdateMaxUpgradeAttr(pNpc, nSkillIndex, nGrade, nAttrIndex, nTimes, true)
+          end
+        end
+      end
+    end
+  end
+end
+
+AttributeModule:Register("HorseSkill", HorseSkillMgr)
+
+function HorseSkillMgr:CalcFightPower(pPlayer, szType)
+  local nAllFightPower = 0
+  for nSkillIndex = 1, self.nMaxSkillNum do
+    for nGrade = 1, self.nMaxGrade do
+      local nLevel = self:GetSkillLevel(pPlayer, nSkillIndex, nGrade)
+      local nAttrCfgIndex = self:GetSkillAttrCfg(nSkillIndex, nGrade)
+      if nAttrCfgIndex and nLevel > 0 then
+        nAllFightPower = nAllFightPower + self.tbUpgradeLevelCfg[nAttrCfgIndex][nLevel][2]
+      end
+    end
+  end
+  local nSkillId, tbCfg = self:GetSkillStoneIdAndLevel(pPlayer)
+  if nSkillId > 0 then
+    nAllFightPower = nAllFightPower + tbCfg[3]
+  end
+  return nAllFightPower
+end
+
+FightPower:RegisterFPSystemModule({"HorseSkill"}, HorseSkillMgr)

@@ -1,0 +1,221 @@
+Require("CommonScript/Activity/XiongWangActivity/JingWangJiuXiActivityCommon.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.JingWangJiuXiActivity)
+tbActivity.LEADER_NPC_MAPID = {
+  [1] = 66,
+  [2] = 17
+}
+
+function tbActivity:ServerRequest(szFuncName, ...)
+  if not self[szFuncName] then
+    return
+  end
+  self[szFuncName](self, ...)
+end
+
+tbActivity.LEADER_NPCID = 20
+
+function tbActivity:InitExtraData()
+  self.SaveKey = self.nSaveGroupId
+end
+
+function tbActivity:MakeShangdengZongzi(nZongziNum)
+  ActivityMgr:CallServerScriptV2(self.nId, tbActivity.Protocol.MakeShangdengZongzi, nZongziNum)
+end
+
+function tbActivity:MakeLvZongzi(nZongziNum)
+  ActivityMgr:CallServerScriptV2(self.nId, tbActivity.Protocol.MakeLvZongzi, nZongziNum)
+end
+
+function tbActivity:GotoHandInZongzi()
+  local nRandomNPCIndex = -1
+  for nIndex, nMapID in ipairs(self.LEADER_NPC_MAPID) do
+    if me.nMapId == nMapID then
+      nRandomNPCIndex = nIndex
+      break
+    end
+  end
+  if -1 == nRandomNPCIndex then
+    nRandomNPCIndex = math.random(1, #self.LEADER_NPC_MAPID)
+  end
+  local nPosX, nPosY, nWalkNearLength = Npc:GetNpcPos(self.LEADER_NPCID, self.LEADER_NPC_MAPID[nRandomNPCIndex], false)
+  
+  local function fnCallback()
+    local function __timer_Callback()
+      local nNpcId = KNpc.GetNpcIdByTemplateId(self.LEADER_NPCID)
+      
+      if nNpcId then
+        Operation:SimpleTap(nNpcId)
+      end
+    end
+    
+    Timer:Register(5, __timer_Callback)
+  end
+  
+  AutoPath:GotoAndCallEx(self.LEADER_NPC_MAPID[nRandomNPCIndex], nPosX, nPosY, fnCallback, nWalkNearLength, nil, self.LEADER_NPCID)
+end
+
+function tbActivity:S2CRefreshData()
+  print("S2CRefreshData")
+  self:TryLightRedPoint()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_JINGWANGJIUXI_DATA_SYNC)
+  if not self.bInit then
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.OnItemUpdate, self)
+    self.bInit = true
+  end
+end
+
+function tbActivity:GetExtraAward(nZongziType, nIndex)
+  ActivityMgr:CallServerScriptV2(self.nId, tbActivity.Protocol.GetExtraAward, nZongziType, nIndex)
+end
+
+function tbActivity:ZongziCanGetExtraAward(nZongziType)
+  local tbAllExtraAward = self:GetExtraAwardCfg(nZongziType)
+  if not tbAllExtraAward then
+    LogErr("CanGetExtraAward data error")
+    return
+  end
+  for i, tbExtraAward in ipairs(tbAllExtraAward) do
+    if self:CanGetExtraAward(me, nZongziType, i) then
+      return true
+    end
+  end
+  return false
+end
+
+function tbActivity:ZongziAllExtraAwardHasGet(nZongziType)
+  local tbAllExtraAward = self:GetExtraAwardCfg(nZongziType)
+  if not tbAllExtraAward then
+    LogErr("CanGetExtraAward data error")
+    return
+  end
+  for i, tbExtraAward in ipairs(tbAllExtraAward) do
+    if not self:HasGetExtraAward(me, tbExtraAward.nIndex) then
+      return false
+    end
+  end
+  return true
+end
+
+function tbActivity:GetExtraAwardCfg(nZongziType)
+  local tbCfg = ActivityMgr.XiongWangActivity:GetActivityCfg("JingWangJiuXiActivity")
+  if not tbCfg then
+    LogErr("InitShangdengRewardShow tbCfg nil ")
+    return
+  end
+  local tbExtraAward
+  if nZongziType == self.ZONGZITYPE.SHANGDENGZONGZI then
+    tbExtraAward = tbCfg.JingWangJiuXiShangdengExtraAward
+  elseif nZongziType == self.ZONGZITYPE.LVZONGZI then
+    tbExtraAward = tbCfg.JingWangJiuXiLvZongziExtraAward
+  end
+  return tbExtraAward
+end
+
+function tbActivity:GetExtraAwardList(nZongZiType)
+  if nZongZiType == self.ZONGZITYPE.SHANGDENGZONGZI then
+    return self:GetExtraAwardListHelper(self.tbConfig.JingWangJiuXiShangdengExtraAward)
+  end
+  if nZongZiType == self.ZONGZITYPE.LVZONGZI then
+    return self:GetExtraAwardListHelper(self.tbConfig.JingWangJiuXiLvZongziExtraAward)
+  end
+  return {}
+end
+
+function tbActivity:GetExtraAwardListHelper(tbExtraAwardList)
+  local tbList = {}
+  local tbCurList = {}
+  for _, tbInfo in ipairs(tbExtraAwardList or {}) do
+    tbCurList[tbInfo.szAwardType] = tbCurList[tbInfo.szAwardType] or self:GetCurSubmissionNum(me, tbInfo.szAwardType)
+    table.insert(tbList, {
+      szInfo = i18n.Parse(tbInfo.szInfo),
+      nNeedNum = tbInfo.nNeedZongziNum,
+      bSuccess = me.GetUserValue(self.SaveKey, self.ZongZiSaveID[tbInfo.nIndex]) > 0,
+      nCurNum = tbCurList[tbInfo.szAwardType],
+      tbAward = Award:GetAward(tbInfo.nAwardID, tbInfo.nAwardKey)
+    })
+  end
+  return tbList
+end
+
+function tbActivity:DoGongPinRobber()
+  local tbMapIdList = {}
+  for nMapTemplateId in pairs(self.tbConfig.tbRobber or {}) do
+    table.insert(tbMapIdList, nMapTemplateId)
+    if me.nMapTemplateId == nMapTemplateId then
+      if not Calendar:IsActivityInOpenState("GongPinRobber") then
+        me.CenterMsg(i18n.EasyGet("\229\143\175\229\137\141\229\190\128\233\135\135\231\159\179\231\159\182\239\188\140\233\135\145\229\155\189\231\154\135\233\153\181\230\136\150\232\138\166\232\139\135\232\141\161\231\173\137\229\190\133\232\180\161\229\147\129\229\188\186\231\155\151\229\135\186\231\142\176"))
+        return
+      else
+        me.CenterMsg(i18n.EasyGet("\232\175\183\229\156\168\229\189\147\229\137\141\229\156\176\229\155\190\229\175\187\230\137\190\232\180\161\229\147\129\229\188\186\231\155\151"))
+        return
+      end
+    end
+  end
+  if not next(tbMapIdList) then
+    return
+  end
+  ActivityMgr:GotoMap(tbMapIdList[math.random(#tbMapIdList)])
+end
+
+function tbActivity:OnOpen()
+  print("bActivity:OnOpen()")
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.OnItemUpdate, self)
+end
+
+function tbActivity:GetRedPointEventId()
+  return {
+    RedPointMgr.EVENT.JingWangJiuxiFirstOpen,
+    RedPointMgr.EVENT.JingWangJiuxiShangdengMake,
+    RedPointMgr.EVENT.JingWangJiuxiLvZongziMake,
+    RedPointMgr.EVENT.JingWangJiuxiZongziHandIn,
+    RedPointMgr.EVENT.JingWangJiuxiExtraAward
+  }
+end
+
+function tbActivity:CloseSyncTimer()
+  if self.nSyncItem then
+    Timer:Close(self.nSyncItem)
+    self.nSyncItem = nil
+  end
+end
+
+function tbActivity:TryLightRedPoint()
+  self:CloseSyncTimer()
+  local bCanGetShangdengExtraAward = self:ZongziCanGetExtraAward(self.ZONGZITYPE.SHANGDENGZONGZI)
+  local bCanGetLvZongziExtraAward = self:ZongziCanGetExtraAward(self.ZONGZITYPE.LVZONGZI)
+  if bCanGetShangdengExtraAward or bCanGetLvZongziExtraAward then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.JingWangJiuxiExtraAward)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.JingWangJiuxiExtraAward)
+  end
+  if self:CheckPlayerCanMakeZongzi(me, self.ZONGZITYPE.SHANGDENGZONGZI, 1) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.JingWangJiuxiShangdengMake)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.JingWangJiuxiShangdengMake)
+  end
+  if self:CheckPlayerCanMakeZongzi(me, self.ZONGZITYPE.LVZONGZI, 1) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.JingWangJiuxiLvZongziMake)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.JingWangJiuxiLvZongziMake)
+  end
+  if 0 == Ui.PlayerPrefs.GetInt("JingWangJiuXiFirst", 0) and self:IsOpen() then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.JingWangJiuxiFirstOpen)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.JingWangJiuxiFirstOpen)
+  end
+  local bHasShangdengZongzi = me.GetItemCountByTypeInBag(self.ZongziID.ShangdengZongziID) > 0
+  local bHasLvZongzi = me.GetItemCountByTypeInBag(self.ZongziID.LvZongziID) > 0
+  if bHasShangdengZongzi or bHasLvZongzi then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.JingWangJiuxiZongziHandIn)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.JingWangJiuxiZongziHandIn)
+  end
+end
+
+function tbActivity:OnItemUpdate()
+  if not self.nSyncItem then
+    self.nSyncItem = Timer:Register(Env.GAME_FPS * MathRandom(1, 3), self.TryLightRedPoint, self)
+  end
+end

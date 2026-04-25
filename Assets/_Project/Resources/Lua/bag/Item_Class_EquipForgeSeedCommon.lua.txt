@@ -1,0 +1,276 @@
+local tbItem = Item:GetClass("EquipForgeSeed")
+tbItem.EQUIP_RANDOM_ATTR_BEGIN = 1
+tbItem.EQUIP_ATTR_OFFSET = 4
+
+function tbItem:OnCreate(pItem)
+  self:OnAddRandomRandomAttri(pItem)
+end
+
+function tbItem:SetRandomAttrInfo(pItem, nIndex, nAttrId, tbV, nOffSet)
+  nOffSet = nOffSet or 0
+  pItem.SetIntValue((nIndex - 1) * self.EQUIP_ATTR_OFFSET + self.EQUIP_RANDOM_ATTR_BEGIN + nOffSet, nAttrId)
+  for j = 1, 3 do
+    pItem.SetIntValue((nIndex - 1) * self.EQUIP_ATTR_OFFSET + self.EQUIP_RANDOM_ATTR_BEGIN + j + nOffSet, tbV[j] or 0)
+  end
+end
+
+function tbItem:GetRandomAttrInfo(pItem, nOffSet)
+  nOffSet = nOffSet or 0
+  local tbRet = {}
+  for i = 1, 2 do
+    local nAttrId = pItem.GetIntValue((i - 1) * tbItem.EQUIP_ATTR_OFFSET + tbItem.EQUIP_RANDOM_ATTR_BEGIN + nOffSet)
+    if nAttrId > 0 then
+      local tbV = {}
+      for j = 1, 3 do
+        tbV[j] = pItem.GetIntValue((i - 1) * tbItem.EQUIP_ATTR_OFFSET + tbItem.EQUIP_RANDOM_ATTR_BEGIN + j + nOffSet)
+      end
+      tbRet[i] = {nAttrId, tbV}
+    end
+  end
+  return tbRet
+end
+
+function tbItem:GetItemAttr(pItem)
+  local tbRandomAttr = self:GetRandomAttrInfo(pItem)
+  local tbRet = self:GetItemAttrByTemplateId(pItem.dwTemplateId, tbRandomAttr)
+  return tbRet
+end
+
+function tbItem:GetItemAttrByTemplateId(dwTemplateId, tbRandomAttr)
+  local nEquipTemplateId = KItem.GetItemExtParam(dwTemplateId, Item.EquipForge.EXT_PARAM_SEED_TO_EQUIP)
+  local tbRet = {}
+  local tbAttrib = KItem.GetEquipBaseProp(nEquipTemplateId).tbBaseAttrib
+  table.insert(tbRet, {
+    i18n.Get(Item.Equip.tbText.szBaseAttribute)
+  })
+  for i, tbMA in ipairs(tbAttrib) do
+    local szDesc = FightSkill:GetMagicDesc(tbMA.szName, tbMA.tbValue)
+    if szDesc and "" ~= szDesc then
+      local szAttrbColor = Item.tbTipsColorDef.EquipBaseAttrb.ColorName or "Red"
+      table.insert(tbRet, {szDesc, szAttrbColor})
+    end
+  end
+  local nColor = Item:GetQuality(dwTemplateId)
+  local bFlagTitle = false
+  local nPos = KItem.GetEquipPos(nEquipTemplateId)
+  for _, tbV in ipairs(tbRandomAttr) do
+    if not bFlagTitle then
+      table.insert(tbRet, {
+        i18n.EasyGet("\233\153\132\229\138\160\229\177\158\230\128\167")
+      })
+      bFlagTitle = true
+    end
+    if self.tbRandomAttrCfg[tbV[1]] then
+      local tbValue = tbV[2]
+      local tbAttrCfg = self.tbRandomAttrCfg[tbV[1]]
+      local szMagic = tbAttrCfg.szAttrType
+      local szDesc = FightSkill:GetMagicDesc(szMagic, tbValue)
+      szDesc = szDesc .. self:GetAttrNumRange(tbAttrCfg, nPos)
+      table.insert(tbRet, {szDesc, nColor})
+    end
+  end
+  return tbRet
+end
+
+function tbItem:GetAttrNumRange(tbAttrCfg, nPos)
+  local tbMin = {}
+  local tbMax = {}
+  for i = 1, 3 do
+    tbMin[i] = tbAttrCfg["nAttrValueMin" .. i] or 0
+    tbMin[i] = tbMin[i] * tbItem.RandomAttrRatio[nPos]
+    tbMax[i] = tbAttrCfg["nAttrValueMax" .. i] or 0
+    tbMax[i] = tbMax[i] * tbItem.RandomAttrRatio[nPos]
+  end
+  local _, szMinFinalValue = FightSkill:GetMagicDescSplit(tbAttrCfg.szAttrType, tbMin)
+  if type(szMinFinalValue) == "string" then
+    szMinFinalValue = string.match(szMinFinalValue, "%d+")
+  end
+  local _, szMaxFinalValue = FightSkill:GetMagicDescSplit(tbAttrCfg.szAttrType, tbMax)
+  if type(szMaxFinalValue) == "string" then
+    szMaxFinalValue = string.match(szMaxFinalValue, "%d+")
+  end
+  return "\239\188\136" .. szMinFinalValue .. " - " .. szMaxFinalValue .. "\239\188\137"
+end
+
+function tbItem:GetChatLinkInfo(pItem)
+  if pItem.szClass ~= "EquipForgeSeed" then
+    return
+  end
+  local tbInfo = {}
+  tbInfo.nTemplateId = pItem.dwTemplateId
+  tbInfo.RandomAttrInfo = self:GetRandomAttrInfo(pItem)
+  return tbInfo
+end
+
+tbItem.EQUIP_GROUP = {
+  weapon = 1,
+  armor = 2,
+  shoushi = 3,
+  fangju = 4
+}
+tbItem.EQUIPPOS_GROUP = {
+  [Item.EQUIPPOS_WEAPON] = tbItem.EQUIP_GROUP.weapon,
+  [Item.EQUIPPOS_ARMOR] = tbItem.EQUIP_GROUP.armor,
+  [Item.EQUIPPOS_RING] = tbItem.EQUIP_GROUP.shoushi,
+  [Item.EQUIPPOS_NECKLACE] = tbItem.EQUIP_GROUP.shoushi,
+  [Item.EQUIPPOS_AMULET] = tbItem.EQUIP_GROUP.shoushi,
+  [Item.EQUIPPOS_PENDANT] = tbItem.EQUIP_GROUP.shoushi,
+  [Item.EQUIPPOS_BOOTS] = tbItem.EQUIP_GROUP.fangju,
+  [Item.EQUIPPOS_BELT] = tbItem.EQUIP_GROUP.fangju,
+  [Item.EQUIPPOS_HELM] = tbItem.EQUIP_GROUP.fangju,
+  [Item.EQUIPPOS_CUFF] = tbItem.EQUIP_GROUP.fangju
+}
+
+function tbItem:OnAddRandomRandomAttri(pItem)
+  if not pItem or pItem.szClass ~= "EquipForgeSeed" then
+    return
+  end
+  if pItem.nQuality == self.nRandomAttrJingLiangQuality then
+    self:OnRandowAttr(pItem, Item.JLEquipRandomWeight, Item.JLEquipRandomAttriPool)
+  elseif pItem.nQuality == self.nRandomAttrXiYouQuality then
+    self:OnRandowAttr(pItem, Item.XYEquipRandomAttriWeight, Item.XYEquipRandomAttriPool)
+  end
+end
+
+function tbItem:OnRandowAttr(pItem, tbWeight, tbAttrRandomPool)
+  local nAllWeight = 0
+  for i = 0, #tbWeight do
+    nAllWeight = nAllWeight + tbWeight[i]
+  end
+  local nRand = MathRandom(1, nAllWeight)
+  nAllWeight = 0
+  local nAttrNum = 0
+  for i = 0, #tbWeight do
+    nAllWeight = nAllWeight + tbWeight[i]
+    if nRand <= nAllWeight then
+      nAttrNum = i
+      break
+    end
+  end
+  if 0 == nAttrNum then
+    return
+  end
+  self:SetRandowAttrNum(pItem, nAttrNum, tbAttrRandomPool)
+end
+
+function tbItem:SetRandowAttrNum(pItem, nAttrNum, tbAttrRandomPool)
+  if nAttrNum <= 0 then
+    return
+  end
+  local nEquipTemplateId = KItem.GetItemExtParam(pItem.dwTemplateId, Item.EquipForge.EXT_PARAM_SEED_TO_EQUIP)
+  local nPos = KItem.GetEquipPos(nEquipTemplateId)
+  local nEquipGroup = self.EQUIPPOS_GROUP[nPos]
+  local nLevel = Item:GetLevel(nEquipTemplateId)
+  local tbAttrPool = tbAttrRandomPool[nLevel][nEquipGroup]
+  local fnRand = Lib:GetRandomSelect(#tbAttrPool)
+  local tbAttrRet = {}
+  for i = 1, nAttrNum do
+    local nIndex = fnRand()
+    table.insert(tbAttrRet, tbAttrPool[nIndex])
+  end
+  for k, v in ipairs(tbAttrRet) do
+    local tbAttrCfg = self.tbRandomAttrCfg[v]
+    if not tbAttrCfg then
+      LogErr("Random attr config error attrid:" .. v)
+    else
+      local tbV = {}
+      for i = 1, 3 do
+        if tbAttrCfg.szAttrType == "basic_damage_v" and 3 == i then
+          tbV[i] = tbV[1]
+        else
+          local nMin = tbAttrCfg["nAttrValueMin" .. i]
+          local nMax = tbAttrCfg["nAttrValueMax" .. i]
+          if nMax and nMin and nMin <= nMax then
+            nMin = nMin * self.RandomAttrRatio[nPos]
+            nMax = nMax * self.RandomAttrRatio[nPos]
+            tbV[i] = MathRandom(0, nMax - nMin) + nMin
+          else
+            tbV[i] = 0
+          end
+        end
+      end
+      self:SetRandomAttrInfo(pItem, k, v, tbV)
+    end
+  end
+end
+
+tbItem.nRandomAttrXiYouQuality = 6
+tbItem.nRandomAttrJingLiangQuality = 4
+tbItem.RandomAttrRatio = {
+  [Item.EQUIPPOS_HELM] = 1,
+  [Item.EQUIPPOS_ARMOR] = 3,
+  [Item.EQUIPPOS_BELT] = 1,
+  [Item.EQUIPPOS_CUFF] = 1,
+  [Item.EQUIPPOS_BOOTS] = 1,
+  [Item.EQUIPPOS_WEAPON] = 5,
+  [Item.EQUIPPOS_NECKLACE] = 2,
+  [Item.EQUIPPOS_RING] = 2,
+  [Item.EQUIPPOS_PENDANT] = 2,
+  [Item.EQUIPPOS_AMULET] = 2
+}
+
+function tbItem:RandomAttrInit()
+  self.tbRandomAttrCfg = Lib:EasyLoadTabFile("Setting/Item/EquipRandomAttriList.tab", {"nAttrId"})
+end
+
+tbItem:RandomAttrInit()
+
+function tbItem:GetRandomAttrFightPower(pEquip)
+  local nEquipPos = Item.EQUIPTYPE_POS[pEquip.nItemType]
+  if nil ~= nEquipPos and Item:IsMainEquipPos(nEquipPos) then
+    local tbAttr = Item:GetClass(Item.MAIN_EQUIP_CLASS_NAME):GetRandomAttr(pEquip)
+    return self:GetRandomAttrFightPowerByAttrData(nEquipPos, pEquip.nQuality, pEquip.nLevel, tbAttr)
+  else
+    return 0
+  end
+end
+
+function tbItem:GetRandomAttrFightPowerByAttrData(nEquipPos, nQuality, nLevel, tbAttr)
+  if nil ~= nEquipPos and Item:IsMainEquipPos(nEquipPos) then
+    if nQuality == self.nRandomAttrJingLiangQuality then
+      return self:GetRandomAttrFightPower2(nEquipPos, nLevel, tbAttr, Item.JLEquipRandomAttriPool)
+    elseif nQuality == self.nRandomAttrXiYouQuality then
+      return self:GetRandomAttrFightPower2(nEquipPos, nLevel, tbAttr, Item.XYEquipRandomAttriPool)
+    else
+      return 0
+    end
+  else
+    return 0
+  end
+end
+
+function tbItem:GetRandomAttrFightPower2(nEquipPos, nLevel, tbAttr, tbEquipPool)
+  local nAttrCount = #tbAttr
+  local nRet = nAttrCount * tbEquipPool[nLevel][0] * self.RandomAttrRatio[nEquipPos]
+  return nRet
+end
+
+function tbItem:ApplyRandomAttr(pNpc, pEquip, nPlayerId)
+  if not Item:IsMainEquipPos(pEquip.nEquipPos) then
+    return
+  end
+  local tbAttr = Item:GetClass(Item.MAIN_EQUIP_CLASS_NAME):GetRandomAttr(pEquip)
+  for index, tbV in ipairs(tbAttr) do
+    local tbAttrCfg = self.tbRandomAttrCfg[tbV[1]]
+    local szMagic = tbAttrCfg.szAttrType
+    pNpc.ApplyMagicAttrib(szMagic, table.unpack(tbV[2]))
+    if nPlayerId then
+      AttributeHelp:LogAttrApply(nPlayerId, "EquipRandomAttr", szMagic, table.unpack(tbV[2]))
+    end
+  end
+end
+
+function tbItem:RemoveRandomAttr(pNpc, pEquip, nPlayerId)
+  if not Item:IsMainEquipPos(pEquip.nEquipPos) then
+    return
+  end
+  local tbAttr = Item:GetClass(Item.MAIN_EQUIP_CLASS_NAME):GetRandomAttr(pEquip)
+  for index, tbV in ipairs(tbAttr) do
+    local tbAttrCfg = self.tbRandomAttrCfg[tbV[1]]
+    local szMagic = tbAttrCfg.szAttrType
+    pNpc.RemoveMagicAttrib(szMagic, table.unpack(tbV[2]))
+    if nPlayerId then
+      AttributeHelp:LogAttrRemove(nPlayerId, "EquipRandomAttr", szMagic, table.unpack(tbV[2]))
+    end
+  end
+end

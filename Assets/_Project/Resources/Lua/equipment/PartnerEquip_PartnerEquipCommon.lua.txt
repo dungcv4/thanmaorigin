@@ -1,0 +1,1025 @@
+Require("CommonScript/Item/ExtEquip/ExtEquipCfg.lua")
+Require("CommonScript/PartnerEquip/PartnerEquipCfg.lua")
+Require("CommonScript/Player/FightPowerCommom.lua")
+local PartnerEquip = Item.PartnerEquip
+PartnerEquip.eEquipQuality = {
+  Simple = 2,
+  Excellent = 4,
+  Rare = 6
+}
+PartnerEquip.Protocol = {
+  EnhanceEquip = 1,
+  ReforgeEquip = 2,
+  DecomposeEquip = 3,
+  SyncAttrib = 4
+}
+PartnerEquip.ProtocolSymbol = {EnhanceOnce = 1, EnhanceBatch = 2}
+PartnerEquip.ServerProtocolSymbol = {
+  [PartnerEquip.ProtocolSymbol.EnhanceOnce] = 1,
+  [PartnerEquip.ProtocolSymbol.EnhanceBatch] = 10
+}
+PartnerEquip.SAVE_GROUP = GetGroupKey("PartnerEquip")
+PartnerEquip.SAVE_ID = {SUIT_ATTR_LV = 1, REFORGE_FULL_NUM = 2}
+PartnerEquip.ATTR_OFFSET = 10
+PartnerEquip.ATTR_HOLE_NUM = 15
+PartnerEquip.BASE_ATTR_MIN = 1
+PartnerEquip.BASE_ATTR_MAX = 5
+PartnerEquip.RANDOM_ATTR_MIN = 6
+PartnerEquip.RANDOM_ATTR_MAX = 15
+PartnerEquip.COST_MATERIAL = 1
+PartnerEquip.EQUIP_LEVEL = 2
+PartnerEquip.HIDE_SKILL_ID = 3
+PartnerEquip.HIDE_SKILL_LV = 4
+PartnerEquip.MAX_WEIGHT = 1000000
+PartnerEquip.ATTRNUM_PER_SUITATTR = 4
+PartnerEquip.MAX_RANDOMATTR_NUM = Item.PartnerEquip.CFG.nMaxEquipLevel / Item.PartnerEquip.CFG.nRandomAttrStageLevel
+PartnerEquip.PartnerProtectSkillId = -1000
+PartnerEquip.tbSpecialSkillAddFunc = {
+  [PartnerEquip.PartnerProtectSkillId] = function(pNpc, nAddSkillLevel)
+    if MODULE_GAMESERVER then
+      local pPlayer = pNpc.GetPlayer()
+      if not pPlayer or not Lib:IsInteger(nAddSkillLevel) then
+        Log("Add PartnerEquip failed")
+        return
+      end
+      Partner:AddExtraProtectSkillLevel(pPlayer, nAddSkillLevel)
+      Log("Add PartnerEquip Succ, nAddSkillLevel = ", nAddSkillLevel)
+    end
+  end
+}
+PartnerEquip.tbSpecialSkillRemoveFunc = {
+  [PartnerEquip.PartnerProtectSkillId] = function(pNpc, nRemoveLevel)
+    if MODULE_GAMESERVER then
+      local pPlayer = pNpc.GetPlayer()
+      if not pPlayer then
+        Log("Remove PartnerEquip failed")
+        return
+      end
+      Partner:RemoveProtectExtraSkillLevel(pPlayer, nRemoveLevel)
+      Log("Remove PartnerEquip Succ")
+    end
+  end
+}
+
+function PartnerEquip:InitCfg()
+  if self.bLoadConfig then
+    return false
+  end
+  local szFilepath = "Setting/PartnerEquip/PartnerEquipExtAttrCfg.tab"
+  self.tbExtAttrCfg = Lib:EasyLoadTabFile(szFilepath, {"nAttrId"})
+  if not self.tbExtAttrCfg then
+    Lib:LogErrFormat("PartnerEquipCommon: InitCfg failed, %s not found", szFilepath)
+    return false
+  end
+  szFilepath = "Setting/PartnerEquip/PartnerEquipAttrGroupCfg.tab"
+  local tbAttrGroupCfg = Lib:EasyLoadTabFile(szFilepath)
+  if not tbAttrGroupCfg then
+    Lib:LogErrFormat("PartnerEquipCommon: InitCfg failed, %s not found", szFilepath)
+    return false
+  end
+  self.tbAttrGroupCfg = {}
+  local tbAttrGroupWeightForCheck = {}
+  for _, tbInfo in pairs(tbAttrGroupCfg) do
+    self.tbAttrGroupCfg[tbInfo.nGroupId] = self.tbAttrGroupCfg[tbInfo.nGroupId] or {}
+    tbAttrGroupWeightForCheck[tbInfo.nGroupId] = tbAttrGroupWeightForCheck[tbInfo.nGroupId] or 0
+    if not self.tbAttrGroupCfg[tbInfo.nGroupId][tbInfo.nAttrId] then
+      self.tbAttrGroupCfg[tbInfo.nGroupId][tbInfo.nAttrId] = tbInfo.nWeight
+      tbAttrGroupWeightForCheck[tbInfo.nGroupId] = tbAttrGroupWeightForCheck[tbInfo.nGroupId] + tbInfo.nWeight
+    else
+      Lib:LogErrFormat("PartnerEquipCommon: InitCfg failed, duplicate attr id in the same group, nGroupId = %d, nAttrId = %d", tbInfo.nGroupId, tbInfo.nAttrId)
+      return false
+    end
+  end
+  for nGroupId, nSumWeight in pairs(tbAttrGroupWeightForCheck) do
+    if nSumWeight > self.MAX_WEIGHT then
+      Lib:LogErrFormat("PartnerEquipCommon: InitCfg failed, sum weight over than %d, nGroupId = %d", self.MAX_WEIGHT, nGroupId)
+      return false
+    end
+  end
+  szFilepath = "Setting/PartnerEquip/PartnerEquipItemCfg.tab"
+  self.tbEquipItemCfg = Lib:EasyLoadTabFile(szFilepath, {
+    "nTemplateId"
+  })
+  if not self.tbEquipItemCfg then
+    Lib:LogErrFormat("PartnerEquipCommon: InitCfg failed, %s not found", szFilepath)
+    return false
+  end
+  szFilepath = "Setting/PartnerEquip/PartnerEquipGetWay.tab"
+  self.tbEquipGetWayCfg = Lib:EasyLoadTabFile(szFilepath, nil)
+  if not self.tbEquipGetWayCfg then
+    Lib:LogErrFormat("PartnerEquipCommon: InitCfg failed, %s not found", szFilepath)
+    return false
+  end
+  self.bLoadConfig = true
+  return true
+end
+
+PartnerEquip.bLoadConfig = false
+PartnerEquip.bInitRet = PartnerEquip:InitCfg()
+
+function PartnerEquip:CheckCfg()
+  return self.bInitRet
+end
+
+Validator:Register(PartnerEquip.CheckCfg, PartnerEquip)
+
+function PartnerEquip:GetPlayerSuitAttrLevel(pPlayer)
+  if not pPlayer then
+    return
+  end
+  return pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_ID.SUIT_ATTR_LV)
+end
+
+function PartnerEquip:GetSuitAttrInfoByLevel(nSuitAttrLevel)
+  if not Lib:IsInteger(nSuitAttrLevel) then
+    return
+  end
+  if not Item.PartnerEquipEnhance.SUIT_ATTR_VAL[nSuitAttrLevel] then
+    return
+  end
+  local tbSuitAttrVal = Item.PartnerEquipEnhance.SUIT_ATTR_VAL[nSuitAttrLevel]
+  local tbSuitAttr = {}
+  for i = 1, self.ATTRNUM_PER_SUITATTR do
+    table.insert(tbSuitAttr, {
+      szAttrType = tbSuitAttrVal[i][1],
+      nAttrValue1 = tbSuitAttrVal[i][2],
+      nAttrValue2 = tbSuitAttrVal[i][3],
+      nAttrValue3 = tbSuitAttrVal[i][4]
+    })
+  end
+  return tbSuitAttr, 0
+end
+
+function PartnerEquip:GetPlayerAllSuitAttr(pPlayer)
+  if not pPlayer then
+    return
+  end
+  local nSuitAttrLevel = self:GetPlayerSuitAttrLevel(pPlayer)
+  if Lib:IsInteger(nSuitAttrLevel) then
+    return self:GetSuitAttrInfoByLevel(nSuitAttrLevel)
+  end
+end
+
+function PartnerEquip:ApplyAllSuitAttr(pPlayer)
+  if not pPlayer then
+    return
+  end
+  local tbSuitAttr, _ = self:GetPlayerAllSuitAttr(pPlayer)
+  if tbSuitAttr then
+    for _, tbAttrInfo in pairs(tbSuitAttr) do
+      self:DoApplyMagicAttr(pPlayer, tbAttrInfo)
+    end
+  end
+end
+
+function PartnerEquip:RemoveAllSuitAttr(pPlayer)
+  if not pPlayer then
+    return
+  end
+  local tbSuitAttr, _ = self:GetPlayerAllSuitAttr(pPlayer)
+  for _, tbAttrInfo in pairs(tbSuitAttr or {}) do
+    self:DoRemoveMagicAttr(pPlayer, tbAttrInfo)
+  end
+end
+
+function PartnerEquip:SetPlayerSuitAttrLevel(pPlayer, nNewLevel)
+  if not pPlayer or not Lib:IsInteger(nNewLevel) then
+    return
+  end
+  if nNewLevel >= 0 and nNewLevel <= #Item.PartnerEquipEnhance.SUIT_ATTR_VAL then
+    self:RemoveAllSuitAttr(pPlayer)
+    pPlayer.SetUserValue(self.SAVE_GROUP, self.SAVE_ID.SUIT_ATTR_LV, nNewLevel)
+    self:ApplyAllSuitAttr(pPlayer)
+  end
+  if MODULE_GAMESERVER then
+    Item.PartnerEquip:UpdateAsyncSuitAttrLevel(pPlayer)
+  end
+end
+
+function PartnerEquip:GetAttrFromRandomGroup(nGroupId, tbExceptAttrList)
+  if not self.tbAttrGroupCfg[nGroupId] then
+    Lib:LogErrFormat("PartnerEquipCommon: GetAttrFromRandomGroup failed, unexist nGroupId = %d", nGroupId)
+    return nil
+  end
+  local tbExceptAttrIdList = {}
+  if not tbExceptAttrList then
+    tbExceptAttrList = {}
+  else
+    for _, tbAttr in pairs(tbExceptAttrList) do
+      tbExceptAttrIdList[tbAttr.nAttrId] = true
+    end
+  end
+  local tbAttrGroup = Lib:CopyTB(self.tbAttrGroupCfg[nGroupId])
+  tbAttrGroup = Lib:GetSubTable2(tbAttrGroup, tbExceptAttrIdList)
+  local nSumWeight = 0
+  local nPrevWeight = 0
+  for nAttrId, nWeight in pairs(tbAttrGroup) do
+    nSumWeight = nSumWeight + nWeight
+    tbAttrGroup[nAttrId] = nPrevWeight + self.tbAttrGroupCfg[nGroupId][nAttrId]
+    nPrevWeight = tbAttrGroup[nAttrId]
+  end
+  if nSumWeight > 0 then
+    local nRand = MathRandom(1, nSumWeight)
+    for nAttrId, nDealWeight in pairs(tbAttrGroup) do
+      if nDealWeight >= nRand then
+        return self:CalcNewAttrById(nAttrId)
+      end
+    end
+    return nil
+  else
+    Lib:LogErrFormat("PartnerEquipCommon: GetAttrFromRandomGroup failed, SumWeight less than zero, nGroupId = %d", nGroupId)
+    return nil
+  end
+end
+
+function PartnerEquip:CalcNewAttrById(nAttrId)
+  local tbAttr = self.tbExtAttrCfg[nAttrId]
+  if not tbAttr then
+    Lib:LogErrFormat("PartnerEquipCommon: CalcNewAttrById failed, Attr not exist in PartnerEquipExtAttrCfg, nAttrId = %d", nAttrId)
+    return nil
+  end
+  local nAttrValue1 = MathRandom(tbAttr.nAttrValueMin1, tbAttr.nAttrValueMax1)
+  local nAttrValue2 = MathRandom(tbAttr.nAttrValueMin2, tbAttr.nAttrValueMax2)
+  local nAttrValue3 = 0
+  if tbAttr.szAttrType == "basic_damage_v" then
+    nAttrValue3 = nAttrValue1
+  else
+    nAttrValue3 = MathRandom(tbAttr.nAttrValueMin3, tbAttr.nAttrValueMax3)
+  end
+  return {
+    nAttrId = nAttrId,
+    szAttrType = tbAttr.szAttrType,
+    nAttrValue1 = nAttrValue1,
+    nAttrValue2 = nAttrValue2,
+    nAttrValue3 = nAttrValue3,
+    nFightPower = 0
+  }
+end
+
+function PartnerEquip:CheckIsPartnerEquip(pEquip)
+  if not pEquip then
+    return
+  end
+  local nSlot = Item:GetExtEquipSlot(pEquip)
+  if nSlot < Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_WEAPON or nSlot > Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_BOOTS then
+    return false
+  end
+  return true
+end
+
+function PartnerEquip:GetAttrTypeStrByAttrId(nAttrId)
+  if not self.tbExtAttrCfg[nAttrId] then
+    return nil
+  else
+    return self.tbExtAttrCfg[nAttrId].szAttrType
+  end
+end
+
+function PartnerEquip:GetAttrIdByHoleIndex(pEquip, nHoleIndex)
+  local tbAttrInfo = self:GetAttrInfoByHoleIndex(pEquip, nHoleIndex)
+  return tbAttrInfo and tbAttrInfo.nAttrId or 0
+end
+
+function PartnerEquip:GetAttrInfoByHoleIndex(pEquip, nHoleIndex)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return nil
+  end
+  if not Lib:IsInteger(nHoleIndex) then
+    return nil
+  end
+  if nHoleIndex < 1 or nHoleIndex > self.ATTR_HOLE_NUM then
+    return nil
+  end
+  local nOffset = 5 * (nHoleIndex - 1) + self.ATTR_OFFSET
+  local nAttrId = pEquip.GetIntValue(nOffset + 1)
+  if nAttrId <= 0 then
+    return nil
+  end
+  local nAttrValue1 = pEquip.GetIntValue(nOffset + 2)
+  local nAttrValue2 = pEquip.GetIntValue(nOffset + 3)
+  local nAttrValue3 = pEquip.GetIntValue(nOffset + 4)
+  local nFightPower = pEquip.GetIntValue(nOffset + 5)
+  local szAttrType = self:GetAttrTypeStrByAttrId(nAttrId)
+  return {
+    szAttrType = szAttrType,
+    nAttrId = nAttrId,
+    nAttrValue1 = nAttrValue1,
+    nAttrValue2 = nAttrValue2,
+    nAttrValue3 = nAttrValue3,
+    nFightPower = nFightPower
+  }
+end
+
+function PartnerEquip:GetAllBaseAttr(pEquip)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  local tbAllBaseAttr = {}
+  for i = self.BASE_ATTR_MIN, self.BASE_ATTR_MAX do
+    local tbAttr = self:GetAttrInfoByHoleIndex(pEquip, i)
+    if tbAttr then
+      table.insert(tbAllBaseAttr, tbAttr)
+    end
+  end
+  return tbAllBaseAttr
+end
+
+function PartnerEquip:GetAllRandomAttr(pEquip)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  local tbAllRandomAttr = {}
+  for i = self.RANDOM_ATTR_MIN, self.RANDOM_ATTR_MAX do
+    local tbAttr = self:GetAttrInfoByHoleIndex(pEquip, i)
+    if tbAttr then
+      table.insert(tbAllRandomAttr, tbAttr)
+    end
+  end
+  return tbAllRandomAttr
+end
+
+function PartnerEquip:GetHideSkillId(pEquip)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  return pEquip.GetIntValue(self.HIDE_SKILL_ID)
+end
+
+function PartnerEquip:GetHideSkillLevel(pEquip)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  return pEquip.GetIntValue(self.HIDE_SKILL_LV)
+end
+
+function PartnerEquip:GetHideSkillInfo(pEquip)
+  local nHideSkillId = self:GetHideSkillId(pEquip)
+  if nHideSkillId then
+    local tbSkillInfo = FightSkill.tbAllSkillSetting[nHideSkillId]
+    if tbSkillInfo then
+      local szSkillName = i18n.Parse(tbSkillInfo.szSkillName)
+      local szSkillDesc = i18n.Parse(tbSkillInfo.szDesc)
+      return szSkillName, szSkillDesc
+    elseif Item.PartnerEquip.SpecialSkill[nHideSkillId] then
+      local szSkillName = i18n.Parse(i18n.Encode(Item.PartnerEquip.SpecialSkill[nHideSkillId].szSkillName))
+      local szSkillDesc = i18n.Parse(i18n.Encode(Item.PartnerEquip.SpecialSkill[nHideSkillId].szDesc))
+      return szSkillName, szSkillDesc
+    end
+  end
+end
+
+function PartnerEquip:GetAllMagicAttr(pEquip)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  local tbAllAttr = {}
+  tbAllAttr = Lib:MergeTable(tbAllAttr, self:GetAllBaseAttr(pEquip) or {})
+  tbAllAttr = Lib:MergeTable(tbAllAttr, self:GetAllRandomAttr(pEquip) or {})
+  return tbAllAttr
+end
+
+function PartnerEquip:IsRandomAttrFullMax(pEquip, nRandomAttrHoleIndex)
+  if not Lib:IsInteger(nRandomAttrHoleIndex) then
+    return
+  end
+  if nRandomAttrHoleIndex < self.RANDOM_ATTR_MIN or nRandomAttrHoleIndex > self.RANDOM_ATTR_MAX then
+    return
+  end
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  local tbRandAttr = self:GetAttrInfoByHoleIndex(pEquip, nRandomAttrHoleIndex)
+  if tbRandAttr then
+    local tbRandAttrValCfg = Item.PartnerEquipEnhance.REFORGE_RANDOM_ATTR_VAL[tbRandAttr.nAttrId]
+    if tbRandAttrValCfg then
+      local tbMaxVal = tbRandAttrValCfg.tbMaxVal
+      return tbMaxVal[1] <= tbRandAttr.nAttrValue1 and tbMaxVal[2] <= tbRandAttr.nAttrValue2 and tbMaxVal[3] <= tbRandAttr.nAttrValue3
+    end
+  end
+end
+
+function PartnerEquip:IsReforgeFullMax(pEquip)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  if not self:IsEquipFullLevel(pEquip) then
+    return false
+  end
+  for i = self.RANDOM_ATTR_MIN, self.RANDOM_ATTR_MAX do
+    if self:IsExistAttrInHole(pEquip, i) and not self:IsRandomAttrFullMax(pEquip, i) then
+      return false
+    end
+  end
+  return true
+end
+
+function PartnerEquip:IsExistAttrInHole(pEquip, nHoleIndex)
+  if self:GetAttrInfoByHoleIndex(pEquip, nHoleIndex) then
+    return true
+  else
+    return false
+  end
+end
+
+function PartnerEquip:RemoveAttrInfoByHoleIndex(pEquip, nHoleIndex)
+  local tbEmptyAttr = {
+    nAttrId = 0,
+    nAttrValue1 = 0,
+    nAttrValue2 = 0,
+    nAttrValue3 = 0,
+    nFightPower = 0
+  }
+  self:SetAttrInfoByHoleIndex(pEquip, nHoleIndex, tbEmptyAttr, true)
+end
+
+function PartnerEquip:SetAttrInfoByHoleIndex(pEquip, nHoleIndex, tbAttrInfo, bForce)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  if not Lib:IsInteger(nHoleIndex) then
+    return
+  end
+  if nHoleIndex < 1 or nHoleIndex > self.ATTR_HOLE_NUM then
+    return
+  end
+  if self:IsExistAttrInHole(pEquip, nHoleIndex) and not bForce then
+    return
+  end
+  local nOffset = 5 * (nHoleIndex - 1) + self.ATTR_OFFSET
+  pEquip.SetIntValue(nOffset + 1, tbAttrInfo.nAttrId)
+  pEquip.SetIntValue(nOffset + 2, tbAttrInfo.nAttrValue1)
+  pEquip.SetIntValue(nOffset + 3, tbAttrInfo.nAttrValue2)
+  pEquip.SetIntValue(nOffset + 4, tbAttrInfo.nAttrValue3)
+  pEquip.SetIntValue(nOffset + 5, tbAttrInfo.nFightPower)
+end
+
+function PartnerEquip:SetBaseAttr(pEquip, tbAttrInfo, nHoleIndex)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  if nHoleIndex >= self.BASE_ATTR_MIN and nHoleIndex <= self.BASE_ATTR_MAX then
+    self:RemoveAttrInfoByHoleIndex(pEquip, nHoleIndex)
+    self:SetAttrInfoByHoleIndex(pEquip, nHoleIndex, tbAttrInfo)
+  end
+end
+
+function PartnerEquip:SetRandomAttr(pEquip, tbAttrInfo)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  for i = self.RANDOM_ATTR_MIN, self.RANDOM_ATTR_MAX do
+    local nOrgAttrId = self:GetAttrIdByHoleIndex(pEquip, i)
+    if nOrgAttrId <= 0 or tbAttrInfo.nAttrId == self:GetAttrIdByHoleIndex(pEquip, i) then
+      self:RemoveAttrInfoByHoleIndex(pEquip, i)
+      self:SetAttrInfoByHoleIndex(pEquip, i, tbAttrInfo)
+      break
+    end
+  end
+end
+
+function PartnerEquip:SetHideSkill(pEquip, nSkillId, nSkillLevel)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  pEquip.SetIntValue(self.HIDE_SKILL_ID, nSkillId)
+  pEquip.SetIntValue(self.HIDE_SKILL_LV, nSkillLevel)
+end
+
+function PartnerEquip:CheckHasEnoughCostItem(pPlayer, tbNeedCostItem)
+  if not pPlayer then
+    return
+  end
+  if tbNeedCostItem and tbNeedCostItem.Coin and tbNeedCostItem.XuanShi then
+    local nHasXuanShiNum = pPlayer.GetItemCountInBags(Item.PartnerEquip.CFG.nXuanShiTemplateId)
+    if nHasXuanShiNum < tbNeedCostItem.XuanShi then
+      return false, i18n.EasyGet("\231\142\132\231\159\179\228\184\141\232\182\179")
+    end
+    if pPlayer.GetMoney(Currency.TYPE.Coin) < tbNeedCostItem.Coin then
+      return false, i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179")
+    end
+    return true
+  else
+    return false
+  end
+end
+
+function PartnerEquip:GetNeedRewardMaterial(pEquip)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  local nRewardMaterial = pEquip.GetIntValue(self.COST_MATERIAL)
+  return nRewardMaterial
+end
+
+function PartnerEquip:AddCostMaterial(pEquip, nAddCost)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return 0
+  end
+  local nHasCost = self:GetNeedRewardMaterial(pEquip)
+  pEquip.SetIntValue(self.COST_MATERIAL, nHasCost + nAddCost)
+end
+
+function PartnerEquip:GetAllPartnerEquipInBagByPos(pPlayer, nEquipPos)
+  if nEquipPos < Item.PartnerEquip.WEAPON or nEquipPos > Item.PartnerEquip.BOOTS then
+    return
+  end
+  local tbRes = {}
+  local tbItemList = pPlayer.GetItemListInBag("PartnerEquipItem") or {}
+  for _, pEquip in ipairs(tbItemList) do
+    if Item:GetExtEquipSlot(pEquip) == nEquipPos then
+      table.insert(tbRes, pEquip)
+    end
+  end
+  return tbRes
+end
+
+function PartnerEquip:GetAllPartnerEquipByPos(pPlayer, nEquipPos)
+  if nEquipPos < Item.PartnerEquip.WEAPON or nEquipPos > Item.PartnerEquip.BOOTS then
+    return
+  end
+  local pUsingEquip = Item.ExtEquip:GetEquipObj(pPlayer, nEquipPos)
+  local tbEquipList = self:GetAllPartnerEquipInBagByPos(pPlayer, nEquipPos) or {}
+  table.sort(tbEquipList, function(pEquip1, pEquip2)
+    return self:GetEquipFightPower(pEquip1) > self:GetEquipFightPower(pEquip2)
+  end)
+  if pUsingEquip then
+    table.insert(tbEquipList, 1, pUsingEquip)
+  end
+  return tbEquipList
+end
+
+function PartnerEquip:GetEquipAttrDiff(tbAttrInfo1, tbAttrInfo2)
+  if Lib:IsEmptyStr(tbAttrInfo1.szAttrType) and tbAttrInfo1.nAttrId > 0 then
+    tbAttrInfo1.szAttrType = self:GetAttrTypeStrByAttrId(tbAttrInfo1.nAttrId)
+  end
+  if tbAttrInfo2 and Lib:IsEmptyStr(tbAttrInfo2.szAttrType) and tbAttrInfo1.nAttrId > 0 then
+    tbAttrInfo2.szAttrType = self:GetAttrTypeStrByAttrId(tbAttrInfo2.nAttrId)
+  end
+  if tbAttrInfo2 and tbAttrInfo1.szAttrType ~= tbAttrInfo2.szAttrType then
+    return
+  end
+  local szAttr1Desc, szAttr1Value = FightSkill:GetMagicDescSplit(tbAttrInfo1.szAttrType, {
+    tbAttrInfo1.nAttrValue1,
+    tbAttrInfo1.nAttrValue2,
+    tbAttrInfo1.nAttrValue3
+  })
+  if tbAttrInfo2 then
+    local szAttr2Desc, szAttr2Value = FightSkill:GetMagicDescSplit(tbAttrInfo2.szAttrType, {
+      tbAttrInfo2.nAttrValue1,
+      tbAttrInfo2.nAttrValue2,
+      tbAttrInfo2.nAttrValue3
+    })
+    return szAttr1Desc, tonumber(szAttr1Value), tonumber(szAttr2Value)
+  end
+  return szAttr1Desc, tonumber(szAttr1Value), nil
+end
+
+function PartnerEquip:GetEquipAttrDiffByBatch(tbAttrInfoList1, tbAttrInfoList2)
+  local tbAttrDiff = {}
+  if tbAttrInfoList2 and #tbAttrInfoList1 ~= #tbAttrInfoList2 then
+    return
+  end
+  for i = 1, #tbAttrInfoList1 do
+    local szAttrDesc, nAttr1Value, nAttr2Value = self:GetEquipAttrDiff(tbAttrInfoList1[i], tbAttrInfoList2 and tbAttrInfoList2[i] or nil)
+    if szAttrDesc and nAttr1Value then
+      table.insert(tbAttrDiff, {
+        szAttrDesc = szAttrDesc,
+        nAttr1Value = nAttr1Value,
+        nAttr2Value = nAttr2Value
+      })
+    end
+  end
+  return tbAttrDiff
+end
+
+function PartnerEquip:GetEquipAttrNextStatusInfoByHoleIndex(pEquip, nHoleIndex)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  if not Lib:IsInteger(nHoleIndex) or nHoleIndex < self.BASE_ATTR_MIN or nHoleIndex > self.RANDOM_ATTR_MAX then
+    return
+  end
+  local tbOldAttrInfo = self:GetAttrInfoByHoleIndex(pEquip, nHoleIndex)
+  if nHoleIndex >= self.BASE_ATTR_MIN and nHoleIndex <= self.BASE_ATTR_MAX then
+    local nEquipLevel = self:GetEquipLevel(pEquip)
+    local tbNewAttrVal = Item.PartnerEquipEnhance.ENHANCE_BASE_ATTR_VAL[Item:GetExtEquipSlot(pEquip)][nEquipLevel + 1][nHoleIndex + 1 - self.BASE_ATTR_MIN]
+    if not tbNewAttrVal then
+      return
+    else
+      return {
+        szAttrType = tbOldAttrInfo.szAttrType,
+        nAttrId = tbOldAttrInfo and tbOldAttrInfo.nAttrId or 0,
+        nAttrValue1 = (tbOldAttrInfo and tbOldAttrInfo.nAttrValue1 or 0) + tbNewAttrVal[1],
+        nAttrValue2 = (tbOldAttrInfo and tbOldAttrInfo.nAttrValue2 or 0) + tbNewAttrVal[2],
+        nAttrValue3 = (tbOldAttrInfo and tbOldAttrInfo.nAttrValue3 or 0) + tbNewAttrVal[3],
+        nFightPower = (tbOldAttrInfo and tbOldAttrInfo.nFightPower or 0) + (tbNewAttrVal[4] or 0)
+      }
+    end
+  elseif nHoleIndex >= self.RANDOM_ATTR_MIN and nHoleIndex <= self.RANDOM_ATTR_MAX then
+    if not tbOldAttrInfo then
+      return
+    end
+    local tbUpVal = Item.PartnerEquipEnhance.REFORGE_RANDOM_ATTR_VAL[tbOldAttrInfo.nAttrId].tbUpVal
+    local tbMaxVal = Item.PartnerEquipEnhance.REFORGE_RANDOM_ATTR_VAL[tbOldAttrInfo.nAttrId].tbMaxVal
+    return {
+      szAttrType = tbOldAttrInfo.szAttrType,
+      nAttrId = tbOldAttrInfo.nAttrId,
+      nAttrValue1 = math.min(tbOldAttrInfo.nAttrValue1 + tbUpVal[1], tbMaxVal[1]),
+      nAttrValue2 = math.min(tbOldAttrInfo.nAttrValue2 + tbUpVal[2], tbMaxVal[2]),
+      nAttrValue3 = math.min(tbOldAttrInfo.nAttrValue3 + tbUpVal[3], tbMaxVal[3]),
+      nFightPower = math.min(tbOldAttrInfo.nFightPower + tbUpVal[4], tbMaxVal[4])
+    }
+  end
+end
+
+function PartnerEquip:GetMaxRandomAttrInfo(nRandomAttrId)
+  if not Item.PartnerEquipEnhance.REFORGE_RANDOM_ATTR_VAL[nRandomAttrId] then
+    return
+  end
+  local tbMaxVal = Item.PartnerEquipEnhance.REFORGE_RANDOM_ATTR_VAL[nRandomAttrId].tbMaxVal
+  return {
+    nAttrId = nRandomAttrId,
+    nAttrValue1 = tbMaxVal[1],
+    nAttrValue2 = tbMaxVal[2],
+    nAttrValue3 = tbMaxVal[3],
+    nFightPower = tbMaxVal[4]
+  }
+end
+
+function PartnerEquip:GetAttrRange(nAttrId)
+  if not self.tbExtAttrCfg[nAttrId] then
+    return
+  end
+  local tbAttrCfg = self.tbExtAttrCfg[nAttrId]
+  local tbMinAttr = {
+    szAttrType = self:GetAttrTypeStrByAttrId(nAttrId),
+    nAttrId = nAttrId,
+    nAttrValue1 = tbAttrCfg.nAttrValueMin1,
+    nAttrValue2 = tbAttrCfg.nAttrValueMin2,
+    nAttrValue3 = tbAttrCfg.nAttrValueMin3
+  }
+  local tbMaxAttr = {
+    szAttrType = self:GetAttrTypeStrByAttrId(nAttrId),
+    nAttrId = nAttrId,
+    nAttrValue1 = tbAttrCfg.nAttrValueMax1,
+    nAttrValue2 = tbAttrCfg.nAttrValueMax2,
+    nAttrValue3 = tbAttrCfg.nAttrValueMax3
+  }
+  return self:GetEquipAttrDiff(tbMinAttr, tbMaxAttr)
+end
+
+function PartnerEquip:GetBaseAttrDiffByLevel(pEquip, nBaseIndex, nOrgLevel, nTargetLevel)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  local nAttrId = self:GetAttrIdByHoleIndex(pEquip, nBaseIndex)
+  local nEquipType = Item:GetExtEquipSlot(pEquip)
+  if not self.tbExtAttrCfg[nAttrId] then
+    return
+  end
+  if nOrgLevel < 0 or nOrgLevel > Item.PartnerEquip.CFG.nMaxEquipLevel then
+    return
+  end
+  if nTargetLevel < 0 or nTargetLevel > Item.PartnerEquip.CFG.nMaxEquipLevel then
+    return
+  end
+  local tbAttr = {
+    nAttrId = nAttrId,
+    nAttrValue1 = 0,
+    nAttrValue2 = 0,
+    nAttrValue3 = 0
+  }
+  local tbEnhanceCfg = Item.PartnerEquipEnhance.ENHANCE_BASE_ATTR_VAL[nEquipType]
+  for i = nOrgLevel + 1, nTargetLevel do
+    tbAttr.nAttrValue1 = tbAttr.nAttrValue1 + tbEnhanceCfg[i][nBaseIndex][1]
+    tbAttr.nAttrValue2 = tbAttr.nAttrValue2 + tbEnhanceCfg[i][nBaseIndex][2]
+    tbAttr.nAttrValue3 = tbAttr.nAttrValue3 + tbEnhanceCfg[i][nBaseIndex][3]
+  end
+  return self:GetEquipAttrDiff(tbAttr, nil)
+end
+
+function PartnerEquip:GetEnhanceCostItem(nOrgLevel, nTargetLevel)
+  local tbCostCfg = Item.PartnerEquipEnhance.ENHANCE_COST_VAL
+  local tbCostItem = {XuanShi = 0, Coin = 0}
+  for i = nOrgLevel + 1, nTargetLevel do
+    if tbCostCfg[i] then
+      tbCostItem.XuanShi = tbCostItem.XuanShi + (tbCostCfg[i][1] or 0)
+      tbCostItem.Coin = tbCostItem.Coin + (tbCostCfg[i][2] or 0)
+    end
+  end
+  return tbCostItem
+end
+
+function PartnerEquip:GetEquipLevel(pEquip)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  return pEquip.GetIntValue(self.EQUIP_LEVEL)
+end
+
+function PartnerEquip:IsEquipFullLevel(pEquip)
+  local nEquipLevel = self:GetEquipLevel(pEquip)
+  if Lib:IsInteger(nEquipLevel) then
+    return nEquipLevel >= Item.PartnerEquip.CFG.nMaxEquipLevel
+  end
+end
+
+function PartnerEquip:CheckCanAddEquipLevel(pEquip, nAddLevel)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return false
+  end
+  if self:IsEquipFullLevel(pEquip) then
+    return false
+  end
+  if not Lib:IsInteger(nAddLevel) then
+    return false
+  end
+  local nOrgEquipLevel = self:GetEquipLevel(pEquip)
+  if not Lib:IsInteger(nOrgEquipLevel) then
+    return false
+  end
+  local nNewLevel = math.min(nOrgEquipLevel + nAddLevel, Item.PartnerEquip.CFG.nMaxEquipLevel)
+  if nNewLevel < 0 then
+    Lib:LogFormat("PartnerEquipCommon: AddEquipLevel failed, invalid nNewLevel = %s", nNewLevel)
+    return false
+  end
+  if nOrgEquipLevel >= nNewLevel then
+    return false
+  end
+  return true
+end
+
+function PartnerEquip:GetReforgeCostItem()
+  local tbCostCfg = Item.PartnerEquipEnhance.REFORGE_COST_VAL
+  local tbCostItem = {
+    XuanShi = tbCostCfg.XuanShi,
+    Coin = tbCostCfg.Coin
+  }
+  return tbCostItem
+end
+
+function PartnerEquip:CheckCanReforgeEquip(pEquip)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return false
+  end
+  if pEquip.nQuality ~= self.eEquipQuality.Rare then
+    return false, i18n.EasyGet("\233\157\158\231\168\128\230\156\137\229\144\140\228\188\180\232\163\133\229\164\135\228\184\141\229\143\175\233\135\141\233\147\184")
+  end
+  local nEquipLevel = self:GetEquipLevel(pEquip)
+  if not Lib:IsInteger(nEquipLevel) or nEquipLevel < Item.PartnerEquip.CFG.nMaxEquipLevel then
+    return false, i18n.EasyGet("\230\156\170\229\188\186\229\140\150\232\135\179\230\187\161\231\186\167\231\154\132\229\144\140\228\188\180\232\163\133\229\164\135\228\184\141\229\143\175\233\135\141\233\147\184")
+  end
+  for i = self.RANDOM_ATTR_MIN, self.RANDOM_ATTR_MAX do
+    local bIsFullMax = self:IsRandomAttrFullMax(pEquip, i)
+    if false == bIsFullMax then
+      return true
+    end
+  end
+  return false, i18n.EasyGet("\230\173\164\229\144\140\228\188\180\232\163\133\229\164\135\229\183\178\233\135\141\233\147\184\232\135\179\230\156\128\233\171\152\231\186\167")
+end
+
+function PartnerEquip:onApplyEquip(pPlayer, pEquip)
+  if not pPlayer or not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  local tbAllAttr = self:GetAllMagicAttr(pEquip)
+  for _, tbAttrInfo in pairs(tbAllAttr or {}) do
+    pPlayer.ApplyMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+    AttributeHelp:LogAttrApply(pPlayer.dwID, "PartnerEquip", tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+  end
+  local nHideSkillId = self:GetHideSkillId(pEquip)
+  local nHideSkillLv = self:GetHideSkillLevel(pEquip)
+  if Lib:IsInteger(nHideSkillId) and (nHideSkillId > 0 or Item.PartnerEquip.SpecialSkill[nHideSkillId]) and Lib:IsInteger(nHideSkillLv) and nHideSkillLv > 0 then
+    self:DoAddSkill(pPlayer.GetNpc(), nHideSkillId, nHideSkillLv)
+  end
+end
+
+function PartnerEquip:onRemoveEquip(pPlayer, pEquip)
+  if not pPlayer or not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  local tbAllAttr = self:GetAllMagicAttr(pEquip)
+  for _, tbAttrInfo in pairs(tbAllAttr or {}) do
+    pPlayer.RemoveMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+    AttributeHelp:LogAttrRemove(pPlayer.dwID, "PartnerEquip", tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+  end
+  local nHideSkillId = self:GetHideSkillId(pEquip)
+  local nHideSkillLv = self:GetHideSkillLevel(pEquip)
+  if Lib:IsInteger(nHideSkillId) and (nHideSkillId > 0 or Item.PartnerEquip.SpecialSkill[nHideSkillId]) then
+    self:DoRemoveSkill(pPlayer.GetNpc(), nHideSkillId, nHideSkillLv)
+  end
+end
+
+Item:RegisterExtEquipModule({
+  Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_WEAPON,
+  Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_HELM,
+  Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_NECKLACE,
+  Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_CUFF,
+  Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_RING,
+  Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_ARMOR,
+  Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_PENDANT,
+  Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_BELT,
+  Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_AMULET,
+  Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_BOOTS
+}, "PartnerEquip", PartnerEquip)
+
+function PartnerEquip:GetEnhanceFightPower(pEquip, nLevel)
+  local nEquipType = Item:GetExtEquipSlot(pEquip)
+  local tbEnhanceCfg = Item.PartnerEquipEnhance.ENHANCE_BASE_ATTR_VAL[nEquipType]
+  local nEnhanceFightPower = 0
+  for i = 1, nLevel do
+    nEnhanceFightPower = nEnhanceFightPower + tbEnhanceCfg[i][3]
+  end
+  return nEnhanceFightPower
+end
+
+function PartnerEquip:GetEquipFightPower(pEquip)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return 0
+  end
+  local nLevel = self:GetEquipLevel(pEquip)
+  local tbAllRandomAttrInfo = self:GetAllRandomAttr(pEquip)
+  if tbAllRandomAttrInfo then
+    local nSumFightPower = 0
+    for _, tbAttr in pairs(tbAllRandomAttrInfo) do
+      nSumFightPower = nSumFightPower + tbAttr.nFightPower
+    end
+    return nSumFightPower + pEquip.nFightPower + self:GetEnhanceFightPower(pEquip, nLevel)
+  else
+    return pEquip.nFightPower + self:GetEnhanceFightPower(pEquip, nLevel)
+  end
+end
+
+function PartnerEquip:CalcFightPower(pPlayer)
+  local nTotalPower = 0
+  for nEquipPos = Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_WEAPON, Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_BOOTS do
+    local pEquip = Item.ExtEquip:GetEquipObj(pPlayer, nEquipPos)
+    if pEquip then
+      nTotalPower = nTotalPower + self:GetEquipFightPower(pEquip)
+    end
+  end
+  local _, nFightPower = self:GetPlayerAllSuitAttr(pPlayer)
+  if nFightPower then
+    nTotalPower = nTotalPower + nFightPower
+  end
+  return nTotalPower
+end
+
+function PartnerEquip:UpdateFightPower(tbTypes, dwPlayerId)
+  local pPlayer = KPlayer.GetPlayerObjById(dwPlayerId)
+  if not pPlayer then
+    return
+  end
+  FightPower:ChangePower(tbTypes, pPlayer)
+end
+
+function PartnerEquip:onFightPowerUpdateEvent(tbTypes)
+  Event:RegisterEvent(Event.emEVENT_PARTNER_EQUIP_ENHANCE_SUCCESS, PartnerEquip, "UpdateFightPower", tbTypes)
+  Event:RegisterEvent(Event.emEVENT_PARTNER_EQUIP_REFORGE_SUCCESS, PartnerEquip, "UpdateFightPower", tbTypes)
+  Event:RegisterEvent(Event.emEVENT_PARTNER_EQUIP_DECOMPOSE_SUCCESS, PartnerEquip, "UpdateFightPower", tbTypes)
+end
+
+function PartnerEquip:OnEventFightPowerChange(dwID, szType, nFightPower)
+  Event:OnEvent(Event.emEVENT_PARTNER_EQUIP_FIGHTPOWER_CHANGE, dwID, nFightPower)
+end
+
+FightPower:RegisterFPSystemModule({
+  "PartnerEquip"
+}, PartnerEquip)
+
+function PartnerEquip:OnEquip(pPlayer)
+  local tbSuitAttr, _ = self:GetPlayerAllSuitAttr(pPlayer)
+  if tbSuitAttr then
+    for _, tbAttrInfo in pairs(tbSuitAttr) do
+      pPlayer.ApplyMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+      AttributeHelp:LogAttrApply(pPlayer.dwID, "PartnerEquip", tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+    end
+  end
+end
+
+function PartnerEquip:OnUnEquip(pPlayer)
+  local tbSuitAttr, _ = self:GetPlayerAllSuitAttr(pPlayer)
+  if tbSuitAttr then
+    for _, tbAttrInfo in pairs(tbSuitAttr) do
+      pPlayer.RemoveMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+      AttributeHelp:LogAttrRemove(pPlayer.dwID, "PartnerEquip", tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+    end
+  end
+end
+
+function PartnerEquip:IsUseEquip(pPlayer, pEquip)
+  local nPos = Item:GetExtEquipSlot(pEquip)
+  local pUseEquip = Item.ExtEquip:GetEquipObj(pPlayer, nPos)
+  if not pUseEquip or pUseEquip.dwId ~= pEquip.dwId then
+    return false
+  else
+    return true
+  end
+end
+
+function PartnerEquip:MaskUsingEquip(pPlayer, pEquip)
+  if not self:IsUseEquip(pPlayer, pEquip) then
+    return
+  elseif pEquip then
+    local tbAllAttr = self:GetAllMagicAttr(pEquip)
+    for _, tbAttrInfo in pairs(tbAllAttr or {}) do
+      self:DoRemoveMagicAttr(pPlayer, tbAttrInfo)
+    end
+    local nHideSkillId = self:GetHideSkillId(pEquip)
+    local nHideSkillLv = self:GetHideSkillLevel(pEquip)
+    if Lib:IsInteger(nHideSkillId) and (nHideSkillId > 0 or Item.PartnerEquip.SpecialSkill[nHideSkillId]) then
+      self:DoRemoveSkill(pPlayer.GetNpc(), nHideSkillId, nHideSkillLv)
+    end
+  end
+end
+
+function PartnerEquip:UnMaskUsingEquip(pPlayer, pEquip)
+  if not self:IsUseEquip(pPlayer, pEquip) then
+    return
+  elseif pEquip then
+    local tbAllAttr = self:GetAllMagicAttr(pEquip)
+    for _, tbAttrInfo in pairs(tbAllAttr or {}) do
+      self:DoApplyMagicAttr(pPlayer, tbAttrInfo)
+    end
+    local nHideSkillId = self:GetHideSkillId(pEquip)
+    local nHideSkillLv = self:GetHideSkillLevel(pEquip)
+    if Lib:IsInteger(nHideSkillId) and (nHideSkillId > 0 or Item.PartnerEquip.SpecialSkill[nHideSkillId]) and Lib:IsInteger(nHideSkillLv) and nHideSkillLv > 0 then
+      self:DoAddSkill(pPlayer.GetNpc(), nHideSkillId, nHideSkillLv)
+    end
+  end
+end
+
+function PartnerEquip:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  local nEquipSuitLv = pPlayerAsync.GetPartnerEquipSuitLv()
+  local tbEquipSuitAttr = self:GetSuitAttrInfoByLevel(nEquipSuitLv)
+  for _, tbAttrInfo in pairs(tbEquipSuitAttr or {}) do
+    pNpc.ApplyMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+  end
+end
+
+function PartnerEquip:onApplyRobotNpcEquip(pPlayerAsync, pNpc, pEquip)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  local tbAllAttr = self:GetAllMagicAttr(pEquip)
+  for _, tbAttrInfo in pairs(tbAllAttr or {}) do
+    pNpc.ApplyMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+  end
+  local nHideSkillId = self:GetHideSkillId(pEquip)
+  local nHideSkillLv = self:GetHideSkillLevel(pEquip)
+  if Lib:IsInteger(nHideSkillId) and (nHideSkillId > 0 or Item.PartnerEquip.SpecialSkill[nHideSkillId]) and Lib:IsInteger(nHideSkillLv) and nHideSkillLv > 0 then
+    self:DoAddSkill(pNpc, nHideSkillId, nHideSkillLv)
+  end
+end
+
+AttributeModule:Register("PartnerEquip", PartnerEquip)
+
+function PartnerEquip:IsPartnerEquip(pEquip)
+  local nSlot = Item:GetExtEquipSlot(pEquip)
+  if nSlot < Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_WEAPON or nSlot > Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_BOOTS then
+    return false
+  end
+  return true
+end
+
+function PartnerEquip:DoApplyMagicAttr(pPlayer, tbAttrInfo)
+  if pPlayer then
+    pPlayer.ApplyMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+    AttributeHelp:LogAttrApply(pPlayer.dwID, "PartnerEquip", tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+    if MODULE_GAMESERVER then
+      Item.PartnerEquip:CallClientScript(pPlayer, self.Protocol.SyncAttrib, tbAttrInfo, true)
+    end
+  end
+end
+
+function PartnerEquip:DoRemoveMagicAttr(pPlayer, tbAttrInfo)
+  if pPlayer then
+    pPlayer.RemoveMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+    AttributeHelp:LogAttrRemove(pPlayer.dwID, "PartnerEquip", tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+    if MODULE_GAMESERVER then
+      Item.PartnerEquip:CallClientScript(pPlayer, self.Protocol.SyncAttrib, tbAttrInfo, false)
+    end
+  end
+end
+
+function PartnerEquip:DoRemoveSkill(pNpc, nSkillId, nRemoveLevel)
+  if not pNpc or not Lib:IsInteger(nSkillId) then
+    return
+  end
+  if self.tbSpecialSkillRemoveFunc[nSkillId] then
+    self.tbSpecialSkillRemoveFunc[nSkillId](pNpc, nRemoveLevel)
+  else
+    pNpc.RemoveSkill(nSkillId)
+  end
+end
+
+function PartnerEquip:DoAddSkill(pNpc, nSkillId, nLevel)
+  if not (pNpc and Lib:IsInteger(nSkillId)) or not Lib:IsInteger(nLevel) then
+    return
+  end
+  if self.tbSpecialSkillAddFunc[nSkillId] then
+    self.tbSpecialSkillAddFunc[nSkillId](pNpc, nLevel)
+  else
+    pNpc.AddSkill(nSkillId, nLevel)
+  end
+end

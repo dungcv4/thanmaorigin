@@ -1,0 +1,709 @@
+local tbEquip = Item:GetClass("equip")
+
+function tbEquip:OnCreate(pEquip)
+  local nPos = pEquip.nEquipPos
+  local nSeries = pEquip.GetSeries()
+  if nPos >= Item.EQUIPPOS_HELM and nPos <= Item.EQUIPPOS_AMULET and (nSeries <= Item.emSERIES_TYPE.SERIES_NONE or nSeries >= Item.emSERIES_TYPE.SERIES_NUM) then
+    pEquip.SetSeries(MathRandom(Item.emSERIES_TYPE.SERIES_NONE + 1, Item.emSERIES_TYPE.SERIES_NUM - 1))
+  end
+  for i = 0, Item.EQUIP_BASE_ATTRIB_COUNT - 1 do
+    pEquip.SetBaseAttribRange(i, MathRandom(0, Item.EQUIP_BASE_ATTRIB_RANGE_ACCURACY))
+  end
+end
+
+function tbEquip:OnInit(pEquip)
+  local nValue = pEquip.nOrgValue
+  local nFightPower = pEquip.nBaseFightPower
+  pEquip.nFightPower = nFightPower
+  pEquip.SetSingleValue(nValue)
+end
+
+function tbEquip:GetTip(pEquip, pPlayer, bIsCompare, tbItemExtParams, nEquipedType)
+  local tbBaseAttrib = self:GetBaseAttrib(pEquip.dwTemplateId, pEquip, pPlayer, bIsCompare, tbItemExtParams)
+  local tbJingZhuAttr
+  local tbRandomAttrib = self:GetRandomAttrib(pEquip, nil, pEquip.nQuality, pEquip.nEquipPos)
+  local tbSeriesActiveAttrib = self:GetSeriesActiveAttrib(pEquip, pPlayer, tbItemExtParams)
+  local tbLianHuaSuitAttrib, tbEnhanceSuitAttrib
+  local tbStoneData = {}
+  local nQiHunLevel = -1
+  local tbLingZhuData
+  local tbSkillDesc = self:GetAdditionalSkillDesc(pEquip, pPlayer)
+  if nEquipedType ~= Item.Equip.EQUIPED_TYPE.NOT then
+    if nEquipedType == Item.Equip.EQUIPED_TYPE.ME then
+      tbJingZhuAttr = self:GetJingZhuAttrib(pEquip.dwTemplateId, pEquip, pPlayer)
+      tbEnhanceSuitAttrib = self:GetEnhanceSuitAttrib(pEquip, pPlayer, tbItemExtParams)
+    end
+    tbLianHuaSuitAttrib = self:GetLianHuaSuitAttrib(pEquip, pPlayer)
+    tbStoneData = self:GetStoneData(pEquip, pPlayer)
+    nQiHunLevel = Item.QiHun:GetEquipQiHunData(pPlayer, pEquip)
+    tbLingZhuData = self:GetLingZhuData(pEquip, pPlayer)
+  end
+  local tbReturn = self:FormatTips(pEquip.dwTemplateId, tbBaseAttrib, tbJingZhuAttr, tbRandomAttrib, tbSeriesActiveAttrib, tbLianHuaSuitAttrib, tbEnhanceSuitAttrib, tbStoneData, tbLingZhuData, nQiHunLevel, tbSkillDesc)
+  return tbReturn
+end
+
+function tbEquip:GetTipByTemplate(nTemplateId, tbLinkInfo)
+  local tbBaseAttrib = self:GetBaseAttrib(nTemplateId)
+  local tbSkillDesc = self:GetAdditionalSkillDescByTempId(nTemplateId) or {}
+  local tbBaseInfo = Item:GetItemBaseProp(nTemplateId)
+  local tbRandomAttr = {}
+  if tbLinkInfo and tbLinkInfo.tbRandomAttr then
+    tbRandomAttr = self:GetRandomAttrib(nil, tbLinkInfo.tbRandomAttr, tbBaseInfo.nQuality, KItem.GetEquipPos(nTemplateId))
+  end
+  local tbSeriesAttrib = {}
+  if tbLinkInfo and tbLinkInfo.tbSeriesActiveAttrib then
+    local tbAttrList = {}
+    for i, nAttr in ipairs(tbLinkInfo.tbSeriesActiveAttrib) do
+      if 0 ~= nAttr then
+        table.insert(tbAttrList, {
+          Item.EquipForge:UnpackAttr(nAttr)
+        })
+      else
+        table.insert(tbAttrList, {0, 0})
+      end
+    end
+    tbSeriesAttrib = self:GetSeriesActiveAttribByValue(tbAttrList, tbLinkInfo.nSeries, KItem.GetEquipPos(nTemplateId), tbBaseInfo.nLevel, Faction:GetSeries(tbLinkInfo.nFaction))
+  end
+  local tbEnhanceSuitAttrib = self:GetEnhanceSuitAttribByTemp(nTemplateId, tbLinkInfo and tbLinkInfo.nSeries or Item.emSERIES_TYPE.SERIES_NONE)
+  local tbReturn = self:FormatTips(nTemplateId, tbBaseAttrib, {}, tbRandomAttr, tbSeriesAttrib, {}, tbEnhanceSuitAttrib, {}, {}, -1, tbSkillDesc)
+  return tbReturn
+end
+
+function tbEquip:GetMagicAttribDesc(szName, tbValue, nActiveReq)
+  if "" == szName then
+    return ""
+  end
+  local szAttribMsg = FightSkill:GetMagicDesc(szName, tbValue)
+  local szReq = Item:GetActiveReqDesc(nActiveReq)
+  if szReq then
+    szAttribMsg = szAttribMsg .. string.format(" (%s)", szReq)
+  end
+  return szAttribMsg
+end
+
+function tbEquip:GetBaseAttrib(nTemplate, pEquip, pPlayer, bIsCompare, tbItemExtParams)
+  local tbTip = {}
+  local tbAttrib
+  if pEquip then
+    tbAttrib = pEquip.GetBaseAttrib()
+  else
+    tbAttrib = KItem.GetEquipBaseProp(nTemplate).tbBaseAttrib
+  end
+  if not tbAttrib then
+    return
+  end
+  local nAddPercent = Item.EquipLianHua.tbAddPercent[1]
+  local nLianHuaLevel = -1
+  if pPlayer then
+    if pPlayer.GetLianHua then
+      nLianHuaLevel = pPlayer.GetLianHua(pEquip.nEquipPos + 1)
+    else
+      nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(pPlayer, pEquip.nEquipPos)
+    end
+  end
+  if tbItemExtParams and tbItemExtParams.nLianHuaLevel then
+    nLianHuaLevel = tbItemExtParams.nLianHuaLevel
+  end
+  for i, tbMA in ipairs(tbAttrib) do
+    local tbExt = {}
+    local tbV = Lib:CopyTB(tbMA.tbValue)
+    if pEquip and pPlayer and not bIsCompare then
+      local nEnhanceLv = 0
+      if pPlayer.GetEnhance then
+        nEnhanceLv = pPlayer.GetEnhance(pEquip.nEquipPos + 1)
+      else
+        nEnhanceLv = Item.EquipEnhance:GetEquipEnhanceLevel(pPlayer, pEquip.nEquipPos)
+      end
+      local tbValue = Item.EquipEnhance:GetAttrib(pEquip, nEnhanceLv)
+      if tbValue and tbValue[i] then
+        local szName, szValue = FightSkill:GetMagicDescSplit(tbMA.szName, tbValue[i])
+        tbExt.szEnhance = szValue
+      end
+      if nLianHuaLevel == pEquip.nLevel then
+        for k, nV in ipairs(tbV) do
+          tbV[k] = nV + math.ceil(nV * nAddPercent / 100)
+        end
+      end
+      local nWuLianLevel = 0
+      if pPlayer.GetWuLian then
+        nWuLianLevel = pPlayer.GetWuLian(pEquip.nEquipPos + 1)
+      else
+        nWuLianLevel = Item.EquipWuLian:GetEquipWuLianLevel(pPlayer, pEquip.nEquipPos)
+      end
+      local tbValue = Item.EquipWuLian:GetAttrib(pEquip, nWuLianLevel)
+      if tbValue and tbValue[i] then
+        local szName, szValue = FightSkill:GetMagicDescSplit(tbMA.szName, tbValue[i])
+        tbExt.szWuLian = szValue
+      end
+    end
+    local szDesc = self:GetMagicAttribDesc(tbMA.szName, tbV, tbMA.nActiveReq)
+    if szDesc and "" ~= szDesc then
+      local szAttrbColor = Item.tbTipsColorDef.EquipBaseAttrb.ColorName or "Red"
+      tbExt.szColor = Item.tbTipsColorDef.EquipEnhanceAttrb.ColorName or "Red"
+      if pEquip and nLianHuaLevel == pEquip.nLevel then
+        szAttrbColor = Item.EquipLianHua.nLianHuaQuality - 1
+      end
+      if Lib:CountTB(tbExt) > 0 then
+        table.insert(tbTip, {
+          {
+            szDesc,
+            szAttrbColor,
+            tbExt
+          }
+        })
+      else
+        table.insert(tbTip, {szDesc, szAttrbColor})
+      end
+    end
+  end
+  return tbTip or {}
+end
+
+function tbEquip:GetStoneData(pEquip, pPlayer)
+  local tbRet = Item.Stone:GetEquipStoneData(pPlayer, pEquip)
+  if pPlayer.GetLianHua then
+    tbRet.nLianHuaLevel = pPlayer.GetLianHua(pEquip.nEquipPos + 1)
+  else
+    tbRet.nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(pPlayer, pEquip.nEquipPos)
+  end
+  return tbRet
+end
+
+function tbEquip:GetLingZhuData(pEquip, pPlayer)
+  local tbLZData
+  local nWenYangLevel = 0
+  if pPlayer.GetEquipCuiLing then
+    nWenYangLevel = EquipCuiLing:GetSyncWenYangLevel(pPlayer, pEquip.nEquipPos)
+    tbLZData = EquipCuiLing:GetSyncPutOnLingZhuData(pPlayer, pEquip.nEquipPos)
+  else
+    nWenYangLevel = EquipCuiLing:GetWenYangLevel(pPlayer, pEquip.nEquipPos)
+    tbLZData = EquipCuiLing:GetPutOnLingZhuData(pPlayer, pEquip.nEquipPos)
+  end
+  if not tbLZData or tbLZData.nTemplateId <= 0 then
+    return
+  end
+  local tbTip = {}
+  for _, tbAttr in ipairs(tbLZData) do
+    local nAttrId = tbAttr[1]
+    if nAttrId > 0 then
+      local tbAttrCfg = EquipCuiLing.tbLZAttrId2AttrType[tbAttr[1]]
+      local szMagic = tbAttrCfg.szAttrType
+      local tbV = tbAttr[2]
+      local szDesc = FightSkill:GetMagicDesc(szMagic, tbV)
+      table.insert(tbTip, {szDesc, 2})
+    end
+  end
+  return {tbTip = tbTip, nWenYangLevel = nWenYangLevel}
+end
+
+function tbEquip:GetJingZhuAttrib(nTemplate, pEquip, pPlayer)
+  if pEquip.nEquipPos < Item.EQUIPPOS_HELM or pEquip.nEquipPos > Item.EQUIPPOS_AMULET then
+    return
+  end
+  local tbAttrib
+  local tbTips = {}
+  if pEquip then
+    tbAttrib = pEquip.GetBaseAttrib()
+  else
+    tbAttrib = KItem.GetEquipBaseProp(nTemplate).tbBaseAttrib
+  end
+  if pPlayer.GetJingZhu then
+    tbTips.nLevel = pPlayer.GetJingZhu(pEquip.nEquipPos + 1)
+  else
+    tbTips.nLevel = Item.EquipJingZhu:GetJingZhuLevel(pPlayer, pEquip.nEquipPos)
+  end
+  for i, tbMA in ipairs(tbAttrib) do
+    if tbTips.nLevel > 0 then
+      local tbJingZhuAttr = Item.EquipJingZhu:GetJingZhuAddAttrNum(tbTips.nLevel, tbMA.szName)
+      local szName, szValue = FightSkill:GetMagicDescSplit(tbMA.szName, tbJingZhuAttr)
+      local szDesc = string.format("%s : %s", szName, szValue)
+      tbTips[i] = szDesc
+    end
+  end
+  return tbTips
+end
+
+function tbEquip:GetAdditionalSkillDesc(pEquip, pPlayer)
+  local tbTips = {}
+  local tbAttrib
+  if pEquip then
+    tbAttrib = pEquip.GetBaseAttrib()
+  end
+  if not tbAttrib then
+    return
+  end
+  for index, tbMA in ipairs(tbAttrib) do
+    if string.find(tbMA.szName, "add_skill_level") then
+      local nSkillId = tbMA.tbValue[1]
+      local szName = i18n.Parse(FightSkill.tbAllSkillSetting[nSkillId].szSkillName)
+      local szDesc = i18n.Parse(FightSkill.tbAllSkillSetting[nSkillId].szDesc)
+      table.insert(tbTips, {szName = szName, szDesc = szDesc})
+    end
+  end
+  return tbTips
+end
+
+function tbEquip:GetAdditionalSkillDescByTempId(nTemplate)
+  local tbAttrib = KItem.GetEquipBaseProp(nTemplate).tbBaseAttrib
+  if not tbAttrib then
+    return
+  end
+  local tbTips = {}
+  for index, tbMA in ipairs(tbAttrib) do
+    if string.find(tbMA.szName, "add_skill_level") then
+      local nSkillId = tbMA.tbValue[1]
+      local szName = i18n.Parse(FightSkill.tbAllSkillSetting[nSkillId].szSkillName)
+      local szDesc = i18n.Parse(FightSkill.tbAllSkillSetting[nSkillId].szDesc)
+      table.insert(tbTips, {szName = szName, szDesc = szDesc})
+    end
+  end
+  return tbTips
+end
+
+function tbEquip:GetSuitAttrib(pEquip)
+  return {}
+end
+
+function tbEquip:GetLianHuaSuitAttrib(pEquip, pPlayer)
+  if not Item.EquipLianHua.tbMinLeveLimit[pEquip.nEquipPos] then
+    return
+  end
+  if pEquip.nLevel < Item.EquipLianHua.tbMinLeveLimit[pEquip.nEquipPos] then
+    return
+  end
+  local nSuitIndex, tbSuitInfo = Item.EquipLianHua:FindSuitCfgByEquipPos(pEquip.nEquipPos)
+  if not tbSuitInfo then
+    return
+  end
+  local tbTip = {}
+  local tbActivePos = Item.EquipLianHua:GetSuitAttriActivePosTb(pPlayer, pEquip.nEquipPos)
+  local tbSuitNum = Item.EquipLianHua.tbSuit2EquipNum[nSuitIndex]
+  for i = 1, #tbSuitInfo do
+    local szTip = self:GetMagicAttribDesc(tbSuitInfo[i][1], {
+      table.unpack(tbSuitInfo[i], 2)
+    })
+    table.insert(tbTip, {
+      szTip,
+      tbSuitNum[i]
+    })
+  end
+  return {
+    nIndex = nSuitIndex,
+    tbPos = tbActivePos,
+    tbTip = tbTip
+  }
+end
+
+function tbEquip:GetSeriesList(tbEquipList)
+  local tbSeries = {
+    0,
+    0,
+    0,
+    0,
+    0
+  }
+  for nPos, nItemId in pairs(tbEquipList) do
+    local pEquip = KItem.GetItemObj(nItemId)
+    if pEquip and pEquip.nEquipPos >= Item.EQUIPPOS_HELM and pEquip.nEquipPos <= Item.EQUIPPOS_AMULET then
+      local nSeries = pEquip.GetSeries()
+      tbSeries[nSeries] = tbSeries[nSeries] + 1
+    end
+  end
+  return tbSeries
+end
+
+function tbEquip:GetRandomAttrib(pEquip, tbAttrList, nQuality, nEquipPos)
+  local tbTip = {}
+  tbAttrList = tbAttrList or Item:GetClass(Item.MAIN_EQUIP_CLASS_NAME):GetRandomAttr(pEquip)
+  for _, tbAttr in ipairs(tbAttrList) do
+    local nAttrId = tbAttr[1]
+    if nAttrId > 0 and Item:GetClass("EquipForgeSeed").tbRandomAttrCfg[nAttrId] then
+      local tbAttrCfg = Item:GetClass("EquipForgeSeed").tbRandomAttrCfg[nAttrId]
+      local tbV = tbAttr[2]
+      local nColor = nQuality
+      local szMagic = tbAttrCfg.szAttrType
+      local szRange = Item:GetClass("EquipForgeSeed"):GetAttrNumRange(tbAttrCfg, nEquipPos)
+      local szDesc = FightSkill:GetMagicDesc(szMagic, tbV) .. szRange
+      table.insert(tbTip, {szDesc, nColor})
+    end
+  end
+  return {tbTip = tbTip}
+end
+
+function tbEquip:GetSeriesActiveAttrib(pEquip, pPlayer, tbItemExtParams)
+  local tbSeriesList, nPlayerSeries
+  local nLianHuaLevel = 0
+  if pPlayer.GetFaction then
+    nPlayerSeries = KPlayer.GetPlayerInitInfo(pPlayer.GetFaction()).nSeries
+    nLianHuaLevel = pPlayer.GetLianHua(pEquip.nEquipPos + 1)
+    tbSeriesList = self:GetSeriesList(ViewRole.tbEquip)
+  else
+    nPlayerSeries = KPlayer.GetPlayerInitInfo(pPlayer.nFaction).nSeries
+    nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(pPlayer, pEquip.nEquipPos)
+    if pEquip.nPos == pEquip.nEquipPos then
+      tbSeriesList = Item.EquipForge:StatSeries(pPlayer)
+    end
+  end
+  local tbTip = {}
+  local nAddPercent = Item.EquipLianHua.tbAddPercent[2]
+  if tbItemExtParams and tbItemExtParams.nLianHuaLevel then
+    nLianHuaLevel = tbItemExtParams.nLianHuaLevel
+  end
+  local tbAttrList = Item.EquipForge:GetAttr(pEquip)
+  local nEquipSeries = pEquip.GetSeries()
+  for nAttrIndex, tbAttr in ipairs(tbAttrList) do
+    local nGroupId, nLv = table.unpack(tbAttr)
+    if 0 ~= nGroupId and 0 ~= nLv then
+      local _, nColor = Item.EquipForge:ColorAttr(pEquip.nEquipPos, pEquip.nLevel, nLv)
+      local tbSetting = FightSkill:GetExternAttrib(nGroupId, nLv)
+      if tbSetting then
+        for _, tbInfo in ipairs(tbSetting) do
+          local szMagic = tbInfo.szAttribName
+          szMagic = Item.EquipForge.ATTR_CONVERT[szMagic] and Item.EquipForge.ATTR_CONVERT[szMagic][nEquipSeries] or szMagic
+          local szDesc = self:GetMagicAttribDesc(szMagic, tbInfo.tbValue)
+          if nLianHuaLevel == pEquip.nLevel and Item.EquipLianHua:CheckCanAddLianHuaSeeriesAttr(nColor) and tbSeriesList then
+            local tbV = {}
+            for key, value in ipairs(tbInfo.tbValue) do
+              tbV[key] = math.ceil(value * nAddPercent / 100)
+            end
+            local szName, szValue = FightSkill:GetMagicDescSplit(szMagic, tbV)
+            local szcolor = Item.tbTipsColorDef.EquipLianhuaAttrb.ColorName or "Red"
+            table.insert(tbTip, {
+              {
+                szDesc,
+                nColor,
+                szValue,
+                szcolor
+              }
+            })
+          else
+            table.insert(tbTip, {szDesc, nColor})
+          end
+        end
+      end
+    end
+  end
+  return {
+    tbSeriesList = tbSeriesList,
+    nPlayerSeries = nPlayerSeries,
+    tbTip = tbTip
+  }
+end
+
+function tbEquip:GetSeriesActiveAttribByValue(tbAttrList, nEquipSeries, nEquipPos, nEquipLevel, nPlayerSeries)
+  local tbTip = {}
+  for nAttrIndex, tbAttr in ipairs(tbAttrList) do
+    local nGroupId, nLv = table.unpack(tbAttr)
+    if 0 ~= nGroupId and 0 ~= nLv then
+      local _, nColor = Item.EquipForge:ColorAttr(nEquipPos, nEquipLevel, nLv)
+      local tbSetting = FightSkill:GetExternAttrib(nGroupId, nLv)
+      if tbSetting then
+        for _, tbInfo in ipairs(tbSetting) do
+          local szMagic = tbInfo.szAttribName
+          szMagic = Item.EquipForge.ATTR_CONVERT[szMagic] and Item.EquipForge.ATTR_CONVERT[szMagic][nEquipSeries] or szMagic
+          local szDesc = self:GetMagicAttribDesc(szMagic, tbInfo.tbValue)
+          table.insert(tbTip, {szDesc, nColor})
+        end
+      end
+    end
+  end
+  return {nPlayerSeries = nPlayerSeries, tbTip = tbTip}
+end
+
+function tbEquip:GetEnhanceSuitAttrib(pEquip, pPlayer, tbItemExtParams)
+  if pEquip.nEquipPos < Item.EQUIPPOS_HELM or pEquip.nEquipPos > Item.EQUIPPOS_AMULET then
+    return
+  end
+  local tbTip = {}
+  local nEnhanceLv, nMaxEnhanceLv, nLianHuaLevel
+  if pPlayer.GetEnhance then
+    nEnhanceLv = pPlayer.GetEnhance(pEquip.nEquipPos + 1)
+    nLianHuaLevel = pPlayer.GetLianHua(pEquip.nEquipPos + 1)
+    nMaxEnhanceLv = Item.EquipEnhance:GetEnhanceLvLimit(pEquip, nLianHuaLevel)
+  else
+    nEnhanceLv = Item.EquipEnhance:GetEquipEnhanceLevel(pPlayer, pEquip.nEquipPos)
+    if tbItemExtParams and tbItemExtParams.nLianHuaLevel then
+      nLianHuaLevel = tbItemExtParams.nLianHuaLevel
+    else
+      nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(pPlayer, pEquip.nEquipPos)
+    end
+    nMaxEnhanceLv = Item.EquipEnhance:GetEnhanceLvLimit(pEquip, nLianHuaLevel)
+  end
+  local tbAttrList = Item.EquipEnhance:GetSuitAttrib(pEquip, nEnhanceLv, nLianHuaLevel, pEquip.GetSeries())
+  for _, tbAttr in ipairs(tbAttrList) do
+    local szTip = string.format("%s%s", Lib:StrFillL(string.format("+%d", tbAttr.nReqLv), 6), self:GetMagicAttribDesc(tbAttr.tbAttr[1], {
+      table.unpack(tbAttr.tbAttr, 2)
+    }))
+    if tbAttr.bActive then
+      table.insert(tbTip, {szTip, "NewGreen"})
+    else
+      table.insert(tbTip, {szTip, "Gray"})
+    end
+  end
+  return {
+    nEnhanceLv = nEnhanceLv,
+    nMaxEnhanceLv = nMaxEnhanceLv,
+    tbTip = tbTip
+  }
+end
+
+function tbEquip:GetEnhanceSuitAttribByTemp(nTemplateId, nSeries)
+  local tbTip = {}
+  local tbAttrList = Item.EquipEnhance:GetSuitAttrib(nTemplateId, nil, nil, nSeries)
+  if not tbAttrList then
+    return
+  end
+  for _, tbAttr in ipairs(tbAttrList) do
+    local szTip = string.format("%s%s", Lib:StrFillL(string.format("+%d", tbAttr.nReqLv), 6), self:GetMagicAttribDesc(tbAttr.tbAttr[1], {
+      table.unpack(tbAttr.tbAttr, 2)
+    }))
+    table.insert(tbTip, {szTip, "Gray1"})
+  end
+  return {
+    nEnhanceLv = 0,
+    nMaxEnhanceLv = Item.EquipEnhance:GetEnhanceLvLimit(nTemplateId, 0),
+    tbTip = tbTip
+  }
+end
+
+function tbEquip:FormatTips(nTemplateId, tbBaseAttrib, tbJingZhuAttrib, tbRandomAttrib, tbSeriesActiveAttrib, tbLianHuaSuitAttrib, tbEnhanceSuitAttrib, tbStoneData, tbLingZhuData, nQiHunLevel, tbSkillDesc)
+  local tbAttribs = {}
+  if next(tbBaseAttrib) then
+    table.insert(tbAttribs, {
+      i18n.Get(Item.Equip.tbText.szBaseAttribute)
+    })
+    for i, v in ipairs(tbBaseAttrib) do
+      local szText, szColor = table.unpack(v)
+      if "table" == type(szText) then
+        local tbV = Lib:CopyTB(v)
+        if tbV[1] and not Lib:IsEmptyStr(tbV[1][3].szEnhance) then
+          tbV[1][3].szEnhance = i18n.Get(Item.Equip.tbText.szEnhanceValue, szText[3].szEnhance)
+        end
+        if tbV[1] and not Lib:IsEmptyStr(tbV[1][3].szWuLian) then
+          tbV[1][3].szWuLian = i18n.Get(Item.Equip.tbText.szWuLianValue, szText[3].szWuLian)
+        end
+        table.insert(tbAttribs, tbV)
+      else
+        table.insert(tbAttribs, v)
+      end
+    end
+  end
+  if tbJingZhuAttrib and next(tbJingZhuAttrib) and tbJingZhuAttrib.nLevel > 0 then
+    table.insert(tbAttribs, {
+      i18n.Get(Item.Equip.tbText.szJingZhuAttributeAndLevel, tbJingZhuAttrib.nLevel)
+    })
+    local szColor = Item.tbTipsColorDef.EquipJingzhuAttrb.ColorName or "Red"
+    for index, value in ipairs(tbJingZhuAttrib) do
+      table.insert(tbAttribs, {
+        {value, szColor}
+      })
+    end
+  end
+  if next(tbSeriesActiveAttrib) and next(tbSeriesActiveAttrib.tbTip) then
+    table.insert(tbAttribs, {
+      i18n.EasyGet("\230\180\151\231\187\131\229\177\158\230\128\167")
+    })
+    local tbSeriesList = tbSeriesActiveAttrib.tbSeriesList
+    for i, v in ipairs(tbSeriesActiveAttrib.tbTip) do
+      if tbSeriesList then
+        local tbV = Lib:CopyTB(v)
+        if "table" == type(tbV[1]) then
+          tbV[1][2] = Item:GetQualityColor(tbV[1][2])
+          tbV[1][3] = {
+            tbLianHua = i18n.Get(Item.Equip.tbText.szLianHuaValue, tbV[1][3]),
+            szColor = tbV[1][4]
+          }
+        else
+        end
+        table.insert(tbAttribs, tbV)
+      else
+        table.insert(tbAttribs, v)
+      end
+    end
+  end
+  if next(tbRandomAttrib) and next(tbRandomAttrib.tbTip) then
+    table.insert(tbAttribs, {
+      i18n.EasyGet("\233\153\132\229\138\160\229\177\158\230\128\167")
+    })
+    for i, v in ipairs(tbRandomAttrib.tbTip) do
+      table.insert(tbAttribs, v)
+    end
+  end
+  if tbLianHuaSuitAttrib and next(tbLianHuaSuitAttrib) and next(tbLianHuaSuitAttrib.tbTip) then
+    local szSuitName = Item.EquipLianHua:GetLianHuaSuitName(tbLianHuaSuitAttrib.nIndex)
+    table.insert(tbAttribs, {
+      i18n.Get(szSuitName)
+    })
+    local nActiveCount = Lib:CountTB(tbLianHuaSuitAttrib.tbPos)
+    local tbEquipName = Item.EquipLianHua:GetLianHuaSuitEquipName(tbLianHuaSuitAttrib.nIndex)
+    local szExt = ""
+    for i, v in ipairs(tbEquipName) do
+      if tbLianHuaSuitAttrib.tbPos[i] then
+        szExt = szExt .. "<color=#54ab4d>" .. v .. "   </color>"
+      else
+        szExt = szExt .. "<color=#939392>" .. v .. "   </color>"
+      end
+    end
+    table.insert(tbAttribs, {
+      {
+        "",
+        "Blue",
+        {tbLianHuaSuit = szExt}
+      }
+    })
+    for i, v in ipairs(tbLianHuaSuitAttrib.tbTip) do
+      local szDesc = i18n.Get(Item.Equip.tbText.szLianHuaSuitTips, v[2], v[1])
+      if nActiveCount >= v[2] then
+        table.insert(tbAttribs, {szDesc, "NewGreen"})
+      else
+        table.insert(tbAttribs, {szDesc, "Gray"})
+      end
+    end
+  end
+  if tbEnhanceSuitAttrib and next(tbEnhanceSuitAttrib) and next(tbEnhanceSuitAttrib.tbTip) then
+    table.insert(tbAttribs, {
+      i18n.Get(Item.Equip.tbText.szEnhanceActiveAttribute, tbEnhanceSuitAttrib.nEnhanceLv, tbEnhanceSuitAttrib.nMaxEnhanceLv)
+    })
+    for i, v in ipairs(tbEnhanceSuitAttrib.tbTip) do
+      table.insert(tbAttribs, v)
+    end
+  end
+  if tbLingZhuData and next(tbLingZhuData) then
+    table.insert(tbAttribs, {
+      i18n.EasyGet("\231\129\181\231\143\160\229\177\158\230\128\167\239\188\136\230\184\169\229\133\187\231\173\137\231\186\167\239\188\154{0}\239\188\137", tbLingZhuData.nWenYangLevel)
+    })
+    for i, v in ipairs(tbLingZhuData.tbTip) do
+      table.insert(tbAttribs, v)
+    end
+  end
+  if tbStoneData and next(tbStoneData) then
+    local nCurStone = 0
+    local bShowTittle = true
+    for nHole, nStoneTemplateId in ipairs(tbStoneData) do
+      if nStoneTemplateId > 0 then
+        nCurStone = nCurStone + 1
+      end
+    end
+    for nHole, nStoneTemplateId in ipairs(tbStoneData) do
+      if nStoneTemplateId > 0 then
+        local tbStoneAttrCfg = Item.Stone:GetStoneAttri(nStoneTemplateId)
+        local szText, szText2
+        local szStoneName, nIcon, nView, nQuality = KItem.GetItemShowInfo(nStoneTemplateId, me.nFaction, me.nFactionSect, me.nSex)
+        if tbStoneAttrCfg[1] then
+          szText = FightSkill:GetMagicDesc(tbStoneAttrCfg[1][1], {
+            tbStoneAttrCfg[1][2],
+            tbStoneAttrCfg[1][3],
+            tbStoneAttrCfg[1][4]
+          })
+        else
+          szText = ""
+        end
+        if tbStoneAttrCfg[2] then
+          szText2 = FightSkill:GetMagicDesc(tbStoneAttrCfg[2][1], {
+            tbStoneAttrCfg[2][2],
+            tbStoneAttrCfg[2][3],
+            tbStoneAttrCfg[2][4]
+          })
+        else
+          szText2 = ""
+        end
+        if bShowTittle then
+          local tbEquipInfo = Item:GetItemBaseProp(nTemplateId)
+          local nMaxHole, nMaxLevel = Item.Stone:GetMaxHoleAndLevel(tbStoneData.nLianHuaLevel, tbEquipInfo.nLevel, Item.EQUIPTYPE_POS[tbEquipInfo.nItemType])
+          table.insert(tbAttribs, {
+            i18n.Get(Item.Equip.tbText.szStoneNumAndLevelLimit, nCurStone, nMaxHole, nMaxLevel)
+          })
+          bShowTittle = false
+        end
+        table.insert(tbAttribs, {
+          szText,
+          nQuality,
+          nIcon,
+          nil,
+          szText2,
+          i18n.Parse(szStoneName),
+          nil,
+          nTemplateId
+        })
+      end
+    end
+  end
+  if nQiHunLevel and nQiHunLevel >= 0 then
+    if nQiHunLevel > 0 then
+      local szDesc = i18n.EasyGet("\229\153\168\233\173\130\231\173\137\231\186\167\239\188\154{0}\231\186\167", nQiHunLevel)
+      table.insert(tbAttribs, {szDesc})
+    else
+      table.insert(tbAttribs, {
+        i18n.EasyGet("\229\153\168\233\173\130\231\173\137\231\186\167\239\188\1540\231\186\167")
+      })
+    end
+  end
+  if tbSkillDesc and next(tbSkillDesc) then
+    for index, tbInfo in ipairs(tbSkillDesc) do
+      local szTemp1 = i18n.Get(Item.Equip.tbText.szPassiveSkill, tbInfo.szName)
+      local szTemp2 = i18n.Get(Item.Equip.tbText.szDesc, tbInfo.szDesc)
+      local szText2 = szTemp1 .. "\n" .. szTemp2
+      table.insert(tbAttribs, {
+        nil,
+        nil,
+        nil,
+        nil,
+        szText2
+      })
+    end
+  end
+  return tbAttribs
+end
+
+function tbEquip:GetBaseAttributePower(pEquip)
+  local nAttributePower = GetItemAttributePower(pEquip.dwId)
+  return nAttributePower
+end
+
+function tbEquip:BeforeDelete(pEquip)
+  local ownerId = GetItemOwner(pEquip.dwId)
+  local tbEquipData = {
+    pEquip.dwTemplateId
+  }
+  local json = Lib:EncodeJson(tbEquipData)
+  local b64 = Lib:Base64Encode(json)
+  Log("DeleteEquip", ownerId, pEquip.nItemType, json, b64)
+end
+
+function tbEquip:GiveBackEquip(nPlayerID, tbData)
+  local json = Lib:Base64Decode(tbData)
+  local tbEquipData = Lib:DecodeJson(json)
+  Log("GiveBackEquip", nPlayerID, tbData, json)
+  local pPlayer = KPlayer.GetPlayerObjById(nPlayerID)
+  if pPlayer then
+    self:AddEquipToPlayer(pPlayer, tbEquipData)
+  else
+    LogErr("GiveBackEquip no Player", nPlayerID, tbData)
+  end
+end
+
+function tbEquip:AddEquipToPlayer(pPlayer, tbData)
+  if pPlayer.GetFreeBagCount() < 1 then
+    pPlayer.Msg(i18n.Get(Item.Equip.tbText.szLackBagSpare))
+    return
+  end
+  local dwTemplateId = tbData[1]
+  local pEquip = pPlayer.AddItemEx(dwTemplateId, 1, {}, Env.LogWay_GiveBackEquip)
+  if pEquip then
+    local isUse = false
+    if self:IsEquipInBody(pPlayer, pEquip) then
+      Item:UnuseEquip(pPlayer, pEquip.nEquipPos)
+      isUse = true
+    end
+    if isUse then
+      Item:UseEquip(pPlayer, pEquip.dwId)
+    end
+  else
+    LogErr("AddEquipToPlayer no Equip", pPlayer.dwID, dwTemplateId)
+  end
+end
+
+function tbEquip:IsEquipInBody(pPlayer, pEquip)
+  local tbEquips = pPlayer.GetEquips()
+  return tbEquips[pEquip.nEquipPos] == pEquip.dwId
+end

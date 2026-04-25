@@ -1,0 +1,246 @@
+Require("Script/PartnerEquip/PartnerEquipC.lua")
+local tbWnd = Ui:CreateClass("UIOtherPartnerEquipInfo", "UIPanel")
+local PartnerEquipC = Item.PartnerEquip
+local tbControls = {
+  leftItemTemplate = "L/leftItemTemplate",
+  txtTotalFightPowerValue = "R/imgFightPowerBg/txtValue",
+  btnSuitLook = "R/btnSuitLook",
+  normal = "R/normal",
+  UIItemGrid = "R/normal/UIItemGrid",
+  txtEquipName = "R/normal/txtEquipName",
+  txtLevelNow = "R/normal/txtLevelNow",
+  imgArrow = "R/normal/imgArrow",
+  txtLevelNext = "R/normal/txtLevelNext",
+  txtFullLevelTips = "R/normal/txtFullLevelTips",
+  empty = "R/empty",
+  itemEmpty = "R/empty/itemEmpty"
+}
+local tbAttrBase = {
+  attrBase = "R/normal/attributeCell/attrBasic/attr%d",
+  txtAttrTip = "/txtAttrTip",
+  txtAttrValue = "/txtAttrValue",
+  imgArrow1 = "/imgArrow1",
+  txtAttrValueNext = "/txtAttrValueNext",
+  txtAttrValueUp = "/txtAttrValueUp"
+}
+local tbAttrRandom = {
+  attrRandomTemplate = "R/normal/attributeCell/attrRandom/attrRandomTemplate",
+  attrNormal = "attrNormal",
+  txtAttrTip = "attrNormal/txtAttrTip",
+  txtAttrValueNow = "attrNormal/txtAttrValueNow",
+  imgArrow1 = "attrNormal/imgArrow1",
+  txtAttrValueNext = "attrNormal/txtAttrValueNext",
+  txtAttrValueUp = "attrNormal/txtAttrValueUp",
+  txtLimit = "attrNormal/txtLimit",
+  attrLock = "attrLock",
+  txtLock = "attrLock/txtLock"
+}
+local tbAttrHide = {
+  attrHide = "R/normal/attributeCell/attrHide",
+  attrLock = "R/normal/attributeCell/attrHide/attrLock",
+  attrHideContent = "R/normal/attributeCell/attrHide/attrHideContent"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self.tbLeftItemList = {}
+  self.tbLeftItemGridView = Ui:NewItemGridView(self, tbControls.leftItemTemplate)
+end
+
+function tbWnd:OnOpen()
+  self.pAsyncRole = self.tbOwner.pAsyncRole
+  self.tbExtEquips = self.tbOwner.tbExtEquips
+  self:UpdateLeftItem()
+  Ui:Button_BindEvent(self.pPanel, tbControls.btnSuitLook, self.OnClickEquipSuit, self)
+end
+
+function tbWnd:UpdateLeftItem()
+  self.tbLeftItemList = {}
+  for i = Item.PartnerEquip.WEAPON, Item.PartnerEquip.BOOTS do
+    if 0 ~= GetTimeFrameState(Item.PartnerEquip.CFG.OpenTimeFrame[i]) then
+      local pItem
+      if self.tbExtEquips[i] then
+        pItem = KItem.GetItemObj(self.tbExtEquips[i])
+      end
+      table.insert(self.tbLeftItemList, {
+        nFightPower = pItem and PartnerEquipC:GetEquipFightPower(pItem) or 0,
+        nEquipType = i,
+        nItemId = pItem and pItem.dwId or nil,
+        nItemTemplateId = pItem and pItem.dwTemplateId or nil
+      })
+    end
+  end
+  for nIndex, tb in ipairs(self.tbLeftItemList) do
+    self.tbLeftItemGridView:SetEmpty(nIndex)
+    local szItemKey = self.tbLeftItemGridView:GetItemKey(nIndex)
+    if tb.nItemTemplateId then
+      self.tbLeftItemGridView:SetItem(nIndex, {
+        "Item",
+        tb.nItemTemplateId
+      }, false)
+      self.pPanel:SetActive(szItemKey .. "/Empty", false)
+    else
+      self.pPanel:SetActive(szItemKey .. "/Empty", true)
+    end
+    self.pPanel:Label_SetText(szItemKey .. "/txtClothes", i18n.Get(Item.PartnerEquip.CFG.EquipPosDesc[tb.nEquipType]))
+    self.pPanel:Button_SetEnable(szItemKey .. "/Button", true)
+    self.pPanel:SetActive(szItemKey .. "/imgSelected", false)
+    Ui:Button_BindEvent(self.pPanel, szItemKey .. "/Button", self.SelectLeftItem, self, tb.nEquipType)
+  end
+  for _, tb in ipairs(self.tbLeftItemList) do
+    if tb.nItemId then
+      self:SelectLeftItem(tb.nEquipType)
+      return
+    end
+  end
+  self:SelectLeftItem(Item.PartnerEquip.WEAPON)
+end
+
+function tbWnd:OnClickEquipSuit()
+  local tbWindow = Ui:GetWindow("UIViewRole")
+  if tbWindow then
+    tbWindow:OpenEquipSuitActive(self.pAsyncRole)
+  end
+end
+
+function tbWnd:SelectLeftItem(nEquipType)
+  for nIndex, tb in ipairs(self.tbLeftItemList) do
+    if tb.nEquipType == nEquipType then
+      local szItemKey = self.tbLeftItemGridView:GetItemKey(nIndex)
+      if self.nSelectLeftIndex then
+        local szOldItemKey = self.tbLeftItemGridView:GetItemKey(self.nSelectLeftIndex)
+        self.pPanel:SetActive(szOldItemKey .. "/imgSelected", false)
+      end
+      self.pPanel:SetActive(szItemKey .. "/imgSelected", true)
+      self.nSelectLeftIndex = nIndex
+      self.nSelectLeftEquipType = nEquipType
+      self:__OnClickLeftItem(tb)
+      break
+    end
+  end
+end
+
+function tbWnd:ShowTotalFightPower()
+  local nTotalFightPower = self:CalcOtherFightPower()
+  self.pPanel:Label_SetText(tbControls.txtTotalFightPowerValue, nTotalFightPower)
+end
+
+function tbWnd:CalcOtherFightPower()
+  local nTotalFightPower = 0
+  for _, tbEquipInfo in ipairs(self.tbLeftItemList) do
+    nTotalFightPower = nTotalFightPower + tbEquipInfo.nFightPower
+  end
+  return nTotalFightPower
+end
+
+function tbWnd:UpdateRightPanel(nEquipType)
+  if Lib:IsInteger(nEquipType) and nEquipType >= Item.PartnerEquip.WEAPON and nEquipType <= Item.PartnerEquip.BOOTS then
+    self.nEquipType = nEquipType
+  else
+    self.nEquipType = self.nEquipType or Item.PartnerEquip.WEAPON
+  end
+  self:ShowTotalFightPower()
+  local nSuitAttrLevel = self.pAsyncRole.GetPartnerEquipSuitLv()
+  if nSuitAttrLevel and nSuitAttrLevel > 0 then
+    self.pPanel:Button_SetText(tbControls.btnSuitLook, i18n.EasyGet("\229\165\151\232\163\133\229\177\158\230\128\167{0}\231\186\167", nSuitAttrLevel), "txt")
+  else
+    self.pPanel:Button_SetText(tbControls.btnSuitLook, i18n.EasyGet("\229\165\151\232\163\133\229\177\158\230\128\167\230\156\170\230\191\128\230\180\187"), "txt")
+  end
+  local pItem
+  if self.tbExtEquips[self.nEquipType] then
+    pItem = KItem.GetItemObj(self.tbExtEquips[self.nEquipType])
+  end
+  if pItem then
+    self:__UpdateNormal(pItem)
+  end
+  self.pPanel:SetActive(tbControls.normal, nil ~= pItem)
+  self.pPanel:SetActive(tbControls.empty, nil == pItem)
+end
+
+function tbWnd:__UpdateNormal(pItem)
+  if not self.tbEquipGrid then
+    self.tbEquipGrid = Ui:NewExistItemGrid(self, tbControls.UIItemGrid)
+  else
+    self.tbEquipGrid:Clear()
+  end
+  self.tbEquipGrid:SetItemByTemplate(pItem.dwTemplateId, 0)
+  self.pPanel:Label_SetText(tbControls.txtEquipName, i18n.Parse(pItem.szName))
+  local nEquipLevelNow = PartnerEquipC:GetEquipLevel(pItem)
+  self.pPanel:SetActive(tbControls.txtFullLevelTips, nEquipLevelNow >= Item.PartnerEquip.CFG.nMaxEquipLevel)
+  self.pPanel:SetActive(tbControls.txtLevelNow, nEquipLevelNow < Item.PartnerEquip.CFG.nMaxEquipLevel and nEquipLevelNow > 0)
+  self.pPanel:Label_SetText(tbControls.txtLevelNow, i18n.EasyGet("{0}\231\186\167", nEquipLevelNow))
+  self:__UpdateAttrBasicInfo(pItem)
+  self:__UpdateAttrRandomInfo(pItem)
+  self:__UpdateAttrHideInfo(pItem)
+end
+
+function tbWnd:__UpdateEmpty()
+end
+
+function tbWnd:__UpdateAttrBasicInfo(pItem)
+  local tbBasicAttr = PartnerEquipC:GetAllBaseAttr(pItem) or {}
+  for nIndex, tbAttr in ipairs(tbBasicAttr) do
+    local szRoot = string.format(tbAttrBase.attrBase, nIndex)
+    local szAttrDesc, nAttrValue, _ = PartnerEquipC:GetEquipAttrDiff(tbAttr, nil)
+    self.pPanel:Label_SetText(szRoot .. tbAttrBase.txtAttrTip, szAttrDesc)
+    self.pPanel:Label_SetText(szRoot .. tbAttrBase.txtAttrValue, nAttrValue)
+  end
+end
+
+function tbWnd:__UpdateAttrRandomInfo(pItem)
+  if not self.tbRandomAttrView then
+    self.tbRandomAttrView = Ui:NewScrollView(self, tbAttrRandom.attrRandomTemplate)
+  end
+  local tbAllRandomAttr = PartnerEquipC:GetAllRandomAttr(pItem) or {}
+  for i = 1, PartnerEquipC.MAX_RANDOMATTR_NUM do
+    self.tbRandomAttrView:SetElement(i, function(tbElement, nIndex)
+      self:__SetRandomAttrElement(tbElement, tbAllRandomAttr[nIndex], nIndex)
+    end)
+  end
+end
+
+function tbWnd:__SetRandomAttrElement(tbElement, tbOrgRandomAttr, nIndex)
+  if not tbOrgRandomAttr then
+    tbElement.pPanel:SetActive(tbAttrRandom.attrNormal, false)
+    tbElement.pPanel:SetActive(tbAttrRandom.attrLock, true)
+    tbElement.pPanel:Label_SetText(tbAttrRandom.txtLock, i18n.EasyGet("\229\141\135\232\135\179{0}\231\186\167\229\143\175\232\167\163\233\148\129", nIndex * Item.PartnerEquip.CFG.nRandomAttrStageLevel))
+  else
+    tbElement.pPanel:SetActive(tbAttrRandom.attrNormal, true)
+    tbElement.pPanel:SetActive(tbAttrRandom.attrLock, false)
+    local szAttrDesc, nAttr1Val = PartnerEquipC:GetEquipAttrDiff(tbOrgRandomAttr, nil)
+    tbElement.pPanel:Label_SetText(tbAttrRandom.txtAttrTip, szAttrDesc)
+    tbElement.pPanel:Label_SetText(tbAttrRandom.txtAttrValueNow, nAttr1Val)
+    local tbMaxRandomAttrInfo = PartnerEquipC:GetMaxRandomAttrInfo(tbOrgRandomAttr.nAttrId)
+    local _, nAttrVal, _ = PartnerEquipC:GetEquipAttrDiff(tbMaxRandomAttrInfo, nil)
+    tbElement.pPanel:Label_SetText(tbAttrRandom.txtLimit, i18n.EasyGet("\239\188\136\228\184\138\233\153\144\239\188\154{0}\239\188\137", nAttrVal))
+  end
+end
+
+function tbWnd:__UpdateAttrHideInfo(pItem)
+  if pItem.nQuality == PartnerEquipC.eEquipQuality.Rare and PartnerEquipC:IsReforgeFullMax(pItem) then
+    self.pPanel:SetActive(tbAttrHide.attrHide, true)
+  else
+    self.pPanel:SetActive(tbAttrHide.attrHide, false)
+    return
+  end
+  local nHideSkill = PartnerEquipC:GetHideSkillLevel(pItem)
+  if not nHideSkill or nHideSkill <= 0 and not Item.PartnerEquip.SpecialSkill[nHideSkill] then
+    self.pPanel:SetActive(tbAttrHide.attrLock, true)
+    self.pPanel:SetActive(tbAttrHide.attrHideContent, false)
+  else
+    self.pPanel:SetActive(tbAttrHide.attrLock, false)
+    self.pPanel:SetActive(tbAttrHide.attrHideContent, true)
+    local szSkillName, szSkillDesc = PartnerEquipC:GetHideSkillInfo(pItem)
+    self.pPanel:Label_SetText(tbAttrHide.attrHideContent, string.format("[%s] %s", szSkillName, szSkillDesc))
+  end
+end
+
+function tbWnd:__OnClickLeftItem(tbLeftItemInfo)
+  if not tbLeftItemInfo or not tbLeftItemInfo.nEquipType then
+    return
+  end
+  self:UpdateRightPanel(tbLeftItemInfo.nEquipType)
+end
+
+function tbWnd:OnClose()
+end

@@ -1,0 +1,743 @@
+local tbWnd = Ui:CreateClass("UIAppearancePanel3", "UIPanel")
+local tbControls = {
+  btnClothesShop = "btnAll",
+  btnMyClothes = "btnMyClothes",
+  btnRecommend = "btnNewClothes",
+  partTemplate = "Left/Viewport/Content/Template",
+  btnSetting = "closeInfo/btnSetting",
+  btnModelSwitchPeople = "btnModelSwitch",
+  statePeopleAll = "btnModelSwitch/stateAll",
+  statePeople = "btnModelSwitch/statePeople",
+  btnModelSwitchHorse = "btnModelSwitchHorseShop",
+  stateHorseAll = "btnModelSwitchHorseShop/stateAll",
+  stateHorse = "btnModelSwitchHorseShop/stateHorse",
+  NpcModel = "closeInfo/NpcModel",
+  HitZone = "closeInfo/NpcModel/HitZone",
+  btnLeft = "closeInfo/btnLeft",
+  btnRight = "closeInfo/btnRight",
+  btnAttributeLook = "closeInfo/btnAttributeLook",
+  btnCharmValue = "closeInfo/btnCharmValue",
+  txtPretty = "closeInfo/attribute/txtPretty",
+  txtAttribute = "closeInfo/attribute/txtAttribute",
+  txtName = "closeInfo/txtName",
+  txtDesc = "closeInfo/Scroll View/Viewport/Content/txtDesc",
+  txtCharm = "closeInfo/txtCharm",
+  txtTime = "closeInfo/txtTime",
+  empty = "Right/myClose/empty",
+  promoteCell = "Right/myClose/empty/promoteCell",
+  promoteTemplate = "Right/myClose/empty/promoteCell/Template",
+  ClothesList = "Right/myClose/ClothesList",
+  ClothesTemplate = "Right/myClose/ClothesList/Viewport/Content/Template",
+  btnWear = "Right/myClose/btnWear",
+  btnOff = "Right/myClose/btnOff"
+}
+tbWnd.tbControls = tbControls
+local tbPriceShowType = {
+  [1] = function()
+    return i18n.EasyGet("\229\141\179\229\176\134\229\188\128\230\148\190")
+  end,
+  [2] = function()
+    return i18n.EasyGet("\233\166\150\229\133\133\232\142\183\229\190\151")
+  end,
+  [3] = function()
+    return i18n.EasyGet("\229\165\151\232\163\133\232\180\173\228\185\176")
+  end
+}
+local tbModelState = {
+  OnlyHorse = 1,
+  OnlyPeople = 2,
+  HorseAndPeople = 3
+}
+local PROMOTE_MAXCOUNT = 3
+tbWnd.tbOnSwipe = {
+  HitZone = function(self, pos)
+    Fashion:SwipeModel(pos.x)
+  end
+}
+tbWnd.tbOnClick = {
+  btnLeft = function()
+    Fashion:Preview_TurnLeft()
+  end,
+  btnRight = function()
+    Fashion:Preview_TurnRight()
+  end,
+  btnClothesShop = function(self)
+    self:OnClose()
+    Ui:CloseWindow("UIBag")
+    Ui:OpenWindow("UIClosetShopNew")
+  end,
+  btnRecommend = function(self)
+    self:OnClose()
+    Ui:CloseWindow("UIBag")
+    Ui:OpenWindow("UIClosetShopNew", nil, nil, 2)
+  end,
+  btnSetting = function()
+    local tbUiBag = Ui:GetWindow("UIBag")
+    if tbUiBag then
+      tbUiBag:OpenClosetShowSetting()
+    end
+  end,
+  btnAttributeLook = function()
+    local tbUiBag = Ui:GetWindow("UIBag")
+    if tbUiBag then
+      tbUiBag:OpenClosetPanelAttribute()
+    end
+  end,
+  btnCharmValue = function(self)
+    Ui:OpenWindow("UIRewardFashionPretty")
+  end,
+  btnModelSwitchPeople = function(self)
+    if self.nHorseRidingState == tbModelState.HorseAndPeople then
+      self.nHorseRidingState = tbModelState.OnlyPeople
+    else
+      self.nHorseRidingState = tbModelState.HorseAndPeople
+    end
+    self:ModelSwitchShow()
+  end,
+  btnModelSwitchHorse = function(self)
+    if self.nHorseRidingState == tbModelState.HorseAndPeople then
+      self.nHorseRidingState = tbModelState.OnlyHorse
+    else
+      self.nHorseRidingState = tbModelState.HorseAndPeople
+    end
+    self:ModelSwitchShow()
+  end,
+  btnWear = function(self)
+    if self.nSelectPartIndex and self.nSelectFashionId then
+      local nWearFashionId = self:GetCurPartWearFashionId()
+      if self.nSelectFashionId == nWearFashionId then
+        return
+      end
+      Fashion:WearFashion(self.nSelectFashionId)
+    end
+  end,
+  btnOff = function(self)
+    if self.nSelectPartIndex then
+      local nWearFashionId = self:GetCurPartWearFashionId()
+      if self.nSelectFashionId ~= nWearFashionId then
+        return
+      end
+      local tbFashionSetting = Fashion:GetFashionSetting(me, nWearFashionId)
+      if tbFashionSetting then
+        if tbFashionSetting.nLayer == Npc.NpcPartLayerDef.npc_part_layer_effect then
+          Fashion:TakeOffEffectFashion(tbFashionSetting.nPart)
+        else
+          Fashion:TakeOffFashion(tbFashionSetting.nPart)
+        end
+      end
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbPartScrollView = Ui:NewScrollView(self, tbControls.partTemplate, self.OnSelectPart)
+  self.tbPromoteScrollView = Ui:NewScrollView(self, tbControls.promoteTemplate, self.OnSelectPromote)
+  self.tbClothesGridView = Ui:NewSuperGridView(self, tbControls.ClothesTemplate, self.SetClothesItem)
+  self.objResPreview = self.pPanel:GetObject(tbControls.NpcModel)
+  self.tbHaveFashions = Fashion:GetHaveFashions()
+  self.tbPartSetting = Fashion:GetFashionPartConfig()
+  self.nSelectFashionId = nil
+  self.nSelectPartIndex = nil
+end
+
+function tbWnd:OnOpen(nPartIndex, nFashionId)
+  self:SetDefaultSelectPart(nPartIndex)
+  Fashion.nTemporarySex = me.nSex
+  Fashion:Preview_Init(self.objResPreview)
+  self:Redirection()
+  self:RefreshTotalPretty()
+  self:ClosetShopButtonShow()
+  self:RefreshPartScrollView(true)
+  self:SetDefaultSelectFashionId(nFashionId)
+  self:RegistRedPoint()
+end
+
+function tbWnd:OnClose()
+  Fashion:Preview_Destroy()
+  self.tbPartScrollView:Clear()
+  self.tbPromoteScrollView:Clear()
+  if self.nCountDownTimer then
+    Timer:Close(self.nCountDownTimer)
+    self.nCountDownTimer = nil
+  end
+  self.nSelectPartIndex = nil
+  self.nHorseRidingState = nil
+  self:UnRegistRedPoint()
+end
+
+function tbWnd:RegistRedPoint()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnCharmValue, {
+    RedPointMgr.EVENT.FashionPrettyStageAward
+  })
+end
+
+function tbWnd:UnRegistRedPoint()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnCharmValue)
+end
+
+function tbWnd:SetDefaultSelectPart(nPartIndex)
+  if nPartIndex and self.tbPartSetting[nPartIndex] then
+    self.nSelectPartIndex = nPartIndex
+  end
+end
+
+function tbWnd:SetDefaultSelectFashionId(nFashionId)
+  if not nFashionId then
+    return
+  end
+  local tbFashions = self:ArrangeFashionItems()
+  for nIndex, tbFashion in ipairs(tbFashions) do
+    if tbFashion.nFashionId == nFashionId then
+      self:OnSelectFashionItem(nIndex, nFashionId, true)
+      break
+    end
+  end
+end
+
+function tbWnd:Redirection()
+  if Fashion.bHorse then
+    Fashion:SetResDir(1)
+  else
+    Fashion:SetResDir(0)
+  end
+end
+
+function tbWnd:RefreshTotalPretty()
+  local nPrettyValue = Fashion:GetPrettyValue(me)
+  self.pPanel:Label_SetText(tbControls.txtCharm, i18n.EasyGet("\230\128\187\233\173\133\229\138\155\229\128\188:{0}", nPrettyValue))
+end
+
+function tbWnd:ClosetShopButtonShow()
+  local pShopObj = self.pPanel:GetObject(tbControls.btnClothesShop)
+  local pShopTrans = pShopObj:GetComponent(Ui.BGroupTrans)
+  if pShopTrans then
+    pShopTrans:OnUnSelected()
+  end
+  self.pPanel:SetActive(tbControls.btnRecommend, Shop:HasNewFashion())
+  local pRecommendObj = self.pPanel:GetObject(tbControls.btnRecommend)
+  local pRecommendTrans = pRecommendObj:GetComponent(Ui.BGroupTrans)
+  if pRecommendTrans then
+    pRecommendTrans:OnUnSelected()
+  end
+  local pClothesObj = self.pPanel:GetObject(tbControls.btnMyClothes)
+  local pClothesTrans = pClothesObj:GetComponent(Ui.BGroupTrans)
+  if pClothesTrans then
+    pClothesTrans:OnSelected()
+  end
+end
+
+function tbWnd:CurWearOffBtnShow()
+  local nWearFashionId = self:GetCurPartWearFashionId()
+  if self.nSelectFashionId == nWearFashionId then
+    self.pPanel:SetActive(tbControls.btnOff, true)
+    self.pPanel:SetActive(tbControls.btnWear, false)
+  elseif self.nSelectFashionId and self.nSelectFashionId > 0 then
+    self.pPanel:SetActive(tbControls.btnOff, false)
+    self.pPanel:SetActive(tbControls.btnWear, true)
+  else
+    self.pPanel:SetActive(tbControls.btnOff, false)
+    self.pPanel:SetActive(tbControls.btnWear, false)
+  end
+end
+
+function tbWnd:RefreshClothesInfo()
+  local nFashionId = self.nSelectFashionId
+  if not nFashionId then
+    self.pPanel:Label_SetText(tbControls.txtTime, "")
+    self.pPanel:Label_SetText(tbControls.txtName, "")
+    self.pPanel:Label_SetText(tbControls.txtPretty, "")
+    self.pPanel:Label_SetText(tbControls.txtDesc, i18n.EasyGet("\232\175\183\233\128\137\229\143\150\229\164\150\232\167\130\230\159\165\231\156\139\230\143\143\232\191\176"))
+    self.pPanel:SetActive(tbControls.txtAttribute, false)
+  elseif nFashionId > 0 then
+    local tbFashion = Fashion:GetFashion(me, nFashionId)
+    if tbFashion.nExpiredTime and tbFashion.nExpiredTime > 0 then
+      local nRestTime = tbFashion.nExpiredTime - GetTime()
+      local szShowTime = i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180:{0}", Lib:TimeDesc2(nRestTime))
+      self.pPanel:Label_SetText(tbControls.txtTime, szShowTime)
+      self:_StartCountDowntTimer()
+    else
+      self.pPanel:Label_SetText(tbControls.txtTime, "")
+    end
+    local tbFashionSetting, bCanUse = Fashion:GetFashionSetting(me, nFashionId)
+    if bCanUse and tbFashionSetting then
+      self.pPanel:Label_SetText(tbControls.txtName, i18n.Parse(tbFashionSetting.szName))
+      self.pPanel:Label_SetText(tbControls.txtDesc, i18n.Parse(tbFashionSetting.szDesc))
+      self.pPanel:Label_SetText(tbControls.txtPretty, i18n.EasyGet("\233\173\133\229\138\155\229\128\188+{0}", tbFashionSetting.nPrettyValue))
+      if nFashionId and Fashion.AttrCfg[nFashionId] then
+        local szMagicName = Fashion.AttrCfg[nFashionId][1]
+        local tbMagic = {
+          table.unpack(Fashion.AttrCfg[nFashionId], 2)
+        }
+        local szFinalName, szFinalValue = FightSkill:GetMagicDescSplit(szMagicName, tbMagic)
+        local szAttribute = string.format("%s%s", szFinalName, szFinalValue)
+        self.pPanel:SetActive(tbControls.txtAttribute, true)
+        self.pPanel:Label_SetText(tbControls.txtAttribute, i18n.EasyGet(szAttribute))
+      else
+        self.pPanel:SetActive(tbControls.txtAttribute, false)
+      end
+    end
+  end
+end
+
+function tbWnd:_StartCountDowntTimer()
+  if self.nCountDownTimer then
+    Timer:Close(self.nCountDownTimer)
+  end
+  self.nCountDownTimer = Timer:Register(Env.GAME_FPS, function()
+    local tbFashion = Fashion:GetFashion(me, self.nSelectFashionId)
+    if tbFashion and tbFashion.nExpiredTime and tbFashion.nExpiredTime > 0 then
+      local nRestTime = tbFashion.nExpiredTime - GetTime()
+      if nRestTime > 0 then
+        local szShowTime = i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180:{0}", Lib:TimeDesc2(nRestTime))
+        self.pPanel:Label_SetText(tbControls.txtTime, szShowTime)
+        return true
+      else
+        self.pPanel:Label_SetText(tbControls.txtTime, i18n.EasyGet("\230\173\164\229\164\150\232\167\130\229\183\178\232\191\135\230\156\159"))
+        return false
+      end
+    else
+      self.pPanel:Label_SetText(tbControls.txtTime, "")
+      return false
+    end
+  end)
+end
+
+function tbWnd:RefreshPartScrollView(bOnOpen)
+  self.tbPartScrollView:Clear()
+  local nSelectPartIndex
+  for nIndex, tbPart in ipairs(self.tbPartSetting) do
+    if Fashion:CheckCanShowPart(tbPart.nPartId) then
+      self.tbPartScrollView:SetElement(nIndex, function(tbElement)
+        local nFashionId = self:GetCurPartWearFashionId(tbPart.nPartId, tbPart.nLayer)
+        if nFashionId > 0 then
+          if nil == nSelectPartIndex then
+            nSelectPartIndex = nIndex
+          end
+          tbElement.pPanel:SetActive("Empty", false)
+          tbElement.pPanel:SetActive("UIItemGrid", true)
+          local tbFashionSetting = Fashion:GetFashionSetting(me, nFashionId)
+          local pGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+          Fashion:InitFashionGrid(pGrid, tbFashionSetting)
+        else
+          tbElement.pPanel:SetActive("Empty", true)
+          tbElement.pPanel:SetActive("UIItemGrid", false)
+        end
+        tbElement.pPanel:Label_SetText("txtClothes", i18n.Parse(tbPart.szName))
+        local pObj = tbElement.pPanel.transform.gameObject
+        local pTrans = pObj:GetComponent(Ui.BGroupTrans)
+        if pTrans then
+          pTrans:OnUnSelected()
+        end
+      end)
+    end
+  end
+  nSelectPartIndex = self.nSelectPartIndex or nSelectPartIndex or 1
+  local nCount = Lib:CountTB(self.tbPartScrollView:GetAllElement())
+  if #self.tbPartSetting == nCount and bOnOpen then
+    self.tbPartScrollView:ScrollToIndex(nSelectPartIndex, true)
+  else
+    self.tbPartScrollView:SelectElement(nSelectPartIndex)
+  end
+end
+
+function tbWnd:OnSelectPart(nIndex)
+  self.nSelectPartIndex = nIndex
+  self:ModelSwitchShow()
+  self:RefreshClothesScrollView()
+end
+
+function tbWnd:ModelSwitchShow()
+  local nPart = Fashion:GetFashionPartByIndex(self.nSelectPartIndex)
+  if not nPart then
+    LogErr("UIAppearancePanel3:ModelSwitchShow error. can not find part in setting", self.nSelectPartIndex)
+    return
+  end
+  if nPart == Npc.NpcResPartsDef.npc_part_horse then
+    Fashion.bHorse = true
+    self.pPanel:SetActive(tbControls.btnModelSwitchHorse, true)
+    self.pPanel:SetActive(tbControls.btnModelSwitchPeople, false)
+    if self.nHorseRidingState == tbModelState.HorseAndPeople then
+      Fashion.bShieldHorse = false
+      Fashion:Preview_RefreshPreview_AllPart()
+      self.pPanel:SetActive(tbControls.stateHorse, false)
+      self.pPanel:SetActive(tbControls.stateHorseAll, true)
+    else
+      if self.nHorseRidingState ~= tbModelState.OnlyHorse then
+        self.nHorseRidingState = tbModelState.OnlyHorse
+      end
+      Fashion.bShieldHorse = true
+      Fashion:Preview_RefreshPreview()
+      self.pPanel:SetActive(tbControls.stateHorse, true)
+      self.pPanel:SetActive(tbControls.stateHorseAll, false)
+    end
+  else
+    Fashion.bHorse = false
+    self.pPanel:SetActive(tbControls.btnModelSwitchHorse, false)
+    self.pPanel:SetActive(tbControls.btnModelSwitchPeople, true)
+    if self.nHorseRidingState == tbModelState.HorseAndPeople then
+      Fashion.bShieldHorse = false
+      Fashion:Preview_RefreshPreview_AllPart()
+      self.pPanel:SetActive(tbControls.statePeople, false)
+      self.pPanel:SetActive(tbControls.statePeopleAll, true)
+      if not Fashion:CheckCanShowPart(Npc.NpcResPartsDef.npc_part_horse) then
+        me.CenterMsg(i18n.EasyGet("\232\175\183\229\133\136\230\139\165\230\156\137\230\158\163\231\186\162\233\169\172"))
+      end
+    else
+      if self.nHorseRidingState ~= tbModelState.OnlyPeople then
+        self.nHorseRidingState = tbModelState.OnlyPeople
+      end
+      Fashion.bShieldHorse = true
+      Fashion:Preview_RefreshPreview()
+      self.pPanel:SetActive(tbControls.statePeople, true)
+      self.pPanel:SetActive(tbControls.statePeopleAll, false)
+    end
+  end
+end
+
+function tbWnd:RefreshClothesScrollView()
+  local tbFashions = self:ArrangeFashionItems()
+  if not tbFashions then
+    LogErr("UIAppearancePanel3:RefreshClothesScrollView ArrangeFashionItems is nil")
+    return
+  elseif Lib:IsEmptyTB(tbFashions) then
+    self.pPanel:SetActive(tbControls.empty, true)
+    self.pPanel:SetActive(tbControls.ClothesList, false)
+    self:RefreshPromoteScrollView()
+  else
+    self.pPanel:SetActive(tbControls.empty, false)
+    self.pPanel:SetActive(tbControls.ClothesList, true)
+  end
+  self.tbClothesGridView:SetAllElement(tbFashions)
+  self.tbClothesGridView:MovePanelToFirstItem()
+  local nPreviewFashionId = self:GetCurPreviewFashionId()
+  if not nPreviewFashionId or nPreviewFashionId <= 0 then
+    self.nSelectFashionId = nil
+    self:CurWearOffBtnShow()
+    self:RefreshClothesInfo()
+  end
+end
+
+function tbWnd:SetClothesItem(tbElement, tbFashion, nIndex)
+  local pGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  Fashion:InitFashionGrid(pGrid, tbFashion)
+  local nPreviewFashionId = self:GetCurPreviewFashionId()
+  if tbFashion.nFashionId == nPreviewFashionId then
+    if self.nSelectFashionId ~= nPreviewFashionId then
+      self:OnSelectFashionItem(nIndex, nPreviewFashionId, false)
+    end
+    tbElement.pPanel:ButtonGroup_SetSelect("Main", true)
+  else
+    tbElement.pPanel:ButtonGroup_SetSelect("Main", false)
+  end
+  if tbFashion.nFashionId == self:GetCurPartWearFashionId() then
+    tbElement.pPanel:SetActive("imgEquipedBg", true)
+  else
+    tbElement.pPanel:SetActive("imgEquipedBg", false)
+  end
+  if tbFashion.nExpiredTime and tbFashion.nExpiredTime > 0 then
+    tbElement.pPanel:SetActive("imgLimitBg", true)
+  else
+    tbElement.pPanel:SetActive("imgLimitBg", false)
+  end
+  if tbFashion.nLayer == Npc.NpcPartLayerDef.npc_part_layer_effect then
+    if nIndex > self.nHightLightClothes then
+      tbElement.pPanel:Sprite_SetColor("Button", 48, 48, 48, 153)
+    else
+      tbElement.pPanel:Sprite_SetColor("Button", 48, 48, 48, 0)
+    end
+  else
+    tbElement.pPanel:Sprite_SetColor("Button", 48, 48, 48, 0)
+  end
+  Ui:Button_BindEvent(tbElement.pPanel, "Button", self.OnSelectFashionItem, self, nIndex, tbFashion.nFashionId, true)
+end
+
+function tbWnd:ArrangeFashionItems()
+  local nPart, nLayer = Fashion:GetFashionPartByIndex(self.nSelectPartIndex)
+  if not nPart then
+    LogErr("UIAppearancePanel3:ArrangeFashionItems error. can not find part in setting", self.nSelectPartIndex)
+    return
+  end
+  local tbFashions = Fashion:GetHaveFashionByPart(nPart, nLayer)
+  if not tbFashions or Lib:IsEmptyTB(tbFashions) then
+    return tbFashions
+  end
+  
+  local function fnSort(a, b)
+    return a.nQuality > b.nQuality
+  end
+  
+  table.sort(tbFashions, fnSort)
+  local nWearFashionId = self:GetCurPartWearFashionId()
+  if nWearFashionId and nWearFashionId > 0 then
+    for nIndex, tbFashion in ipairs(tbFashions) do
+      if tbFashion.nFashionId == nWearFashionId then
+        local tbTemp = tbFashions[nIndex]
+        tbFashions[nIndex] = tbFashions[1]
+        tbFashions[1] = tbTemp
+        break
+      end
+    end
+  end
+  self.nHightLightClothes = #tbFashions
+  if nLayer == Npc.NpcPartLayerDef.npc_part_layer_effect then
+    self.nHightLightClothes = 0
+    local tbPickFashions = Fashion:Preview_GetPreviewList()
+    if not tbPickFashions[nPart] then
+      return tbFashions
+    end
+    local nPreviewFashionId = tbPickFashions[nPart].nFashionId
+    if not nPreviewFashionId or nPreviewFashionId <= 0 then
+      return tbFashions
+    end
+    local tbGrey = {}
+    local tbHightLight = {}
+    local tbFashionSetting = Fashion:GetFashionSetting(me, nPreviewFashionId)
+    for _, tbFashion in ipairs(tbFashions) do
+      if Lib:Is_include(tbFashion.nFashionId, tbFashionSetting.tbFashion2EffectIds) then
+        self.nHightLightClothes = self.nHightLightClothes + 1
+        table.insert(tbHightLight, tbFashion)
+      else
+        table.insert(tbGrey, tbFashion)
+      end
+    end
+    table.sort(tbGrey, fnSort)
+    table.sort(tbHightLight, fnSort)
+    tbFashions = Lib:MergeTable(tbHightLight, tbGrey)
+  end
+  return tbFashions
+end
+
+function tbWnd:GetCurPartWearFashionId(nPart, nLayer)
+  if not nPart then
+    nPart, nLayer = Fashion:GetFashionPartByIndex(self.nSelectPartIndex)
+    if not nPart then
+      LogErr("UIAppearancePanel3:GetCurPartWearFashionId error. can not find part in setting", self.nSelectPartIndex)
+      return 0
+    end
+  end
+  if nLayer == Npc.NpcPartLayerDef.npc_part_layer_effect then
+    return Fashion:GetWearingEffectFashionIdByPart(me, nPart)
+  else
+    return Fashion:GetWearingFashionIdByPart(nPart)
+  end
+end
+
+function tbWnd:GetCurPreviewFashionId()
+  local nPart, nLayer = Fashion:GetFashionPartByIndex(self.nSelectPartIndex)
+  if not nPart then
+    LogErr("UIAppearancePanel3:GetCurPreviewFashionId error. can not find part in setting", self.nSelectPartIndex)
+    return 0
+  end
+  if nLayer == Npc.NpcPartLayerDef.npc_part_layer_effect then
+    local tbPickFashions = Fashion:GetPreviewEffectList()
+    if not tbPickFashions[nPart] then
+      return 0
+    end
+    local nPreviewFashionId = tbPickFashions[nPart].nFashionId
+    if not nPreviewFashionId or nPreviewFashionId <= 0 then
+      return 0
+    end
+    return nPreviewFashionId
+  else
+    local nWearFashionId = self:GetCurPartWearFashionId()
+    local tbPickFashions = Fashion:Preview_GetPreviewList()
+    if not tbPickFashions[nPart] then
+      return nWearFashionId
+    end
+    local nPreviewFashionId = tbPickFashions[nPart].nFashionId
+    if not nPreviewFashionId or nPreviewFashionId <= 0 then
+      return nWearFashionId
+    end
+    return nPreviewFashionId
+  end
+end
+
+function tbWnd:CheckCanClickFashionItem(nFashionId)
+  local tbItem = Fashion:GetHaveFashionById(nFashionId)
+  if not tbItem then
+    return false
+  end
+  local tbFashionSetting, bCanUse = Fashion:GetFashionSetting(me, nFashionId)
+  if not tbFashionSetting or not bCanUse then
+    return false
+  end
+  if tbFashionSetting.nLayer == Npc.NpcPartLayerDef.npc_part_layer_effect then
+    local tbPickFashions = Fashion:Preview_GetPreviewList()
+    if not tbPickFashions[tbFashionSetting.nPart] then
+      return nil, i18n.EasyGet("\231\137\185\230\149\136\228\184\142\229\164\150\232\167\130\228\184\141\229\140\185\233\133\141")
+    end
+    local nPreviewFashionId = tbPickFashions[tbFashionSetting.nPart].nFashionId
+    if not nPreviewFashionId or nPreviewFashionId <= 0 then
+      return nil, i18n.EasyGet("\231\137\185\230\149\136\228\184\142\229\164\150\232\167\130\228\184\141\229\140\185\233\133\141")
+    end
+    if not Lib:Is_include(nPreviewFashionId, tbFashionSetting.tbEffect2FashionIds) then
+      return false, i18n.EasyGet("\231\137\185\230\149\136\228\184\142\229\164\150\232\167\130\228\184\141\229\140\185\233\133\141")
+    end
+  end
+  return true
+end
+
+function tbWnd:OnSelectFashionItem(nIndex, nFashionId, bSendMsg)
+  local bCanClick, szMsg = self:CheckCanClickFashionItem(nFashionId)
+  if not bCanClick then
+    if bSendMsg and not Lib:IsEmptyStr(szMsg) then
+      me.CenterMsg(szMsg)
+    end
+    return
+  end
+  local nPart, nLayer = Fashion:GetFashionPartByIndex(self.nSelectPartIndex)
+  if self.nSelectFashionId == nFashionId then
+    self.nSelectFashionId = nil
+    Fashion:ResetPartEffectPreview(nPart)
+    if nLayer == Npc.NpcPartLayerDef.npc_part_layer_base then
+      Fashion:ResetPartPreview(nPart)
+    end
+    local tbElementDatas = self.tbClothesGridView:GetElementData()
+    for nId = 1, #tbElementDatas do
+      self.tbClothesGridView:DoItemHightLight(nId, false)
+    end
+  else
+    self.nSelectFashionId = nFashionId
+    self:PreviewWear()
+    Fashion:IsNeedPopBoxPartShield(nPart)
+    local tbElementDatas = self.tbClothesGridView:GetElementData()
+    for nId = 1, #tbElementDatas do
+      self.tbClothesGridView:DoItemHightLight(nId, nId == nIndex)
+    end
+  end
+  self:RefreshClothesInfo()
+  self:CurWearOffBtnShow()
+end
+
+function tbWnd:PreviewWear()
+  local nPart, nLayer = Fashion:GetFashionPartByIndex(self.nSelectPartIndex)
+  if not nPart then
+    LogErr("UIAppearancePanel3:RefreshClothesScrollView error. can not find part in setting", self.nSelectPartIndex)
+    return
+  end
+  if nLayer == Npc.NpcPartLayerDef.npc_part_layer_effect then
+    local tbPreviewIdList = Fashion:GetPreviewEffectList()
+    if not tbPreviewIdList or not tbPreviewIdList[nPart] then
+      return
+    end
+    if tbPreviewIdList[nPart].nFashionId == self.nSelectFashionId then
+      return
+    end
+    Fashion:PreviewTryOnEffect(nPart, self.nSelectFashionId)
+  else
+    local tbPreviewIdList = Fashion:Preview_GetPreviewList()
+    if not tbPreviewIdList or not tbPreviewIdList[nPart] then
+      return
+    end
+    if tbPreviewIdList[nPart].nFashionId == self.nSelectFashionId then
+      return
+    end
+    local tbPreviewEffectList = Fashion:GetPreviewEffectList()
+    if tbPreviewEffectList[nPart] and tbPreviewEffectList[nPart].nFashionId then
+      local nEffectFashionId = tbPreviewEffectList[nPart].nFashionId
+      local tbFashionSetting = Fashion:GetFashionSetting(me, self.nSelectFashionId)
+      if tbFashionSetting and not Lib:Is_include(nEffectFashionId, tbFashionSetting.tbFashion2EffectIds) then
+        Fashion:ClearPartEffectPreview(nPart)
+      end
+    end
+    Fashion:Preview_TryOnAFashion(nPart, self.nSelectFashionId)
+  end
+end
+
+function tbWnd:RefreshPromoteScrollView()
+  local tbPromote = self:ArrangePromoteList()
+  if not tbPromote or Lib:IsEmptyTB(tbPromote) then
+    return
+  end
+  self.tbPromoteItems = tbPromote
+  self.tbPromoteScrollView:Clear()
+  for nIndex, tbItem in ipairs(self.tbPromoteItems) do
+    self.tbPromoteScrollView:SetElement(nIndex, function(tbElement)
+      local tbSetting = Fashion:GetFashionSetting(me, tbItem.nFashionID)
+      tbElement.pGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      Fashion:InitFashionGrid(tbElement.pGrid, tbSetting)
+      local szMoneyIcon = Currency:GetIcon(tbItem.szMoneyType)
+      tbElement.pPanel:Sprite_SetSprite("Cost/imgMoney", szMoneyIcon)
+      tbElement.pPanel:SetActive("MarkNew", tbItem.bShowNewTip)
+      if tbPriceShowType[tbItem.nShowType] then
+        tbElement.pPanel:SetActive("Cost", false)
+        tbElement.pPanel:SetActive("MarkNew", false)
+        tbElement.pPanel:SetActive("MarkDiscounts", false)
+        tbElement.pPanel:Label_SetText("txtComingSoon", tbPriceShowType[tbItem.nShowType]())
+      else
+        tbElement.pPanel:SetActive("Cost", true)
+        tbElement.pPanel:Label_SetText("txtComingSoon", "")
+        if tbItem.nDiscountPrice and tbItem.nDiscountPrice > 0 then
+          tbElement.pPanel:SetActive("MarkDiscounts", true)
+          tbElement.pPanel:SetActive("Cost/CostDiscounts", true)
+          tbElement.pPanel:Label_SetText("Cost/txtCost", tbItem.nDiscountPrice)
+          tbElement.pPanel:Label_SetText("Cost/CostDiscounts/txtCost", tbItem.nPrice)
+          tbElement.pPanel:Label_SetText("MarkDiscounts/txt", i18n.GetDiscountText(tbItem.nDiscount / 10))
+        else
+          tbElement.pPanel:SetActive("MarkDiscounts", false)
+          tbElement.pPanel:SetActive("Cost/CostDiscounts", false)
+          tbElement.pPanel:Label_SetText("Cost/txtCost", tbItem.nPrice)
+        end
+      end
+    end)
+  end
+end
+
+function tbWnd:ArrangePromoteList()
+  local tbPromoteItemIds = self.tbPartSetting[self.nSelectPartIndex]
+  if not tbPromoteItemIds then
+    LogErr("UIAppearancePanel3:ArrangePromoteList error. the currently selected index has no in tbPartSetting", self.nSelectPartIndex)
+    return
+  end
+  local nPart, nLayer = Fashion:GetFashionPartByIndex(self.nSelectPartIndex)
+  if not nPart then
+    LogErr("UIAppearancePanel3:ArrangePromoteList error. can not find part in setting", self.nSelectPartIndex)
+    return
+  end
+  local tbShopItems = Shop:GetFashionSinglesByPart(nPart, nLayer)
+  if not tbShopItems or Lib:IsEmptyTB(tbShopItems) then
+    LogErr("UIAppearancePanel3:ArrangePromoteList error. GetFashionSinglesByPart is nil", nPart, nLayer)
+    return
+  end
+  local tbPromote = {}
+  for _, tbItem in ipairs(tbShopItems) do
+    if #tbPromote == #tbPromoteItemIds then
+      break
+    end
+    if Lib:Is_include(tbItem.nId, tbPromoteItemIds) then
+      table.insert(tbPromote, tbItem)
+    end
+  end
+  for _, tbItem in ipairs(tbShopItems) do
+    if #tbPromote >= PROMOTE_MAXCOUNT then
+      break
+    end
+    table.insert(tbPromote, tbItem)
+  end
+  return tbPromote
+end
+
+function tbWnd:OnSelectPromote(nIndex)
+  local tbPromoteItem = self.tbPromoteItems[nIndex]
+  if not tbPromoteItem then
+    return
+  end
+  local nPart, nLayer = Fashion:GetFashionPartByIndex(self.nSelectPartIndex)
+  if not nPart then
+    LogErr("UIAppearancePanel3:RefreshClothesScrollView error. can not find part in setting", self.nSelectPartIndex)
+    return
+  end
+  self:OnClose()
+  Ui:CloseWindow("UIBag")
+  Ui:OpenWindow("UIClosetShopNew", 1, {
+    nPart = nPart,
+    nLayer = nLayer,
+    nId = tbPromoteItem.nId
+  })
+end
+
+function tbWnd:OnFashionDataUpdate()
+  self:RefreshTotalPretty()
+  self:RefreshPartScrollView()
+  self:CurWearOffBtnShow()
+end

@@ -1,0 +1,498 @@
+Require("CommonScript/ZhenFa/ZhenFaCfg.lua")
+Require("CommonScript/Player/FightPowerCommom.lua")
+ZhenFa.tbAttactZJCfg = {}
+ZhenFa.tbDefanceZJCfg = {}
+
+function ZhenFa:InitCfg()
+  for index, tbV in ipairs(self.ZhenJueLibrary) do
+    if 1 == index % 2 then
+      for _, nAttrId in ipairs(tbV) do
+        self.tbAttactZJCfg[nAttrId] = true
+      end
+    else
+      for _, nAttrId in ipairs(tbV) do
+        self.tbDefanceZJCfg[nAttrId] = true
+      end
+    end
+  end
+end
+
+ZhenFa:InitCfg()
+ZhenFa.nQiangZhenFuId = 33010
+ZhenFa.nNormalLingWuDanId = 33011
+ZhenFa.nPerfectLingWuDanId = 33012
+ZhenFa.nHuiXinDanId = 33013
+ZhenFa.nHuiXinDanCostNum = 5
+ZhenFa.nMaxZhenFa = 13
+ZhenFa.nMaxQuality = 11
+ZhenFa.nMaxZFCYCount = 11
+ZhenFa.nMaxTeamMember = 4
+ZhenFa.nMaxZhenJue = 8
+ZhenFa.szOpenTimeframe = "OpenLevel89"
+ZhenFa.ZhenFaCommonSaveGroup = GetGroupKey("ZhenFaCommon")
+ZhenFa.CUR_PUTON_POS = 1
+ZhenFa.CUR_PUTON_SUB_POS = 2
+ZhenFa.ZHENFA_LEVEL = 3
+ZhenFa.nMaxZhenJueDataCount = 5
+ZhenFa.ZFZhenJueSaveGroup = GetGroupKey("ZFZhenJue")
+ZhenFa.ZF_ZHEN_JUE_LEVEL = 1
+ZhenFa.ZF_ZHEN_JUE_EXP = 2
+ZhenFa.ZF_LING_WU_COUNT = 3
+ZhenFa.tbSaveGroupKey = ZhenFa.tbSaveGroupKey or {}
+ZhenFa.ZHENJUE_ATTR_BEGIN = 5
+ZhenFa.ZHENJUE_ATTR_END = 13
+for i = 1, ZhenFa.nMaxZhenFa do
+  ZhenFa.tbSaveGroupKey[i] = GetGroupKey("ZhenFa" .. i)
+end
+ZhenFa.nNormalLingWu = 1
+ZhenFa.nPerfectLingWu = 2
+ZhenFa.tbSubPos2SavePos = {
+  [1] = 1,
+  [2] = 2,
+  [3] = 3,
+  [4] = 4,
+  [5] = 5,
+  [6] = 20,
+  [7] = 19,
+  [8] = 21,
+  [9] = 22,
+  [10] = 23,
+  [11] = 24,
+  [12] = 25
+}
+
+function ZhenFa:GetZhenFaMaxActiveQualityByPos(pPlayer, nPos)
+  local nSubPos = -1
+  for i = self.nMaxQuality, 1, -1 do
+    if self:GetZhenFaActiveStatus(pPlayer, nPos, i) then
+      nSubPos = i
+      break
+    end
+  end
+  return nSubPos
+end
+
+function ZhenFa:GetZhenFaMaxActiveQuality(pPlayer)
+  local nMaxActiveQuality = 1
+  for nPos = 1, self.nMaxZhenFa do
+    for nSubPos = self.nMaxQuality, 1, -1 do
+      if self:GetZhenFaActiveStatus(pPlayer, nPos, nSubPos) then
+        nMaxActiveQuality = math.max(nMaxActiveQuality, nSubPos)
+        break
+      end
+    end
+    if nMaxActiveQuality >= self.nMaxQuality then
+      break
+    end
+  end
+  return nMaxActiveQuality
+end
+
+function ZhenFa:GetZhenFaMaxLevel(pPlayer)
+  pPlayer = pPlayer or me
+  local nMaxActiveQuality = self:GetZhenFaMaxActiveQuality(pPlayer)
+  local nMaxLevel = 0
+  local nMaxTimeFrameLevel = 0
+  local nMaxQualityLevel = 0
+  for k, v in ipairs(self.tbTimeFrame2ZFMaxLevel) do
+    if 1 == GetTimeFrameState(v.szTimeFrame) then
+      nMaxTimeFrameLevel = v.nLevel
+    end
+  end
+  for k, v in ipairs(self.tbTimeFrame2ZFMaxLevel) do
+    if nMaxActiveQuality >= v.nNeedQuality then
+      nMaxQualityLevel = v.nLevel
+    end
+  end
+  nMaxLevel = math.min(nMaxTimeFrameLevel, nMaxQualityLevel)
+  return nMaxLevel, nMaxTimeFrameLevel, nMaxQualityLevel
+end
+
+function ZhenFa:GetZFZhenJueMaxLevel(pPlayer)
+  pPlayer = pPlayer or me
+  local nMaxActiveQuality = self:GetZhenFaMaxActiveQuality(pPlayer)
+  local nMaxLevel = 0
+  local nMaxTimeFrameLevel = 0
+  local nMaxQualityLevel = 0
+  for k, v in ipairs(self.tbTimeFrame2ZJMaxLevel) do
+    if 1 == GetTimeFrameState(v.szTimeFrame) then
+      nMaxTimeFrameLevel = v.nLevel
+    end
+  end
+  for k, v in ipairs(self.tbTimeFrame2ZJMaxLevel) do
+    if nMaxActiveQuality >= v.nNeedQuality then
+      nMaxQualityLevel = v.nLevel
+    end
+  end
+  nMaxLevel = math.min(nMaxTimeFrameLevel, nMaxQualityLevel)
+  return nMaxLevel, nMaxTimeFrameLevel, nMaxQualityLevel
+end
+
+function ZhenFa:GetZhenFaCurPutOnPos(pPlayer)
+  local nCurPutOnPos = pPlayer.GetUserValue(self.ZhenFaCommonSaveGroup, self.CUR_PUTON_POS)
+  local nCurPutOnSubPos = pPlayer.GetUserValue(self.ZhenFaCommonSaveGroup, self.CUR_PUTON_SUB_POS)
+  return nCurPutOnPos, nCurPutOnSubPos
+end
+
+function ZhenFa:GetZhenFaLevel(pPlayer)
+  local nLevel = pPlayer.GetUserValue(self.ZhenFaCommonSaveGroup, self.ZHENFA_LEVEL) + 1
+  return nLevel
+end
+
+function ZhenFa:GetZhenFaActiveStatus(pPlayer, nPos, nSubPos)
+  if nPos < 1 or nPos > self.nMaxZhenFa or nSubPos < 1 or nSubPos > self.nMaxQuality then
+    return false
+  end
+  local nSavePos = self.tbSubPos2SavePos[nSubPos]
+  local nStatus = pPlayer.GetUserValue(self.tbSaveGroupKey[nPos], nSavePos)
+  return 1 == nStatus
+end
+
+function ZhenFa:GetZhenJueHoleLevel(pPlayer, nHole)
+  local nDataPos = self.nMaxZhenJueDataCount * (nHole - 1) + self.ZF_ZHEN_JUE_LEVEL
+  local nLevel = pPlayer.GetUserValue(self.ZFZhenJueSaveGroup, nDataPos) + 1
+  return nLevel
+end
+
+function ZhenFa:GetZhenJueAttrIdList(pPlayer, nPos)
+  local tbRet = {}
+  for i = self.ZHENJUE_ATTR_BEGIN + 1, self.ZHENJUE_ATTR_END do
+    local nAttrId = pPlayer.GetUserValue(self.tbSaveGroupKey[nPos], i)
+    if nAttrId > 0 then
+      table.insert(tbRet, nAttrId)
+    else
+      return tbRet
+    end
+  end
+  return tbRet
+end
+
+function ZhenFa:CheckZhenJueAttrIdStatus(pPlayer, nPos, nAttrId)
+  for i = self.ZHENJUE_ATTR_BEGIN + 1, self.ZHENJUE_ATTR_END do
+    local nMyAttrId = pPlayer.GetUserValue(self.tbSaveGroupKey[nPos], i)
+    if nMyAttrId == nAttrId then
+      return true
+    end
+  end
+  return false
+end
+
+function ZhenFa:GetZFZhenJueExp(pPlayer, nHole)
+  local nDataPos = self.nMaxZhenJueDataCount * (nHole - 1) + self.ZF_ZHEN_JUE_EXP
+  return pPlayer.GetUserValue(self.ZFZhenJueSaveGroup, nDataPos)
+end
+
+function ZhenFa:GetZFZhenJueLingWuCount(pPlayer, nHole)
+  local nDataPos = self.nMaxZhenJueDataCount * (nHole - 1) + self.ZF_LING_WU_COUNT
+  local nCount = pPlayer.GetUserValue(self.ZFZhenJueSaveGroup, nDataPos)
+  return nCount
+end
+
+function ZhenFa:GetZFZhenJueSuccessRateCfg(nLevel)
+  if not self.ZhenJueLevelInfo[nLevel] then
+    return 0, 0, 0
+  end
+  return self.ZhenJueLevelInfo[nLevel][1], self.ZhenJueLevelInfo[nLevel][11], self.ZhenJueLevelInfo[nLevel][12]
+end
+
+function ZhenFa:GetPlayerZFZhenJueSuccessRate(pPlayer, nHole, nNextLevel)
+  local nBaseRate, nARTime, nAddRate = self:GetZFZhenJueSuccessRateCfg(nNextLevel)
+  local nAllRate = nBaseRate
+  if nARTime > 0 and nAddRate > 0 then
+    local nCount = math.floor(self:GetZFZhenJueLingWuCount(pPlayer, nHole) / nARTime)
+    nAllRate = nAddRate * nCount
+  end
+  return math.min(nAllRate, 100)
+end
+
+function ZhenFa:CanZhenJueLingWu(pPlayer, nZJHole, nLWType)
+  if not self:IsSystemOpen() then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\229\176\154\230\156\170\229\188\128\229\144\175")
+  end
+  local nCurPutOnPos = self:GetZhenFaCurPutOnPos(pPlayer)
+  if not nCurPutOnPos or nCurPutOnPos <= 0 then
+    return false, i18n.EasyGet("\230\156\170\232\163\133\229\164\135\233\152\181\230\179\149")
+  end
+  local nCurLevel = self:GetZhenJueHoleLevel(pPlayer, nZJHole)
+  if nCurLevel >= self:GetZFZhenJueMaxLevel(pPlayer) then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\229\136\176\230\156\128\229\164\167\231\173\137\231\186\167")
+  end
+  local nNextLevel = nCurLevel + 1
+  if nNextLevel > #self.ZhenJueLevelInfo then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\229\136\176\230\156\128\229\164\167\231\173\137\231\186\167")
+  end
+  local nItemTemplateId, nItemNum
+  if nLWType == self.nNormalLingWu then
+    nItemTemplateId, nItemNum = self.ZhenJueLevelInfo[nNextLevel][2], self.ZhenJueLevelInfo[nNextLevel][3]
+  else
+    nItemTemplateId, nItemNum = self.ZhenJueLevelInfo[nNextLevel][4], self.ZhenJueLevelInfo[nNextLevel][5]
+  end
+  if nItemTemplateId <= 0 then
+    return false, i18n.EasyGet("\230\182\136\232\128\151\233\129\147\229\133\183\233\133\141\231\189\174\233\148\153\232\175\175")
+  end
+  local nCurNum = pPlayer.GetItemCountByTypeInBag(nItemTemplateId)
+  if nItemNum > nCurNum then
+    return false, i18n.EasyGet("\230\182\136\232\128\151\233\129\147\229\133\183\230\149\176\233\135\143\228\184\141\232\182\179")
+  end
+  return true
+end
+
+function ZhenFa:IsSystemOpen()
+  if 1 ~= GetTimeFrameState(self.szOpenTimeframe) then
+    return false
+  end
+  return true
+end
+
+function ZhenFa:GetZhenFaPosByActiveId(nActiveItemTId)
+  for i = 1, #self.ZhenFaInfo do
+    for j = 1, #self.ZhenFaInfo[i] do
+      if nActiveItemTId == self.ZhenFaInfo[i][j][2] then
+        return i, j
+      end
+    end
+  end
+end
+
+function ZhenFa:GetZhenFaPosByUpgradeId(nUpgradeItemTId)
+  for i = 1, #self.ZhenFaInfo do
+    for j = 1, #self.ZhenFaInfo[i] do
+      if nUpgradeItemTId == self.ZhenFaInfo[i][j][9] then
+        return i, j
+      end
+    end
+  end
+end
+
+function ZhenFa:GetZhenFaUpgradeConsumeInfo(nLevel)
+  local nIndex = -1
+  for i = 1, #self.ZFConsumeTimeframe2Index do
+    if 1 == GetTimeFrameState(self.ZFConsumeTimeframe2Index[i].szTimeFrame) then
+      nIndex = self.ZFConsumeTimeframe2Index[i].nIndex
+    end
+  end
+  local nItemTemplateId, nItemNum = self.ZhenFaLevelInfo[nLevel][1], self.ZhenFaLevelInfo[nLevel][2]
+  if -1 ~= nIndex then
+    nItemNum = self.ZhenFaLevelConsumeItemNum[nLevel][nIndex]
+  end
+  return nItemTemplateId, nItemNum
+end
+
+function ZhenFa:CanUpgradeZFLevel(pPlayer)
+  if not self:IsSystemOpen() then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\229\176\154\230\156\170\229\188\128\229\144\175")
+  end
+  local nCurPutOnPos = self:GetZhenFaCurPutOnPos(pPlayer)
+  if not nCurPutOnPos and nCurPutOnPos <= 0 then
+    return false, i18n.EasyGet("\230\156\170\232\163\133\229\164\135\233\152\181\230\179\149")
+  end
+  local nCurLevel = self:GetZhenFaLevel(pPlayer)
+  if nCurLevel >= self:GetZhenFaMaxLevel(pPlayer) then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\229\136\176\230\156\128\229\164\167\231\173\137\231\186\167")
+  end
+  local nNextLevel = nCurLevel + 1
+  if nNextLevel > #self.ZhenFaLevelInfo then
+    return false, i18n.EasyGet("\229\183\178\232\190\190\229\136\176\230\156\128\229\164\167\231\173\137\231\186\167")
+  end
+  local nItemTemplateId, nItemNum = self:GetZhenFaUpgradeConsumeInfo(nNextLevel)
+  if nItemTemplateId <= 0 then
+    return false, i18n.EasyGet("\230\182\136\232\128\151\233\129\147\229\133\183\233\133\141\231\189\174\233\148\153\232\175\175")
+  end
+  local nCurNum = pPlayer.GetItemCountByTypeInBag(nItemTemplateId)
+  if nItemNum > nCurNum then
+    return false, i18n.EasyGet("\230\182\136\232\128\151\233\129\147\229\133\183\230\149\176\233\135\143\228\184\141\232\182\179")
+  end
+  return true
+end
+
+function ZhenFa:CanPutOn(pPlayer, nPos)
+  if not self:IsSystemOpen() then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\229\176\154\230\156\170\229\188\128\229\144\175")
+  end
+  local nCurPutOnPos = self:GetZhenFaCurPutOnPos(pPlayer)
+  if nCurPutOnPos and nPos == nCurPutOnPos then
+    return false, i18n.EasyGet("\229\183\178\232\163\133\229\164\135")
+  end
+  return true
+end
+
+function ZhenFa:ChangeZhenJueAttr(pPlayer, nOldPos, nNewPos)
+  if pPlayer.IsMaskPlayerAttr() then
+    return
+  end
+  self:RemoveZhenJueAttribute(pPlayer, nOldPos)
+  self:ApplyZhenJueAttribute(pPlayer, nNewPos)
+end
+
+function ZhenFa:ChangeZFAttr(pPlayer, nOldPos, nOldSubPos, nNewPos, nNewSubPos, nOldLevel, nNewLevel)
+  if pPlayer.IsMaskPlayerAttr() then
+    return
+  end
+  local nTeamMemberNum = self:GetTeamMemberCount(pPlayer)
+  if nTeamMemberNum < 1 then
+    nTeamMemberNum = 1
+  end
+  self:RemoveZFAttribute(pPlayer, nOldPos, nOldSubPos, nTeamMemberNum, nOldLevel)
+  self:ApplyZFAttribute(pPlayer.GetNpc(), nNewPos, nNewSubPos, nTeamMemberNum, nNewLevel, pPlayer.dwID)
+end
+
+function ZhenFa:GetZFAttrList(nPos, nSubPos, nTeamMemberNum, nLevel)
+  if nTeamMemberNum < 1 or nPos <= 0 then
+    return
+  end
+  local nAttrId = self.ZhenFaInfo[nPos][nSubPos][4]
+  local szKey = "ZFAttrInfo" .. nAttrId
+  if not self[szKey] then
+    return
+  end
+  if not self[szKey][nTeamMemberNum] then
+    return
+  end
+  return self[szKey][nTeamMemberNum][nLevel]
+end
+
+function ZhenFa:ApplyZFAttribute(pNpc, nPos, nSubPos, nTeamMemberNum, nLevel, nPlayerId)
+  local tbAttrList = self:GetZFAttrList(nPos, nSubPos, nTeamMemberNum, nLevel)
+  if tbAttrList then
+    for _, tbV in ipairs(tbAttrList) do
+      pNpc.ApplyMagicAttrib(tbV[1], tbV[2], tbV[3], tbV[4])
+      if nPlayerId then
+        AttributeHelp:LogAttrApply(nPlayerId, "ZhenFa", tbV[1], tbV[2], tbV[3], tbV[4])
+      end
+    end
+  end
+end
+
+function ZhenFa:RemoveZFAttribute(pPlayer, nPos, nSubPos, nTeamMemberNum, nLevel)
+  local tbAttrList = self:GetZFAttrList(nPos, nSubPos, nTeamMemberNum, nLevel)
+  if tbAttrList then
+    for _, tbV in ipairs(tbAttrList) do
+      pPlayer.RemoveMagicAttrib(tbV[1], tbV[2], tbV[3], tbV[4])
+      AttributeHelp:LogAttrRemove(pPlayer.dwID, "ZhenFa", tbV[1], tbV[2], tbV[3], tbV[4])
+    end
+  end
+end
+
+function ZhenFa:ApplyZhenJueAttribute(pPlayer, nPos, tbAttrIdList)
+  tbAttrIdList = tbAttrIdList or self:GetZhenJueAttrIdList(pPlayer, nPos)
+  local tbAttrIdList = self:GetZhenJueAttrIdList(pPlayer, nPos)
+  for nHoleIndex, nAttrId in ipairs(tbAttrIdList) do
+    local nLevel = self:GetZhenJueHoleLevel(pPlayer, nHoleIndex)
+    self:ApplyZhenJueAttributeByAttrId(pPlayer.GetNpc(), nAttrId, nLevel, pPlayer.dwID)
+  end
+end
+
+function ZhenFa:ApplyZhenJueAttributeByAttrId(pNpc, nAttrId, nLevel, nPlayerId)
+  local tbAttrList = self.ZhenJueAttrInfo[nAttrId][nLevel]
+  if tbAttrList then
+    for _, tbV in ipairs(tbAttrList) do
+      if type(tbV) == "table" then
+        pNpc.ApplyMagicAttrib(tbV[1], tbV[2], tbV[3], tbV[4])
+        if nPlayerId then
+          AttributeHelp:LogAttrApply(nPlayerId, "ZhenFa", tbV[1], tbV[2], tbV[3], tbV[4])
+        end
+      end
+    end
+  end
+end
+
+function ZhenFa:RemoveZhenJueAttribute(pPlayer, nPos, tbOldAttrIdList)
+  tbOldAttrIdList = tbOldAttrIdList or self:GetZhenJueAttrIdList(pPlayer, nPos)
+  for nHoleIndex, nAttrId in ipairs(tbOldAttrIdList) do
+    local nLevel = self:GetZhenJueHoleLevel(pPlayer, nHoleIndex)
+    self:RemoveZhenJueAttributeByAttrId(pPlayer, nAttrId, nLevel)
+  end
+end
+
+function ZhenFa:RemoveZhenJueAttributeByAttrId(pPlayer, nAttrId, nLevel)
+  local tbAttrList = self.ZhenJueAttrInfo[nAttrId][nLevel]
+  if tbAttrList then
+    for _, tbV in ipairs(tbAttrList) do
+      if type(tbV) == "table" then
+        pPlayer.RemoveMagicAttrib(tbV[1], tbV[2], tbV[3], tbV[4])
+        AttributeHelp:LogAttrRemove(pPlayer.dwID, "ZhenFa", tbV[1], tbV[2], tbV[3], tbV[4])
+      end
+    end
+  end
+end
+
+function ZhenFa:CalcFightPower(pPlayer, szType)
+  local nCurPutOnPos, nCurPutOnSubPos = self:GetZhenFaCurPutOnPos(pPlayer)
+  if nCurPutOnPos <= 0 or nCurPutOnSubPos <= 0 then
+    return 0
+  end
+  local nFightPower = 0
+  local nZFLevel = self:GetZhenFaLevel(pPlayer)
+  nFightPower = nFightPower + self.ZhenFaLevelInfo[nZFLevel][2 + nCurPutOnSubPos]
+  local tbAttrIdList = self:GetZhenJueAttrIdList(pPlayer, nCurPutOnPos)
+  for nIndex, nAttrId in ipairs(tbAttrIdList) do
+    if nAttrId > 0 then
+      local nLevel = self:GetZhenJueHoleLevel(pPlayer, nIndex)
+      if nLevel > 0 then
+        nFightPower = nFightPower + self.ZhenJueLevelInfo[nLevel][13]
+      end
+    end
+  end
+  return nFightPower
+end
+
+function ZhenFa:OnEquip(pPlayer)
+  local nCurPutOnPos, nCurPutOnSubPos = self:GetZhenFaCurPutOnPos(pPlayer)
+  if nCurPutOnPos <= 0 or nCurPutOnSubPos <= 0 then
+    return
+  end
+  local nTeamMemberCount = self:GetTeamMemberCount(pPlayer)
+  if nTeamMemberCount <= 0 then
+    nTeamMemberCount = 1
+  end
+  local nLevel = self:GetZhenFaLevel(pPlayer)
+  self:ApplyZFAttribute(pPlayer.GetNpc(), nCurPutOnPos, nCurPutOnSubPos, nTeamMemberCount, nLevel, pPlayer.dwID)
+  self:ApplyZhenJueAttribute(pPlayer, nCurPutOnPos)
+end
+
+function ZhenFa:ApplyZFAttrByRobot(pNpc, nPos, nSubPos, nLevel, tbZJAttrData)
+  local nTeamMemberCount = 1
+  self:ApplyZFAttribute(pNpc, nPos, nSubPos, nTeamMemberCount, nLevel)
+  for _, tbV in ipairs(tbZJAttrData) do
+    if tbV[1] > 0 and tbV[2] > 0 then
+      self:ApplyZhenJueAttributeByAttrId(pNpc, tbV[1], tbV[2])
+    end
+  end
+end
+
+function ZhenFa:OnUnEquip(pPlayer)
+  local nCurPutOnPos, nCurPutOnSubPos = self:GetZhenFaCurPutOnPos(pPlayer)
+  if nCurPutOnPos <= 0 or nCurPutOnSubPos <= 0 then
+    return
+  end
+  local nTeamMemberCount = self:GetTeamMemberCount(pPlayer)
+  if nTeamMemberCount <= 0 then
+    nTeamMemberCount = 1
+  end
+  local nLevel = self:GetZhenFaLevel(pPlayer)
+  self:RemoveZFAttribute(pPlayer, nCurPutOnPos, nCurPutOnSubPos, nTeamMemberCount, nLevel)
+  self:RemoveZhenJueAttribute(pPlayer, nCurPutOnPos)
+end
+
+AttributeModule:Register("ZhenFa", ZhenFa)
+
+function ZhenFa:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  local nZFLevel = pPlayerAsync.GetZhenFaLevel()
+  if 0 == self.nZhenFaLevel then
+    self.nZhenFaLevel = 1
+  end
+  local nZFPos = pPlayerAsync.GetZhenFaPos()
+  local nZFSubPos = pPlayerAsync.GetZhenFaSubPos()
+  local tbZJAttrData = {}
+  for i = 1, ZhenFa.nMaxZhenJue do
+    tbZJAttrData[i] = {}
+    tbZJAttrData[i][1] = pPlayerAsync.GetZFZhenJueAttrId(i)
+    tbZJAttrData[i][2] = pPlayerAsync.GetZFZhenJueLevel(i)
+    if 0 == tbZJAttrData[i][2] then
+      tbZJAttrData[i][2] = 1
+    end
+  end
+  ZhenFa:ApplyZFAttrByRobot(pNpc, nZFPos, nZFSubPos, nZFLevel, tbZJAttrData)
+end
+
+FightPower:RegisterFPSystemModule({"ZhenFa"}, ZhenFa)

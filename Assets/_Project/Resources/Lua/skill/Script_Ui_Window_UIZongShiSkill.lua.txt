@@ -1,0 +1,151 @@
+local tbWnd = Ui:CreateClass("UIZongShiSkill", "UIPanel")
+local tbControls = {
+  txtTitle = "txt_Tittle",
+  txtTitleInfo = "txt_Info",
+  btnReset = "btnReset",
+  btnCenter = "Scroll View/Viewport/Content/Template/Cont_Center/btnSkill%d",
+  btn01 = "Scroll View/Viewport/Content/Template/Cont_01/btnSkill%d",
+  btn02 = "Scroll View/Viewport/Content/Template/Cont_02/btnSkill%d",
+  btn03 = "Scroll View/Viewport/Content/Template/Cont_03/btnSkill%d",
+  btn04 = "Scroll View/Viewport/Content/Template/Cont_04/btnSkill%d",
+  SkillName = "/txtSkillName",
+  SkillNum = "/txtSkillNum",
+  SkillImage = "/skillImage",
+  SkillUnopen = "/skillUnopen",
+  SkillUnopen_Effect = "/skillUnopen_Effect",
+  SkillActiveStateText = "/txtState",
+  ImgLine = "/ImgLine0%d",
+  ImgLineOpen = "/ImgLineOpen0%d",
+  ImgLineOpen_Effect = "/ImgLineOpen0%d_Effect"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnReset = function()
+    local function fnDo()
+      if me.GetMoney("YuanBao") < ZongShiSkill.Cfg.ZONGSHI_SKILL_RESET_COST then
+        me.CenterMsg(i18n.EasyGet("\229\133\131\229\174\157\228\184\141\232\182\179"))
+        
+        return
+      end
+      RemoteServer.RequestZongShiSkill("RequestResetAllSkill")
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\230\182\136\232\128\151{0}\229\133\131\229\174\157\233\135\141\231\189\174\230\137\128\230\156\137\230\138\128\232\131\189\239\188\159", ZongShiSkill.Cfg.ZONGSHI_SKILL_RESET_COST), {
+      {fnDo},
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  end
+}
+
+function tbWnd:OnCreate()
+end
+
+function tbWnd:OnOpen()
+  if not Lib:IsEmptyStr(self.szSelectedIconPath) then
+    self.pPanel:SetActive(self.szSelectedIconPath .. "/UpSkilllEffect", false)
+  end
+  self.szSelectedIconPath = ""
+  self.tbZongShiSkillSetting = ZongShiSkill.tbZongShiSkillSetting or {}
+  self.tbZongShiSkillData = {}
+  self.tbContList = {}
+  self.tbContBtnName = {
+    [0] = tbControls.btnCenter,
+    [1] = tbControls.btn01,
+    [2] = tbControls.btn02,
+    [3] = tbControls.btn03,
+    [4] = tbControls.btn04
+  }
+  self:OnSyncPlayerData()
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:OnSyncPlayerData(bUpdateSkill)
+  self:UpdateSkillPointData()
+  self:UpdateContData()
+  if bUpdateSkill and not Lib:IsEmptyStr(self.szSelectedIconPath) then
+    self.pPanel:SetActive(self.szSelectedIconPath .. "/UpSkilllEffect", false)
+    self.pPanel:SetActive(self.szSelectedIconPath .. "/UpSkilllEffect", true)
+  end
+end
+
+function tbWnd:UpdateSkillPointData()
+  local nTotalSkillPoint = me.GetUserValue(ZongShiSkill.SKILL_POINT_GROUP, ZongShiSkill.SKILL_POINT)
+  local nUsedSkillPoint = me.GetUserValue(ZongShiSkill.SKILL_POINT_GROUP, ZongShiSkill.TOTAL_COST_POINT)
+  self.pPanel:Label_SetText(tbControls.txtTitleInfo, i18n.EasyGet("\230\138\128\232\131\189\231\130\185 {0}", nTotalSkillPoint - nUsedSkillPoint))
+  self.pPanel:SetActive(tbControls.btnReset, nUsedSkillPoint > 0)
+end
+
+function tbWnd:onClickViewSkill(nSkillId)
+  if not Lib:IsEmptyStr(self.szSelectedIconPath) then
+    self.pPanel:SetActive(self.szSelectedIconPath .. "/UpSkilllEffect", false)
+  end
+  local tbSkillData = self.tbZongShiSkillSetting[nSkillId]
+  self.szSelectedIconPath = string.format(self.tbContBtnName[tbSkillData.nSect], tbSkillData.nUIShowPos)
+  Ui:OpenWindow("UISkillShow_MasterSkill", nSkillId, false)
+end
+
+function tbWnd:UpdateContData()
+  for nSkillId, tbSkillData in pairs(self.tbZongShiSkillSetting) do
+    local nSkillLevel, nMaxLevel = ZongShiSkill:GetSkillLevelInfoById(me, nSkillId)
+    self.tbZongShiSkillData[nSkillId] = {nSkillLevel, nMaxLevel}
+    self.tbContList[tbSkillData.nSect] = self.tbContList[tbSkillData.nSect] or {}
+    self.tbContList[tbSkillData.nSect][nSkillId] = tbSkillData
+  end
+  for i = 0, 4 do
+    for nSkillId, tbSkillData in pairs(self.tbContList[i]) do
+      local nPosId = tbSkillData.nUIShowPos
+      local szBtnName = string.format(self.tbContBtnName[i], nPosId)
+      self.pPanel:Label_SetText(szBtnName .. tbControls.SkillName, i18n.Parse(tbSkillData.szName))
+      if self.tbZongShiSkillData[nSkillId][1] ~= self.tbZongShiSkillData[nSkillId][2] then
+        self.pPanel:Label_SetText(szBtnName .. tbControls.SkillNum, string.format("%d/%d", self.tbZongShiSkillData[nSkillId][1], self.tbZongShiSkillData[nSkillId][2]))
+      else
+        self.pPanel:Label_SetText(szBtnName .. tbControls.SkillNum, string.format("<color=#FFEF00>%d/%d</color>", self.tbZongShiSkillData[nSkillId][1], self.tbZongShiSkillData[nSkillId][2]))
+      end
+      local szIconAltlas = FightSkill:GetSkillIconAtlas(nSkillId)
+      self.pPanel:Sprite_SetSprite(szBtnName .. tbControls.SkillImage, szIconAltlas)
+      self.pPanel:SetActive(szBtnName .. tbControls.SkillUnopen, self.tbZongShiSkillData[nSkillId][1] <= 0)
+      self.pPanel:SetActive(szBtnName .. tbControls.SkillUnopen_Effect, self.tbZongShiSkillData[nSkillId][1] == self.tbZongShiSkillData[nSkillId][2])
+      self.pPanel:SetActive(szBtnName .. tbControls.SkillActiveStateText, self.tbZongShiSkillData[nSkillId][1] <= 0)
+      self.pPanel:Label_SetText(szBtnName .. tbControls.SkillActiveStateText, "")
+      Ui:Button_BindEvent(self.pPanel, szBtnName, self.onClickViewSkill, self, nSkillId)
+      if 8 == nPosId then
+        local szEffectName = ""
+        if 1 == i then
+          szEffectName = "/QingLong"
+        elseif 2 == i then
+          szEffectName = "/ZhuQue"
+        elseif 3 == i then
+          szEffectName = "/BaiHu"
+        elseif 4 == i then
+          szEffectName = "/XuanWu"
+        end
+        self.pPanel:SetActive(szBtnName .. szEffectName, self.tbZongShiSkillData[nSkillId][1] > 0)
+      end
+      local tbSkillLineData = ZongShiSkill.tbUIZongShiSkillLineSetting[i][nPosId]
+      if tbSkillLineData then
+        for j = 1, tbSkillLineData.nLineCount do
+          local nLineTarget = tbSkillLineData["nLine" .. j .. "Target"]
+          local nTargetSect = math.floor(nLineTarget / 10)
+          local nTargetPos = math.floor(nLineTarget % 10)
+          local tbTargetSkill = ZongShiSkill.tbZongShiSkillUIShowPos[nTargetSect][nTargetPos]
+          if tbTargetSkill then
+            local nCurSkillLevel = ZongShiSkill:GetSkillLevelInfoById(me, nSkillId)
+            local nTargetSkillLevel = ZongShiSkill:GetSkillLevelInfoById(me, tbTargetSkill[2])
+            local bTargetCanDo = ZongShiSkill:CheckCanLearnSkill(me, tbTargetSkill[2], true)
+            local szLineName = string.format(tbControls.ImgLine, j)
+            local szLineOpenName = string.format(tbControls.ImgLineOpen, j)
+            local szLineOpenEffect = string.format(tbControls.ImgLineOpen_Effect, j)
+            self.pPanel:SetActive(szBtnName .. szLineName, true)
+            self.pPanel:SetActive(szBtnName .. szLineOpenName, nCurSkillLevel > 0 and bTargetCanDo)
+            self.pPanel:SetActive(szBtnName .. szLineOpenEffect, nCurSkillLevel > 0 and nTargetSkillLevel > 0)
+          end
+        end
+      end
+    end
+  end
+end

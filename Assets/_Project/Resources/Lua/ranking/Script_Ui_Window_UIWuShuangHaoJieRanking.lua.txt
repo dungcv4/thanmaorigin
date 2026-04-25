@@ -1,0 +1,186 @@
+local tbWnd = Ui:CreateWindow("UIWuShuangHaoJieRanking")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_WULINDAHUI_SYNC_PRERANK,
+      self.DoUpdateRank,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  NotInfo = "node/imgBG/Content/RankList/NotInfo",
+  Content = "node/imgBG/Content/RankList/Content",
+  RankTemplate = "node/imgBG/Content/RankList/Content/Template",
+  txtPage = "node/imgBG/Content/txtPage",
+  btnPrePage = "node/imgBG/Content/btnPrePage",
+  btnNextPage = "node/imgBG/Content/btnNextPage",
+  btnFirstPage = "node/imgBG/Content/btnFirstPage",
+  btnLastPage = "node/imgBG/Content/btnLastPage",
+  txtRank = "node/imgBG/Content/Bottom/txtRank",
+  txtRankValue = "node/imgBG/Content/Bottom/txtRankValue",
+  txtScore = "node/imgBG/Content/Bottom/txtScore",
+  txtScoreValue = "node/imgBG/Content/Bottom/txtScoreValue",
+  txtMyInfoLabelNoData = "node/imgBG/Content/Bottom/txtMyInfoLabelNoData"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnPrePage = function(self)
+    self:PrePage()
+  end,
+  btnNextPage = function(self)
+    self:NextPage()
+  end,
+  btnLastPage = function(self)
+    self:LastPage()
+  end,
+  btnFirstPage = function(self)
+    self:FirstPage()
+  end
+}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.tbScrollView = Ui:NewScrollView(tbWnd, tbControls.RankTemplate)
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:OnOpen()
+  self.nCurPage = 1
+  self:DoUpdateRank()
+end
+
+function tbWnd:SetMyData(tbMyRankInfo)
+  tbWnd.pPanel:SetActive(tbControls.txtRank, true)
+  tbWnd.pPanel:SetActive(tbControls.txtRankValue, true)
+  tbWnd.pPanel:SetActive(tbControls.txtScore, true)
+  tbWnd.pPanel:SetActive(tbControls.txtScoreValue, true)
+  tbWnd.pPanel:SetActive(tbControls.txtMyInfoLabelNoData, false)
+  tbWnd.pPanel:Label_SetText(tbControls.txtRank, i18n.EasyGet("\230\136\152\233\152\159\230\142\146\229\144\141\239\188\154"))
+  tbWnd.pPanel:Label_SetText(tbControls.txtRankValue, tbMyRankInfo[WldhTeam.RANK] or "-")
+  tbWnd.pPanel:Label_SetText(tbControls.txtScore, i18n.EasyGet("\230\136\152\233\152\159\231\167\175\229\136\134\239\188\154"))
+  tbWnd.pPanel:Label_SetText(tbControls.txtScoreValue, tbMyRankInfo[WldhTeam.SCORE] or "-")
+end
+
+function tbWnd:SetElement(tbElement, tbRecord)
+  local pPanel = tbElement.pPanel
+  if tbRecord.nRank <= 3 then
+    pPanel:SetActive("txtRank", false)
+    pPanel:SetActive("UIRankNo", true)
+    pPanel:SetActive("UIRankNo/imgNO1", 1 == tbRecord.nRank)
+    pPanel:SetActive("UIRankNo/imgNO2", 2 == tbRecord.nRank)
+    pPanel:SetActive("UIRankNo/imgNO3", 3 == tbRecord.nRank)
+  else
+    pPanel:SetActive("UIRankNo", false)
+    pPanel:SetActive("txtRank", true)
+    pPanel:Label_SetText("txtRank", tbRecord.nRank)
+  end
+  if tbRecord.nTeamId ~= WuLinDaHui:GetBattleTeamId(me.dwID) then
+    pPanel:Sprite_SetColor("Main", 0, 0, 0, 20)
+  else
+    pPanel:Sprite_SetColor("Main", 255, 255, 255, 255)
+  end
+  pPanel:Label_SetText("txtTeamName", tbRecord.szTeamName)
+  pPanel:Label_SetText("txtTime", Lib:TimeDesc(tbRecord.nBattleTime or 0))
+  pPanel:Label_SetText("txtVictory", tbRecord.nWinCount or 0)
+  pPanel:Label_SetText("txtScore", tbRecord.nScore or 0)
+  Ui:Button_BindEvent(pPanel, "", function()
+    Ui:OpenWindow("UIWuShuangHaoJie", tbRecord.nTeamId)
+  end)
+end
+
+function tbWnd:DoUpdateRank()
+  local nPage = self.nCurPage
+  local tbData = WuLinDaHui:CheckUpdateData(nPage)
+  self:UpdateMyRankInfo()
+  if tbData then
+    self:SetRankData(tbData)
+  else
+    self.tbScrollView:Clear()
+  end
+end
+
+function tbWnd:SetRankData(tbData)
+  self.tbScrollView:Clear()
+  if not tbData or Lib:IsEmptyTB(tbData) then
+    self.pPanel:SetActive(tbControls.NotInfo, true)
+    return
+  end
+  for nIndex, tbRecord in ipairs(tbData) do
+    self.tbScrollView:SetElement(nIndex, function(tbElement)
+      tbWnd:SetElement(tbElement, tbRecord)
+    end)
+  end
+  self.pPanel:SetActive(tbControls.NotInfo, false)
+end
+
+function tbWnd:UpdateMyRankInfo()
+  local tbMyInfo = WuLinDaHui.tbTeamInfo
+  if not (tbMyInfo and tbMyInfo[WldhTeam.RANK]) or 0 == tbMyInfo[WldhTeam.RANK] or tbMyInfo[WldhTeam.RANK] > WuLinDaHui.PreCfg.RANK_COUNT then
+    self:SetMyRankInfo_NOData()
+  else
+    self:SetMyRankInfo(tbMyInfo)
+  end
+  local nMaxNum = WuLinDaHui.nMaxLength or 0
+  self.nMaxPage = math.max(math.ceil(nMaxNum / WuLinDaHui.PAGE_NUM), 1)
+  self.pPanel:Label_SetText(tbControls.txtPage, string.format("%d/%d", self.nCurPage, self.nMaxPage))
+end
+
+function tbWnd:SetMyRankInfo_NOData()
+  tbWnd.pPanel:SetActive(tbControls.txtRank, false)
+  tbWnd.pPanel:SetActive(tbControls.txtRankValue, false)
+  tbWnd.pPanel:SetActive(tbControls.txtScore, false)
+  tbWnd.pPanel:SetActive(tbControls.txtScoreValue, false)
+  tbWnd.pPanel:SetActive(tbControls.txtMyInfoLabelNoData, true)
+end
+
+function tbWnd:SetMyRankInfo(tbData)
+  self:SetMyData(tbData)
+end
+
+function tbWnd:OnSynRankData(nPage)
+  if self.nCurPage ~= nPage then
+    return
+  end
+  self:DoUpdateRank()
+end
+
+function tbWnd:FirstPage()
+  if 1 == self.nCurPage then
+    return
+  end
+  self.nCurPage = 1
+  self:DoUpdateRank()
+end
+
+function tbWnd:LastPage()
+  if self.nCurPage == self.nMaxPage then
+    return
+  end
+  self.nCurPage = self.nMaxPage
+  self:DoUpdateRank()
+end
+
+function tbWnd:PrePage()
+  if self.nCurPage <= 1 then
+    return
+  end
+  self.nCurPage = self.nCurPage - 1
+  self:DoUpdateRank()
+end
+
+function tbWnd:NextPage()
+  if self.nCurPage >= self.nMaxPage then
+    return
+  end
+  self.nCurPage = self.nCurPage + 1
+  self:DoUpdateRank()
+end

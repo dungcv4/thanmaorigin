@@ -1,0 +1,179 @@
+TieFuCheng.bMeetTimeFrame = TieFuCheng.bMeetTimeFrame or false
+
+function TieFuCheng:OnPredictState(bMeetTimeFrame)
+  self.bMeetTimeFrame = bMeetTimeFrame
+end
+
+function TieFuCheng:AttendReq(nMapId)
+  local bRet, szErr = self:CanAttend(nMapId)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  RemoteServer.RequestTieFuCheng("AttendReq", nMapId)
+end
+
+function TieFuCheng:FollowMemberReq(nFromMapId, nFromMapTid, nTargetMapId, nTargetMapTid)
+  self:SwitchMap(nTargetMapId)
+end
+
+function TieFuCheng:FollowMemberRsp(bRet)
+  if not bRet and TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+end
+
+function TieFuCheng:Init()
+  local tbRegisterMapList = {}
+  for nIndex, nTemplateID in pairs(TieFuCheng.FIGHT_MAP) do
+    table.insert(tbRegisterMapList, nTemplateID)
+    local tbTieFuChengMapClass = Map:GetClass(nTemplateID)
+    
+    function tbTieFuChengMapClass:TransmitTo(...)
+      TieFuCheng:FollowMemberReq(...)
+    end
+  end
+  FubenUIController:RegisterChecker(tbRegisterMapList, self)
+end
+
+function TieFuCheng:OnFubenMapLoaded(pPlayer)
+  FubenUIController:OpenFuBenUI()
+end
+
+function TieFuCheng:IsNeedFuncScoreButton()
+  return true, {
+    Ui.SwitchWindow,
+    Ui,
+    "UIHudTieFuChengScore"
+  }
+end
+
+function TieFuCheng:QueryScoreReq()
+  if self:IsGameMap(me.nMapTemplateId) then
+    RemoteServer.RequestTieFuCheng("QueryScoreReq", me.dwID)
+  else
+    return false
+  end
+  return true
+end
+
+function TieFuCheng:QueryScoreRsp(tbTongList, tbAttendeeList, tbPillarList)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TIEFUCHENG_SCORE, tbTongList, tbAttendeeList, tbPillarList)
+end
+
+function TieFuCheng:CanAttend(nMapId)
+  if 1 ~= GetTimeFrameState(self.ATTEND_COND.TIMEFRAME_REQ) then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  if not Tong:HasTong() then
+    return false, i18n.EasyGet("\233\156\128\232\166\129\229\138\160\229\133\165\229\184\174\228\188\154")
+  end
+  local bRet, szErr = ActivityCheck:CheckCanEnterActivityEx(me, nil, nil, nil, nil, not self:IsGameMap(me.nMapTemplateId))
+  if not bRet then
+    return false, szErr
+  end
+  return true
+end
+
+function TieFuCheng:IsNeedExitFubenButton()
+  return true
+end
+
+TieFuCheng:Init()
+
+function TieFuCheng:SyncMapList(tbMapList, nMapIndex)
+  self.tbMapListCache = tbMapList
+  self.nMapIndex = nMapIndex
+end
+
+function TieFuCheng:GetMapList()
+  if self.tbMapListCache then
+    return self.tbMapListCache
+  end
+end
+
+function TieFuCheng:SwitchMap(nMapId, nX, nY)
+  RemoteServer.RequestTieFuCheng("SwitchMap", nMapId, false, nX, nY)
+end
+
+function TieFuCheng:SetHasGlobalInfo(bHasGlobalInfo)
+  self.bHasGlobalInfo = bHasGlobalInfo
+end
+
+function TieFuCheng:HasGlobalInfo()
+  return self.bHasGlobalInfo or false
+end
+
+function TieFuCheng:GetLastResultRsp(tbResult)
+  if Ui:WindowVisible("UINewInformation") then
+    Ui:GetWindow("UINewInformation"):UpdateTieFuChengPanel(tbResult)
+  end
+end
+
+function TieFuCheng:GetPlayerLastResultRsp(tbPlayerResult)
+  if Ui:WindowVisible("UITieFuChengResult") then
+    Ui:GetWindow("UITieFuChengResult"):Update(tbPlayerResult)
+  end
+end
+
+function TieFuCheng:GetMapIndex()
+  self.tbMapList = self:GetMapList()
+  if self.tbMapList then
+    for nIndex, nMapID in pairs(self.tbMapList) do
+      if nMapID == me.nMapId then
+        return nIndex
+      end
+    end
+  end
+  return 1
+end
+
+function TieFuCheng:GetCurrentLineName()
+  local txtName
+  if TieFuCheng:IsGameMap(me.nMapTemplateId) then
+    local nIndex = TieFuCheng:GetMapIndex()
+    if nIndex then
+      txtName = i18n.EasyGet("-{0}\231\186\191", nIndex)
+    end
+  end
+  return txtName
+end
+
+function TieFuCheng:UpdateMiniMap()
+  if Ui:WindowVisible("UIHudMinimap") then
+    Ui:GetWindow("UIHudMinimap"):UpdateMiniMapSuffix()
+  end
+end
+
+function TieFuCheng:DoSwitch(nX, nY)
+  Ui:CloseWindow("UIMiniMap")
+  
+  local function fnUpdatePercent()
+    local fMapPercent = Ui.ToolFunction.GetLoadMapPercent()
+    if fMapPercent >= 1.0 then
+      if Ui:GetWindow("UIHudRightCenter") then
+        Ui:GetWindow("UIHudRightCenter"):OnMapLoaded()
+      end
+      self.nUpdateTimerId = nil
+      return
+    end
+    return true
+  end
+  
+  AutoPath:GotoAndCallEx(me.nMapId, nX, nY)
+  self.nUpdateTimerId = Timer:Register(Env.GAME_FPS, fnUpdatePercent)
+end
+
+function TieFuCheng:CloseUI()
+  Ui:CloseWindow("UIHudTieFuChengScore")
+end
+
+function TieFuCheng:SyncRefFlag(nFlag)
+  me.GetNpc().ChangeRefFlag(Npc.RefFlagType.npc_forbid_move, nFlag)
+end
+
+function TieFuCheng:CheckAndGoto(nMapTid, nMapId, nX, nY)
+  if self:IsGameMap(nMapTid) and me.nMapTemplateId ~= nMapTid then
+    self:SwitchMap(nMapId, nX, nY)
+  end
+end

@@ -1,0 +1,171 @@
+local tbWnd = Ui:CreateClass("UIChildrensBook", "UIPanel")
+local tbControls = {
+  txtTitle = "txtTitle",
+  txtSecondTittle = "txtSecondTittle",
+  btnHelp = "txtTitle/btnHelp",
+  Template = "Scroll View/Viewport/Content/Template",
+  txtTime = "txtTime01",
+  Element = "Scroll View/Viewport/Content/Element%d",
+  wndInfo = "wndInfo",
+  Empty4Raycast = "wndInfo/Empty4Raycast"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.szHelpKey)
+  end,
+  Empty4Raycast = function(self)
+    self.pPanel:SetActive(tbControls.wndInfo, false)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.pTaskScorllView = Ui:NewScrollView(self, tbControls.Template, nil, false, false)
+  self.tbListView = {}
+end
+
+function tbWnd:OnOpen(nEntranceIndex, nIndex)
+  self.nEntranceIndex = nEntranceIndex or self.nEntranceIndex
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CHILDRENSBOOK_SYNDATA, self.UpdateTaskInfo, self)
+  if self.nEntranceIndex then
+    self:UpdateInfo(self.nEntranceIndex, nIndex)
+  end
+end
+
+function tbWnd:UpdateInfo(nEntranceIndex, nIndex)
+  self.nEntranceIndex = nEntranceIndex or self.nEntranceIndex
+  self.nIndex = self.nIndex or nIndex
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(nEntranceIndex)
+  local tbInfo = self.tbActivityList[nIndex]
+  if not tbInfo then
+    return 0
+  end
+  self.nIndex = nIndex
+  self.nActivityId = tbInfo.nId
+  self.szHelpKey = tbInfo.szHelpKey
+  self:UpdateActivityInfo()
+end
+
+function tbWnd:UpdateActivityInfo()
+  local pInstance = ActivityMgr:GetInstanceById(self.nActivityId)
+  if pInstance.nStartTime > GetTime() then
+    local nDiff = pInstance.nStartTime - GetTime()
+    self.pPanel:Label_SetText(tbControls.txtTime, i18n.EasyGet("<color=#1FFB24>{0}</color>", i18n.Parse(pInstance.tbConfig.szShowTime)))
+    self.pPanel:Label_SetText(tbControls.txtTime .. "/txtTimeTittle01", i18n.EasyGet("{0}\229\144\142\231\187\147\230\157\159", Lib:TimeDesc2(nDiff)))
+    self.pPanel:SetActive(tbControls.txtTime .. "/txtTimeTittle01", true)
+  else
+    local nRestTime = pInstance:GetEndTime() - GetTime()
+    self.pPanel:Label_SetText(tbControls.txtTime, i18n.EasyGet("<color=#1FFB24>{0}</color>", i18n.Parse(pInstance.tbConfig.szShowTime)))
+    self.pPanel:Label_SetText(tbControls.txtTime .. "/txtTimeTittle01", i18n.EasyGet("{0}\229\144\142\231\187\147\230\157\159", Lib:TimeDesc2(nRestTime)))
+    self.pPanel:SetActive(tbControls.txtTime .. "/txtTimeTittle01", true)
+  end
+  self.pPanel:Label_SetText(tbControls.txtTitle, i18n.Parse(pInstance.tbConfig.szTitle))
+  self.pPanel:Label_SetText(tbControls.txtSecondTittle, i18n.Parse(pInstance.tbConfig.szSecondTitle))
+  self:UpdateTaskInfo()
+end
+
+function tbWnd:UpdateTaskInfo()
+  local pInstance = ActivityMgr:GetInstanceById(self.nActivityId)
+  local nDay = #pInstance.tbConfig.tbEvent
+  self.pTaskScorllView:Clear()
+  for nIndex = 1, nDay do
+    self.pTaskScorllView:SetElement(nIndex, function(tbElement)
+      self:SetElementInfo(tbElement, nIndex)
+    end)
+  end
+  self.pTaskScorllView:ScrollToIndex(pInstance:GetNotHaveReceivedIndex(), true)
+end
+
+function tbWnd:SetElementInfo(tbElement, nIndex)
+  local szCnNum = Lib:Transfer4LenDigit2CnNum(nIndex)
+  tbElement.pPanel:Label_SetText("txtNameNormal", i18n.EasyGet("\231\172\172{0}\230\151\165", szCnNum))
+  local pInstance = ActivityMgr:GetInstanceById(self.nActivityId)
+  local tbTask = pInstance.tbConfig.tbEvent[nIndex]
+  local nCnt = 1
+  for szEventName, tbInfo in pairs(tbTask) do
+    local szPath = string.format("txtInfo0%d", nCnt)
+    local nFinishNum = pInstance:GetFinishNum(nIndex, szEventName)
+    tbElement.pPanel:Label_SetText(szPath, i18n.EasyGet("{0}.{1}({2}/{3})", nCnt, i18n.Parse(tbInfo.szTaskName), nFinishNum, tbInfo.nNeedCnt))
+    nCnt = nCnt + 1
+  end
+  if 2 == nCnt then
+    tbElement.pPanel:SetActive("txtInfo02", false)
+  end
+  local tbAwardCfg = pInstance.tbConfig.tbAward[nIndex]
+  local tbAward = Award:GetAward(tbAwardCfg.nShowAwardId, tbAwardCfg.nShowAwardKey)
+  if not tbAward then
+    return
+  end
+  if not tbElement.pList then
+    tbElement.pList = Ui:NewScrollView(tbElement, "List/Viewport/Content/Template")
+  end
+  tbElement.pList:Clear()
+  for i = 1, #tbAward do
+    tbElement.pList:SetElement(i, function(tbElement)
+      self:UpdateListElement(tbElement, tbAward[i])
+    end, true)
+  end
+  local nTaskState = pInstance:GetTaskState(nIndex)
+  if nTaskState == pInstance.TaskLock then
+    tbElement.pPanel:SetActive("ImgLock", true)
+    tbElement.pPanel:SetActive("txtlock", true)
+    tbElement.pPanel:SetActive("img_Finish", false)
+    tbElement.pPanel:SetActive("btnGet", false)
+    tbElement.pPanel:SetActive("btnCheckAll", false)
+    tbElement.pPanel:Label_SetText("txtlock", i18n.Parse(tbAwardCfg.szUnlock))
+  elseif nTaskState == pInstance.CanDraw then
+    tbElement.pPanel:SetActive("ImgLock", false)
+    tbElement.pPanel:SetActive("txtlock", false)
+    tbElement.pPanel:SetActive("img_Finish", false)
+    tbElement.pPanel:SetActive("btnGet", true)
+    tbElement.pPanel:SetActive("btnCheckAll", true)
+    tbElement.pPanel:Button_SetText("btnCheckAll", i18n.Parse(pInstance.tbConfig.szCheckAllTitle), "txt")
+    Ui:Button_BindEvent(tbElement.pPanel, "btnCheckAll", self.OnClickGo, self, nIndex)
+    Ui:Button_BindEvent(tbElement.pPanel, "btnGet", self.OnClickGetAward, self, nIndex)
+    RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, "btnGet", pInstance:GetRedPointEventId())
+  elseif nTaskState == pInstance.HaveReceived then
+    tbElement.pPanel:SetActive("ImgLock", false)
+    tbElement.pPanel:SetActive("txtlock", false)
+    tbElement.pPanel:SetActive("img_Finish", true)
+    tbElement.pPanel:SetActive("btnGet", false)
+    tbElement.pPanel:SetActive("btnCheckAll", true)
+    tbElement.pPanel:Button_SetText("btnCheckAll", i18n.Parse(pInstance.tbConfig.szCheckAllTitle), "txt")
+    Ui:Button_BindEvent(tbElement.pPanel, "btnCheckAll", self.OnClickGo, self, nIndex)
+  else
+    tbElement.pPanel:SetActive("ImgLock", false)
+    tbElement.pPanel:SetActive("txtlock", false)
+    tbElement.pPanel:SetActive("img_Finish", false)
+    tbElement.pPanel:SetActive("btnGet", true)
+    tbElement.pPanel:SetActive("btnCheckAll", true)
+    tbElement.pPanel:Button_SetEnable("btnGet", false)
+    tbElement.pPanel:Button_SetText("btnCheckAll", i18n.Parse(pInstance.tbConfig.szCheckAllTitle), "txt")
+    Ui:Button_BindEvent(tbElement.pPanel, "btnCheckAll", self.OnClickGo, self, nIndex)
+  end
+end
+
+function tbWnd:UpdateListElement(tbElement, tbAward)
+  local tbGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  tbGrid:SetGenericItem(tbAward)
+  tbGrid:SetClickEnable(true)
+end
+
+function tbWnd:OnClickGetAward(nDay)
+  local pInstance = ActivityMgr:GetInstanceById(self.nActivityId)
+  if pInstance then
+    pInstance:GetAward(nDay)
+  end
+end
+
+function tbWnd:OnClickGo(nDay)
+  local pInstance = ActivityMgr:GetInstanceById(self.nActivityId)
+  local tbAwardCfg = pInstance.tbConfig.tbAward[nDay]
+  if tbAwardCfg then
+    self.pPanel:SetActive(tbControls.wndInfo, true)
+    self.pPanel:Label_SetText(tbControls.wndInfo .. "/imgBg/txtInfo", i18n.Parse(tbAwardCfg.szChildrensText))
+    self.pPanel:Label_SetText(tbControls.wndInfo .. "/imgBg/txtTitle", i18n.Parse(tbAwardCfg.szTxtTitle))
+  end
+end
+
+function tbWnd:OnClose()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHILDRENSBOOK_SYNDATA, self)
+end

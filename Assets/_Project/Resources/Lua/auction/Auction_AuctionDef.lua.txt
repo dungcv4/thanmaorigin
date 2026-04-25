@@ -1,0 +1,239 @@
+local function LoadAuctionSetting()
+  local tbAuctionSetting = Lib:LoadTabFileEx("Setting/Auction/Auction.tab", "dddddssdd", "ItemId", {
+    "ItemId",
+    
+    "MaxItemCount",
+    "OrgPrice",
+    "BidOverRate",
+    "AddRatePerTime",
+    "TypeName",
+    "MoneyType",
+    "MaxSyncNumInGlobal",
+    "Sort"
+  })
+  local tbAuctionGoldSetting = Lib:LoadTabFileEx("Setting/Auction/AuctionGold.tab", "sddd", nil, {
+    "szType",
+    "nCount",
+    "nMinGold",
+    "nMaxGold"
+  })
+  local tbAuctionGold = {}
+  for _, tbInfo in ipairs(tbAuctionGoldSetting) do
+    tbAuctionGold[tbInfo.szType] = tbAuctionGold[tbInfo.szType] or {}
+    table.insert(tbAuctionGold[tbInfo.szType], tbInfo)
+  end
+  local tbShoperAuctionSetting = Lib:LoadTabFileEx("Setting/Auction/AuctionShop.tab", "dddddddssssdddd", "Id", {
+    "Id",
+    "ItemId",
+    "ItemCount",
+    "MaxItemCount",
+    "OrgPrice",
+    "Fix2ndPrice",
+    "AddRatePerTime",
+    "TypeName",
+    "MoneyType",
+    "StartTimeFrame",
+    "EndTimeFrame",
+    "MaxSyncNum",
+    "NeedSysBid",
+    "OpenByTimeFrame",
+    "Sort"
+  })
+  Validator:Register(function()
+    for ItemId, v in pairs(tbAuctionSetting) do
+      if not Item:IsExist(ItemId) then
+        LogErr(string.format("load Auction.tab failed, ItemId %d not exist", ItemId))
+        return false
+      end
+    end
+    return true
+  end)
+  return tbAuctionSetting, tbAuctionGold, tbShoperAuctionSetting
+end
+
+Auction.tbAuctionSetting, Auction.tbAuctionGoldSetting, Auction.tbShoperAuctionSetting = LoadAuctionSetting()
+Auction.bShoperAuctionOpenByActivity = false
+Auction.bShoperAuctionOpenByTimeFrame = false
+
+function Auction:GetGlobalType()
+  return "Global"
+end
+
+function Auction:IsGlobal(szType)
+  return szType == self:GetGlobalType()
+end
+
+function Auction:GetShoperType()
+  return "Shoper"
+end
+
+function Auction:IsShoper(szType)
+  return szType == self:GetShoperType()
+end
+
+function Auction:SetShoperOpenByActivity(bOpen)
+  self.bShoperAuctionOpenByActivity = bOpen
+  Log("Auction:SetShoperOpenByActivity: bOpen = ", bOpen)
+end
+
+function Auction:SetShoperOpenByTimeFrame(bOpen)
+  self.bShoperAuctionOpenByTimeFrame = bOpen
+  Log("Auction:SetShoperOpenByTimeFrame: bOpen = ", bOpen)
+end
+
+function Auction:IsShoperOpen()
+  if self.bShoperAuctionOpenByActivity then
+    return true
+  end
+  if self.bShoperAuctionOpenByTimeFrame then
+    return true
+  end
+  return false
+end
+
+function Auction:GetShoperSellItems()
+  local tbItems = {}
+  for nId, tbInfo in pairs(self.tbShoperAuctionSetting) do
+    if self:IsShoperAuctionItemOnSale(nId) then
+      if self.bShoperAuctionOpenByActivity and 1 ~= tbInfo.OpenByTimeFrame then
+        table.insert(tbItems, {
+          tbInfo.ItemId,
+          tbInfo.ItemCount,
+          nId
+        })
+      elseif self.bShoperAuctionOpenByTimeFrame and 1 == tbInfo.OpenByTimeFrame then
+        table.insert(tbItems, {
+          tbInfo.ItemId,
+          tbInfo.ItemCount,
+          nId
+        })
+      end
+    end
+  end
+  return tbItems
+end
+
+function Auction:GetShoperAuctionItemMaxCount(nId)
+  return self.tbShoperAuctionSetting[nId] and self.tbShoperAuctionSetting[nId].MaxItemCount
+end
+
+function Auction:GetShoperAuctionItemPrice(nId)
+  local tbItemInfo = self.tbShoperAuctionSetting[nId]
+  if not tbItemInfo then
+    return 0
+  end
+  local nRealPrice = tbItemInfo.OrgPrice
+  if nRealPrice <= 0 then
+    return 0
+  end
+  return nRealPrice
+end
+
+function Auction:GetShoperAuctionItemFix2ndPrice(nId)
+  local tbItemInfo = self.tbShoperAuctionSetting[nId]
+  if not tbItemInfo then
+    return 0
+  end
+  local nRealPrice = tbItemInfo.Fix2ndPrice
+  if nRealPrice <= 0 then
+    return 0
+  end
+  return nRealPrice
+end
+
+function Auction:GetShoperAuctionItemAddRatePerTime(nId)
+  return self.tbShoperAuctionSetting[nId] and self.tbShoperAuctionSetting[nId].AddRatePerTime / 100 or 0
+end
+
+function Auction:GetShoperAuctionItemTypeName(nId)
+  return self.tbShoperAuctionSetting[nId] and self.tbShoperAuctionSetting[nId].TypeName
+end
+
+function Auction:GetShoperAuctionItemMoneyType(nId)
+  return self.tbShoperAuctionSetting[nId] and self.tbShoperAuctionSetting[nId].MoneyType
+end
+
+function Auction:IsShoperAuctionItemOnSale(nId)
+  local tbItemInfo = self.tbShoperAuctionSetting[nId]
+  if not tbItemInfo then
+    return false
+  end
+  if tbItemInfo.StartTimeFrame ~= "" and 1 ~= GetTimeFrameState(tbItemInfo.StartTimeFrame) then
+    return false
+  end
+  if "" ~= tbItemInfo.EndTimeFrame and 1 == GetTimeFrameState(tbItemInfo.EndTimeFrame) then
+    return false
+  end
+  return true
+end
+
+function Auction:GetShoperAuctionItemMaxSyncNum(nId)
+  return self.tbShoperAuctionSetting[nId] and self.tbShoperAuctionSetting[nId].MaxSyncNum or self.Def.nMaxSyncCount
+end
+
+function Auction:IsShoperAuctionItemNeedSysBid(nId)
+  local nFlag = self.tbShoperAuctionSetting[nId] and self.tbShoperAuctionSetting[nId].NeedSysBid or 0
+  return 0 ~= nFlag
+end
+
+function Auction:GetShoperAuctionItemSort(nId)
+  return self.tbShoperAuctionSetting[nId] and self.tbShoperAuctionSetting[nId].Sort or math.huge
+end
+
+function Auction:GetAuctionItemMaxCount(nItemId)
+  return self.tbAuctionSetting[nItemId] and self.tbAuctionSetting[nItemId].MaxItemCount
+end
+
+function Auction:GetAuctionItemPrice(nItemId)
+  local tbItemInfo = self.tbAuctionSetting[nItemId]
+  if not tbItemInfo then
+    return 0
+  end
+  local nRealPrice = tbItemInfo.OrgPrice
+  if nRealPrice <= 0 then
+    return 0
+  end
+  return nRealPrice
+end
+
+function Auction:GetAuctionItemBidOverRate(nItemId)
+  return self.tbAuctionSetting[nItemId] and self.tbAuctionSetting[nItemId].BidOverRate / 100 or 0
+end
+
+function Auction:GetAuctionItemAddRatePerTime(nItemId)
+  return self.tbAuctionSetting[nItemId] and self.tbAuctionSetting[nItemId].AddRatePerTime / 100 or 0
+end
+
+function Auction:GetAuctionItemTypeName(nItemId)
+  return self.tbAuctionSetting[nItemId] and self.tbAuctionSetting[nItemId].TypeName
+end
+
+function Auction:GetAuctionItemMoneyType(nItemId)
+  return self.tbAuctionSetting[nItemId] and self.tbAuctionSetting[nItemId].MoneyType
+end
+
+function Auction:GetAuctionItemMaxSyncNum(nItemId)
+  return self.tbAuctionSetting[nItemId] and self.tbAuctionSetting[nItemId].MaxSyncNumInGlobal or self.Def.nMaxSyncCount
+end
+
+function Auction:GetAuctionItemSort(nItemId)
+  return self.tbAuctionSetting[nItemId] and self.tbAuctionSetting[nItemId].Sort or math.huge
+end
+
+function Auction:GetAuctionGoldLimit(szType, nCount)
+  if self.tbAuctionGoldSetting[szType] then
+    local nMaxGold = self.tbAuctionGoldSetting[szType][1].nMaxGold
+    local nMinGold = self.tbAuctionGoldSetting[szType][1].nMinGold
+    for nIdx, tbConfig in ipairs(self.tbAuctionGoldSetting[szType]) do
+      if nCount >= tbConfig.nCount then
+        nMaxGold = tbConfig.nMaxGold
+        nMinGold = tbConfig.nMinGold
+      else
+        return nMaxGold, nMinGold
+      end
+    end
+    return nMaxGold, nMinGold
+  else
+    return 0, 0
+  end
+end

@@ -1,0 +1,195 @@
+local tbWnd = Ui:CreateWindow("UIFishingBag")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_SWITCH,
+      self.CloseByDefault
+    },
+    {
+      EventNotify.emNOTIFY_SUMMERFISHING_HANDIN_DATA_SYNC,
+      self.OnHandInDataSync,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_UPDATE_EXTRA_AWARD,
+      self.DealExtraAward,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  BIContent = "imgBG/FishingBag/BIViewport/BIContent",
+  ItemTemplate = "imgBG/FishingBag/BIViewport/BIContent/ItemCell/Item1",
+  btnRanking = "imgBG/FishingInfo/btnRanking",
+  btnAwards = "imgBG/FishingInfo/btnAwards",
+  btnClose = "imgBG/BG/btnClose",
+  txtFishingScoreValue = "imgBG/FishingInfo/txtFishingScoreTip/txtFishingScoreValue",
+  txtFishingWeightValue = "imgBG/FishingInfo/txtFishingWeightTip/txtFishingWeightValue",
+  txtFishingNumValue = "imgBG/FishingInfo/txtFishingNumTip/txtFishingNumValue",
+  FishTips = "imgBG/FishTips",
+  txtFishName = "imgBG/FishTips/txtFishName",
+  UIItemGrid = "imgBG/FishTips/UIItemGrid",
+  txtScoreValue = "imgBG/FishTips/txtScoreTip/txtScoreValue",
+  txtMaxWeightValue = "imgBG/FishTips/txtMaxWeightTip/txtMaxWeightValue",
+  txtTotalWeightValue = "imgBG/FishTips/txtTotalWeightTip/txtTotalWeightValue",
+  txtNumValue = "imgBG/FishTips/txtNumTip/txtNumValue",
+  wndExtraAwardDetail = "wndExtraAwardDetail",
+  Content = "wndExtraAwardDetail/imgBg/GetAwards/AwardList/Viewport/Content",
+  AwardTemplate = "wndExtraAwardDetail/imgBg/GetAwards/AwardList/Viewport/Content/ItemTemplate"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnRanking = function(self)
+    Ui:OpenWindow("UIRankingSummer", self.pInstance.tbConfig.nRankingAwardActivityId)
+  end,
+  btnAwards = function(self)
+    if self.pPanel:IsActive(tbControls.wndExtraAwardDetail) then
+      self.pPanel:SetActive(tbControls.wndExtraAwardDetail, false)
+    else
+      self:DealExtraAward()
+      self.pPanel:SetActive(tbControls.wndExtraAwardDetail, true)
+    end
+  end,
+  btnClose = function(self)
+    self:CloseByDefault()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbFishGridView = Ui:NewItemGridView(self, tbControls.ItemTemplate)
+  self.tbExAwardView = Ui:NewScrollView(self, tbControls.AwardTemplate, nil, false, false)
+  self:SetClickEmptyCallback(tbControls.wndExtraAwardDetail)
+  self:SetClickEmptyCallback(tbControls.FishTips)
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnAwards, {
+    RedPointMgr.EVENT.SummerAchieve
+  })
+end
+
+function tbWnd:OnOpen()
+  self.pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.SummerFishing)
+  self.pAchieveInstance = ActivityMgr:GetInstanceById(self.pInstance.tbConfig.nAchieveAwardActivityId)
+  self.pPanel:SetActive(tbControls.wndExtraAwardDetail, false)
+  if not self.pInstance or not self.pInstance then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return 0
+  end
+  self.pPanel:SetActive(tbControls.FishTips, false)
+  local tbHandInData, tbSortItem = self.pInstance:GetHandInData()
+  self:OnHandInDataSync(tbHandInData, tbSortItem)
+end
+
+function tbWnd:OnHandInDataSync(tbHandInData, tbSortItem)
+  self:RefreshFishGridView(tbHandInData, tbSortItem)
+  self:RefreshFishingInfo(tbHandInData)
+end
+
+function tbWnd:RefreshFishGridView(tbHandInData, tbSortItem)
+  if not self.tbSortItem then
+    self.tbSortItem = tbSortItem
+  end
+  local nIndex = 1
+  for _, tbInfo in ipairs(tbSortItem) do
+    local function funcClick(nTemplateId, tbData, tbShowInfo, nIndex1)
+      if self.nIndex == nIndex1 and self.pPanel:IsActive(tbControls.FishTips) then
+        self.pPanel:SetActive(tbControls.FishTips, false)
+        
+        local tbGrid = self.tbFishGridView:GetUIItemGridByIndex(nIndex1)
+        tbGrid.pPanel:SetActive("../imgSelected", false)
+        return
+      else
+        self.nIndex = nIndex1
+        self:RefreshGridHighLight()
+      end
+      self.pPanel:SetActive(tbControls.FishTips, false)
+      self:ShowFishDetail(nTemplateId, tbData, tbShowInfo)
+    end
+    
+    local tbGrid = self.tbFishGridView:SetItem(nIndex, {
+      "Item",
+      tbInfo.nFishTemplateId,
+      tbHandInData[tbInfo.nFishTemplateId].HandInNum
+    }, true, funcClick, tbInfo.nFishTemplateId, tbHandInData, tbInfo, nIndex)
+    tbGrid:CDLabyer_SetActive(tbHandInData[tbInfo.nFishTemplateId].HandInNum <= 0)
+    nIndex = nIndex + 1
+  end
+end
+
+function tbWnd:RefreshGridHighLight()
+  for i = 1, #self.tbSortItem do
+    local tbGrid = self.tbFishGridView:GetUIItemGridByIndex(i)
+    if tbGrid then
+      tbGrid.pPanel:SetActive("../imgSelected", self.nIndex == i)
+    end
+  end
+end
+
+function tbWnd:RefreshFishingInfo(tbHandInData)
+  local nTotalWeight = 0
+  local nTotalHandInNum = 0
+  for _, tbInfo in pairs(tbHandInData) do
+    if type(tbInfo) == "table" then
+      nTotalHandInNum = nTotalHandInNum + tbInfo.HandInNum
+      nTotalWeight = nTotalWeight + tbInfo.SumWeight
+    end
+  end
+  self.pPanel:Label_SetText(tbControls.txtFishingScoreValue, tbHandInData.nTotalScore)
+  self.pPanel:Label_SetText(tbControls.txtFishingWeightValue, nTotalWeight)
+  self.pPanel:Label_SetText(tbControls.txtFishingNumValue, nTotalHandInNum)
+end
+
+function tbWnd:ShowFishDetail(nFishTemplateId, tbHandInData, tbShowInfo)
+  if not tbHandInData[nFishTemplateId] then
+    return
+  end
+  local tbFishInfo = tbHandInData[nFishTemplateId]
+  local tbGrid = Ui:NewExistItemGrid(self, tbControls.UIItemGrid)
+  if tbGrid then
+    tbGrid:SetClickEnable(true)
+    tbGrid:SetItemByTemplate(nFishTemplateId, tbFishInfo.HandInNum, me.nFaction, me.nFactionSect, nil, nil, nil, nil)
+    self.pPanel:Label_SetText(tbControls.txtFishName, i18n.Parse(tbShowInfo.szName))
+    self.pPanel:Label_SetText(tbControls.txtScoreValue, tbFishInfo.Score)
+    self.pPanel:Label_SetText(tbControls.txtMaxWeightValue, tbFishInfo.MaxWeight)
+    self.pPanel:Label_SetText(tbControls.txtTotalWeightValue, tbFishInfo.SumWeight)
+    self.pPanel:Label_SetText(tbControls.txtNumValue, tbFishInfo.HandInNum)
+    self.pPanel:SetActive(tbControls.FishTips, true)
+  end
+end
+
+function tbWnd:DealExtraAward()
+  local tbAchieveData = self.pAchieveInstance:GetExtraAwardList()
+  for nIndex, tbAwardInfo in ipairs(tbAchieveData) do
+    self.tbExAwardView:SetElement(nIndex, function(tbElement)
+      self:__SetAchieveElement(tbElement, tbAwardInfo)
+    end)
+  end
+end
+
+function tbWnd:__SetAchieveElement(tbElement, tbAwardInfo)
+  tbElement.pPanel:Label_SetText("AwardTips/txtAwardTip", i18n.Parse(tbAwardInfo.szInfo))
+  local tbGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  tbGrid:SetItemByTemplate(tbAwardInfo.tbAward[1][2], tbAwardInfo.tbAward[1][3], me.nFaction, me.nFactionSect, nil, nil, me.nSex)
+  tbGrid:SetClickEnable(true)
+  if tbAwardInfo.bSuccess and not tbAwardInfo.bHasAward then
+    tbElement.pPanel:Button_SetEnable("btnGet", true)
+    tbElement.pPanel:Button_BindEvent("btnGet", self.GetExtraAward, self, tbAwardInfo.nAchieveId)
+  elseif not tbAwardInfo.bSuccess then
+    tbElement.pPanel:Button_SetEnable("btnGet", false)
+    tbElement.pPanel:Button_SetText("btnGet", i18n.EasyGet("\233\162\134\229\143\150"), "Text")
+  elseif tbAwardInfo.bHasAward then
+    tbElement.pPanel:Button_SetEnable("btnGet", false)
+    tbElement.pPanel:Button_SetText("btnGet", i18n.EasyGet("\229\183\178\233\162\134\229\143\150"), "Text")
+  end
+end
+
+function tbWnd:GetExtraAward(nAchieveId)
+  self.pAchieveInstance:GetExtraAward(nAchieveId)
+end
+
+function tbWnd:OnClickEmptyClose()
+  self.pPanel:SetActive(tbControls.wndExtraAwardDetail, false)
+  self.pPanel:SetActive(tbControls.FishTips, false)
+  self.nIndex = nil
+  self:RefreshGridHighLight()
+end

@@ -1,0 +1,195 @@
+local tbWnd = Ui:CreateClass("UIHudLeftPanelFunnyPlay", "UIPanel")
+tbWnd.UpdateOpt = {
+  UpdateSingleRank = "UpdateSingleRank",
+  UpdateAllRank = "UpdateAllRank",
+  UpdateTopContent = "UpdateTopContent",
+  UpdateMiddleContent = "UpdateMiddleContent",
+  UpdateBottomContent = "UpdateBottomContent"
+}
+local tbControls = {
+  RankTemplate = "UIDefaultFubenInfo/InfoScroll/Viewport/Content/Template",
+  txtBottomContent = "Image/txtContentInfo1",
+  txtTopContentTitle = "txtContent1",
+  txtTopContentTime = "txtContent1/txtContentTime1",
+  txtMiddleContent = "txtContent2"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self.tbRankScrollView = Ui:NewScrollView(self, tbControls.RankTemplate)
+  self.tbDataList = {}
+end
+
+function tbWnd:OnActivate()
+  self:UpdateTopContent()
+  self:UpdateMiddleContent()
+  self:UpdateBottomContent()
+  self:UpdateAllRank()
+end
+
+function tbWnd:OnDeactivate()
+  if self.nCountTimer then
+    Timer:Close(self.nCountTimer)
+    self.nCountTimer = nil
+  end
+  self.nDeactivateTime = GetTime()
+end
+
+function tbWnd:UpdateData(szOpt, ...)
+  if self.UpdateOpt[szOpt] and self[szOpt] then
+    Lib:CallBack({
+      self[szOpt],
+      self,
+      ...
+    })
+  end
+end
+
+function tbWnd:UpdateTopContent(szTitle, nTime, tbTimeDescCallBack, bReset, bCountDown)
+  self.szTopContentTitle = szTitle or self.szTopContentTitle
+  self.nTime = nTime or self.nTime
+  self.tbTimeDescCallBack = tbTimeDescCallBack or self.tbTimeDescCallBack
+  self.bCountDown = bCountDown or self.bCountDown
+  self.pPanel:SetActive(tbControls.txtTopContentTitle, not Lib:IsEmptyStr(szTitle))
+  self.pPanel:Label_SetText(tbControls.txtTopContentTitle, self.szTopContentTitle or "")
+  if true == bReset then
+    self.nDeactivateTime = nil
+  end
+  Lib:CallBack({
+    self._UpdateTime,
+    self
+  })
+  if Lib:IsInteger(self.nTime) and self.nTime > 0 then
+    if self.nCountTimer then
+      Timer:Close(self.nCountTimer)
+    end
+    self.nCountTimer = Timer:Register(Env.GAME_FPS, self._UpdateTime, self)
+  end
+end
+
+function tbWnd:_UpdateTime()
+  if not Lib:IsInteger(self.nTime) or self.nTime <= 0 then
+    self.pPanel:SetActive(tbControls.txtTopContentTime, false)
+    self.pPanel:SetActive(tbControls.txtTopContentTitle, false)
+    if self.nCountTimer then
+      Timer:Close(self.nCountTimer)
+      self.nCountTimer = nil
+    end
+    return false
+  else
+    self.pPanel:SetActive(tbControls.txtTopContentTime, true)
+    self.pPanel:SetActive(tbControls.txtTopContentTitle, true)
+    local nOffset = self.nDeactivateTime and GetTime() - self.nDeactivateTime or 0
+    self.nDeactivateTime = nil
+    if self.bCountDown then
+      self.nTime = self.nTime - 1 - nOffset
+    else
+      self.nTime = self.nTime + 1 + nOffset
+    end
+    local szTimeDesc = ""
+    if self.tbTimeDescCallBack then
+      _, szTimeDesc = Lib:CallBack({
+        table.unpack(self.tbTimeDescCallBack),
+        self.nTime
+      })
+    else
+      _, szTimeDesc = Lib:CallBack({
+        Lib.TimeDesc12,
+        Lib,
+        self.nTime
+      })
+    end
+    self.pPanel:Label_SetText(tbControls.txtTopContentTime, szTimeDesc or "")
+    return true
+  end
+end
+
+function tbWnd:UpdateMiddleContent(szContent, szColor)
+  if nil ~= szContent then
+    self.szMiddleContent = szContent
+  end
+  self.szMiddleColor = szColor or self.szMiddleColor
+  if not Lib:IsEmptyStr(self.szMiddleColor) then
+    self.szMiddleContent = string.format("<color=%s>%s</color>", self.szMiddleColor, self.szMiddleContent)
+  end
+  self.pPanel:Label_SetText(tbControls.txtMiddleContent, self.szMiddleContent or "")
+  self.pPanel:SetActive(tbControls.txtMiddleContent, not Lib:IsEmptyStr(self.szMiddleContent))
+end
+
+function tbWnd:UpdateSingleRank(nId, szContent, Weight, szColor)
+  local nIndex = 0
+  for nIdx, tbInfo in ipairs(self.tbDataList) do
+    if tbInfo.nId == nId then
+      nIndex = nIdx
+      break
+    end
+  end
+  Lib:Tree({
+    nId,
+    szContent,
+    Weight,
+    szColor
+  })
+  self.tbDataList[nIndex] = {
+    nId = nId,
+    szContent = Lib:IIF(Lib:IsEmptyStr(szContent), self.tbDataList[nIndex].szContent, szContent),
+    Weight = Lib:IIF(Lib:IsInteger(Weight), Weight, self.tbDataList[nIndex].Weight),
+    szColor = Lib:IIF(Lib:IsEmptyStr(szColor), self.tbDataList[nIndex].szColor, szColor)
+  }
+  Lib:Tree(self.tbDataList)
+  if self.pCompareFunc then
+    table.sort(self.tbDataList, self.pCompareFunc)
+  end
+  for nIdx, tbInfo in ipairs(self.tbDataList) do
+    local szShowContent = ""
+    self.tbRankScrollView:SetElement(nIdx, function(tbElement)
+      if not Lib:IsEmptyStr(tbInfo.szColor) then
+        szShowContent = string.format("<color=%s>%d %s</color>", tbInfo.szColor, nIdx, tbInfo.szContent)
+      else
+        szShowContent = string.format("%d %s", nIdx, tbInfo.szContent)
+      end
+      tbElement.pPanel:Label_SetText("Main", szShowContent)
+      tbElement.pPanel:SetActive("Main", not Lib:IsEmptyStr(szShowContent))
+    end)
+  end
+end
+
+function tbWnd:UpdateAllRank(tbDataList, pCompareFunc)
+  if pCompareFunc then
+    self.pCompareFunc = pCompareFunc
+  else
+    function self.pCompareFunc(tbA, tbB)
+      return tbA.Weight > tbB.Weight
+    end
+  end
+  self.tbRankScrollView:Clear()
+  if tbDataList then
+    self.tbDataList = tbDataList
+  end
+  for nIndex, tbInfo in ipairs(self.tbDataList) do
+    local szShowContent = ""
+    self.tbRankScrollView:SetElement(nIndex, function(tbElement)
+      if not Lib:IsEmptyStr(tbInfo.szColor) then
+        szShowContent = string.format("<color=%s>%d %s</color>", tbInfo.szColor, nIndex, tbInfo.szContent)
+      else
+        szShowContent = string.format("%d %s", nIndex, tbInfo.szContent)
+      end
+      tbElement.pPanel:Label_SetText("Main", szShowContent)
+      tbElement.pPanel:SetActive("Main", not Lib:IsEmptyStr(szShowContent))
+    end)
+  end
+end
+
+function tbWnd:UpdateBottomContent(szContent, szColor)
+  if nil ~= szContent then
+    self.szBottomContent = szContent
+  end
+  if nil ~= szColor then
+    self.szBottomColor = szColor
+  end
+  if not Lib:IsEmptyStr(self.szBottomColor) then
+    self.szBottomContent = string.format("<color=%s>%s</color>", self.szBottomColor, self.szBottomContent)
+  end
+  self.pPanel:Label_SetText(tbControls.txtBottomContent, self.szBottomContent or "")
+  self.pPanel:SetActive(tbControls.txtBottomContent, not Lib:IsEmptyStr(self.szBottomContent))
+end

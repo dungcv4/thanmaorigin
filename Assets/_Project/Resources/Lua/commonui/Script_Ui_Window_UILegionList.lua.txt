@@ -1,0 +1,174 @@
+local tbWnd = Ui:CreateWindow("UILegionList")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_LEGION_BASEINFO,
+      self.onLegionSyncData
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  Template = "node/imgBG/Content/imgList/List/Template",
+  NotInfo = "node/imgBG/Content/imgList/NotInfo",
+  txtLegionName = "node/imgBG/Content/Right/txtLegionName",
+  txtLegionNotice = "node/imgBG/Content/Right/LegionNotice/txtContent",
+  btnPrevious = "node/imgBG/Content/imgList/btnPrevious",
+  btnNext = "node/imgBG/Content/imgList/btnNext",
+  txtPage = "node/imgBG/Content/imgList/txtPage",
+  btnJoinLegion = "node/imgBG/Content/Right/GridBtn/btnGo",
+  btnCreateLegion = "node/imgBG/Content/Right/GridBtn/btnCreate",
+  btnMatch = "node/imgBG/Content/Right/GridBtn/btnMatch",
+  btnHelp = "node/imgBG/txtTitle/btnHelp"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("LegionHelp")
+  end,
+  btnCreateLegion = function(self)
+    if Legion:HasLegion() then
+      me.CenterMsg(i18n.Get(Legion.Cfg.Msg.AlreadyJoinLegion))
+      return
+    end
+    if not WeekMonthCard:CheckMonthCardState(me) then
+      me.CenterMsg(i18n.Get(Legion.Cfg.Msg.LimitMonthCardCreateLegion))
+      return
+    end
+    local nState = Legion:GetState()
+    if not nState then
+      me.CenterMsg(i18n.Get(Legion.Cfg.Msg.ForbidCreateLegion))
+      return
+    end
+    if nState == Legion.Def.State.PreSign then
+      local nItemCount = me.GetItemCountInBags(Legion.Cfg.nCreateLegionPriorityItem)
+      if nItemCount < 1 then
+        me.CenterMsg(i18n.Get(Legion.Cfg.Msg.NeedLegionPriorityItem))
+        return
+      end
+    end
+    Ui:OpenWindow("UICreateLegion")
+    self:Close()
+  end,
+  btnJoinLegion = function(self)
+    self:ApplyJoinLegion()
+  end,
+  btnMatch = function(self)
+    Legion:SignLegion()
+  end,
+  btnPrevious = function(self)
+    self:OnClickPrevious()
+  end,
+  btnNext = function(self)
+    self:OnClickNext()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbLegionListScrollView = Ui:NewScrollView(self, self.Template, function(self, nIndex, tbElement)
+    self:OnClickOneLegion(nIndex)
+  end)
+  self.tbApplyLegionMap = {}
+end
+
+function tbWnd:OnOpen()
+  local nState = Legion:GetState()
+  if not nState or nState == Legion.Def.State.Close or nState == Legion.Def.State.PrePlay then
+    self.pPanel:SetActive(self.btnCreateLegion, false)
+  else
+    self.pPanel:SetActive(self.btnCreateLegion, true)
+  end
+  self:ClearChooseInfo()
+  Legion:UpdateJoinLegionsData(1, true)
+end
+
+function tbWnd:onLegionSyncData(szDataType, tbJoinLegionsData, nPage, nMaxPage)
+  if "JoinLegions" == szDataType then
+    self:OnUpdateScrollView(tbJoinLegionsData, nPage, nMaxPage)
+  elseif "New" == szDataType then
+    self.tbApplyLegionMap = {}
+    self:OnUpdateScrollView(self.tbCurrentPageList, self.nCurrentPage, self.nMaxPage)
+  elseif "Apply" == szDataType then
+    if not self.nChooseIndex or not self.tbCurrentPageList then
+      return
+    end
+    local nLegionId = self.tbCurrentPageList[self.nChooseIndex].nLegionId
+    self.tbApplyLegionMap[nLegionId] = 1
+    local tbElement = self.tbLegionListScrollView:GetElement(self.nChooseIndex)
+    if tbElement then
+      tbElement.pPanel:SetActive("imgApplied", true)
+    end
+  end
+end
+
+function tbWnd:OnUpdateScrollView(tbJoinLegionsData, nPage, nMaxPage)
+  self.nCurrentPage = nPage
+  self.nMaxPage = nMaxPage > 0 and nMaxPage or 1
+  self.pPanel:Label_SetText(self.txtPage, string.format("%d/%d", self.nCurrentPage, self.nMaxPage))
+  self.tbLegionListScrollView:Clear()
+  self.tbCurrentPageList = tbJoinLegionsData or {}
+  local tbLegionList = self.tbCurrentPageList
+  self.pPanel:SetActive(self.NotInfo, 0 == #tbLegionList)
+  for i = 1, #tbLegionList do
+    self.tbLegionListScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtLegionName", tbLegionList[i].szName)
+      pPanel:Label_SetText("txtNum", tbLegionList[i].nMemberCount .. "/" .. tbLegionList[i].nMaxMemberCount)
+      pPanel:Label_SetText("txtName", tbLegionList[i].szMasterName)
+      local bShowTips = self.tbApplyLegionMap[tbLegionList[i].nLegionId] and true or false
+      pPanel:SetActive("imgApplied", bShowTips)
+      Ui:SetVipLevelEffect(pPanel, tbLegionList[i].nLeaderVipLevel, "txtName")
+    end)
+  end
+  if #tbLegionList > 0 then
+    self.tbLegionListScrollView:SelectElement(1)
+  end
+end
+
+function tbWnd:OnClickOneLegion(nIndex)
+  self.nChooseIndex = nIndex
+  local tbInfo = self.tbCurrentPageList[nIndex]
+  self.pPanel:Label_SetText(self.txtLegionName, tbInfo.szName)
+  self.pPanel:Label_SetText(self.txtLegionNotice, tbInfo.szDeclaration)
+end
+
+function tbWnd:ClearChooseInfo()
+  self.nChooseIndex = nil
+  self.pPanel:Label_SetText(self.txtLegionName, "")
+  self.pPanel:Label_SetText(self.txtLegionNotice, "")
+end
+
+function tbWnd:ApplyJoinLegion()
+  if not self.nChooseIndex or not self.tbCurrentPageList then
+    return
+  end
+  local nLegionId = self.tbCurrentPageList[self.nChooseIndex].nLegionId
+  if Legion:ApplyLegion(nLegionId) then
+  end
+end
+
+function tbWnd:OnClickPrevious()
+  if not self.nCurrentPage or not self.nMaxPage then
+    return
+  end
+  if self.nCurrentPage <= 1 then
+    me.CenterMsg(i18n.EasyGet("\229\183\178\231\187\143\230\152\175\231\172\172\228\184\128\233\161\181"))
+    return
+  end
+  Legion:UpdateJoinLegionsData(self.nCurrentPage - 1, true)
+end
+
+function tbWnd:OnClickNext()
+  if not self.nCurrentPage or not self.nMaxPage then
+    return
+  end
+  if self.nCurrentPage >= self.nMaxPage then
+    me.CenterMsg(i18n.EasyGet("\229\183\178\231\187\143\230\152\175\230\156\128\229\144\142\228\184\128\233\161\181"))
+    return
+  end
+  Legion:UpdateJoinLegionsData(self.nCurrentPage + 1, true)
+end

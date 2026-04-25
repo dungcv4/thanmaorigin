@@ -1,0 +1,326 @@
+LevelTower = LevelTower or {}
+LevelTower.tbClass = LevelTower.tbClass or {}
+
+function LevelTower:CreateClass(szNewClass, szBaseClass)
+  if szBaseClass and self.tbClass[szBaseClass] then
+    self.tbClass[szNewClass] = Lib:NewClass(self.tbClass[szBaseClass])
+  else
+    self.tbClass[szNewClass] = {}
+  end
+  local tbClass = self.tbClass[szNewClass]
+  return tbClass
+end
+
+function LevelTower:GetClass(szClassName)
+  return self.tbClass[szClassName]
+end
+
+function LevelTower:CreateInstance(szClassName)
+  local tbClass = self.tbClass[szClassName]
+  if not tbClass then
+    return nil
+  end
+  local tb = {}
+  setmetatable(tb, {__index = tbClass})
+  return tb
+end
+
+function LevelTower:GetLevelConfig(nLevel)
+  if self.tbLevelSetting[nLevel] then
+    local szClassName = self.tbLevelSetting[nLevel].szClassName
+    local tbConfig = Lib:CopyTB(self.tbLevelClassSetting[szClassName][nLevel])
+    tbConfig.nFirstPassAwardId = self.tbLevelSetting[nLevel].nFirstPassAwardId
+    tbConfig.nFirstPassAwardKey = self.tbLevelSetting[nLevel].nFirstPassAwardKey
+    return {
+      nLevel = nLevel,
+      nMapTemplateId = self.tbLevelSetting[nLevel].nMapTemplateId,
+      szClassName = szClassName,
+      tbConfig = tbConfig
+    }
+  end
+end
+
+LevelTower.tbFile = {
+  LevelInfoCfg = "Setting/LevelTower/LevelInfoCfg.tab",
+  tbLevelClassFile = {
+    KillFixedMonsterInTime = "Setting/LevelTower/KillFixedMonsterInTimeCfg.tab",
+    KillMonsterInFixedTime = "Setting/LevelTower/KillMonsterInFixedTimeCfg.tab",
+    SurvivalInFixedTime = "Setting/LevelTower/SurvivalCfg.tab",
+    ProtectInFixedTime = "Setting/LevelTower/ProtectCfg.tab",
+    InteractInFixedTime = "Setting/LevelTower/InteractCfg.tab"
+  }
+}
+
+function LevelTower:LoadConfig()
+  local tbLevelInfoCfg = Lib:EasyLoadTabFile(self.tbFile.LevelInfoCfg, {"nLevel"})
+  if not tbLevelInfoCfg then
+    Lib:LogErrFormat("LevelTowerCommon: Load %s failed")
+    return
+  end
+  self.tbLevelSetting = {}
+  self:LoadPosFile()
+  self:LoadFixNpcFile()
+  self:LoadNpcPathPointFile()
+  for nLevel, tbLevelInfo in pairs(tbLevelInfoCfg) do
+    if self.tbLevelSetting[nLevel] then
+      Lib:LogErrFormat("LevelTowerCommon: Load %s occur error, duplicate nLevel = %d", self.tbFile.LevelInfoCfg, nLevel)
+    else
+      self.tbLevelSetting[nLevel] = tbLevelInfo
+      self:LoadLevelClassConfig(tbLevelInfo.szClassName, nLevel)
+    end
+  end
+  self.tbLevelClassSettingCache = nil
+end
+
+function LevelTower:LoadLevelClassConfig(szClassName, nLevel)
+  self.tbLevelClassSetting = self.tbLevelClassSetting or {}
+  self.tbLevelClassSettingCache = self.tbLevelClassSettingCache or {}
+  if not self.tbLevelClassSettingCache[szClassName] then
+    self.tbLevelClassSettingCache[szClassName] = {}
+    if self.tbFile.tbLevelClassFile[szClassName] then
+      local tbClassCfg = Lib:EasyLoadTabFile(self.tbFile.tbLevelClassFile[szClassName], {"nLevel"})
+      self.tbLevelClassSettingCache[szClassName] = tbClassCfg
+    else
+      Lib:LogErrFormat("LevelTowerCommon: LoadLevelClassConfig failed, szClassName = %s, nLevel = %d", szClassName, nLevel)
+      return
+    end
+  end
+  self.tbLevelClassSetting[szClassName] = self.tbLevelClassSetting[szClassName] or {}
+  if not self.tbLevelClassSettingCache[szClassName][nLevel] then
+    Lib:LogErrFormat("LevelTowerCommon: LoadLevelClassConfig failed, invalid Level, szClassName = %s, nLevel = %d", szClassName, nLevel)
+    return
+  end
+  local tbClassInfo = Lib:CopyTB(self.tbLevelClassSettingCache[szClassName][nLevel])
+  self.tbLevelClassSetting[szClassName][nLevel] = tbClassInfo
+  if tbClassInfo.szMonsterRefreshParam and not Lib:IsEmptyStr(tbClassInfo.szMonsterRefreshParam) then
+    self.tbLevelClassSetting[szClassName][nLevel].tbRandMonster = self:ParseMonsterRefreshParam(tbClassInfo.szMonsterRefreshParam, nLevel)
+  else
+    Lib:LogErrFormat("LevelTowerCommon: LoadLevelClassConfig failed, invalid szMonsterRefreshParam, szClassName = %s, nLevel = %d", szClassName, nLevel)
+    return
+  end
+  self.tbLevelClassSetting[szClassName][nLevel].tbScoreRegular = {}
+  for szScore, _ in pairs(self.ScoreWeight) do
+    if tbClassInfo["sz" .. szScore .. "Level"] then
+      table.insert(self.tbLevelClassSetting[szClassName][nLevel].tbScoreRegular, {
+        szScore = szScore,
+        tbRange = Lib:SplitStr2Num(tbClassInfo["sz" .. szScore .. "Level"], "|")
+      })
+    else
+      Lib:LogErrFormat("LevelTowerCommon: LoadLevelClassConfig failed, invalid szScore = %s", szScore)
+      return
+    end
+  end
+  table.sort(self.tbLevelClassSetting[szClassName][nLevel].tbScoreRegular, function(a, b)
+    return a.tbRange[1] < b.tbRange[1]
+  end)
+end
+
+function LevelTower:LoadPosFile()
+  self.tbPosConfig = self.tbPosConfig or {}
+  for nMapTemplateId, szPosFile in pairs(self.Cfg.tbPosFile) do
+    local tbPosConfig = Lib:LoadTabFileEx(szPosFile, "dd", nil, {"PosX", "PosY"})
+    if not tbPosConfig then
+      Lib:LogErrFormat("LevelTowerCommon: LoadPosFile failed, nMapId = %d, szPosFile = %s", nMapTemplateId, szPosFile)
+      return
+    elseif self.tbPosConfig[nMapTemplateId] then
+      Lib:LogErrFormat("LevelTowerCommon: LoadPosFile failed, duplicate nMapId = %d, szPosFile = %s", nMapTemplateId, szPosFile)
+      return
+    else
+      self.tbPosConfig[nMapTemplateId] = tbPosConfig
+    end
+  end
+end
+
+function LevelTower:LoadFixNpcFile()
+  self.tbFixNpcConfig = self.tbFixNpcConfig or {}
+  for nMapTemplateId, szFixNpcFile in pairs(self.Cfg.tbFixNpcFile) do
+    local tbFixNpcInfo = Lib:LoadTabFileEx(szFixNpcFile, "ddddds", nil, {
+      "nTowerLevel",
+      "nNpcTemplateId",
+      "PosX",
+      "PosY",
+      "Delay",
+      "szParams"
+    })
+    if not tbFixNpcInfo then
+      Lib:LogErrFormat("LevelTowerCommon: LoadFixNpcFile failed, %s not exist", szFixNpcFile)
+      return
+    end
+    if self.tbFixNpcConfig[nMapTemplateId] then
+      Lib:LogErrFormat("LevelTowerCommon: LoadFixNpcFile failed, duplicate nMapId = %d", nMapTemplateId)
+      return
+    end
+    self.tbFixNpcConfig[nMapTemplateId] = {}
+    for _, tbInfo in pairs(tbFixNpcInfo) do
+      if not Lib:IsInteger(tbInfo.Delay) or tbInfo.Delay <= 0 then
+        Lib:LogErrFormat("LevelTowerCommon: LoadFixNpcFile failed, Delay must be bigger than zero, nNpcTemplateId = %d")
+      else
+        self.tbFixNpcConfig[nMapTemplateId][tbInfo.nTowerLevel] = self.tbFixNpcConfig[nMapTemplateId][tbInfo.nTowerLevel] or {}
+        table.insert(self.tbFixNpcConfig[nMapTemplateId][tbInfo.nTowerLevel], tbInfo)
+      end
+    end
+  end
+  for nMapIdx, _ in pairs(self.tbFixNpcConfig) do
+    for nLevelIdx, _ in pairs(self.tbFixNpcConfig[nMapIdx]) do
+      table.sort(self.tbFixNpcConfig[nMapIdx][nLevelIdx], function(a, b)
+        return a.Delay < b.Delay
+      end)
+    end
+  end
+end
+
+function LevelTower:LoadNpcPathPointFile()
+  self.tbNpcPathPointConfig = self.tbNpcPathPointConfig or {}
+  for nMapTemplateId, szNpcPathPointFile in pairs(self.Cfg.tbNpcPathFile) do
+    local tbPathSetting = Lib:EasyLoadTabFile(szNpcPathPointFile, {"nPath", "nIndex"})
+    if not tbPathSetting then
+      Lib:LogErrFormat("LevelTower: LoadNpcPathPointFile failed, %s not exist", szNpcPathPointFile)
+    else
+      self.tbNpcPathPointConfig[nMapTemplateId] = self.tbNpcPathPointConfig[nMapTemplateId] or {}
+      for nPath, tbInfo in pairs(tbPathSetting) do
+        self.tbNpcPathPointConfig[nMapTemplateId][nPath] = self.tbNpcPathPointConfig[nMapTemplateId][nPath] or {}
+        for _, tbPos in ipairs(tbInfo) do
+          local tbTemp = {
+            PosX = tonumber(tbPos.PosX),
+            PosY = tonumber(tbPos.PosY)
+          }
+          table.insert(self.tbNpcPathPointConfig[nMapTemplateId][nPath], tbTemp)
+        end
+      end
+    end
+  end
+end
+
+function LevelTower:ParseMonsterRefreshParam(szMonsterRefreshParam, nLevel)
+  local tb1 = Lib:SplitStr(szMonsterRefreshParam, ";")
+  if not tb1 or #tb1 <= 0 then
+    Lib:LogErrFormat("LevelTowerCommon: ParseMonsterRefreshParam failed, nLevel = %d", nLevel)
+    return
+  end
+  local tbRes = {}
+  for _, szInfo in ipairs(tb1) do
+    local tb2 = Lib:SplitStr2Num(szInfo, "|")
+    if not tb2 or 3 ~= #tb2 then
+      Lib:LogErrFormat("LevelTowerCommon: ParseMonsterRefreshParam failed, Error Param, nLevel = %d", nLevel)
+      return
+    else
+      table.insert(tbRes, tb2)
+    end
+  end
+  table.sort(tbRes, function(a, b)
+    return a[2] < b[2]
+  end)
+  return tbRes
+end
+
+LevelTower.tbStatus = {
+  Prepare = "Prepare",
+  Challenge = "Challenge",
+  Settlement = "Settlement",
+  Close = "Close"
+}
+LevelTower.tbResult = {Success = 1, Fail = 2}
+LevelTower.NpcRefreshMode = {
+  TimeSequence = "TimeSequence",
+  Circulate = "Circulate",
+  DeathPush = "DeathPush"
+}
+LevelTower.SaveGroup = 318
+LevelTower.SaveKey = {
+  FirstPassCount = 1,
+  FirstPassTimeCtrl = 2,
+  MaxPassLevel = 3
+}
+LevelTower.ScoreWeight = {
+  S = 4,
+  A = 3,
+  B = 2,
+  C = 1
+}
+LevelTower.RankBoard = {nNearRecordRange = 10, nMaxLevelScoreWeight = 10000}
+LevelTower.C2SProtocol = {
+  RequestEnterFuben = 1,
+  ReqConfirmContinueLevelByCaptain = 2,
+  ReqConfirmContinueLevelByMember = 3,
+  ReqExitLevel = 4,
+  ReqTeamMinLevel = 5
+}
+LevelTower.S2CProtocol = {}
+
+function LevelTower:GetRemainFirstPassCount(pPlayer)
+  if pPlayer then
+    return pPlayer.GetUserValue(self.SaveGroup, self.SaveKey.FirstPassCount)
+  else
+    return 0
+  end
+end
+
+function LevelTower:GetNpcPathConfig(nMapTemplateId, nPath)
+  if LevelTower.tbNpcPathPointConfig[nMapTemplateId] then
+    return LevelTower.tbNpcPathPointConfig[nMapTemplateId][nPath]
+  end
+end
+
+function LevelTower:GetMaxPassLevelByScore(nRankBoardScore)
+  return math.floor(nRankBoardScore / LevelTower.RankBoard.nMaxLevelScoreWeight)
+end
+
+function LevelTower:GetNearPassLevelScore(nRankBoardScore)
+  return nRankBoardScore % LevelTower.RankBoard.nMaxLevelScoreWeight
+end
+
+function LevelTower:GetLevelName(nLevel)
+  if self.tbLevelSetting[nLevel] then
+    return i18n.Parse(self.tbLevelSetting[nLevel].szMainName), i18n.Parse(self.tbLevelSetting[nLevel].szSubName)
+  else
+    return "", ""
+  end
+end
+
+function LevelTower:GetMaxPassLevel(pPlayer)
+  if pPlayer then
+    return pPlayer.GetUserValue(LevelTower.SaveGroup, LevelTower.SaveKey.MaxPassLevel)
+  else
+    return 0
+  end
+end
+
+function LevelTower:GetMaxLevelNum()
+  return Lib:CountTB(self.tbLevelSetting)
+end
+
+function LevelTower:GetMainLevelBySub(nSubLevel)
+  return math.ceil(nSubLevel / LevelTower.Cfg.nSubLevelPerMain)
+end
+
+function LevelTower:CheckQianCengTaCanShow()
+  return me.nLevel >= LevelTower.Cfg.nShowLevel
+end
+
+function LevelTower:CheckCanJoinQianCengTa()
+  return me.nLevel >= LevelTower.Cfg.nShowLevel
+end
+
+function LevelTower:CheckQianCengTaEnter()
+  if me.nLevel < LevelTower.Cfg.nShowLevel then
+    return false, i18n.EasyGet("{0}\231\154\132\231\173\137\231\186\167\228\184\141\232\182\179{1}", me.szName, LevelTower.Cfg.nShowLevel)
+  end
+  return true
+end
+
+function LevelTower:SignUpQianCengTa()
+  me.CallClientScript("ActivityMgr:GotoNpc", 12430, 66)
+end
+
+function LevelTower:DialogGuide(pPlayer)
+  if not pPlayer then
+    return
+  end
+  if 1 ~= LevelTower.LevelTowerS.nSwitch then
+    pPlayer.CenterMsg(i18n.EasyGet("\229\138\159\232\131\189\230\154\130\230\156\170\229\188\128\229\144\175\239\188\140\230\149\172\232\175\183\230\156\159\229\190\133"))
+    return
+  end
+  pPlayer.CallClientScript("Ui:OpenWindow", "UIToweActivity")
+end
+
+LevelTower:LoadConfig()

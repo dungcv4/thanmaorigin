@@ -1,0 +1,701 @@
+Require("CommonScript/Item/WuXingYin/WuXingYinAttrCfg.lua")
+Require("CommonScript/Item/ItemForEquip.lua")
+Require("CommonScript/Player/FightPowerCommom.lua")
+Item.WuXingYin = Item.WuXingYin or {}
+local WuXingYin = Item.WuXingYin
+WuXingYin.nFixAttr = 2
+WuXingYin.nRandAttr = 6
+WuXingYin.nGroup = GetGroupKey("WuXingYinWash")
+WuXingYin.nWashTypeKey = 7
+WuXingYin.nOpenLevel = 30
+WuXingYin.nTaskId = 10021
+
+function WuXingYin:LoadSetting()
+  self.tbAttrCfg = Lib:LoadTabFileEx("Setting/Item/WuXingYin/AttrWeight.tab", "ddddddddddddddddddddddd", "nRandAttrLevel", {
+    "nRandAttrLevel",
+    "lifemax_v",
+    "manamax_v",
+    "metal_resist_v",
+    "all_series_resist_v",
+    "allsect_metaldamage_v",
+    "defense_v",
+    "ignore_defense_v",
+    "deadlystrike_v",
+    "weaken_deadlystrike_v",
+    "deadlystrike_damage_v",
+    "weaken_deadlystrike_damage_v",
+    "basic_damage_v",
+    "attackrating_v",
+    "ignore_all_resist_v",
+    "steallife_v",
+    "ignore_metal_resist_v",
+    "ignore_wood_resist_v",
+    "ignore_water_resist_v",
+    "ignore_fire_resist_v",
+    "ignore_earth_resist_v",
+    "recover_life_v",
+    "recover_mana_v"
+  })
+  self.tbFixAttrUp = Lib:LoadTabFileEx("Setting/Item/WuXingYin/FixAttrUp.tab", "ddddddd", "nFixAttrLevel", {
+    "nFixAttrLevel",
+    "series_abate_v",
+    "nAbDegree",
+    "series_enhance_v",
+    "nEnDegree",
+    "nCostTemplate",
+    "nPerAdd"
+  })
+  self.tbCfg = Lib:LoadTabFileEx("Setting/Item/WuXingYin/WuXingYinCfg.tab", "dsdddddddddd", "nLevel", {
+    "nLevel",
+    "szOpenTime",
+    "series_abate_v",
+    "series_enhance_v",
+    "nNewAttr",
+    "nWashTypeCostID",
+    "nWashTypeCost",
+    "nWashValCostID",
+    "nWashValCost",
+    "nEquipLvUpCostID",
+    "nEquipLvUpCost",
+    "nDefaultAttrLv"
+  })
+  self.tbAttrPool = Lib:EasyLoadTabFile("Setting/Item/WuXingYin/AttrPool.tab", {"nGroupId", "nLevel"})
+  self.tbHideRule = Lib:EasyLoadTabFile("Setting/Item/WuXingYin/HideRule.tab", {"nLevel", "nQuality"})
+  self.tbMustGet = {}
+  for nLevel, tbValue in pairs(self.tbHideRule) do
+    for nQuality, tbInfo in pairs(tbValue) do
+      self.tbMustGet[nLevel] = self.tbMustGet[nLevel] or {}
+      if tbInfo.nMustGet then
+        self.tbMustGet[nLevel][tbInfo.nMustGet] = nQuality
+      end
+    end
+  end
+  self.tbAttrWeight = {}
+  for nRandAttrLevel, tbInfo in ipairs(self.tbAttrCfg) do
+    self.tbAttrWeight[nRandAttrLevel] = {}
+    for szAttr, value in pairs(tbInfo) do
+      local nGroup = Item.WuXingYin.ATTRGROUP[szAttr]
+      if nGroup then
+        self.tbAttrWeight[nRandAttrLevel][nGroup] = value
+      end
+    end
+  end
+  self.tbColorDef = {}
+  self.tbAttrRange = {}
+  local nStart, nEnd
+  for nLevel, tbInfo in pairs(Item.WuXingYin.ColorDef) do
+    self.tbColorDef[nLevel] = {}
+    self.tbAttrRange[nLevel] = {}
+    self.tbAttrRange[nLevel].nMinLevel = 99999
+    self.tbAttrRange[nLevel].nMaxLevel = 0
+    for nQuality, szRange in ipairs(tbInfo) do
+      local tbSplite = Lib:SplitStr(szRange, ":")
+      nStart = tonumber(tbSplite[1])
+      nEnd = tonumber(tbSplite[2])
+      if nStart < self.tbAttrRange[nLevel].nMinLevel then
+        self.tbAttrRange[nLevel].nMinLevel = nStart
+      end
+      if nEnd < self.tbAttrRange[nLevel].nMinLevel then
+        self.tbAttrRange[nLevel].nMaxLevel = nEnd
+      end
+      for i = nStart, nEnd do
+        self.tbColorDef[nLevel][i] = nQuality
+      end
+    end
+  end
+  self.tbAllTransAttr = {}
+  for key, tbAttr in pairs(Item.WuXingYin.ATTR_CONVERT) do
+    for index, nAttr in pairs(tbAttr) do
+      self.tbAllTransAttr[nAttr] = key
+    end
+  end
+end
+
+WuXingYin:LoadSetting()
+
+function WuXingYin:GetFixAttrLevel(nItemId, nIndex)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem or not Item.WuXingYin.FIXATTR_INDEX[nIndex] then
+    return
+  end
+  local nAttrIndex = Item.WuXingYin.FIXATTR_INDEX[nIndex].index
+  local nAttr = pItem.GetIntValue(nAttrIndex)
+  local nLevel = self:UnpackAttr(nAttr)
+  local szLimit = Item.WuXingYin.FIXATTR_INDEX[nIndex].szLimit
+  local nLevelLimit = self.tbCfg[pItem.nLevel][szLimit]
+  return nLevel, nLevelLimit
+end
+
+function WuXingYin:GetFixAttrName(nItemId, nIndex)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  local nGroup = Item.WuXingYin.FIXATTR_INDEX[nIndex].nGroup
+  local nLevel = self:GetFixAttrLevel(nItemId, nIndex)
+  local tbInfo = self:GetAttrFromPool(nGroup, nLevel)
+  local szName = tbInfo.szName
+  local szTransName = FightSkill:GetMagicDescSplit(szName, nil)
+  return szName, szTransName
+end
+
+function WuXingYin:GetFixAttrLvValue(nItemId, nIndex)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  local nLevel = self:GetFixAttrLevel(nItemId, nIndex)
+  local nGroup = Item.WuXingYin.FIXATTR_INDEX[nIndex].nGroup
+  local tbCurInfo = self:GetAttrFromPool(nGroup, nLevel)
+  local szLimit = Item.WuXingYin.FIXATTR_INDEX[nIndex].szLimit
+  local nLevelLimit = self.tbCfg[pItem.nLevel][szLimit]
+  local tbCurValue = tbCurInfo.tbValue
+  local tbNextValue
+  if self.tbFixAttrUp[nLevel + 1] and nLevel < nLevelLimit then
+    local tbNextInfo = self:GetAttrFromPool(nGroup, nLevel + 1)
+    tbNextValue = tbNextInfo.tbValue
+  end
+  return tbCurValue, tbNextValue
+end
+
+function WuXingYin:GetFixAttrAllValue(nItemId, nIndex)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  local tbAttrib = pItem.GetBaseAttrib()
+  local tbV = Lib:CopyTB(tbAttrib[nIndex].tbValue)
+  local tbNextV = Lib:CopyTB(tbAttrib[nIndex].tbValue)
+  local tbCurValue, tbNextValue = self:GetFixAttrLvValue(nItemId, nIndex)
+  for i, nV in ipairs(tbV) do
+    tbV[i] = nV + tbCurValue[i]
+  end
+  local szCurName, szCurValue = FightSkill:GetMagicDescSplit(tbAttrib[nIndex].szName, tbV)
+  local szNextValue
+  if tbNextValue then
+    for i, nV in ipairs(tbNextV) do
+      tbNextV[i] = nV + tbNextValue[i]
+    end
+    _, szNextValue = FightSkill:GetMagicDescSplit(tbAttrib[nIndex].szName, tbNextV)
+  else
+    szNextValue = i18n.EasyGet("\229\183\178\230\187\161\231\186\167")
+  end
+  return szCurName, szCurValue, szNextValue
+end
+
+function WuXingYin:GetFixAttrByValue(nIndex, nAttr)
+  local nLevel = self:UnpackAttr(nAttr)
+  local nGroup = Item.WuXingYin.FIXATTR_INDEX[nIndex].nGroup
+  local tbInfo = self:GetAttrFromPool(nGroup, nLevel)
+  local szName = FightSkill:GetMagicDescSplit(tbInfo.szName, nil)
+  return szName, tbInfo.tbValue
+end
+
+function WuXingYin:GetFixAttrDegree(nItemId, nIndex)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  local nItemIndex = Item.WuXingYin.FIXATTR_INDEX[nIndex].index
+  local nAttr = pItem.GetIntValue(nItemIndex)
+  local nLevel, nDegree = self:UnpackAttr(nAttr)
+  local szDegree = Item.WuXingYin.FIXATTR_INDEX[nIndex].szDegree
+  local nMaxDegree = self:GetFixAttrMaxDegreeCost(nLevel, szDegree)
+  return nDegree, nMaxDegree
+end
+
+function WuXingYin:GetFixAttrMaxDegreeCost(nLevel, szDegree)
+  local nCoef = 1
+  local nDiscountIndex = 1
+  for nIndex, tbInfo in ipairs(self.FixAttrUpDiscount) do
+    if 1 == GetTimeFrameState(tbInfo.szTimeFrame) then
+      nDiscountIndex = nIndex
+    end
+  end
+  for nIndex, nVal in ipairs(self.FixAttrUpDiscount[nDiscountIndex].tbDiscount) do
+    if nLevel <= nIndex * 10 then
+      nCoef = nVal
+      break
+    end
+  end
+  return math.floor(nCoef * self.tbFixAttrUp[nLevel][szDegree] + 0.1)
+end
+
+function WuXingYin:GetFixAttrUpCost(nLevel)
+  if self.tbFixAttrUp[nLevel] then
+    return self.tbFixAttrUp[nLevel].nCostTemplate, self.tbFixAttrUp[nLevel].nPerAdd
+  end
+  return 0, 0
+end
+
+function WuXingYin:FixAttrCheck(nItemId, nIndex, nCost, pPlayer)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return false
+  end
+  if 0 == pItem.IsEquip() or pItem.szClass ~= Item.WUXINGYIN_CLASS_NAME then
+    return false
+  end
+  local nLevel, nMaxLevel = WuXingYin:GetFixAttrLevel(nItemId, nIndex)
+  if nMaxLevel <= nLevel then
+    pPlayer.CenterMsg(i18n.Get(Item.WuXingYin.MSG.LEVELLIMIT))
+    return false
+  end
+  local nCostTemplate = Item.WuXingYin:GetFixAttrUpCost(nLevel)
+  local nHave = pPlayer.GetItemCountInBags(nCostTemplate)
+  if nCost > nHave then
+    pPlayer.CenterMsg(i18n.Get(Item.WuXingYin.MSG.MATERIALLIMIT))
+    if not MODULE_GAMESERVER then
+      Item.WuXingYin:OnBuyMaterial("FixAttrUp", nItemId, nIndex)
+    end
+    return false
+  end
+  local nDegree, nMaxDegree = Item.WuXingYin:GetFixAttrDegree(nItemId, nIndex)
+  if nCost <= 0 and nDegree < nMaxDegree then
+    pPlayer.CenterMsg(i18n.Get(Item.WuXingYin.MSG.NONUMS))
+    return false
+  end
+  return true
+end
+
+function WuXingYin:CheckFixAttrIsFull(nItemId, nIndex)
+  local pEquip = KItem.GetItemObj(nItemId)
+  if not pEquip then
+    return false
+  end
+  local nLevel = self:GetFixAttrLevel(nItemId, nIndex)
+  local szLimit = self.FIXATTR_INDEX[nIndex].szLimit
+  local nLevelLimit = self.tbCfg[pEquip.nLevel][szLimit]
+  if self.tbFixAttrUp[nLevel + 1] and nLevel < nLevelLimit then
+    return false
+  end
+  return true
+end
+
+function WuXingYin:GetEquipLvUpCost(nEquipId)
+  local pEquip = KItem.GetItemObj(nEquipId)
+  if not pEquip then
+    return
+  end
+  local tbInfo = self.tbCfg[pEquip.nLevel]
+  if not tbInfo then
+    return
+  end
+  return tbInfo.nEquipLvUpCostID, tbInfo.nEquipLvUpCost
+end
+
+function WuXingYin:EquipLvCheck(nEquipId, pPlayer)
+  if pPlayer.IsMaskPlayerAttr() then
+    return false
+  end
+  local pEquip = KItem.GetItemObj(nEquipId)
+  if not pEquip or not pPlayer then
+    return false
+  end
+  if 0 == pEquip.IsEquip() or pEquip.szClass ~= Item.WUXINGYIN_CLASS_NAME then
+    return false
+  end
+  if pPlayer.GetFreeBagCount() < 1 then
+    pPlayer.CenterMsg(i18n.Get(Item.WuXingYin.MSG.NOPLACE))
+    return false
+  end
+  if not self.tbCfg[pEquip.nLevel + 1] then
+    pPlayer.CenterMsg(i18n.Get(Item.WuXingYin.MSG.LEVElMAX))
+    return false
+  end
+  local nTemplate, nCost = self:GetEquipLvUpCost(nEquipId)
+  local nHave = pPlayer.GetItemCountInBags(nTemplate)
+  if nCost > nHave then
+    pPlayer.CenterMsg(i18n.Get(Item.WuXingYin.MSG.MATERIALLIMIT))
+    return false
+  end
+  local szOpenTime = self.tbCfg[pEquip.nLevel].szOpenTime
+  if 0 == GetTimeFrameState(szOpenTime) then
+    pPlayer.CenterMsg(i18n.Get(Item.WuXingYin.MSG.LEVElMAX))
+    return false
+  end
+  local nNextLevelTID = Item.WuXingYin.EquipLv2TID[pEquip.nLevel]
+  if not nNextLevelTID then
+    pPlayer.CenterMsg(i18n.Get(Item.WuXingYin.MSG.LEVElMAX))
+    return false
+  end
+  local tbInfo = Item:GetItemBaseProp(nNextLevelTID)
+  if pPlayer.nLevel < tbInfo.nRequireLevel then
+    pPlayer.CenterMsg(i18n.Get(Item.WuXingYin.MSG.PLAYERLVLIMIT))
+    return false
+  end
+  return true
+end
+
+function WuXingYin:GetRandAttrAllValue(nEquipId, nIndex, nEquipLevel, nAttrLevel)
+  local pItem = KItem.GetItemObj(nEquipId)
+  if not pItem then
+    return
+  end
+  nEquipLevel = nEquipLevel or pItem.nLevel
+  local nAttrIndex = Item.WuXingYin.RANDATTR_INDEX[nIndex]
+  local nAttr = pItem.GetIntValue(nAttrIndex)
+  if 0 == nAttr then
+    return
+  end
+  local nGroup, nLevel = self:UnpackAttr(nAttr)
+  nAttrLevel = nAttrLevel or nLevel
+  local tbInfo = self:GetAttrFromPool(nGroup, nAttrLevel)
+  if not tbInfo then
+    return
+  end
+  local nQuality = 1
+  if self.tbColorDef[nEquipLevel] and nAttrLevel >= self.tbCfg[nEquipLevel].nDefaultAttrLv then
+    nQuality = self.tbColorDef[nEquipLevel][nAttrLevel]
+  end
+  local szCurName, szCurValue = FightSkill:GetMagicDescSplit(tbInfo.szName, tbInfo.tbValue)
+  return szCurName, szCurValue, nQuality
+end
+
+function WuXingYin:GetRandAttrByValue(nEquipLevel, nAttr)
+  local nGroup, nLevel = self:UnpackAttr(nAttr)
+  if 0 == nGroup then
+    return
+  end
+  local tbInfo = self:GetAttrFromPool(nGroup, nLevel)
+  local szCurName, szCurValue = FightSkill:GetMagicDescSplit(tbInfo.szName, tbInfo.tbValue)
+  local nQuality = self.tbColorDef[nEquipLevel][nLevel] or 1
+  return szCurName, szCurValue, nQuality
+end
+
+function WuXingYin:GetAttrRange(nLevel)
+  local nMinStart, nMinEnd, nMaxStart, nMaxEnd
+  if Item.WuXingYin.ColorDef[nLevel] then
+    local szMinRange = Item.WuXingYin.ColorDef[nLevel][1]
+    local szMaxRange = Item.WuXingYin.ColorDef[nLevel][6]
+    local tbMinSplite = Lib:SplitStr(szMinRange, ":")
+    local tbMaxSplite = Lib:SplitStr(szMaxRange, ":")
+    nMinStart, nMinEnd = table.unpack(tbMinSplite)
+    nMaxStart, nMaxEnd = table.unpack(tbMaxSplite)
+  end
+  nMinStart = tonumber(nMinStart)
+  nMaxEnd = tonumber(nMaxEnd)
+  return nMinStart, nMaxEnd
+end
+
+function WuXingYin:GetAttrRangeByQuality(nLevel, nQuality)
+  local nStart, nEnd
+  if Item.WuXingYin.ColorDef[nLevel] then
+    local szRange = Item.WuXingYin.ColorDef[nLevel][nQuality]
+    local tbSplite = Lib:SplitStr(szRange, ":")
+    nStart = tbSplite[1]
+    nEnd = tbSplite[2]
+  end
+  return nStart, nEnd
+end
+
+function WuXingYin:GetRandAttrNums(nEquipId)
+  local pItem = KItem.GetItemObj(nEquipId)
+  if not pItem then
+    return
+  end
+  local nCount = 0
+  for i = 1, self.nRandAttr do
+    local nAttrIndex = Item.WuXingYin.RANDATTR_INDEX[i]
+    local nAttr = pItem.GetIntValue(nAttrIndex)
+    if 0 ~= nAttr then
+      nCount = nCount + 1
+    end
+  end
+  return nCount
+end
+
+function WuXingYin:GetWashTypeCost(nEquipId)
+  local pEquip = KItem.GetItemObj(nEquipId)
+  if not pEquip then
+    return
+  end
+  local tbInfo = self.tbCfg[pEquip.nLevel]
+  if not tbInfo then
+    return
+  end
+  return tbInfo.nWashTypeCostID, tbInfo.nWashTypeCost
+end
+
+function WuXingYin:WashTypeCheck(pPlayer, nEquipId)
+  local pEquip = KItem.GetItemObj(nEquipId)
+  if not pEquip then
+    return false
+  end
+  if 0 == pEquip.IsEquip() or pEquip.szClass ~= Item.WUXINGYIN_CLASS_NAME then
+    return false
+  end
+  if pEquip.nLevel <= 1 then
+    pPlayer.CenterMsg(i18n.Get(Item.WuXingYin.MSG.TIMELIMIT))
+    return false
+  end
+  local nCostTemplate, nCost = Item.WuXingYin:GetWashTypeCost(nEquipId)
+  local nHave = pPlayer.GetItemCountInBags(nCostTemplate)
+  if nCost > nHave then
+    pPlayer.CenterMsg(i18n.Get(Item.WuXingYin.MSG.MATERIALLIMIT))
+    return false
+  end
+  return true
+end
+
+function WuXingYin:GetWashValueCost(nEquipId)
+  local pEquip = KItem.GetItemObj(nEquipId)
+  if not pEquip then
+    return
+  end
+  local tbInfo = self.tbCfg[pEquip.nLevel]
+  if not tbInfo then
+    return
+  end
+  return tbInfo.nWashValCostID, tbInfo.nWashValCost
+end
+
+function WuXingYin:WashValueCheck(pPlayer, nEquipId)
+  local pEquip = KItem.GetItemObj(nEquipId)
+  if not pEquip then
+    return false
+  end
+  if 0 == pEquip.IsEquip() or pEquip.szClass ~= Item.WUXINGYIN_CLASS_NAME then
+    return false
+  end
+  if pEquip.nLevel <= 1 then
+    pPlayer.CenterMsg(i18n.Get(Item.WuXingYin.MSG.TIMELIMIT))
+    return false
+  end
+  local nCostTemplate, nCost = Item.WuXingYin:GetWashValueCost(nEquipId)
+  local nHave = pPlayer.GetItemCountInBags(nCostTemplate)
+  if nCost > nHave then
+    pPlayer.CenterMsg(i18n.Get(Item.WuXingYin.MSG.MATERIALLIMIT))
+    return false
+  end
+  return true
+end
+
+function WuXingYin:ApplyAttrib(pNpc, pEquip, nPlayerId)
+  if not pNpc or not pEquip then
+    return
+  end
+  if pEquip.nEquipPos ~= Item.EQUIPPOS_WUXINGYIN then
+    return
+  end
+  for i = 1, self.nFixAttr do
+    local nGroup = Item.WuXingYin.FIXATTR_INDEX[i].nGroup
+    local nLevel = self:GetFixAttrLevel(pEquip.dwId, i)
+    local tbInfo = self:GetAttrFromPool(nGroup, nLevel)
+    pNpc.ApplyMagicAttrib(tbInfo.szName, table.unpack(tbInfo.tbValue))
+    if nPlayerId then
+      AttributeHelp:LogAttrApply(nPlayerId, "WuXingYin", tbInfo.szName, table.unpack(tbInfo.tbValue))
+    end
+  end
+  local nRandAttr = WuXingYin:GetRandAttrNums(pEquip.dwId)
+  if 0 == nRandAttr then
+    return
+  end
+  for i = 1, nRandAttr do
+    local nIndex = Item.WuXingYin.RANDATTR_INDEX[i]
+    local nAttr = pEquip.GetIntValue(nIndex)
+    local tbInfo = self:GetAttrFromPool(self:UnpackAttr(nAttr))
+    local tbValue = tbInfo.tbValue
+    pNpc.ApplyMagicAttrib(tbInfo.szName, table.unpack(tbValue))
+    if nPlayerId then
+      AttributeHelp:LogAttrApply(nPlayerId, "WuXingYin", tbInfo.szName, table.unpack(tbValue))
+    end
+  end
+end
+
+function WuXingYin:RemoveAttrib(pPlayer, pEquip)
+  if not pPlayer or not pEquip then
+    return
+  end
+  if pEquip.nEquipPos ~= Item.EQUIPPOS_WUXINGYIN then
+    return
+  end
+  for i = 1, self.nFixAttr do
+    local nGroup = Item.WuXingYin.FIXATTR_INDEX[i].nGroup
+    local nLevel = self:GetFixAttrLevel(pEquip.dwId, i)
+    local tbInfo = self:GetAttrFromPool(nGroup, nLevel)
+    pPlayer.RemoveMagicAttrib(tbInfo.szName, table.unpack(tbInfo.tbValue))
+    AttributeHelp:LogAttrRemove(pPlayer.dwID, "WuXingYin", tbInfo.szName, table.unpack(tbInfo.tbValue))
+  end
+  local nRandAttr = WuXingYin:GetRandAttrNums(pEquip.dwId)
+  if 0 == nRandAttr then
+    return
+  end
+  for i = 1, nRandAttr do
+    local nIndex = Item.WuXingYin.RANDATTR_INDEX[i]
+    local nAttr = pEquip.GetIntValue(nIndex)
+    local tbInfo = self:GetAttrFromPool(self:UnpackAttr(nAttr))
+    local tbValue = tbInfo.tbValue
+    pPlayer.RemoveMagicAttrib(tbInfo.szName, table.unpack(tbValue))
+    AttributeHelp:LogAttrRemove(pPlayer.dwID, "WuXingYin", tbInfo.szName, table.unpack(tbValue))
+  end
+end
+
+function WuXingYin:RefreshFixAttrib(pPlayer, nIndex, nAddLevel)
+  local pEquip = pPlayer.GetEquipByPos(Item.EQUIPPOS_WUXINGYIN)
+  if not pPlayer or not pEquip then
+    return
+  end
+  if pPlayer.IsMaskPlayerAttr() then
+    return
+  end
+  if pEquip.nEquipPos ~= Item.EQUIPPOS_WUXINGYIN then
+    return
+  end
+  local nGroup = Item.WuXingYin.FIXATTR_INDEX[nIndex].nGroup
+  local nCurLevel = self:GetFixAttrLevel(pEquip.dwId, nIndex)
+  local tbCurInfo = self:GetAttrFromPool(nGroup, nCurLevel)
+  local tbOrgInfo = self:GetAttrFromPool(nGroup, nCurLevel - nAddLevel)
+  pPlayer.RemoveMagicAttrib(tbOrgInfo.szName, table.unpack(tbOrgInfo.tbValue))
+  AttributeHelp:LogAttrRemove(pPlayer.dwID, "WuXingYin", tbOrgInfo.szName, table.unpack(tbOrgInfo.tbValue))
+  pPlayer.ApplyMagicAttrib(tbCurInfo.szName, table.unpack(tbCurInfo.tbValue))
+  AttributeHelp:LogAttrApply(pPlayer.dwID, "WuXingYin", tbCurInfo.szName, table.unpack(tbCurInfo.tbValue))
+end
+
+function WuXingYin:RefreshRandAttrib(pPlayer, pEquip, tbOldAttr)
+  if not pPlayer or not pEquip then
+    return
+  end
+  if pPlayer.IsMaskPlayerAttr() then
+    return
+  end
+  if pEquip.nEquipPos ~= Item.EQUIPPOS_WUXINGYIN then
+    return
+  end
+  for index, nAttr in ipairs(tbOldAttr) do
+    local tbInfo = self:GetAttrFromPool(self:UnpackAttr(nAttr))
+    pPlayer.RemoveMagicAttrib(tbInfo.szName, table.unpack(tbInfo.tbValue))
+  end
+  local nRandAttr = WuXingYin:GetRandAttrNums(pEquip.dwId)
+  if 0 == nRandAttr then
+    return
+  end
+  for i = 1, nRandAttr do
+    local nIndex = Item.WuXingYin.RANDATTR_INDEX[i]
+    local nAttr = pEquip.GetIntValue(nIndex)
+    local tbInfo = self:GetAttrFromPool(self:UnpackAttr(nAttr))
+    local tbValue = tbInfo.tbValue
+    pPlayer.ApplyMagicAttrib(tbInfo.szName, table.unpack(tbValue))
+  end
+end
+
+function WuXingYin:RefreshOneAttrib(pPlayer, pEquip, nAttrIndex, nOldLevel)
+  if not pPlayer or not pEquip then
+    return
+  end
+  if pPlayer.IsMaskPlayerAttr() then
+    return
+  end
+  if pEquip.nEquipPos ~= Item.EQUIPPOS_WUXINGYIN then
+    return
+  end
+  local nGroup, nNewLevel = self:UnpackAttr(pEquip.GetIntValue(nAttrIndex))
+  local tbOldInfo = self:GetAttrFromPool(nGroup, nOldLevel)
+  local tbNewInfo = self:GetAttrFromPool(nGroup, nNewLevel)
+  pPlayer.RemoveMagicAttrib(tbOldInfo.szName, table.unpack(tbOldInfo.tbValue))
+  pPlayer.ApplyMagicAttrib(tbNewInfo.szName, table.unpack(tbNewInfo.tbValue))
+  AttributeHelp:LogAttrRemove(pPlayer.dwID, "WuXingYin", tbOldInfo.szName, table.unpack(tbOldInfo.tbValue))
+  AttributeHelp:LogAttrApply(pPlayer.dwID, "WuXingYin", tbNewInfo.szName, table.unpack(tbNewInfo.tbValue))
+end
+
+function WuXingYin:PackAttr(nParam1, nParam2)
+  return nParam1 + nParam2 * 1000
+end
+
+function WuXingYin:UnpackAttr(nAttr)
+  local nParam2 = math.floor(nAttr / 1000)
+  local nParam1 = nAttr % 1000
+  return nParam1, nParam2
+end
+
+function WuXingYin:GetAttrFromPool(nGroup, nLevel)
+  if self.tbAttrPool[nGroup] and self.tbAttrPool[nGroup][nLevel] then
+    local szMagic = self.tbAttrPool[nGroup][nLevel].szAttrib1Type
+    local tbValue = {
+      self.tbAttrPool[nGroup][nLevel].nAttrib1Value1,
+      self.tbAttrPool[nGroup][nLevel].nAttrib1Value2,
+      self.tbAttrPool[nGroup][nLevel].nAttrib1Value3
+    }
+    local nFightPower = self.tbAttrPool[nGroup][nLevel].nFightPower
+    return {
+      szName = szMagic,
+      tbValue = tbValue,
+      nFightPower = nFightPower
+    }
+  end
+  return {}
+end
+
+function WuXingYin:TransAttr(pPlayer, nGroup)
+  local nGroup = nGroup
+  if Item.WuXingYin.ATTR_CONVERT[nGroup] then
+    nGroup = Item.WuXingYin.ATTR_CONVERT[nGroup][KPlayer.GetPlayerInitInfo(pPlayer.nFaction).nSeries]
+  end
+  return nGroup
+end
+
+function WuXingYin:onApplyRobotNpcEquip(pPlayerAsync, pNpc, pEquip)
+  self:ApplyAttrib(pNpc, pEquip)
+end
+
+function WuXingYin:onApplyEquip(pPlayer, pEquip)
+  self:ApplyAttrib(pPlayer.GetNpc(), pEquip, pPlayer.dwID)
+end
+
+function WuXingYin:onRemoveEquip(pPlayer, pEquip)
+  self:RemoveAttrib(pPlayer, pEquip)
+end
+
+Item:RegisterEquipModule({
+  Item.EQUIPPOS_WUXINGYIN
+}, "WuXingYin", WuXingYin)
+
+function WuXingYin:CalcFightPower(pPlayer, szType)
+  if "WuXingYinGrade" == szType then
+    return self:GetWuXingYinGradeFightPower(pPlayer)
+  end
+  if "WuXingYinLevel" == szType then
+    return self:GetWuXingYinLevelFightPower(pPlayer)
+  end
+  if "WuXingYinAttr" == szType then
+    return self:GetWuXingYinAttrFightPower(pPlayer)
+  end
+  return 0
+end
+
+function WuXingYin:GetWuxingyinAllFight(pPlayer)
+  return self:GetWuXingYinGradeFightPower(pPlayer) + self:GetWuXingYinLevelFightPower(pPlayer) + self:GetWuXingYinAttrFightPower(pPlayer)
+end
+
+function WuXingYin:GetWuXingYinGradeFightPower(pPlayer)
+  local nEquipFightPower = 0
+  local pWuXingYin = pPlayer.GetEquipByPos(Item.EQUIPPOS_WUXINGYIN)
+  if pWuXingYin then
+    nEquipFightPower = pWuXingYin.nGradeFightPower
+  end
+  return nEquipFightPower
+end
+
+function WuXingYin:GetWuXingYinLevelFightPower(pPlayer)
+  local nEquipFightPower = 0
+  local pWuXingYin = pPlayer.GetEquipByPos(Item.EQUIPPOS_WUXINGYIN)
+  if pWuXingYin then
+    nEquipFightPower = pWuXingYin.nLevelFightPower
+  end
+  return nEquipFightPower
+end
+
+function WuXingYin:GetWuXingYinAttrFightPower(pPlayer)
+  local nEquipFightPower = 0
+  local pWuXingYin = pPlayer.GetEquipByPos(Item.EQUIPPOS_WUXINGYIN)
+  if pWuXingYin then
+    nEquipFightPower = pWuXingYin.nAttrFightPower
+  end
+  return nEquipFightPower
+end
+
+FightPower:RegisterFPSystemModule({
+  "WuXingYinGrade",
+  "WuXingYinLevel",
+  "WuXingYinAttr"
+}, WuXingYin)

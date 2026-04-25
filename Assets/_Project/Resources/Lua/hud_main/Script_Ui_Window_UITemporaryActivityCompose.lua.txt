@@ -1,0 +1,215 @@
+local tbWnd = Ui:CreateWindow("UITemporaryActivityCompose")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  txtHightTitle = "node/imgBG/Content/High/txtTitle",
+  HighPlus = "node/imgBG/Content/High/Compose/Viewport/Content/Plus",
+  btnHighExtraAward = "node/imgBG/Content/High/btnExtraAward",
+  HighMaterials = "node/imgBG/Content/High/Materials",
+  HighTemplate = "node/imgBG/Content/High/Materials/Template",
+  imgHighIcon = "node/imgBG/Content/High/imgItemBg/imgIcon",
+  txtHighRemainingValue = "node/imgBG/Content/High/Remaining/txtRemainingValue",
+  HighRemaining = "node/imgBG/Content/High/Remaining",
+  btnHighMake = "node/imgBG/Content/High/btnMake",
+  imgHighAward = "node/imgBG/Content/High/btnExtraAward/imgAward",
+  imgHighAwardOpen = "node/imgBG/Content/High/btnExtraAward/imgAwardOpen",
+  imgHighAward_Recieve = "node/imgBG/Content/High/btnExtraAward/imgAward_Recieve",
+  txtMediumTitle = "node/imgBG/Content/Medium/txtTitle",
+  MediumPlus = "node/imgBG/Content/Medium/Compose/Viewport/Content/Plus",
+  btnMediumExtraAward = "node/imgBG/Content/Medium/btnExtraAward",
+  MediumMaterials = "node/imgBG/Content/Medium/Materials",
+  MediumTemplate = "node/imgBG/Content/Medium/Materials/Template",
+  imgMediumIcon = "node/imgBG/Content/Medium/imgBg/imgIcon",
+  txtMediumRemainingValue = "node/imgBG/Content/Medium/Remaining/txtRemainingValue",
+  MediumRemaining = "node/imgBG/Content/Medium/Remaining",
+  btnMediumMake = "node/imgBG/Content/Medium/btnMake",
+  extraAwardItemTemplate = "wndExtraAwardDetail/imgBg/GetAwards/AwardList/Viewport/Content/ItemTemplate",
+  imgMediumAward = "node/imgBG/Content/Medium/btnExtraAward/imgAward",
+  imgMediumAwardOpen = "node/imgBG/Content/Medium/btnExtraAward/imgAwardOpen",
+  imgMediumAward_Recieve = "node/imgBG/Content/Medium/btnExtraAward/imgAward_Recieve",
+  wndExtraAwardDetail = "wndExtraAwardDetail"
+}
+local PLUS_NUM = 5
+local MEDIUM_PLUS_NUM = 4
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_COMPOSEACTIVITY_UPDATE,
+      self.RefreshPanels,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MAP_ENTER,
+      self.CloseByDefault,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.RefreshPanels,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.RefreshPanels,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MAP_SWITCH,
+      self.CloseByDefault
+    }
+  }
+end
+
+tbWnd.tbControls = tbControls
+tbWnd.ExtraAwardType = {High = 1, Medium = 2}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseByDefault()
+  end,
+  btnHighExtraAward = function(self)
+    self:ShowExtraAward(tbWnd.ExtraAwardType.High)
+    self.pPanel:SetActive(tbControls.wndExtraAwardDetail, true)
+  end,
+  btnMediumExtraAward = function(self)
+    self:ShowExtraAward(tbWnd.ExtraAwardType.Medium)
+    self.pPanel:SetActive(tbControls.wndExtraAwardDetail, true)
+  end
+}
+
+function tbWnd:OnClickEmptyClose()
+  self.pPanel:SetActive(tbControls.wndExtraAwardDetail, false)
+end
+
+function tbWnd:OnCreate()
+  self.tbPanelPath = {
+    "node/imgBG/Content/High",
+    "node/imgBG/Content/Medium"
+  }
+  self.tbComposePanel = {}
+  for nComposeType, szPath in ipairs(self.tbPanelPath) do
+    self.tbComposePanel[nComposeType] = Ui:CreatePanel("UIComposePanel", szPath, self)
+  end
+  self.tbExtraAwardScrollView = Ui:NewScrollView(self, tbControls.extraAwardItemTemplate)
+  self:SetClickEmptyCallback(tbControls.wndExtraAwardDetail)
+end
+
+function tbWnd:OnOpen(nComposeActivityId)
+  self.pInstance = ActivityMgr:GetInstanceById(nComposeActivityId)
+  if not self.pInstance or not self.pInstance:IsOpen() then
+    return 0
+  end
+  self.tbFormula = self.pInstance:GetFormulas()
+  for nComposeType, pPanel in ipairs(self.tbComposePanel) do
+    if self.tbFormula[nComposeType] then
+      pPanel:Init(self.tbFormula[nComposeType], function()
+        self:Make(nComposeType)
+      end, function()
+        return self.pInstance:CanGetExtraAwardByComposeType(nComposeType)
+      end, function()
+        return self.pInstance:AllExtraAwardHasGet(nComposeType)
+      end, function()
+        return self.pInstance:GetLeftFormulaMaxComposeCount(me, nComposeType)
+      end)
+      self.pPanel:SetActive(self.tbPanelPath[nComposeType], true)
+    else
+      self.pPanel:SetActive(self.tbPanelPath[nComposeType], false)
+    end
+  end
+  self.tbExtraAward = self.pInstance:GetAllExAwardCfg()
+  if self.tbExtraAward then
+    self.pPanel:SetActive(tbControls.btnHighExtraAward, true)
+    self.pPanel:SetActive(tbControls.btnMediumExtraAward, true)
+  else
+    self.pPanel:SetActive(tbControls.btnHighExtraAward, false)
+    self.pPanel:SetActive(tbControls.btnMediumExtraAward, false)
+  end
+  self:RegRedPoint()
+  self:RefreshPanels()
+end
+
+function tbWnd:OnClose()
+  self:UnRegRedPoint()
+end
+
+function tbWnd:Make(nComposeType)
+  local nMaxNum, szInfo = self.pInstance:GetPlayerCanMakeNum(me, nComposeType)
+  if 0 == nMaxNum then
+    me.CenterMsg(szInfo)
+    return
+  end
+  local tbProduct = self.tbFormula[nComposeType].tbProduct
+  Ui:OpenWindow("UITemporaryActivityComposeSet", tbProduct, nMaxNum, 1, {
+    self.pInstance.MakeByFormula,
+    self.pInstance,
+    nComposeType
+  })
+end
+
+function tbWnd:RefreshPanels()
+  for nComposeType, tbInfo in pairs(self.tbFormula) do
+    if self.tbComposePanel[nComposeType] then
+      self.tbComposePanel[nComposeType]:Refresh()
+    end
+  end
+  if not self.nCurExtraAwardIndex then
+    return
+  end
+  self:ShowExtraAward(self.nCurExtraAwardIndex)
+end
+
+function tbWnd:RefreshExtraAwardByNotify()
+end
+
+function tbWnd:ShowExtraAward(nExtraAwardIndex)
+  self.nCurExtraAwardIndex = nExtraAwardIndex
+  local tbAllExtraAward = self.pInstance:GetExtraAwardList(self.tbExtraAward[nExtraAwardIndex])
+  self.tbExtraAwardScrollView:Clear()
+  for nIndex, tbInfo in ipairs(tbAllExtraAward) do
+    self.tbExtraAwardScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("AwardTips/txtAwardTip1", tbInfo.szInfo)
+      local nShowCurNum = math.min(tbInfo.nCurNum, tbInfo.nNeedNum)
+      local szShowCurNum
+      if nShowCurNum < tbInfo.nNeedNum then
+        szShowCurNum = string.format("<color=#b60000>%s</color>", nShowCurNum)
+      else
+        szShowCurNum = string.format("<color=#54ab4d>%s</color>", nShowCurNum)
+      end
+      pPanel:Label_SetText("AwardTips/txtAwardTip2", i18n.EasyGet("{0}/{1}", szShowCurNum, tbInfo.nNeedNum))
+      local tbItemGridView = tbElement.tbItemGridView
+      if not tbItemGridView then
+        tbItemGridView = Ui:NewItemGridView(tbElement, "AwardsItem/ItemTemplate")
+        for nIndex2, tbAward in ipairs(tbInfo.tbAward) do
+          tbItemGridView:SetItem(nIndex2, tbAward, true)
+        end
+      end
+      pPanel:SetActive("btnGet", not tbInfo.bSuccess)
+      pPanel:SetActive("MarkRecieved", tbInfo.bSuccess)
+      Ui:Button_BindEvent(pPanel, "btnGet", self.OnGetExtraAward, self, nExtraAwardIndex, tbInfo.nIndex)
+      pPanel:Button_SetEnable("btnGet", not tbInfo.bSuccess and tbInfo.nNeedNum <= tbInfo.nCurNum)
+    end)
+  end
+end
+
+function tbWnd:RegRedPoint()
+  local tbConfig = self.pInstance:GetConfig()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnHighMake, {
+    RedPointMgr.EVENT[tbConfig.szHighRedPoint]
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnMediumMake, {
+    RedPointMgr.EVENT[tbConfig.szMiddleRedPoint]
+  })
+end
+
+function tbWnd:UnRegRedPoint()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnHighMake)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnMediumMake)
+end
+
+function tbWnd:OnGetExtraAward(nComposeType, nIndex)
+  if not self.pInstance then
+    LogErr("UITemporaryActivityCompose pInstance nil")
+    return
+  end
+  self.pInstance:GetExtraAward(nComposeType, nIndex)
+end

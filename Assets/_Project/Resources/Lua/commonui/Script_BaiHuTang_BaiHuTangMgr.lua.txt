@@ -1,0 +1,257 @@
+Require("CommonScript/BaiHuTang/BaiHuTangCfg.lua")
+Require("Script/Fuben/FubenUIController.lua")
+Require("Script/Map/Map.lua")
+
+function BaiHuTang:QuickEnterHallReq()
+  local nMapTemplateId = me.nMapTemplateId
+  for _, nMapId in pairs(self.MAP_HALL.ID) do
+    if nMapId == nMapTemplateId then
+      return
+    end
+  end
+  for _, tbInfoList in pairs(self.MAP_FLOOR) do
+    for nMapId, _ in pairs(tbInfoList) do
+      if nMapId == nMapTemplateId then
+        return
+      end
+    end
+  end
+  local nTargetNpcTemplateId = 7015
+  local nTargetMapTemplateId = 95
+  local nTargetNpcX, nTargetNpcY, nWalkNearLength = Npc:GetNpcPos(nTargetNpcTemplateId, nTargetMapTemplateId, true)
+  AutoPath:GotoAndCallEx(nTargetMapTemplateId, nTargetNpcX, nTargetNpcY, function()
+    local tbNpcList = KNpc.GetAroundNpcList(me.GetNpc(), GetNpcDialogDistance(nTargetNpcTemplateId)) or {}
+    for _, pNpc in pairs(tbNpcList) do
+      if pNpc.nTemplateId == nTargetNpcTemplateId then
+        Operation:SimpleTap(pNpc.nId)
+        return
+      end
+    end
+  end, nWalkNearLength)
+end
+
+function BaiHuTang:OnFubenMapLoaded(pPlayer)
+  FubenUIController:OpenFuBenUI()
+  local nMapTemplateId = pPlayer.nMapTemplateId
+  local bFound = false
+  for _, nMapId in pairs(self.MAP_HALL.ID) do
+    if nMapId == nMapTemplateId then
+      bFound = true
+      break
+    end
+  end
+  if bFound then
+    FubenUIController:ShowInfo(nil, nil, nil, i18n.EasyGet("<color=#{0}>\228\190\160\229\174\162\229\156\168\230\175\143\229\164\169\231\154\13211\231\130\185\227\128\12913\231\130\185\227\128\12917\231\130\185\227\128\12920\231\130\185\227\128\12923\231\130\185\230\149\180\231\130\185\229\144\142\231\154\1325\229\136\134\233\146\159\229\134\133\229\143\175\229\146\140\231\153\189\232\153\142\229\160\130\233\151\168\228\186\186\230\138\165\229\144\141\232\191\155\229\133\165\229\143\130\228\184\142\231\153\189\232\153\142\229\160\130\228\186\137\229\164\186\239\188\129</color>", Ui.tbColor:GetColorByType("Intro")))
+  end
+end
+
+function BaiHuTang:IsInFubenMap()
+  return true, i18n.EasyGet("\231\153\189\232\153\142\229\160\130")
+end
+
+function BaiHuTang:IsNeedExitFubenButton()
+  return true
+end
+
+function BaiHuTang:IsNeedFubenBtn()
+  local nMapTid = me.nMapTemplateId
+  local bFound = false
+  for _, nOtherMapTid in pairs(self.MAP_HALL.ID) do
+    if nOtherMapTid == nMapTid then
+      bFound = true
+    end
+  end
+  if not bFound then
+    return false
+  end
+  local tbBtnList = {}
+  
+  local function fnGoto(nNpcTid)
+    if nMapTid ~= me.nMapTemplateId then
+      return
+    end
+    local nPosX, nPosY, nNearLength = Npc:GetNpcPos(nNpcTid, nMapTid)
+    if not nPosX or not nPosY then
+      return
+    end
+    
+    local function fnCallback()
+      local nNpcId = KNpc.GetNpcIdByTemplateId(nNpcTid)
+      if nNpcId then
+        Operation:SimpleTap(nNpcId)
+      end
+    end
+    
+    TeamMgr:StopFollowMember()
+    AFK:Stop()
+    AutoPath:GotoAndCallEx(nMapTid, nPosX, nPosY, fnCallback, nNearLength, nil, nNpcTid)
+  end
+  
+  for nNpcTid, _ in pairs(self.MAP_HALL.TRANSMIT) do
+    local tbInfoList = Map:GetMapNpcInfoByNpcTemplate(nMapTid, nNpcTid) or {}
+    if tbInfoList[1] then
+      table.insert(tbBtnList, {
+        szName = i18n.Parse(tbInfoList[1].NpcName),
+        fnOnClick = function()
+          fnGoto(nNpcTid)
+        end
+      })
+    end
+  end
+  return true, nil, tbBtnList
+end
+
+function BaiHuTang:GetFubenBtnAImagePathAndText()
+  return "UI/atlas/hud/btn_transfer.png", nil
+end
+
+function BaiHuTang:RegisterFubenUIChecker()
+  local tbMapList = {}
+  for _, nMapId in pairs(self.MAP_HALL.ID) do
+    table.insert(tbMapList, nMapId)
+  end
+  for _, tbInfoList in pairs(self.MAP_FLOOR) do
+    for nMapId, _ in pairs(tbInfoList) do
+      table.insert(tbMapList, nMapId)
+    end
+  end
+  FubenUIController:RegisterChecker(tbMapList, self)
+end
+
+function BaiHuTang:EnterBaiHuTangByCaptainRes(bIsCanEnter)
+  if false == bIsCanEnter and TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+end
+
+function BaiHuTang:GetFloor(nTemplateId)
+  for nFloor, tbInfoList in pairs(self.MAP_FLOOR) do
+    if tbInfoList[nTemplateId] then
+      return nFloor
+    end
+  end
+  return nil
+end
+
+function BaiHuTang:TransmitTo(nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+  local nFloor = self:GetFloor(nFromTemplateId)
+  local nTargetFloor = self:GetFloor(nTargetMapTemplateId)
+  local tbWayPoint = Lib:RandTable({
+    {nTransPosX = 34548, nTransPosY = 32613},
+    {nTransPosX = 35657, nTransPosY = 31868}
+  })
+  if not nTargetFloor then
+    local target = self.MAP_FLOOR[nFloor].TARGET
+    if "Global" ~= target then
+      return true, tbWayPoint
+    else
+      TeamMgr:S2C_StopFollowMember()
+      return true
+    end
+  elseif nFloor >= nTargetFloor then
+    TeamMgr:S2C_StopFollowMember()
+    return false
+  else
+    return true, tbWayPoint
+  end
+end
+
+function BaiHuTang:TransmitFrom(nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+  RemoteServer.RequestBaiHuTang("EnterBaiHuTangByCaptainReq", nTargetMapId)
+end
+
+function BaiHuTang:OnStartBattle(nCurEventLeftTime)
+  if not self.tbCacheData then
+    self.tbCacheData = {}
+  end
+  self.tbCacheData.nCurEventLeftTime = nCurEventLeftTime
+  FubenUIController:ShowInfo(nil, nil, {
+    {
+      i18n.EasyGet("\229\188\128\229\144\175\229\128\146\232\174\161\230\151\182"),
+      nCurEventLeftTime
+    }
+  })
+end
+
+function BaiHuTang:OnJoin(tbInfo)
+  if not self.tbCacheData then
+    self.tbCacheData = {}
+  end
+  self.tbCacheData = tbInfo
+  local szHightLight = Ui.tbColor:GetColorByType("Intro")
+  local szIntro = i18n.EasyGet("<color=#{0}>\229\135\187\232\180\165\233\151\175\229\160\130\232\180\188\229\164\180\233\162\134\229\143\175\230\137\147\229\188\128\233\128\154\229\190\128\228\184\139\228\184\128\229\177\130\229\133\165\229\143\163\227\128\130</color>", szHightLight)
+  if "Global" == BaiHuTang.MAP_FLOOR[tbInfo.nFloor][tbInfo.nScene].TARGET then
+    szIntro = i18n.EasyGet("<color=#{0}>\229\135\187\232\180\165{1}\229\177\130\229\164\180\233\162\134\231\154\132\229\174\182\230\151\143/\229\184\174\228\188\154\230\136\144\229\145\152\229\143\175\233\128\154\232\191\135\228\188\160\233\128\129\231\149\140\233\157\162\232\191\155\229\133\165\232\183\168\230\156\141\231\153\189\232\153\142\229\160\130</color>", szHightLight, tbInfo.nFloor)
+  end
+  if not tbInfo.bForceBattle then
+    szIntro = i18n.EasyGet("<color=#{0}>\230\180\187\229\138\168\229\188\128\229\144\175\229\144\142\239\188\140\229\176\134\229\156\168{1}\229\136\134\233\146\159\229\144\142\229\136\135\230\141\162\229\174\182\230\151\143/\229\184\174\228\188\154\230\168\161\229\188\143\227\128\130</color>", szHightLight, tbInfo.nRangeEventTime / 60)
+  end
+  local tbTimer = {
+    {
+      i18n.EasyGet("\230\180\187\229\138\168\229\128\146\232\174\161\230\151\182"),
+      tbInfo.nAllEventLeftTime
+    }
+  }
+  if not tbInfo.bForceBattle then
+    table.insert(tbTimer, {
+      i18n.EasyGet("\230\136\152\230\150\151\231\138\182\230\128\129\229\188\128\229\144\175"),
+      tbInfo.nSpEventLeftTime
+    })
+  elseif tbInfo.bCanRevive then
+    table.insert(tbTimer, {
+      i18n.EasyGet("\229\164\180\233\162\134\229\135\186\231\142\176\229\128\146\232\174\161\230\151\182"),
+      tbInfo.nSpEventLeftTime
+    })
+  end
+  FubenUIController:ShowInfo(nil, nil, tbTimer, szIntro)
+end
+
+function BaiHuTang:OnLeavePlayer()
+  self.tbCacheData = nil
+  FubenUIController:CloseFubenUI()
+end
+
+function BaiHuTang:Init()
+  if not self.bInit then
+    self:RegisterFubenUIChecker()
+    self.bInit = true
+    for i, tbInfoList in pairs(self.MAP_FLOOR) do
+      for nMapTemplateId, v in pairs(tbInfoList) do
+        local tbBaiHuTangMapClass = Map:GetClass(nMapTemplateId)
+        
+        function tbBaiHuTangMapClass.TransmitTo(tbBaiHuTangMapClass, nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+          return self:TransmitTo(nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+        end
+        
+        function tbBaiHuTangMapClass.TransmitFrom(tbBaiHuTangMapClass, nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+          return self:TransmitFrom(nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+        end
+      end
+    end
+  end
+end
+
+function BaiHuTang:GotoEntrance()
+  local bCanJoin, szMsg = BaiHuTang:CheckCanJoin()
+  if not bCanJoin then
+    me.CenterMsg(szMsg)
+    return
+  end
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  local bLeadFight = AFK:IsLeadFightRunning()
+  if bLeadFight then
+    AFK:Stop()
+  end
+  BaiHuTang:QuickEnterHallReq()
+end
+
+function BaiHuTang:CheckCanJoin()
+  if DegreeCtrl:GetDegree(me, "BaiHuTang") <= 0 then
+    return false, i18n.EasyGet("\230\130\168\231\154\132\231\153\189\232\153\142\229\160\130\229\143\130\228\184\142\230\172\161\230\149\176\229\183\178\230\187\161")
+  end
+  return true, ""
+end
+
+BaiHuTang:Init()

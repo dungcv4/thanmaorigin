@@ -1,0 +1,297 @@
+local tbWnd = Ui:CreateClass("UIAuctionItem", "UIPanel")
+
+function tbWnd:IsOpen()
+  return self.szAuctionType and self.tbItemData and true or false
+end
+
+function tbWnd:OnOpen(szAuctionType, tbItemData)
+  self.szAuctionType = szAuctionType
+  self.tbItemData = tbItemData
+  if not self.tbItemGrid then
+    self.tbItemGrid = Ui:NewExistItemGrid(self, "UIItemGrid")
+    self.tbItemGrid:SetClickEnable(true)
+  end
+  self.tbItemGrid:SetItemByTemplate(tbItemData.nItemId, tbItemData.nCount)
+  self.pPanel:Label_SetText("txtName", i18n.Parse(KItem.GetItemShowInfo(tbItemData.nItemId)))
+  self.pPanel:SetActive("txtMyState", false)
+  self.pPanel:SetActive("txtTime", false)
+  self.pPanel:SetActive("txtSold", false)
+  local szMoneyType
+  if Auction:IsShoper(szAuctionType) then
+    szMoneyType = Auction:GetShoperAuctionItemMoneyType(tbItemData.nOrgId)
+  else
+    szMoneyType = Auction:GetAuctionItemMoneyType(tbItemData.nItemId)
+  end
+  if szMoneyType then
+    self.pPanel:Sprite_SetSprite("BidOver/imgMoney", Currency:GetIcon(szMoneyType))
+    self.pPanel:Sprite_SetSprite("CurPrice/imgMoney", Currency:GetIcon(szMoneyType))
+  else
+    self.pPanel:Sprite_SetSprite("BidOver/imgMoney", "")
+    self.pPanel:Sprite_SetSprite("CurPrice/imgMoney", "")
+  end
+  self.pPanel:SetActive("BidOver", true)
+  self.pPanel:Button_SetEnable("BidOver/btnBidOver", true)
+  self.pPanel:Button_SetEnable("CurPrice/btnBidAdd", true)
+  if not self.bBindEvent then
+    Ui:Button_BindEvent(self.pPanel, "BidOver/btnBidOver", self.OnClickBidOver, self)
+    Ui:Button_BindEvent(self.pPanel, "CurPrice/btnBidAdd", self.OnClickBidAdd, self)
+    self.bBindEvent = true
+  end
+  self:Update()
+end
+
+function tbWnd:OnClose()
+  self.szAuctionType = nil
+  self.tbItemData = nil
+end
+
+function tbWnd:Update()
+  local bContinue = false
+  if not self:IsOpen() then
+    return bContinue
+  end
+  local tbItemData = self.tbItemData
+  if tbItemData.nBidderId then
+    self.pPanel:SetActive("txtMyState", true)
+    if me.dwID == tbItemData.nBidderId then
+      self.pPanel:Label_SetText("txtMyState", string.format("<color=#%s>%s</color>", Ui.tbColor:GetColorHexByDefineName("NewGold"), i18n.EasyGet("\230\130\168\231\154\132\229\135\186\228\187\183\230\156\128\233\171\152")))
+    else
+      self.pPanel:Label_SetText("txtMyState", string.format("<color=#%s>%s</color>", Ui.tbColor:GetColorHexByDefineName("BlueNew"), i18n.EasyGet("\231\171\158\228\187\183\228\184\173")))
+    end
+  else
+    self.pPanel:SetActive("txtMyState", false)
+  end
+  local nNow = GetTime()
+  if tbItemData.bSold or nNow >= tbItemData.nTimeOut or tbItemData.bKeepSoldOut then
+    self.pPanel:SetActive("txtSold", true)
+    self.pPanel:SetActive("imgSoldOut", true)
+    self.pPanel:SetActive("txtTime", false)
+    self.pPanel:Label_SetText("txtMyState", "")
+    bContinue = false
+  else
+    local nLeftTime = tbItemData.nStartTime - nNow
+    if nLeftTime > 0 then
+      self.pPanel:SetActive("txtSold", false)
+      self.pPanel:SetActive("imgSoldOut", false)
+      self.pPanel:SetActive("txtTime", true)
+      if Auction:IsShoper(self.szAuctionType) then
+        local nTodayTime = tbItemData.nStartTime - Lib:GetTodayZeroHour(nNow)
+        self.pPanel:Label_SetText("txtTime", i18n.EasyGet("{0}\229\188\128\229\144\175", Lib:TimeDesc3(nTodayTime)))
+      else
+        self.pPanel:Label_SetText("txtTime", i18n.EasyGet("{0}\229\188\128\229\167\139", Lib:TimeDesc3(nLeftTime)))
+      end
+      bContinue = true
+    else
+      nLeftTime = tbItemData.nTimeOut - nNow
+      if nLeftTime > 0 then
+        self.pPanel:SetActive("txtSold", false)
+        self.pPanel:SetActive("imgSoldOut", false)
+        self.pPanel:SetActive("txtTime", true)
+        self.pPanel:Label_SetText("txtTime", Lib:TimeDesc3(nLeftTime))
+        bContinue = true
+      else
+        self.pPanel:SetActive("txtSold", true)
+        self.pPanel:SetActive("imgSoldOut", true)
+        self.pPanel:SetActive("txtTime", false)
+        bContinue = false
+      end
+    end
+  end
+  self.pPanel:Label_SetText("BidOver/txtMaxPrice", tbItemData.nMaxPrice)
+  self.pPanel:Label_SetText("CurPrice/txtCurPrice", tbItemData.nCurPrice)
+  if tbItemData.nBidderId == me.dwID then
+    self.pPanel:Label_SetText("CurPrice/btnBidAdd/txtBidAdd", i18n.EasyGet("\229\138\160\228\187\183"))
+  else
+    self.pPanel:Label_SetText("CurPrice/btnBidAdd/txtBidAdd", i18n.EasyGet("\231\171\158\228\187\183"))
+  end
+  if tbItemData.bDelayBidOver then
+    if tbItemData.bMeHaveRequestBidOver then
+      self.pPanel:Label_SetText("BidOver/btnBidOver/txtBidOver", i18n.EasyGet("\229\183\178\230\138\162\230\139\141"))
+      self.pPanel:Button_SetEnable("BidOver/btnBidOver", false)
+      self.pPanel:SetActive("txtMyState", true)
+      self.pPanel:Label_SetText("txtMyState", string.format("<color=#%s>%s</color>", Ui.tbColor:GetColorHexByDefineName("NewGold"), i18n.EasyGet("\230\138\162\230\139\141\228\184\173")))
+    elseif tbItemData.bOtherHaveRequestBidOver then
+      self.pPanel:Label_SetText("BidOver/btnBidOver/txtBidOver", i18n.EasyGet("\230\138\162\230\139\141"))
+      self.pPanel:Button_SetEnable("BidOver/btnBidOver", true)
+      self.pPanel:SetActive("txtMyState", true)
+      self.pPanel:Label_SetText("txtMyState", string.format("<color=#%s>%s</color>", Ui.tbColor:GetColorHexByDefineName("NewGold"), i18n.EasyGet("\230\138\162\230\139\141\228\184\173")))
+    else
+      self.pPanel:Label_SetText("BidOver/btnBidOver/txtBidOver", i18n.EasyGet("\230\138\162\230\139\141"))
+      self.pPanel:Button_SetEnable("BidOver/btnBidOver", true)
+    end
+    self.pPanel:Button_SetEnable("CurPrice/btnBidAdd", false)
+  else
+    if not tbItemData.bMeHaveRequestBidOver then
+      self.pPanel:Label_SetText("BidOver/btnBidOver/txtBidOver", i18n.EasyGet("\232\180\173\228\185\176"))
+      self.pPanel:Button_SetEnable("BidOver/btnBidOver", true)
+    else
+      self.pPanel:Label_SetText("BidOver/btnBidOver/txtBidOver", i18n.EasyGet("\230\138\162\230\139\141"))
+      self.pPanel:Button_SetEnable("BidOver/btnBidOver", false)
+    end
+    self.pPanel:Button_SetEnable("CurPrice/btnBidAdd", true)
+  end
+  if Auction:IsShoper(self.szAuctionType) then
+    self.pPanel:SetActive("BidOver", false)
+  end
+  if not bContinue then
+    self.pPanel:Button_SetEnable("BidOver/btnBidOver", false)
+    self.pPanel:Button_SetEnable("CurPrice/btnBidAdd", false)
+  end
+  return bContinue
+end
+
+function tbWnd:OnClickBidOver()
+  if not self:IsOpen() then
+    return
+  end
+  local bRet, szErr, szMoneyType, nPrice = self:CanBidWithReminderWindow(true)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  local szAuctionType = self.szAuctionType
+  local tbItemData = self.tbItemData
+  local szMsg
+  if me.dwID == tbItemData.nBidderId then
+    szMsg = i18n.EasyGet("\230\130\168\229\189\147\229\137\141\229\135\186\228\187\183\230\156\128\233\171\152<color=#ffff0e>\239\188\136{0}{1}\239\188\137</color>\239\188\140\231\161\174\229\174\154\232\166\129\229\134\141\229\162\158\229\138\160<color=#ffff0e>{2}{1}</color>\228\184\128\229\143\163\228\187\183\232\180\173\228\185\176\229\144\151\239\188\159", tbItemData.nCurPrice, Currency:GetName(szMoneyType), nPrice - tbItemData.nCurPrice)
+  else
+    szMsg = i18n.EasyGet("\230\130\168\231\161\174\229\174\154\232\166\129\232\138\177\232\180\185<color=#ffff0e>{0}{1}</color>\228\184\128\229\143\163\228\187\183\232\180\173\228\185\176\229\144\151\239\188\159", nPrice, Currency:GetName(szMoneyType))
+  end
+  
+  local function fnConfirm()
+    RemoteServer.OnAuctionRequest("BidOver", szAuctionType, tbItemData.nId, nPrice)
+    Auction:SaveMyAuctionInfo(szAuctionType, tbItemData)
+  end
+  
+  me.MsgBox(szMsg, {
+    {
+      i18n.szOk,
+      fnConfirm
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function tbWnd:OnClickBidAdd()
+  if not self:IsOpen() then
+    return
+  end
+  local bRet, szErr, szMoneyType, nPrice = self:CanBidWithReminderWindow(false)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  local szAuctionType = self.szAuctionType
+  local tbItemData = self.tbItemData
+  if not Auction:IsShoper(szAuctionType) and nPrice >= tbItemData.nMaxPrice then
+    local szMsg = i18n.EasyGet("\228\189\160\231\154\132\229\135\186\228\187\183\229\183\178\231\187\143\232\190\190\229\136\176\228\186\134\228\184\128\229\143\163\228\187\183\239\188\136<color=#ffff0e>{0}{1}</color>\239\188\137\239\188\140\230\152\175\229\144\166\228\184\128\229\143\163\228\187\183\228\185\176\228\184\139\239\188\159", tbItemData.nMaxPrice, Currency:GetName(szMoneyType))
+    
+    local function fnConfirm()
+      RemoteServer.OnAuctionRequest("BidOver", szAuctionType, tbItemData.nId, tbItemData.nMaxPrice)
+      Auction:SaveMyAuctionInfo(szAuctionType, tbItemData)
+    end
+    
+    me.MsgBox(szMsg, {
+      {
+        i18n.szOk,
+        fnConfirm
+      },
+      {
+        i18n.szCancel
+      }
+    })
+  else
+    local szMsg
+    if me.dwID == tbItemData.nBidderId then
+      szMsg = i18n.EasyGet("\228\189\160\229\189\147\229\137\141\229\135\186\228\187\183\230\156\128\233\171\152\239\188\140\231\161\174\229\174\154\232\166\129\232\138\177\232\180\185<color=#ffff0e>{0}{1}</color>\229\138\160\228\187\183\231\171\158\230\139\141\229\144\151\239\188\159", nPrice - tbItemData.nCurPrice, Currency:GetName(szMoneyType))
+    else
+      szMsg = i18n.EasyGet("\228\189\160\231\161\174\229\174\154\232\166\129\232\138\177\232\180\185<color=#ffff0e>{0}{1}</color>\229\143\130\228\184\142\231\171\158\230\139\141\229\144\151\239\188\159", nPrice, Currency:GetName(szMoneyType))
+    end
+    
+    local function fnConfirm()
+      RemoteServer.OnAuctionRequest("Bid", szAuctionType, tbItemData.nId, nPrice)
+      Auction:SaveMyAuctionInfo(szAuctionType, tbItemData)
+    end
+    
+    me.MsgBox(szMsg, {
+      {
+        i18n.szOk,
+        fnConfirm
+      },
+      {
+        i18n.szCancel
+      }
+    })
+  end
+end
+
+function tbWnd:CanBidWithReminderWindow(bBidOver)
+  local bRet, szErrMsg, szMoneyType, nPrice = self:CanBid(bBidOver)
+  if true == bRet then
+    return bRet, szErrMsg, szMoneyType, nPrice
+  elseif szMoneyType and szErrMsg and szErrMsg == i18n.EasyGet("\230\130\168\231\154\132{0}\228\184\141\232\182\179\239\188\129", Currency:GetName(szMoneyType)) then
+    if GainCurrency:ReadyForJump(szMoneyType) then
+      return bRet
+    else
+      return bRet, szErrMsg, szMoneyType, nPrice
+    end
+  else
+    return bRet, szErrMsg, szMoneyType, nPrice
+  end
+end
+
+function tbWnd:CanBid(bBidOver)
+  local szAuctionType = self.szAuctionType
+  local tbItemData = self.tbItemData
+  local nNow = GetTime()
+  if nNow < tbItemData.nStartTime then
+    return false, i18n.EasyGet("{0}\229\144\142\229\188\128\229\167\139\230\139\141\229\141\150", Lib:TimeDesc3(tbItemData.nStartTime - nNow))
+  end
+  if nNow >= tbItemData.nTimeOut then
+    return false, i18n.EasyGet("\231\171\158\230\139\141\229\183\178\231\187\147\230\157\159")
+  end
+  if tbItemData.bSold or 0 == tbItemData.nTimeOut then
+    return false, i18n.EasyGet("\229\183\178\231\187\143\232\162\171\230\139\141\232\181\176\228\186\134")
+  end
+  local szMoneyType
+  if Auction:IsShoper(szAuctionType) then
+    szMoneyType = Auction:GetShoperAuctionItemMoneyType(tbItemData.nOrgId)
+  else
+    szMoneyType = Auction:GetAuctionItemMoneyType(tbItemData.nItemId)
+  end
+  if not szMoneyType then
+    return false, i18n.EasyGet("\230\156\170\230\137\190\229\136\176\231\137\169\229\147\129\228\191\161\230\129\175")
+  end
+  local nPrice
+  if not bBidOver then
+    if tbItemData.bDelayBidOver then
+      return false, i18n.EasyGet("\229\189\147\229\137\141\230\152\175\228\184\128\229\143\163\228\187\183\233\152\182\230\174\181")
+    end
+    if Auction:IsShoper(szAuctionType) then
+      nPrice = tbItemData.nCurPrice
+      if tbItemData.nBidderId then
+        local nFix2ndPrice = Auction:GetShoperAuctionItemFix2ndPrice(tbItemData.nOrgId) * tbItemData.nCount
+        local nAddRate = Auction:GetShoperAuctionItemAddRatePerTime(tbItemData.nOrgId)
+        if tbItemData.nCurPrice == tbItemData.nOrgPrice then
+          nPrice = nFix2ndPrice
+        else
+          nPrice = tbItemData.nCurPrice + math.ceil(nFix2ndPrice * nAddRate)
+        end
+      end
+    else
+      nPrice = tbItemData.nCurPrice
+      if tbItemData.nBidderId then
+        nPrice = tbItemData.nCurPrice + math.ceil(tbItemData.nOrgPrice * Auction:GetAuctionItemAddRatePerTime(tbItemData.nItemId))
+      end
+    end
+  else
+    nPrice = tbItemData.nMaxPrice
+  end
+  local nRealCost = me.dwID == tbItemData.nBidderId and nPrice - tbItemData.nCurPrice or nPrice
+  if nRealCost > me.GetMoney(szMoneyType) then
+    return false, i18n.EasyGet("\230\130\168\231\154\132{0}\228\184\141\232\182\179\239\188\129", Currency:GetName(szMoneyType)), szMoneyType
+  end
+  return true, nil, szMoneyType, nPrice
+end

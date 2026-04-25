@@ -1,0 +1,233 @@
+XoyoGame.SAVE_XOYOGAME_GROUP = GetGroupKey("XoyoGame")
+XoyoGame.FUBEN_COUNT = 5
+XoyoGame.AFTER_END_TIME = 15
+XoyoGame.MIN_PLAYER_COUNT = 3
+XoyoGame.MAX_PLAYER_COUNT = 4
+XoyoGame.tbXYGLevelStatus = {
+  SYGLS_READY = 1,
+  SYGLS_RUNNING = 2,
+  SYGLS_ENDDING = 3
+}
+XoyoGame.tbFubenWinScore = {
+  [1] = 12,
+  [2] = 14,
+  [3] = 18,
+  [4] = 20,
+  [5] = 22,
+  [6] = 22,
+  [7] = 22
+}
+XoyoGame.tbFubenFailScore = {
+  [1] = 8,
+  [2] = 10,
+  [3] = 12,
+  [4] = 16,
+  [5] = 18,
+  [6] = 18,
+  [7] = 18
+}
+XoyoGame.tbTimeScroe = {
+  {480, 20},
+  {560, 19},
+  {640, 18},
+  {720, 17},
+  {800, 16},
+  {680, 15},
+  {960, 14},
+  {1040, 13},
+  {1120, 12},
+  {1200, 11},
+  {10000, 10}
+}
+XoyoGame.tbXoyoGameAward = {
+  [1] = {601, 1},
+  [2] = {601, 2},
+  [3] = {601, 3},
+  [4] = {601, 4},
+  [5] = {601, 5},
+  [6] = {601, 6}
+}
+
+function XoyoGame:LoadDifficultySetting()
+  local tbParam = {
+    "nSectionIdx",
+    "szName",
+    "szDesc",
+    "nMinLevel",
+    "szShowItem",
+    "nStartRoomLevel"
+  }
+  local tbFile = Lib:LoadTabFileEx("Setting/XoyoGame/XoyoGameDifficulty.tab", "dssdsd", nil, tbParam)
+  assert(tbFile, "[XoyoGame] LoadSetting LoadTabFile Setting/XoyoGame/XoyoGameDifficulty.tab fail !!!")
+  self.tbDifficultSetting = {}
+  for _, tbRow in pairs(tbFile) do
+    local nSectionIdx = tbRow.nSectionIdx
+    self.tbDifficultSetting[nSectionIdx] = {
+      szName = tbRow.szName,
+      szDesc = i18n.Parse(tbRow.szDesc),
+      nMinLevel = tbRow.nMinLevel,
+      tbShowItem = Lib:GetAwardFromString(tbRow.szShowItem),
+      nStartRoomLevel = tbRow.nStartRoomLevel
+    }
+  end
+  self.tbDifficultSetting = SetReadOnly(self.tbDifficultSetting)
+end
+
+XoyoGame:LoadDifficultySetting()
+
+function XoyoGame:LoadRoomSetting()
+  local tbParam = {
+    "nId",
+    "szRoom",
+    "nRoomLevel",
+    "szClassName",
+    "nRate",
+    "nMapTemplateId",
+    "szRoomName",
+    "nFubenTime"
+  }
+  local tbFile = Lib:LoadTabFileEx("Setting/XoyoGame/XoyoGameRoomSetting.tab", "dsdsddsd", nil, tbParam)
+  assert(tbFile, "[XoyoGame] LoadSetting LoadTabFile Setting/XoyoGame/XoyoGameRoomSetting.tab fail !!!")
+  self.tbFile = {}
+  self.tbFile = tbFile
+  self.tbXoyoRoomSetting = {}
+  self.tbRateInfo = {}
+  for _, tbRow in pairs(tbFile) do
+    self.tbXoyoRoomSetting[tbRow.nRoomLevel] = self.tbXoyoRoomSetting[tbRow.nRoomLevel] or {
+      nTotalRate = 0,
+      tbRoom = {}
+    }
+    self.tbRateInfo[tbRow.nMapTemplateId] = tbRow.nRate
+    local tbSetting = self.tbXoyoRoomSetting[tbRow.nRoomLevel]
+    tbSetting.nTotalRate = tbSetting.nTotalRate + tbRow.nRate
+    table.insert(tbSetting.tbRoom, tbRow)
+  end
+  self.tbXoyoRoomSetting = SetReadOnly(self.tbXoyoRoomSetting)
+end
+
+XoyoGame:LoadRoomSetting()
+
+function XoyoGame:GetFubenSetting(nSectionIdx)
+  return self.tbDifficultSetting[nSectionIdx]
+end
+
+function XoyoGame:GMGetMapBySZRoom(nRoom)
+  local num1 = math.floor(nRoom / 10) % 10
+  local num2 = nRoom % 10
+  local szRoom = num1 .. "_" .. num2
+  for i, v in pairs(self.tbXoyoRoomSetting) do
+    for i1, v1 in ipairs(v.tbRoom) do
+      if szRoom == v1.szRoom then
+        return v1.nMapTemplateId
+      end
+    end
+  end
+end
+
+function XoyoGame:GetXoyoRoomSetting(nMapTemplateId)
+  for nRoomLevel, tbData in ipairs(self.tbXoyoRoomSetting) do
+    for i, tbRoom in ipairs(tbData.tbRoom) do
+      if tbRoom.nMapTemplateId == nMapTemplateId then
+        return tbRoom
+      end
+    end
+  end
+end
+
+function XoyoGame:GetXoyoGameActivityType(nSectionIdx)
+  local szActivityType = string.format("XoyoGame%s", nSectionIdx)
+  return szActivityType
+end
+
+function XoyoGame:GetXoyoAllMapTemplateId()
+  local tbRet = {}
+  for nMapTemplateId, _ in pairs(self.tbRateInfo) do
+    table.insert(tbRet, nMapTemplateId)
+  end
+  return tbRet
+end
+
+function XoyoGame:CanEnterCustomFunc(pPlayer, nSectionIdx)
+  if MODULE_GAMESERVER then
+    local szKey, szOpenTimeFrame, szTimeFrameClose, nLevelMin, nLevelMax = Calendar:GetServerActDetailByKey("XoyoGame")
+    if szOpenTimeFrame and "" ~= szOpenTimeFrame and 1 ~= GetTimeFrameState(szOpenTimeFrame) then
+      return false, i18n.EasyGet("\229\189\147\229\137\141\230\154\130\230\156\170\229\188\128\230\148\190")
+    end
+  end
+  local nLevelLimit = XoyoGame.tbDifficultSetting[nSectionIdx].nMinLevel
+  if nLevelLimit > pPlayer.nLevel then
+    return false, i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179{0}\231\186\167\239\188\140\230\151\160\230\179\149\229\143\130\229\138\160\232\175\165\230\180\187\229\138\168\239\188\129", nLevelLimit)
+  end
+  if not Env:CheckSystemSwitch(pPlayer, Env.SW_XoyoGame) then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\228\184\141\229\133\129\232\174\184\229\143\130\229\138\160\232\175\165\230\180\187\229\138\168")
+  end
+  return true
+end
+
+function XoyoGame:CanEnterFubenCommon(pPlayer, nSectionIdx)
+  local function fnCustom()
+    return self:CanEnterCustomFunc(pPlayer, nSectionIdx)
+  end
+  
+  return ActivityCheck:CheckCanEnterActivityEx(pPlayer, fnCustom, nil, false, false, true, nil, {"TeamPanel"}, false)
+end
+
+function XoyoGame:CheckPlayerCanEnterFuben(pPlayer, nSectionIdx)
+  local bResult, szMsg = self:CanEnterFubenCommon(pPlayer, nSectionIdx)
+  if not bResult then
+    return false, szMsg
+  end
+  if pPlayer.CheckNeedArrangeBag() then
+    return false, i18n.EasyGet("\232\131\140\229\140\133\233\129\147\229\133\183\230\149\176\233\135\143\232\191\135\229\164\154\239\188\140\232\175\183\230\149\180\231\144\134\228\184\128\228\184\139\239\188\129")
+  end
+  if not Map:IsCityMap(pPlayer.nMapTemplateId) and not Map:IsTongMap(pPlayer.nMapTemplateId) and not Map:IsFieldFightMap(pPlayer.nMapTemplateId) then
+    return false, i18n.EasyGet("\230\137\128\229\156\168\229\156\176\229\155\190\228\184\141\229\133\129\232\174\184\232\191\155\229\133\165\239\188\129")
+  end
+  return true
+end
+
+function XoyoGame:CheckCanCreateFuben(pPlayer, nSectionIdx)
+  local tbMember = TeamMgr:GetMembers(pPlayer.dwTeamID)
+  if not tbMember or #tbMember <= 0 then
+    tbMember = {
+      pPlayer.dwID
+    }
+  end
+  local teamData = TeamMgr:GetTeamById(pPlayer.dwTeamID)
+  if teamData and teamData.nCaptainID ~= pPlayer.dwID then
+    return false, i18n.EasyGet("\229\143\170\230\156\137\233\152\159\233\149\191\230\137\141\229\143\175\228\187\165\229\188\128\229\144\175\229\137\175\230\156\172\239\188\129")
+  end
+  if #tbMember > self.MAX_PLAYER_COUNT then
+    return false, i18n.EasyGet("\233\152\159\228\188\141\228\186\186\230\149\176\232\182\133\232\191\135 {0}\239\188\140\230\151\160\230\179\149\229\188\128\229\144\175\229\137\175\230\156\172\239\188\129", self.MAX_PLAYER_COUNT), tbMember
+  end
+  local tbNoTimesMemberIds
+  for _, nPlayerId in pairs(tbMember) do
+    local pPlayer1 = KPlayer.GetPlayerObjById(nPlayerId)
+    if not pPlayer1 then
+      return false, i18n.EasyGet("\230\156\170\231\159\165\233\152\159\228\188\141\230\136\144\229\145\152\239\188\140\230\151\160\230\179\149\229\188\128\229\144\175\229\137\175\230\156\172\239\188\129"), tbMember
+    end
+    local bRet, szMsg = self:CheckPlayerCanEnterFuben(pPlayer1, nSectionIdx)
+    if not bRet then
+      return false, i18n.EasyGet("\227\128\140{0}\227\128\141{1}", pPlayer1.szName, szMsg), tbMember
+    end
+  end
+  return true, "", tbMember, tbNoTimesMemberIds
+end
+
+function XoyoGame:CheckCanCreateFubenExt(pPlayer, nSectionIdx)
+  local bRet, szMsg, tbMember, tbNoTimesMemberIds = self:CheckCanCreateFuben(pPlayer, nSectionIdx)
+  return bRet, szMsg, tbNoTimesMemberIds
+end
+
+function XoyoGame:QTCanShow(nSectionIdx)
+  local bResult, szMsg = self:CanEnterCustomFunc(me, nSectionIdx)
+  return bResult
+end
+
+function XoyoGame:GetXYGCardIndex(nItemTemplateId)
+  for i = 1, #self.XoyoGameRecordCfg.tbCardId do
+    if self.XoyoGameRecordCfg.tbCardId[i] == nItemTemplateId then
+      return i
+    end
+  end
+end

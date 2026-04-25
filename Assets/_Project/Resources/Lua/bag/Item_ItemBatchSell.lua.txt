@@ -1,0 +1,311 @@
+Require("CommonScript/UiDef.lua")
+Item.tbItemBatchSell = Item.tbItemBatchSell or {}
+local tbItemBatchSell = Item.tbItemBatchSell
+
+function tbItemBatchSell:GetSellRewardValue(nTemplateId, nItemId)
+  local tbData = self:CheckCanSellItem(nTemplateId)
+  if not tbData then
+    return
+  end
+  local tbBaseProp = Item:GetItemBaseProp(nTemplateId)
+  if tbBaseProp then
+    local szClass = tbBaseProp.szClass
+    local tbSellRewardValueFunc = self.tbItemSellRewardValue[szClass] or self.tbItemSellRewardValue.Default
+    return tbSellRewardValueFunc(self, nItemId, tbData)
+  end
+end
+
+function tbItemBatchSell:GetCustomSellData(nRewardId)
+  return Item.tbItemSell:GetCustomSellData(nRewardId)
+end
+
+function tbItemBatchSell:CheckCanSellItem(nTemplateId)
+  local tbBaseProp = Item:GetItemBaseProp(nTemplateId)
+  if tbBaseProp then
+    local szClass = tbBaseProp.szClass
+    local tbCheckFunc = self.tbCheckItemSell[szClass] or self.tbCheckItemSell.Default
+    return tbCheckFunc(self, nTemplateId)
+  else
+    return false, i18n.EasyGet("\232\175\165\233\129\147\229\133\183\228\184\141\232\131\189\229\155\158\230\148\182")
+  end
+end
+
+tbItemBatchSell.tbCheckItemSell = {
+  Default = function(tbSelf, nTemplateId)
+    return Item.tbItemSell:CheckCanSellItem(nTemplateId)
+  end,
+  PartnerEquipItem = function(tbSelf, nTemplateId)
+    return true
+  end,
+  ShenBingPuItem = function(tbSelf, nTemplateId)
+    return true
+  end,
+  ShenBingPuSeed = function(tbSelf, nTemplateId)
+    return true
+  end
+}
+tbItemBatchSell.tbItemSellRewardValue = {
+  Default = function(tbSelf, nItemId, tbData)
+    local tbCustomData = tbSelf:GetCustomSellData(tbData.szCurrencyType)
+    local nObtainNum = tbCustomData.funcGetObtainNum(nItemId, tbData)
+    if not nObtainNum then
+      return
+    end
+    return tbData.szCurrencyType, nObtainNum
+  end,
+  PartnerEquipItem = function(tbSelf, nItemId, tbData)
+    local pEquip = KItem.GetItemObj(nItemId)
+    local nRewardNum = Item.PartnerEquip:GetNeedRewardMaterial(pEquip)
+    if nRewardNum then
+      return Item.PartnerEquip.CFG.nXuanShiTemplateId, nRewardNum
+    end
+  end,
+  ShenBingPuItem = function(tbSelf, nItemId, tbData)
+    local pItem = KItem.GetItemObj(nItemId)
+    local tbClass = Item:GetClass(pItem.szClass)
+    local nRewardId, nRewardNum = tbClass:GetRecyclePrice(pItem.dwTemplateId)
+    return nRewardId, nRewardNum
+  end,
+  ShenBingPuSeed = function(tbSelf, nItemId, tbData)
+    local pItem = KItem.GetItemObj(nItemId)
+    local tbClass = Item:GetClass(pItem.szClass)
+    local nRewardId, nRewardNum = tbClass:GetRecyclePrice(pItem.dwTemplateId)
+    return nRewardId, nRewardNum
+  end
+}
+tbItemBatchSell.tbItemSellRequest = {
+  Default = function(tbDwId)
+    Item.tbItemSell:SetBatchSellStatus(true)
+    RemoteServer.OnItemSellRequest("SellMany", tbDwId)
+  end,
+  [Ui.tbToggle.PartnerEquip] = function(tbDwId)
+    Item.PartnerEquip:ReqPartnerEquipDecomposeByBatch(tbDwId)
+  end,
+  [Ui.tbToggle.ShenBingPu] = function(tbDwId)
+    Item.ShenBingPu:DoRecycleForBatchSell(tbDwId)
+  end
+}
+tbItemBatchSell.tbItemSellOpenFunc = {
+  [Ui.tbToggle.PartnerEquip] = function()
+    return 1 == GetTimeFrameState(Item.PartnerEquip.CFG.szOpenLevel)
+  end,
+  [Ui.tbToggle.ShenBingPu] = function()
+    return 1 == GetTimeFrameState(Item.ShenBingPu.CFG.szOpenLevel)
+  end,
+  [Ui.tbToggle.TogJingMai] = function()
+    return JingMai:IsSystemOpen(me, 1)
+  end,
+  [Ui.tbToggle.TogZhenYuan] = function()
+    return Item.ZhenYuan:IsSystemOpen(me)
+  end,
+  [Ui.tbToggle.HorseSkillStone] = function()
+    return HorseSkillMgr:IsHorseSkillOpen(me)
+  end,
+  [Ui.tbToggle.TogJingMai] = function()
+    return JingMai:IsSystemOpen(me, 1)
+  end,
+  [Ui.tbToggle.TogLingZhu] = function()
+    return EquipCuiLing:IsSystemOpen()
+  end
+}
+tbItemBatchSell.TRADE_ITEM_OPT = 1000
+tbItemBatchSell.TRADE_ITEM_OPT_STR = tostring(tbItemBatchSell.TRADE_ITEM_OPT)
+tbItemBatchSell.DATA_KEY = "ItemAutoBatchSell"
+tbItemBatchSell.SYNC_DELAY_SELL = 10
+tbItemBatchSell.SELL_PER_BATCH = 5
+tbItemBatchSell.SELL_FRAME = Env.GAME_FPS
+
+function tbItemBatchSell:SaveAutoSellData(nItemTogType, nQuality, bAuto)
+  self:ResetAllAutoTimer()
+  local szItemTogName = tostring(nItemTogType)
+  local szQuality = tostring(nQuality)
+  local bOldAuto = self:GetAutoSellQualityData(nItemTogType, szQuality)
+  if bOldAuto == bAuto then
+    return
+  else
+    local tbSaveAutoData = self:GetAutoSellData()
+    tbSaveAutoData[szItemTogName] = tbSaveAutoData[szItemTogName] or {}
+    tbSaveAutoData[szItemTogName][szQuality] = bAuto
+    LocalData:SetRoleTable(self.DATA_KEY, tbSaveAutoData)
+  end
+end
+
+function tbItemBatchSell:GetAutoSellData()
+  if not self.tbAutoSellDataCache then
+    self.tbAutoSellDataCache = LocalData:GetRoleTable(self.DATA_KEY, {})
+  end
+  return self.tbAutoSellDataCache
+end
+
+function tbItemBatchSell:GetAutoSellQualityData(nItemTogType, nQuality)
+  local szItemTogName = tostring(nItemTogType)
+  local szQuality = tostring(nQuality)
+  local tbSaveAutoData = self:GetAutoSellData()
+  return tbSaveAutoData[szItemTogName] and tbSaveAutoData[szItemTogName][szQuality] or false
+end
+
+function tbItemBatchSell:DoAllAutoSellOnce()
+  self:ResetAllAutoTimer()
+  if Ui:IsInSpecialMap() then
+    return
+  end
+  local tbSaveAutoData = self:GetAutoSellData()
+  local tbBagItems = self:InitCanSellItem()
+  local tbWnd = Ui:GetClass("UIItemBatchSellPanel")
+  if not tbWnd or not tbWnd.GetAllBagItemTogClassify then
+    return
+  end
+  local tbItemLists = tbWnd:GetAllBagItemTogClassify(tbBagItems)
+  for szItemTogType, tbQuality in pairs(tbSaveAutoData) do
+    local tbNeedSellItem = {}
+    local nItemTogType = tonumber(szItemTogType)
+    local tbItemList = tbItemLists[nItemTogType] or {}
+    for _, tbData in pairs(tbItemList) do
+      if tbQuality[tostring(tbData.nQuality)] and (1 ~= tbData.dwTradeLimitType or tbQuality[self.TRADE_ITEM_OPT_STR]) then
+        table.insert(tbNeedSellItem, tbData.nItemId)
+      end
+    end
+    if #tbNeedSellItem > 0 then
+      me.CenterMsg(i18n.EasyGet("\232\135\170\229\138\168\229\155\158\230\148\182{0}", self.tbItemAutoSellCfg[nItemTogType].szBtnName), true)
+      local nTotalBatch = math.ceil(#tbNeedSellItem / self.SELL_PER_BATCH)
+      local nTimer = Timer:RegisterTimerEvent(nTotalBatch, self.SELL_FRAME, 1, self.DoSell, self, tbNeedSellItem, nItemTogType)
+      self.tbTimers[nItemTogType] = nTimer
+    end
+  end
+  self.nSyncItemTimer = nil
+end
+
+function tbItemBatchSell:DoSell(tbNeedSellItem, nItemTogType, nIdx)
+  local tbBatchItem = {
+    table.unpack(tbNeedSellItem, (nIdx - 1) * self.SELL_PER_BATCH + 1, nIdx * self.SELL_PER_BATCH)
+  }
+  if #tbBatchItem <= 0 then
+    Timer:Close(self.tbTimers[nItemTogType])
+    self.tbTimers[nItemTogType] = nil
+    return
+  end
+  local tbItemSell = Item.tbItemBatchSell.tbItemSellRequest[nItemTogType] or Item.tbItemBatchSell.tbItemSellRequest.Default
+  tbItemSell(tbBatchItem)
+end
+
+function tbItemBatchSell:DelayAutoSellItem()
+  if self.nSyncItemTimer then
+    return
+  end
+  if Ui:WindowVisible("UIItemBatchSellPanel") then
+    return
+  end
+  self.nSyncItemTimer = Timer:Register(Env.GAME_FPS * self.SYNC_DELAY_SELL, self.DoAllAutoSellOnce, self)
+end
+
+function tbItemBatchSell:InitCanSellItem()
+  local tbBagItems = {}
+  local tbItem = me.GetItemListInBag()
+  for _, pItem in ipairs(tbItem) do
+    if Item.tbItemBatchSell:CheckCanSellItem(pItem.dwTemplateId) then
+      tbBagItems[pItem.dwId] = pItem
+    end
+  end
+  return tbBagItems
+end
+
+function tbItemBatchSell:GetItemTogClassify(pItem)
+  local tbItemClassifyTag = {}
+  local tbClassifyInfo = Item:GetDetailTypeClassify(pItem.nItemType, pItem.nDetailType)
+  if not tbClassifyInfo then
+    LogErr(string.format("DetailTypeClassify.tab: DetailType:%d%s not Define Classify!", pItem.nDetailType, i18n.Parse(pItem.szName)))
+    return
+  end
+  for key, nClassify in pairs(Ui.tbKey2Classify) do
+    if 1 == tbClassifyInfo[key] then
+      if "bInZhenYuanEquip" == key then
+        if Item.ZhenYuan:IsZhenYuanEquip(pItem) then
+          tbItemClassifyTag[nClassify] = 1
+        end
+      elseif "bInEquip" == key then
+        if not Item.ZhenYuan:IsZhenYuanEquip(pItem) then
+          tbItemClassifyTag[nClassify] = 1
+        end
+      elseif "bInNormal" == key then
+        if not Item.tbItemBatchSell.tbCheckItemSell[pItem.szClass] then
+          tbItemClassifyTag[nClassify] = 1
+        end
+      else
+        tbItemClassifyTag[nClassify] = 1
+      end
+    end
+  end
+  if not Item.tbItemBatchSell.tbCheckItemSell[pItem.szClass] then
+    tbItemClassifyTag[Ui.tbToggle.TogAll] = 1
+  end
+  return tbItemClassifyTag
+end
+
+function tbItemBatchSell:LoadItemSell()
+  self.tbItemBatchSellCfg = Lib:LoadTabFileEx("Setting/Item/ItemBatchSell.tab", "ssdddddd", nil, {
+    "szTogName",
+    "szBtnName",
+    "nWhiteItem",
+    "nGreenItem",
+    "nBlueItem",
+    "nPurpleItem",
+    "nAllItem",
+    "nCanAutoSell"
+  })
+  self.tbItemAutoSellCfg = {}
+  for _, tbCfg in ipairs(self.tbItemBatchSellCfg) do
+    self.tbItemAutoSellCfg[Ui.tbToggle[tbCfg.szTogName]] = tbCfg
+  end
+  Validator:Register(self.CheckItemBatchSell, self)
+end
+
+function tbItemBatchSell:CheckItemBatchSell()
+  for _, tbCfg in pairs(self.tbItemBatchSellCfg) do
+    if not Ui.tbToggle[tbCfg.szTogName] then
+      LogErr("tbItemBatchSell:CheckItemBatchSell failed, unexist toggle name in Ui.tbToggle = ", tbCfg.szTogName)
+      return false
+    end
+  end
+  return true
+end
+
+tbItemBatchSell:LoadItemSell()
+
+function tbItemBatchSell:ResetAllAutoTimer()
+  if type(self.tbTimers) == "table" and not Lib:IsEmptyTB(self.tbTimers) then
+    for _, nTimer in pairs(self.tbTimers) do
+      Timer:Close(nTimer)
+    end
+  end
+  self.tbTimers = {}
+  if self.nSyncItemTimer then
+    Timer:Close(self.nSyncItemTimer)
+  end
+  self.nSyncItemTimer = nil
+end
+
+function tbItemBatchSell:ResetDataCache()
+  self.tbAutoSellDataCache = nil
+end
+
+function tbItemBatchSell:OnLogin()
+  self:ResetAllAutoTimer()
+  self:ResetDataCache()
+  self:DelayAutoSellItem()
+end
+
+function tbItemBatchSell:OnReturnLogin()
+  self:ResetAllAutoTimer()
+  self:ResetDataCache()
+end
+
+if MODULE_GAMECLIENT then
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, tbItemBatchSell)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, tbItemBatchSell.DelayAutoSellItem, tbItemBatchSell)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, tbItemBatchSell)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, tbItemBatchSell.OnLogin, tbItemBatchSell)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_LOGIN_ZONE, tbItemBatchSell)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_LOGIN_ZONE, tbItemBatchSell.OnLogin, tbItemBatchSell)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, tbItemBatchSell)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, tbItemBatchSell.OnReturnLogin, tbItemBatchSell)
+end

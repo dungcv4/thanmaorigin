@@ -1,0 +1,391 @@
+Require("CommonScript/RedPacket/RedPacketMgr.lua")
+RedPacketMgr.RedPacketC = RedPacketMgr.RedPacketC or {}
+local RedPacketC = RedPacketMgr.RedPacketC
+
+function RedPacketMgr:NewRedPacketC(tbData)
+  return setmetatable(tbData, {
+    __index = self.RedPacketC
+  })
+end
+
+function RedPacketC:CanOpen()
+  if 0 == self.nSendTime then
+    return false
+  end
+  if self.nSendTime > 0 then
+    local nNow = GetTime()
+    if nNow - self.nSendTime > RedPacketMgr.Cfg.nExpireTime then
+      return false
+    end
+  end
+  if self.tbRecord then
+    if #self.tbRecord >= self.nCount then
+      return false
+    end
+    for _, tb in ipairs(self.tbRecord) do
+      if tb.nId == me.dwID then
+        return false
+      end
+    end
+  end
+  if self.tbExclusive then
+    local bMeInExclusive = false
+    for nMemberId, v in pairs(self.tbExclusive) do
+      if self.tbExclusive[nMemberId] and nMemberId == me.dwID then
+        bMeInExclusive = true
+        break
+      end
+    end
+    if not bMeInExclusive then
+      return false
+    end
+  end
+  return true
+end
+
+function RedPacketC:GetDesc()
+  if self.nSource then
+    local tbSetting = RedPacketMgr.tbSettings[self.nSource]
+    if not tbSetting then
+      return ""
+    else
+      return i18n.Parse(tbSetting.szTypeName)
+    end
+  else
+    return self.szDesc or ""
+  end
+end
+
+function RedPacketC:GetName()
+  if self.szCurrency == "Gold" then
+    return RedPacketMgr.Name[self.nType]()
+  else
+    return i18n.EasyGet("\229\133\131\229\174\157\231\186\162\229\140\133")
+  end
+end
+
+function RedPacketMgr:Send(nCategory, nType, nExtAmount, nCount, tbExclusive, szDesc)
+  local bOk, nMin, nMax = Lib:CheckLength(szDesc, i18n.CurrentLanguageCode(), 0, RedPacketMgr.Cfg.nDescLenght)
+  if not bOk then
+    me.CenterMsg(i18n.EasyGet("\231\186\162\229\140\133\230\143\143\232\191\176\232\182\133\232\191\135\228\186\134\230\156\128\229\164\167{0}\228\184\170\229\173\151\230\149\176\231\154\132\233\153\144\229\136\182", nMax))
+    return false
+  end
+  if "" ~= szDesc and ReplaceLimitWords(szDesc) then
+    me.CenterMsg(i18n.EasyGet("\231\186\162\229\140\133\230\143\143\232\191\176\229\144\171\230\156\137\230\149\143\230\132\159\232\175\141"))
+    return false
+  end
+  RemoteServer.OnRedPacketRequest(RedPacketMgr.Protocol.C2S_Send, nCategory, nType, nExtAmount, nCount, tbExclusive, szDesc)
+  return true
+end
+
+function RedPacketMgr:SendPending(nId, nExtAmount, nCount)
+  local tbData = RedPacketMgr:GetCache(nId)
+  local tbSetting = self.tbSettings[tbData.nSource]
+  local nTotalAmount = nExtAmount + tbSetting.nBaseNum
+  for index, nAmount in ipairs(tbSetting.tbAddAmountList or {}) do
+    if nAmount == nTotalAmount then
+      local nNeedVipLevel = self.Cfg.tbnAdd2VipLevel[index]
+      if nNeedVipLevel > me.GetVipLevel() then
+        me.CenterMsg(i18n.EasyGet("\228\184\141\230\148\175\230\140\129\229\162\158\229\138\160\232\191\153\228\185\136\229\164\154\233\135\145\233\162\157"))
+        return
+      end
+    end
+  end
+  RemoteServer.OnRedPacketRequest(RedPacketMgr.Protocol.C2S_SendPending, nId, nExtAmount, nCount)
+end
+
+RedPacketMgr._CacheData = RedPacketMgr._CacheData or {}
+RedPacketMgr._KinCache = RedPacketMgr._KinCache or {}
+RedPacketMgr._TongCache = RedPacketMgr._TongCache or {}
+
+function RedPacketMgr:ClearCache()
+  self._CacheData = {}
+  self._KinCache = {}
+  self._TongCache = {}
+end
+
+function RedPacketMgr:Reset()
+  self.bNeedSyncAll = true
+  self._CacheData = {}
+  self._KinCache = {}
+  self._TongCache = {}
+end
+
+function RedPacketMgr:CacheData(nId, tbData)
+  if tbData.nKinId then
+    self._KinCache[nId] = tbData
+  end
+  if tbData.nTongId then
+    self._TongCache[nId] = tbData
+  end
+  self._CacheData[nId] = {
+    tbData = tbData,
+    nExpireTime = tbData.nSendTime + RedPacketMgr.Cfg.nExpireTime
+  }
+end
+
+function RedPacketMgr:DelCache(nId)
+  local tbCache = self._CacheData[nId]
+  self._KinCache[nId] = nil
+  self._TongCache[nId] = nil
+  self._CacheData[nId] = nil
+  if tbCache then
+    return tbCache.tbData
+  end
+end
+
+function RedPacketMgr:GetCache(nId)
+  local tbCache = self._CacheData[nId]
+  if tbCache then
+    return tbCache.tbData, tbCache.nExpireTime
+  end
+end
+
+function RedPacketMgr:ShowRedPacket(nId)
+  local nNow = GetTime()
+  local tbRedPacketC, nExpireTime = self:GetCache(nId)
+  if not tbRedPacketC then
+    me.CenterMsg(i18n.EasyGet("\231\186\162\229\140\133\229\183\178\232\191\135\230\156\159"))
+    return
+  end
+  if tbRedPacketC or nNow <= nExpireTime then
+    if nNow >= tbRedPacketC.nSendTime + self.Cfg.nExpireTime then
+      self:DelCache(nId)
+      me.CenterMsg(i18n.EasyGet("\231\186\162\229\140\133\229\183\178\232\191\135\230\156\159"))
+      EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_REDPACKET)
+      if tbRedPacketC.nKinId then
+        EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_REDPACKET)
+      elseif tbRedPacketC.nTongId then
+        EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TONG_REDPACKET)
+      end
+    else
+      RemoteServer.OnRedPacketRequest(RedPacketMgr.Protocol.C2S_SyncDetail, nId)
+    end
+  else
+    self:OpenUI(tbRedPacketC)
+  end
+end
+
+function RedPacketMgr:OpenUI(tbRedPacketC)
+  if tbRedPacketC:CanOpen() then
+    if tbRedPacketC.szCurrency == "Gold" then
+      Ui:OpenWindow("UIKinRedBagOpenGold", tbRedPacketC, "UnOpen")
+    else
+      Ui:OpenWindow("UIKinRedBagOpen", tbRedPacketC, "UnOpen")
+    end
+  elseif tbRedPacketC.szCurrency == "Gold" then
+    Ui:OpenWindow("UIKinRedBagOpenGold", tbRedPacketC, "Open")
+  else
+    Ui:OpenWindow("UIKinRedBagOpen", tbRedPacketC, "Open")
+  end
+end
+
+function RedPacketMgr:OpenRedPacket(nId)
+  local tbData = self:GetCache(nId)
+  if not tbData or tbData:CanOpen() then
+    RemoteServer.OnRedPacketRequest(RedPacketMgr.Protocol.C2S_Open, nId)
+  else
+    self:ShowRedPacket(nId)
+  end
+end
+
+local function fnCmp(r1, r2)
+  local bCanOpen1 = r1:CanOpen()
+  local bCanOpen2 = r2:CanOpen()
+  if bCanOpen1 == bCanOpen2 then
+    return r1.nSendTime > r2.nSendTime
+  else
+    return bCanOpen1
+  end
+end
+
+function RedPacketMgr.fnOnlySelf(tbData)
+  return tbData.nOwner == me.dwID
+end
+
+function RedPacketMgr.fnExcludeSelf(tbData)
+  return tbData.nOwner ~= me.dwID
+end
+
+function RedPacketMgr:GetKinCache(szCurrency, fnLimit)
+  local tbList = {}
+  for _, tbData in pairs(self._KinCache) do
+    if (not fnLimit or fnLimit(tbData)) and tbData.szCurrency == szCurrency then
+      table.insert(tbList, tbData)
+    end
+  end
+  table.sort(tbList, fnCmp)
+  return tbList
+end
+
+function RedPacketMgr:GetTongCache(szCurrency, fnLimit)
+  local tbList = {}
+  for _, tbData in pairs(self._TongCache) do
+    if (not fnLimit or fnLimit(tbData)) and tbData.szCurrency == szCurrency then
+      table.insert(tbList, tbData)
+    end
+  end
+  table.sort(tbList, fnCmp)
+  return tbList
+end
+
+function RedPacketMgr:GetCanOpenList(tbCurrency)
+  local tbRet = {}
+  for _, szCurrency in ipairs(tbCurrency) do
+    tbRet[szCurrency] = {}
+  end
+  for _, tbCache in pairs(self._CacheData) do
+    if tbCache then
+      local tbData = tbCache.tbData
+      if tbData:CanOpen() then
+        table.insert(tbRet[tbData.szCurrency], tbData)
+      end
+    end
+  end
+  return tbRet
+end
+
+function RedPacketMgr:OnNewRedPacket(tbInfo)
+  local tbRedPacketC = self:NewRedPacketC(tbInfo)
+  self:CacheData(tbInfo.nId, tbRedPacketC)
+  if tbRedPacketC:CanOpen() then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_REDPACKET)
+  end
+  if tbInfo.nKinId then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_REDPACKET)
+  elseif tbInfo.nTongId then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TONG_REDPACKET)
+  end
+end
+
+function RedPacketMgr:SyncResult(nId, tbInfo)
+  if tbInfo then
+    local tbRedPacketC = self:NewRedPacketC(tbInfo)
+    self:CacheData(tbInfo.nId, tbRedPacketC)
+    self:OpenUI(tbRedPacketC)
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_REDPACKET)
+    if tbInfo.nKinId then
+      EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_REDPACKET)
+    elseif tbInfo.nTongId then
+      EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TONG_REDPACKET)
+    end
+  else
+    local tbData = self:DelCache(nId)
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_REDPACKET)
+    if not tbData or tbData.nKinId then
+      EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_REDPACKET)
+    elseif not tbData or tbData.nTongId then
+      EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TONG_REDPACKET)
+    end
+  end
+end
+
+function RedPacketMgr:OnSyncAll(tbList)
+  self:ClearCache()
+  self:OnSyncRedPacketList(tbList)
+end
+
+function RedPacketMgr:OnSyncRedPacketList(tbList)
+  local bCanOpen = false
+  local tbCategory = {}
+  for _, tbInfo in ipairs(tbList) do
+    local tbRedPackC = self:NewRedPacketC(tbInfo)
+    if tbRedPackC:CanOpen() then
+      bCanOpen = true
+    end
+    if tbRedPackC.nKinId then
+      tbCategory[self.Category.Kin] = true
+    elseif tbRedPackC.nTongId then
+      tbCategory[self.Category.Tong] = true
+    end
+    self:CacheData(tbRedPackC.nId, tbRedPackC)
+  end
+  if bCanOpen then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_REDPACKET)
+  end
+  if tbCategory[self.Category.Kin] then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_REDPACKET)
+  elseif tbCategory[self.Category.Tong] then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TONG_REDPACKET)
+  else
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_REDPACKET)
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TONG_REDPACKET)
+  end
+end
+
+function RedPacketMgr:OnSyncRedPacketRemovedList(tbList)
+  for _, nId in ipairs(tbList) do
+    self:DelCache(nId)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_REDPACKET)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_REDPACKET)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TONG_REDPACKET)
+end
+
+function RedPacketMgr:OnAddPending(tbInfo)
+  local tbRedPacketC = self:NewRedPacketC(tbInfo)
+  self:CacheData(tbInfo.nId, tbRedPacketC)
+  if tbInfo.nKinId and DegreeCtrl:GetDegree(me, "RedBag") > 0 then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_KIN_REDPACKET)
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.KinYuanBaoRedBagSend)
+  elseif tbInfo.nTongId and DegreeCtrl:GetDegree(me, "RedBag") > 0 then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_TONG_REDPACKET)
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.TongYuanBaoRedBagSend)
+  end
+end
+
+function RedPacketMgr:UpdateGoldExpireRedPacket()
+  local nNow = GetTime()
+  for nId, tbCache in pairs(self._CacheData) do
+    if tbCache and tbCache.tbData and tbCache.tbData.szCurrency == "Gold" and nNow >= tbCache.nExpireTime then
+      self:DelCache(nId)
+    end
+  end
+end
+
+function RedPacketMgr:OnDelayFetchAll()
+  RemoteServer.OnRedPacketRequest(RedPacketMgr.Protocol.C2S_SyncAll)
+  self.nDelaySync = nil
+  self.bNeedSyncAll = false
+end
+
+function RedPacketMgr:TryFetchAll()
+  self:UpdateGoldExpireRedPacket()
+  if not self.bNeedSyncAll then
+    return
+  end
+  if self.nDelaySync then
+    Timer:Close(self.nDelaySync)
+    self.nDelaySync = nil
+  end
+  self:OnDelayFetchAll()
+end
+
+function RedPacketMgr:OnLogin()
+  self:SyncAllClient()
+end
+
+function RedPacketMgr:SyncAllClient()
+  self:Reset()
+  if not self.nDelaySync then
+    self.nDelaySync = Timer:Register(Env.GAME_FPS * MathRandom(1, 3), self.OnDelayFetchAll, self)
+  end
+end
+
+function RedPacketMgr:SetNeedSyncAll()
+  self.bNeedSyncAll = true
+end
+
+function RedPacketMgr:OnProcessSendResult(szMsg)
+  me.CenterMsg(szMsg)
+end
+
+function RedPacketMgr:OnSendPendingPacket(nRedPacketId)
+  EventNotify:OnNotify(EventNotify.emNOTIFY_SYNC_SEND_PENDING)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.TongYuanBaoRedBagSend)
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_JOIN_KIN, RedPacketMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_JOIN_KIN, RedPacketMgr.SyncAllClient, RedPacketMgr)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, RedPacketMgr)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, RedPacketMgr.Reset, RedPacketMgr)

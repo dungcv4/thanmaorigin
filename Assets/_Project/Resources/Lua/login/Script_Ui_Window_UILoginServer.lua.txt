@@ -1,0 +1,465 @@
+local tbWnd = Ui:CreateWindow("UILoginServer")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_GATEWAY_CONNECT_LOST,
+      self.GatewayConnectLost
+    },
+    {
+      EventNotify.emNOTIFY_LOGIN_HAND_SHAKE_END,
+      self.OnHandShakeEnd
+    },
+    {
+      EventNotify.emNOTIFY_LOGIN_SERVER_UNAVAILABLE,
+      self.OnServerUnavailable
+    },
+    {
+      EventNotify.emNOTIFY_LOGIN_SERVER_FAIL,
+      self.OnServerLoginFail
+    },
+    {
+      EventNotify.emNOTIFY_MAP_LOADED,
+      self.OnMapLoaded
+    },
+    {
+      EventNotify.emNOTIFY_UPDATE_SERVER_LIST,
+      self.OnSyncServerListDone
+    },
+    {
+      EventNotify.emNOTIFY_LOGIN_QUEUE_NOTIFY,
+      self.OnQueueNotify
+    },
+    {
+      EventNotify.emNoTIFY_LOGINTIME_CLOSE,
+      self.CloseConnectServerTimer
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_ACC_SER_INFO,
+      self.OnSyncAccSerInfo
+    }
+  }
+end
+
+local tbControls = {
+  btnLoginServer = "imgBG/btnLoginServer",
+  btnChangeServer = "imgBG/PanelServer/btnChange",
+  ServerFlagGreen = "imgBG/PanelServer/ServerFlagGreen",
+  ServerFlagRed = "imgBG/PanelServer/ServerFlagRed",
+  ServerFlagGray = "imgBG/PanelServer/ServerFlagGray",
+  ServerFlag = "imgBG/PanelServer/ServerFlag",
+  ServerIndex = "imgBG/PanelServer/ServerIndex",
+  ServerName = "imgBG/PanelServer/ServerName",
+  btnSetting = "imgBG/BtnList/btnSetting",
+  imgCADPA = "imgBG/imgCADPA",
+  btnAccount = "imgBG/BtnList/btnAccount",
+  btnAnnounce = "imgBG/BtnList/btnAnnounce",
+  txtAppVersion = "imgBG/txtAppVersion",
+  btnEwm = "imgBG/BtnList/btnEwm",
+  txtGameAdvice2 = "imgBG/txtGameAdvice2",
+  DealRoot = "imgBG/Deal",
+  ToggleDeal = "imgBG/Deal/ToggleCheck",
+  btnUserAgreement = "imgBG/Deal/Label2",
+  szSplitLabel = "imgBG/Deal/Label3",
+  btnPrivacyPolicy = "imgBG/Deal/Label4"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:ToggleAgreement(bToggled)
+  self.pPanel:Toggle_SetChecked(tbControls.ToggleDeal, bToggled)
+  if bToggled then
+    Sdk:OnClickAgreementToggle()
+  end
+end
+
+function tbWnd:SwitchAgreementToggle(bOn)
+  Ui.PlayerPrefs.SetInt(Login:GetAgreementAccountKey(), bOn and 1 or 0)
+  if bOn then
+    Login:UpdateAgreementSyncStatus(true)
+  end
+end
+
+local function OnLoginServerBtnClick(self)
+  if Login:IsShowAgreementRequired() and not self.pPanel:Toggle_GetChecked(tbControls.ToggleDeal) then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\232\175\183\229\133\136\229\144\140\230\132\143\231\148\168\230\136\183\229\141\143\232\174\174\229\146\140\233\154\144\231\167\129\230\148\191\231\173\150\239\188\129"), {
+      {}
+    }, {
+      i18n.EasyGet("\231\161\174\232\174\164")
+    })
+    return
+  end
+  if self.nConnectServerTimer then
+    return
+  end
+  if not self.nCurServerId then
+    return
+  end
+  Ui:OpenWindow("UILoadingTips", i18n.Get("Logging2Server"))
+  Sdk:OnConnectServer(self.nCurServerId)
+  Sdk:OnConnectServerV2(self.nCurServerId)
+  Client.UpdateModule.Lua2CSValidateVersion(function(bResult)
+    if not bResult then
+      return
+    end
+    ConnectServer(self.nCurServerId)
+    self.bServerConnectResponse = nil
+    self.nConnectServerTimer = Timer:Register(Env.GAME_FPS * 20, function()
+      if not self.bServerConnectResponse then
+        Ui:CloseWindow("UILoadingTips")
+        self.tbSerInfo = nil
+        Ui:OpenWindow("UIMessageBoxBig", i18n.EasyGet("\231\153\187\229\189\149\230\156\141\229\138\161\229\153\168\229\164\177\232\180\165"), {
+          function()
+            self:onClickLogout()
+            CloseServerConnect()
+          end
+        }, {
+          i18n.EasyGet("\233\135\141\230\150\176\231\153\187\229\189\149"),
+          i18n.szCancel
+        })
+      end
+      self.nConnectServerTimer = nil
+    end)
+  end)
+end
+
+tbWnd.tbOnClick = {
+  btnLoginServer = OnLoginServerBtnClick,
+  btnChangeServer = function(self)
+    Ui:OpenWindow("UISelectServer", self.tbSerList)
+  end,
+  btnSetting = function()
+    Ui:OpenWindow("UISetting")
+  end,
+  btnAccount = function(self)
+    self:onClickLogout()
+  end,
+  btnAnnounce = function()
+    ClientBulletin:GetBulletin(ClientBulletin.BULLETIN_TYPE_LOGIN, true)
+  end,
+  btnEwm = function(self)
+    self:ScanQRCode()
+  end,
+  imgCADPA = function()
+    if Client.EnableLoginCADPA then
+      Ui:OpenWindow("UIAgeAgreement")
+    end
+  end,
+  btnUserAgreement = function()
+    Ui:OpenWindow("UIAgreementNew", 1)
+  end,
+  btnPrivacyPolicy = function()
+    Ui:OpenWindow("UIAgreementNew", 2)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.pPanel:Sprite_SetNativeSize(tbControls.imgCADPA)
+  self.pPanel:SetActive(tbControls.imgCADPA, Client.EnableLoginCADPA)
+  self.pPanel:SetActive(tbControls.txtGameAdvice2, Client.EnableLoginCADPA)
+  self:CloseConnectServerTimer()
+end
+
+function tbWnd:OnOpen()
+  local szVersionType = Ui.GameEnv.GetVersionType()
+  self.pPanel:SetActive(tbControls.txtAppVersion, false)
+  self.pPanel:SetActive(tbControls.btnEwm, false)
+  Ui:Toggle_BindEvent(self.pPanel, tbControls.ToggleDeal, function(this, isOn)
+    this:SwitchAgreementToggle(isOn)
+  end, self)
+  Ui:DestroyWindow("UILoginChannelInner")
+  Ui:DestroyWindow("UILoginChannelSDK")
+  if Login:IsShowAgreementRequired() then
+    self.pPanel:SetActive(tbControls.DealRoot, true)
+    self.pPanel:SetActive(tbControls.ToggleDeal, true)
+    self.pPanel:SetActive(tbControls.btnUserAgreement, true)
+    self.pPanel:SetActive(tbControls.szSplitLabel, true)
+    self.pPanel:SetActive(tbControls.btnPrivacyPolicy, true)
+    self.pPanel:Label_SetText(tbControls.szSplitLabel, i18n.EasyGet("\229\146\140"))
+    local nOpenAgreement = Login:GetOpenAgreement()
+    if 0 == nOpenAgreement then
+      Ui:OpenWindow("UIAgreementNew")
+      self:ToggleAgreement(false)
+    end
+  else
+    self.pPanel:SetActive(tbControls.DealRoot, false)
+    self.pPanel:SetActive(tbControls.ToggleDeal, false)
+    self.pPanel:SetActive(tbControls.btnUserAgreement, false)
+    self.pPanel:SetActive(tbControls.szSplitLabel, false)
+    self.pPanel:SetActive(tbControls.btnPrivacyPolicy, false)
+  end
+  Ui:CloseWindow("UILoadingTips")
+  RequestServerList()
+  RequestAccSerInfo()
+end
+
+function tbWnd:RegisterHerfCallback()
+  self.emojiAgreenment.text = self.tbAgreementDetail[1]
+  if AREA == "VN" then
+    self.pPanel:SetActive(self.txtPrivacy, false)
+    self.pPanel:SetActive(self.txtChild, false)
+  else
+    self.pPanel:SetActive(self.txtPrivacy, true)
+    self.pPanel:SetActive(self.txtChild, true)
+    self.emojiPrivacy.text = self.tbAgreementDetail[2]
+    self.emojiChild.text = self.tbAgreementDetail[3]
+  end
+end
+
+function tbWnd:OnClose()
+  self:CloseConnectServerTimer()
+  Ui:DestroyWindow("UISelectServer")
+end
+
+function tbWnd:onClickLogout()
+  self:Logout()
+end
+
+function tbWnd:Logout()
+  if not Ui:WindowVisible("UILoginBG") then
+    Ui:OpenWindow("UILoginBG")
+    Ui:OpenWindow("UITopEffect")
+  end
+  Login:SetAutoLogin(false)
+  Ui:CloseWindow("UIMessageBoxBig")
+  self:Close()
+  CloseGateWayConnect()
+  if Ui.GameEnv.EnableSDK then
+    Sdk:Logout(true)
+    Ui:OpenWindow("UILoginChannelSDK")
+  else
+    local szAccount = GetAccountName()
+    Ui:OpenWindow("UILoginChannelInner", szAccount)
+  end
+end
+
+function tbWnd:ScanQRCode()
+  Log("ScanQRCode......", Ui.GameEnv.EnableSDK)
+  if Ui.GameEnv.EnableSDK then
+    Sdk:ScanQRCode()
+  end
+end
+
+local function fnGetLastLoginInfo()
+  local szAccount = GetAccountName()
+  local tbLastLoginfo = LocalData:GetRoleTable("Login", {})
+  return tbLastLoginfo[szAccount]
+end
+
+function tbWnd:GatewayConnectLost()
+  Ui:CloseWindow("UIQueueNotice")
+  Ui:OpenWindow("UIMessageBoxBig", i18n.Get("DisconnectedFromServerRetry"), {
+    function()
+      self:Logout()
+    end
+  }, {
+    i18n.szOk
+  })
+end
+
+function tbWnd:OnHandShakeEnd(nResult)
+  self.bServerConnectResponse = true
+  Ui:CloseWindow("UILoadingTips")
+  if nResult and 0 ~= nResult then
+    local tbResultMsg = {
+      i18n.EasyGet("\230\156\170\231\159\165\233\148\153\232\175\175"),
+      i18n.EasyGet("\231\153\187\229\189\149\228\191\161\230\129\175\232\191\135\230\156\159\239\188\140\232\175\183\233\135\141\230\150\176\231\153\187\229\189\149"),
+      i18n.EasyGet("\232\167\146\232\137\178\228\184\142\232\180\166\229\143\183\228\184\141\229\140\185\233\133\141\239\188\140\232\175\183\233\135\141\230\150\176\231\153\187\229\189\149"),
+      i18n.EasyGet("\232\180\166\229\143\183\229\183\178\229\156\168\229\136\171\229\164\132\231\153\187\229\189\149"),
+      i18n.EasyGet("\229\174\162\230\136\183\231\171\175\231\137\136\230\156\172\228\184\141\230\173\163\231\161\174\239\188\140\232\175\183\230\155\180\230\150\176"),
+      i18n.EasyGet("\229\184\144\229\143\183\232\162\171\229\176\129\231\166\129"),
+      i18n.EasyGet("\233\157\158\230\179\149\230\184\160\233\129\147"),
+      i18n.EasyGet("\229\174\162\230\136\183\231\171\175\231\137\136\230\156\172\229\143\183\232\191\135\233\171\152"),
+      i18n.EasyGet("\229\144\140IP\228\184\173\232\167\146\232\137\178\230\149\176\233\135\143\232\191\135\229\164\154")
+    }
+    Ui:OpenWindow("UIMessageBoxBig", tbResultMsg[nResult], {
+      function()
+        Ui:BackToLogin()
+      end
+    }, {
+      i18n.szOk
+    })
+  end
+end
+
+function tbWnd:OnServerUnavailable(dwServerId)
+  Ui:OpenWindow("UIMessageBoxBig", i18n.Get("ServerMaintenance"))
+  if self.nConnectServerTimer then
+    Ui:CloseWindow("UILoadingTips")
+    Timer:Close(self.nConnectServerTimer)
+    self.nConnectServerTimer = nil
+  end
+  Ui:OpenWindow("UISelectServer", self.tbSerList)
+end
+
+function tbWnd:OnServerLoginFail(nRetCode)
+  if self.nConnectServerTimer then
+    Ui:CloseWindow("UILoadingTips")
+    Timer:Close(self.nConnectServerTimer)
+    self.nConnectServerTimer = nil
+  end
+  local szMsg = "LoginFailUnknow"
+  if nRetCode >= 1 and nRetCode <= 5 then
+    szMsg = i18n.Get("LoginFail" .. nRetCode)
+  end
+  Ui:OpenWindow("UIMessageBoxBig", szMsg)
+end
+
+function tbWnd:OnMapLoaded()
+end
+
+function tbWnd:OnSyncServerListDone(nCode)
+  if 1 == nCode then
+    self:__UpdateSerInfo()
+    if bAllSameAsLastTime then
+      OnLoginServerBtnClick(self)
+    end
+  else
+    Ui:OpenWindow("UIMessageBoxBig", i18n.Get("ServerMaintenance"), {
+      function()
+        self:Logout()
+      end
+    }, {
+      i18n.szOk
+    })
+  end
+end
+
+function tbWnd:__UpdateSerInfo()
+  self.tbSerList = GetServerList()
+  local nServerId = Ui.PlayerPrefs.GetInt("LastServerID", 0)
+  local tbMyAccSerInfo = Login:GetAccSerInfo()
+  local bFind = false
+  local tbServerInfo
+  for i, v in ipairs(self.tbSerList) do
+    if nServerId == v.dwServerId then
+      bFind = true
+      tbServerInfo = v
+      break
+    end
+  end
+  if not bFind then
+    local bFind2 = false
+    local tbRecommandServerSet = {}
+    for i, v in ipairs(self.tbSerList) do
+      if v.nType == Login.SERVER_TYPE_RECOMMEND then
+        table.insert(tbRecommandServerSet, v)
+      end
+    end
+    if #tbRecommandServerSet > 0 then
+      local nIndex = math.random(1, #tbRecommandServerSet)
+      local tbServer = tbRecommandServerSet[nIndex]
+      nServerId = tbServer.dwServerId
+      tbServerInfo = tbServer
+      bFind2 = true
+    end
+    local tbNewServerSet = {}
+    for i, v in ipairs(self.tbSerList) do
+      if v.nType == Login.SERVER_TYPE_NEW then
+        table.insert(tbNewServerSet, v)
+      end
+    end
+    if #tbNewServerSet > 0 then
+      local nIndex = math.random(1, #tbNewServerSet)
+      local tbServer = tbNewServerSet[nIndex]
+      nServerId = tbServer.dwServerId
+      tbServerInfo = tbServer
+      bFind2 = true
+    end
+    if not bFind2 then
+      for i, v in ipairs(self.tbSerList) do
+        if v.nType ~= Login.SERVER_TYPE_OFFLINE then
+          nServerId = v.dwServerId
+          tbServerInfo = v
+        end
+      end
+    end
+  end
+  Ui.PlayerPrefs.SetInt("LastServerID", nServerId)
+  tbServerInfo = tbServerInfo or self.tbSerList[1]
+  if tbServerInfo then
+    self.nCurServerId = tbServerInfo.dwServerId
+    self:UpdateServerShow(tbServerInfo)
+  end
+end
+
+function tbWnd:UpdateServerShow(tbServerInfo)
+  self.nCurServerId = tbServerInfo.dwServerId
+  self.pPanel:Label_SetText(tbControls.ServerIndex, i18n.EasyGet("{0}\230\156\141", tbServerInfo.dwIndex))
+  self.pPanel:Label_SetText(tbControls.ServerName, tbServerInfo.szName)
+  Login.ServerName = tbServerInfo.szName
+  if tbServerInfo.nType == Login.SERVER_TYPE_NEW then
+    self.pPanel:Label_SetText(tbControls.ServerFlag, i18n.EasyGet("\230\150\176\230\156\141"))
+    self.pPanel:Label_SetColorByName(tbControls.ServerFlag, "Green")
+    self.pPanel:SetActive(tbControls.ServerFlagGreen, true)
+    self.pPanel:SetActive(tbControls.ServerFlagRed, false)
+    self.pPanel:SetActive(tbControls.ServerFlagGray, false)
+  elseif tbServerInfo.nType == Login.SERVER_TYPE_OFFLINE then
+    self.pPanel:Label_SetText(tbControls.ServerFlag, i18n.EasyGet("\231\187\180\230\138\164"))
+    self.pPanel:Label_SetColorByName(tbControls.ServerFlag, "Gray1")
+    self.pPanel:SetActive(tbControls.ServerFlagGreen, false)
+    self.pPanel:SetActive(tbControls.ServerFlagRed, false)
+    self.pPanel:SetActive(tbControls.ServerFlagGray, true)
+  elseif tbServerInfo.nType == Login.SERVER_TYPE_RECOMMEND then
+    self.pPanel:Label_SetText(tbControls.ServerFlag, i18n.EasyGet("\230\142\168\232\141\144"))
+    self.pPanel:Label_SetColorByName(tbControls.ServerFlag, "Green")
+    self.pPanel:SetActive(tbControls.ServerFlagGreen, true)
+    self.pPanel:SetActive(tbControls.ServerFlagRed, false)
+    self.pPanel:SetActive(tbControls.ServerFlagGray, false)
+  elseif tbServerInfo.nType == Login.SERVER_TYPE_FULL then
+    self.pPanel:Label_SetText(tbControls.ServerFlag, i18n.EasyGet("\231\136\134\230\187\161"))
+    self.pPanel:Label_SetColorByName(tbControls.ServerFlag, "Red")
+    self.pPanel:SetActive(tbControls.ServerFlagGreen, false)
+    self.pPanel:SetActive(tbControls.ServerFlagRed, true)
+    self.pPanel:SetActive(tbControls.ServerFlagGray, false)
+  elseif tbServerInfo.nType == Login.SERVER_TYPE_NORMAL then
+    self.pPanel:Label_SetText(tbControls.ServerFlag, i18n.EasyGet("\230\181\129\231\149\133"))
+    self.pPanel:Label_SetColorByName(tbControls.ServerFlag, "Green")
+    self.pPanel:SetActive(tbControls.ServerFlagGreen, true)
+    self.pPanel:SetActive(tbControls.ServerFlagRed, false)
+    self.pPanel:SetActive(tbControls.ServerFlagGray, false)
+  end
+end
+
+function tbWnd:OnQueueNotify(nPos, nGiveUp)
+  if 1 == nGiveUp then
+    Ui:CloseWindow("UIQueueNotice")
+    self:onClickLogout()
+    CloseServerConnect()
+    return
+  end
+  if self.nConnectServerTimer then
+    Ui:CloseWindow("UILoadingTips")
+    Timer:Close(self.nConnectServerTimer)
+    self.nConnectServerTimer = nil
+  end
+  local nLastOrderNumber = GetQueueOrderNumber()
+  if 0 ~= nLastOrderNumber and nLastOrderNumber == nPos - 1 then
+    nPos = nLastOrderNumber
+  end
+  SetQueueOrderNumber(nPos)
+  local szInfo = i18n.EasyGet("\230\142\146\233\152\159\228\184\173\239\188\140\229\137\141\230\150\185\232\191\152\230\156\137 {0} \228\186\186 ...", nPos)
+  local tbWnd = Ui:GetWindow("UIQueueNotice")
+  if not tbWnd or not tbWnd:Visible() then
+    Ui:OpenWindow("UIQueueNotice", szInfo)
+  else
+    tbWnd:SetInfo(szInfo)
+  end
+end
+
+function tbWnd:CloseConnectServerTimer()
+  if self.nConnectServerTimer then
+    Timer:Close(self.nConnectServerTimer)
+    self.nConnectServerTimer = nil
+  end
+end
+
+function tbWnd:OnSyncAccSerInfo()
+end
+
+function tbWnd:OnFixedUpdate()
+  self.nLastRequestServerListTime = self.nLastRequestServerListTime or Ui.Time.time
+  if Ui.Time.time - self.nLastRequestServerListTime > 5 then
+    self.nLastRequestServerListTime = Ui.Time.time
+    RequestServerList()
+  end
+end

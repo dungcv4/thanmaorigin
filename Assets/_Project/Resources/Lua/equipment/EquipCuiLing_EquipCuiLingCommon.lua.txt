@@ -1,0 +1,420 @@
+Require("CommonScript/EquipCuiLing/EquipCuiLingCfg.lua")
+Require("CommonScript/AttributeModule/AttributeModule.lua")
+Require("CommonScript/Player/FightPowerCommom.lua")
+Require("CommonScript/Item/ItemForEquip.lua")
+EquipCuiLing.SAVE_CUILING_GROUP = GetGroupKey("EquipCuiLing")
+EquipCuiLing.nWenYangLevel = 1
+EquipCuiLing.nCuiLingState = 11
+EquipCuiLing.tbSaveGroupKey = EquipCuiLing.tbSaveGroupKey or {}
+EquipCuiLing.ECL_RANDOM_ATTR_BEGIN = 1
+EquipCuiLing.ECL_ATTR_OFFSET = 4
+EquipCuiLing.TEMPLATE_ID = 13
+EquipCuiLing.TRADE_LIMIT_TYPE = 14
+EquipCuiLing.tbLingZhuKey = {}
+EquipCuiLing.tbLZKey2LZIndex = {}
+for i = 1, Item.EQUIPPOS_MAIN_NUM do
+  EquipCuiLing.tbLingZhuKey[i] = "LingZhuPutOn" .. i
+  EquipCuiLing.tbLZKey2LZIndex[EquipCuiLing.tbLingZhuKey[i]] = i
+end
+for nIndex = 1, Item.EQUIPPOS_MAIN_NUM do
+  EquipCuiLing.tbSaveGroupKey[nIndex] = GetGroupKey(EquipCuiLing.tbLingZhuKey[nIndex])
+end
+EquipCuiLing.nLingZhuAttrMax = 3
+EquipCuiLing.szSuiPianForgeCurrency = "JingHuo"
+EquipCuiLing.nSyncDataOffset = 50
+EquipCuiLing.nSyncWenYangLevel = 1
+EquipCuiLing.nSyncCuiLingState = 11
+EquipCuiLing.nSyncLingZhuAttr = 21
+EquipCuiLing.nSyncLingZhuTemplateId = 41
+
+function EquipCuiLing:GetCuiLingState(pPlayer, nEquipPos)
+  if not Item:IsMainEquipPos(nEquipPos) then
+    return false
+  end
+  local nState = pPlayer.GetUserValue(self.SAVE_CUILING_GROUP, self.nCuiLingState)
+  nState = nState >> nEquipPos
+  nState = nState & 1
+  return 1 == nState
+end
+
+function EquipCuiLing:GetWenYangLevel(pPlayer, nEquipPos)
+  if not Item:IsMainEquipPos(nEquipPos) then
+    return 0
+  end
+  local nLevel = pPlayer.GetUserValue(self.SAVE_CUILING_GROUP, self.nWenYangLevel + nEquipPos)
+  return nLevel
+end
+
+function EquipCuiLing:GetWenYangAllLevel(pPlayer)
+  local nAllLevel = 0
+  for nEquipPos = 0, Item.EQUIPPOS_MAIN_NUM - 1 do
+    local nLevel = self:GetWenYangLevel(pPlayer, nEquipPos)
+    nAllLevel = nAllLevel + nLevel
+  end
+  return nAllLevel
+end
+
+function EquipCuiLing:GetPutOnLingZhuData(pPlayer, nEquipPos)
+  local nIndex = nEquipPos + 1
+  if not self.tbSaveGroupKey[nEquipPos + 1] then
+    return {nTemplateId = 0, nTradeLimitType = 0}
+  end
+  local tbRet = {}
+  for i = 1, 3 do
+    local nAttrId = pPlayer.GetUserValue(self.tbSaveGroupKey[nIndex], (i - 1) * self.ECL_ATTR_OFFSET + self.ECL_RANDOM_ATTR_BEGIN)
+    if nAttrId > 0 then
+      local tbV = {}
+      for j = 1, 3 do
+        tbV[j] = pPlayer.GetUserValue(self.tbSaveGroupKey[nIndex], (i - 1) * self.ECL_ATTR_OFFSET + self.ECL_RANDOM_ATTR_BEGIN + j)
+      end
+      tbRet[i] = {nAttrId, tbV}
+    end
+  end
+  tbRet.nTemplateId = pPlayer.GetUserValue(self.tbSaveGroupKey[nIndex], self.TEMPLATE_ID)
+  tbRet.nTradeLimitType = pPlayer.GetUserValue(self.tbSaveGroupKey[nIndex], self.TRADE_LIMIT_TYPE)
+  return tbRet
+end
+
+function EquipCuiLing:GetPutOnLingZhuCount(pPlayer)
+  local nCount = 0
+  for nEquipPos = 0, Item.EQUIPPOS_MAIN_NUM - 1 do
+    local tbLingZhuData = self:GetPutOnLingZhuData(pPlayer, nEquipPos)
+    if tbLingZhuData.nTemplateId > 0 then
+      nCount = nCount + 1
+    end
+  end
+  return nCount
+end
+
+function EquipCuiLing:GetWenYangCfgByLevel(nLevel)
+  local nIndex = math.ceil(nLevel / 100)
+  return self.tbLZWenYangInfo[nIndex]
+end
+
+function EquipCuiLing:IsSystemOpen()
+  return 1 == GetTimeFrameState(self.Cfg.szOpenTimeFrame)
+end
+
+function EquipCuiLing:GetCurTimeFrameComposeLZId()
+  local tbRetId = self.tbLZTimeFrame2LZItemId[1].tbItemId
+  for i = 2, #self.tbLZTimeFrame2LZItemId do
+    if 1 == GetTimeFrameState(self.tbLZTimeFrame2LZItemId[i].szTimeFrame) then
+      tbRetId = self.tbLZTimeFrame2LZItemId[i].tbItemId
+    else
+      break
+    end
+  end
+  return tbRetId
+end
+
+function EquipCuiLing:GetCurTimeFrameMaxWenYangLevel()
+  local nLevel = self.tbLZTimeFrame2WenYangLevel[1].nLevel
+  for i = 2, #self.tbLZTimeFrame2WenYangLevel do
+    if 1 == GetTimeFrameState(self.tbLZTimeFrame2WenYangLevel[i].szTimeFrame) then
+      nLevel = self.tbLZTimeFrame2WenYangLevel[i].nLevel
+    else
+      break
+    end
+  end
+  return nLevel
+end
+
+function EquipCuiLing:CanLZSuiPianForge(pPlayer)
+  if not self:IsSystemOpen() then
+    return false, i18n.EasyGet("\230\183\172\231\129\181\231\179\187\231\187\159\230\156\170\229\188\128\229\144\175")
+  end
+  if pPlayer.GetMoney(EquipCuiLing.szSuiPianForgeCurrency) < self.Cfg.nForgeSuiPianCostJingHuo then
+    return false, i18n.EasyGet("\231\178\190\230\180\187\228\184\141\232\182\179")
+  end
+  return true
+end
+
+function EquipCuiLing:CanCuiLing(pPlayer, nEquipPos)
+  if nEquipPos < Item.EQUIPPOS_HELM or nEquipPos > Item.EQUIPPOS_AMULET then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\232\163\133\229\164\135\228\184\141\229\143\175\228\187\165\230\183\172\231\129\181")
+  end
+  if not self:IsSystemOpen() then
+    return false, i18n.EasyGet("\230\183\172\231\129\181\231\179\187\231\187\159\230\156\170\229\188\128\229\144\175")
+  end
+  local pEquip = pPlayer.GetEquipByPos(nEquipPos)
+  if not pEquip then
+    return false, i18n.EasyGet("\230\156\170\231\169\191\230\136\180\232\163\133\229\164\135")
+  end
+  if self:GetCuiLingState(pPlayer, nEquipPos) then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\232\163\133\229\164\135\229\183\178\230\183\172\231\129\181")
+  end
+  return true
+end
+
+function EquipCuiLing:CanLZWenYang(pPlayer, nEquipPos)
+  if not self:IsSystemOpen() then
+    return false, i18n.EasyGet("\230\183\172\231\129\181\231\179\187\231\187\159\230\156\170\229\188\128\229\144\175")
+  end
+  if nEquipPos < Item.EQUIPPOS_HELM or nEquipPos > Item.EQUIPPOS_AMULET then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\232\163\133\229\164\135\228\184\141\229\143\175\228\187\165\230\184\169\229\133\187")
+  end
+  local pEquip = pPlayer.GetEquipByPos(nEquipPos)
+  if not pEquip then
+    return false, i18n.EasyGet("\230\156\170\231\169\191\230\136\180\232\163\133\229\164\135")
+  end
+  if not self:GetCuiLingState(pPlayer, nEquipPos) then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\232\163\133\229\164\135\230\156\170\230\183\172\231\129\181")
+  end
+  local nCount = self:GetPutOnLingZhuCount(pPlayer)
+  if nCount < Item.EQUIPPOS_MAIN_NUM then
+    return false, i18n.EasyGet("\229\133\168\233\131\168\232\163\133\229\164\135\230\183\172\231\129\181\230\137\141\229\143\175\228\187\165\230\184\169\229\133\187")
+  end
+  local nCurLevel = self:GetWenYangLevel(pPlayer, nEquipPos)
+  local nMaxLevel = self:GetCurTimeFrameMaxWenYangLevel()
+  if nCurLevel >= nMaxLevel then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\230\184\169\229\133\187\231\173\137\231\186\167\229\183\178\232\190\190\228\184\138\233\153\144")
+  end
+  local nCfgIndex = math.ceil((nCurLevel + 1) / 100)
+  local szCurrencyType = self.tbLZWenYangInfo[nCfgIndex][1]
+  if self.tbLZWenYangInfo[nCfgIndex][2] > pPlayer.GetMoney(szCurrencyType) then
+    return false, i18n.EasyGet("{0}\228\184\141\232\182\179", Currency:GetName(szCurrencyType))
+  end
+  local nHadNum = pPlayer.GetItemCountByTypeInBag(self.tbLZWenYangInfo[nCfgIndex][3])
+  if nHadNum < self.tbLZWenYangInfo[nCfgIndex][4] then
+    return false, i18n.EasyGet("\230\157\144\230\150\153\228\184\141\232\182\179")
+  end
+  return true
+end
+
+function EquipCuiLing:CanLingZhuCompose(pPlayer, nCount)
+  if not self:IsSystemOpen() then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  local nHadSuiPian1 = pPlayer.GetItemCountByTypeInBag(self.Cfg.nLZSuiPianId1)
+  local nHadSuiPian2 = pPlayer.GetItemCountByTypeInBag(self.Cfg.nLZSuiPianId2)
+  local nHadSuiPian3 = pPlayer.GetItemCountByTypeInBag(self.Cfg.nLZSuiPianId3)
+  if nCount > nHadSuiPian1 or nCount > nHadSuiPian2 or nCount > nHadSuiPian3 then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\230\149\176\233\135\143\228\184\141\232\182\179")
+  end
+  if self.Cfg.nComposeCostCoin > pPlayer.GetMoney("Coin") then
+    return false, i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179")
+  end
+  if nCount > pPlayer.GetFreeBagCount() then
+    return false, i18n.EasyGet("\232\131\140\229\140\133\229\183\178\230\187\161")
+  end
+  return true
+end
+
+function EquipCuiLing:CanPutOnLingZhu(pPlayer, nEquipPos, nItemId)
+  if not self:IsSystemOpen() then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return false, i18n.EasyGet("\233\129\147\229\133\183\228\184\141\229\173\152\229\156\168")
+  end
+  if pPlayer.IsMaskPlayerAttr() then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\228\184\141\229\143\175\230\183\172\231\129\181")
+  end
+  local pEquip = pPlayer.GetEquipByPos(nEquipPos)
+  if not pEquip then
+    return false, i18n.EasyGet("\232\163\133\229\164\135\230\156\170\231\169\191\230\136\180")
+  end
+  if pPlayer.nTotalLevel < pItem.nUseLevel then
+    return false, i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179")
+  end
+  return true
+end
+
+function EquipCuiLing:ApplyLingZhuAttrib(pNpc, tbLingZhuData, nPlayerID)
+  for index, tbV in ipairs(tbLingZhuData) do
+    local tbAttrCfg = self.tbLZAttrId2AttrType[tbV[1]]
+    local szMagic = tbAttrCfg.szAttrType
+    pNpc.ApplyMagicAttrib(szMagic, table.unpack(tbV[2]))
+  end
+end
+
+function EquipCuiLing:RemoveLingZhuAttrib(pNpc, tbLingZhuData, nPlayerID)
+  for index, tbV in ipairs(tbLingZhuData) do
+    local tbAttrCfg = self.tbLZAttrId2AttrType[tbV[1]]
+    local szMagic = tbAttrCfg.szAttrType
+    pNpc.RemoveMagicAttrib(szMagic, table.unpack(tbV[2]))
+  end
+end
+
+function EquipCuiLing:UpdateWenYangAttr(pNpc, nOldLevel, nNewLevel, nPlayerID)
+  self:RemoveWenYangAttr(pNpc, nOldLevel)
+  self:ApplyWenYangAttr(pNpc, nNewLevel)
+end
+
+function EquipCuiLing:ApplyWenYangAttr(pNpc, nLevel, nPlayerID)
+  if nLevel <= 0 or nLevel > #self.tbCLSuitAttr[2] then
+    return
+  end
+  local tbAttrType = self.tbCLSuitAttr[1]
+  local tbAttrValue = self.tbCLSuitAttr[2][nLevel]
+  for i = 1, 3 do
+    pNpc.ApplyMagicAttrib(tbAttrType[i][1], table.unpack(tbAttrValue[i]))
+  end
+end
+
+function EquipCuiLing:RemoveWenYangAttr(pNpc, nLevel, nPlayerID)
+  if nLevel <= 0 or nLevel > #self.tbCLSuitAttr[2] then
+    return
+  end
+  local tbAttrType = self.tbCLSuitAttr[1]
+  local tbAttrValue = self.tbCLSuitAttr[2][nLevel]
+  for i = 1, 3 do
+    pNpc.RemoveMagicAttrib(tbAttrType[i][1], table.unpack(tbAttrValue[i]))
+  end
+end
+
+function EquipCuiLing:ApplySuitActiveAttr(pNpc, nPlayerID)
+  local tbAttrCfg = self.tbCLSuitAttr[1]
+  for i = 1, 3 do
+    pNpc.ApplyMagicAttrib(tbAttrCfg[i][1], table.unpack(tbAttrCfg[i], 2))
+  end
+end
+
+function EquipCuiLing:RemoveSuitActiveAttr(pNpc, nPlayerID)
+  local tbAttrCfg = self.tbCLSuitAttr[1]
+  for i = 1, 3 do
+    pNpc.RemoveMagicAttrib(tbAttrCfg[i][1], table.unpack(tbAttrCfg[i], 2))
+  end
+end
+
+function EquipCuiLing:CalcFightPower(pPlayer, szKey)
+  local nFightPower = 0
+  local nPutOnCount = 0
+  for nEquipPos = 0, Item.EQUIPPOS_MAIN_NUM - 1 do
+    local tbLingZhuData = self:GetPutOnLingZhuData(pPlayer, nEquipPos)
+    if tbLingZhuData.nTemplateId > 0 then
+      nPutOnCount = nPutOnCount + 1
+      for i = 1, 3 do
+        if tbLingZhuData[i] then
+          local tbAttrCfg = self.tbLZAttrId2AttrType[tbLingZhuData[i][1]]
+          local szAttrType = tbAttrCfg.szAttrType
+          nFightPower = nFightPower + tbLingZhuData[i][2][1] * AttrFightPowerFactor[szAttrType] / 10000
+        end
+      end
+    end
+  end
+  if nPutOnCount >= Item.EQUIPPOS_MAIN_NUM then
+    nFightPower = nFightPower + self.tbCLSuitAttr[1][4][2]
+  end
+  local nAllWenYangLevel = self:GetWenYangAllLevel(pPlayer)
+  if nAllWenYangLevel > 0 then
+    nFightPower = nFightPower + self.tbCLSuitAttr[2][nAllWenYangLevel][4]
+  end
+  return nFightPower
+end
+
+FightPower:RegisterFPSystemModule({
+  "EquipCuiLing"
+}, EquipCuiLing)
+
+function EquipCuiLing:GetSyncCuiLingState(pPlayerAsync, nEquipPos)
+  return pPlayerAsync.GetEquipCuiLing(self.nSyncDataOffset * nEquipPos + self.nSyncCuiLingState)
+end
+
+function EquipCuiLing:GetSyncWenYangLevel(pPlayerAsync, nEquipPos)
+  return pPlayerAsync.GetEquipCuiLing(self.nSyncDataOffset * nEquipPos + self.nSyncWenYangLevel)
+end
+
+function EquipCuiLing:GetSyncWenYangAllLevel(pPlayerAsync)
+  local nAllLevel = 0
+  for nEquipPos = 0, Item.EQUIPPOS_MAIN_NUM - 1 do
+    local nLevel = EquipCuiLing:GetSyncWenYangLevel(pPlayerAsync, nEquipPos)
+    nAllLevel = nAllLevel + nLevel
+  end
+  return nAllLevel
+end
+
+function EquipCuiLing:GetSyncPutOnLingZhuData(pPlayerAsync, nEquipPos)
+  local tbSyncLingZhuData = {}
+  for i = 1, 3 do
+    local nSaveIdx = (i - 1) * self.ECL_ATTR_OFFSET + self.ECL_RANDOM_ATTR_BEGIN
+    local nSyncSaveIdx = self.nSyncDataOffset * nEquipPos + self.nSyncLingZhuAttr - 1
+    local nAttrId = pPlayerAsync.GetEquipCuiLing(nSyncSaveIdx + nSaveIdx)
+    if nAttrId > 0 then
+      tbSyncLingZhuData[i] = {
+        nAttrId,
+        {}
+      }
+      for j = 1, 3 do
+        tbSyncLingZhuData[i][2][j] = pPlayerAsync.GetEquipCuiLing(nSyncSaveIdx + nSaveIdx + j)
+      end
+    end
+  end
+  tbSyncLingZhuData.nTemplateId = pPlayerAsync.GetEquipCuiLing(self.nSyncDataOffset * nEquipPos + self.nSyncLingZhuTemplateId)
+  return tbSyncLingZhuData
+end
+
+function EquipCuiLing:GetSyncPutOnLingZhuCount(pPlayerAsync)
+  local nCount = 0
+  for nEquipPos = 0, Item.EQUIPPOS_MAIN_NUM - 1 do
+    local tbLingZhuData = self:GetSyncPutOnLingZhuData(pPlayerAsync, nEquipPos)
+    if tbLingZhuData.nTemplateId > 0 then
+      nCount = nCount + 1
+    end
+  end
+  return nCount
+end
+
+function EquipCuiLing:onApplyRobotNpcEquip(pPlayerAsync, pNpc, pEquip)
+  local tbLingZhuData = self:GetSyncPutOnLingZhuData(pPlayerAsync, pEquip.nEquipPos)
+  if tbLingZhuData.nTemplateId > 0 then
+    self:ApplyLingZhuAttrib(pNpc, tbLingZhuData)
+  end
+end
+
+function EquipCuiLing:onApplyEquip(pPlayer, pEquip)
+  local tbLingZhuData = self:GetPutOnLingZhuData(pPlayer, pEquip.nEquipPos)
+  if tbLingZhuData.nTemplateId > 0 then
+    self:ApplyLingZhuAttrib(pPlayer.GetNpc(), tbLingZhuData, pPlayer.dwID)
+  end
+end
+
+function EquipCuiLing:onRemoveEquip(pPlayer, pEquip)
+  local tbLingZhuData = self:GetPutOnLingZhuData(pPlayer, pEquip.nEquipPos)
+  if tbLingZhuData.nTemplateId > 0 then
+    self:RemoveLingZhuAttrib(pPlayer, tbLingZhuData, pPlayer.dwID)
+  end
+end
+
+Item:RegisterEquipModule({
+  Item.EQUIPPOS_HELM,
+  Item.EQUIPPOS_ARMOR,
+  Item.EQUIPPOS_BELT,
+  Item.EQUIPPOS_CUFF,
+  Item.EQUIPPOS_BOOTS,
+  Item.EQUIPPOS_WEAPON,
+  Item.EQUIPPOS_NECKLACE,
+  Item.EQUIPPOS_RING,
+  Item.EQUIPPOS_PENDANT,
+  Item.EQUIPPOS_AMULET
+}, "EquipCuiLing", EquipCuiLing)
+
+function EquipCuiLing:OnEquip(pPlayer)
+  local nCount = self:GetPutOnLingZhuCount(pPlayer)
+  if nCount >= Item.EQUIPPOS_MAIN_NUM then
+    self:ApplySuitActiveAttr(pPlayer.GetNpc(), pPlayer.dwID)
+    local nAllWYLevel = self:GetWenYangAllLevel(pPlayer)
+    self:ApplyWenYangAttr(pPlayer.GetNpc(), nAllWYLevel, pPlayer.dwID)
+  end
+end
+
+function EquipCuiLing:OnUnEquip(pPlayer)
+  local nCount = self:GetPutOnLingZhuCount(pPlayer)
+  if nCount >= Item.EQUIPPOS_MAIN_NUM then
+    self:RemoveSuitActiveAttr(pPlayer.GetNpc(), pPlayer.dwID)
+    local nAllWYLevel = self:GetWenYangAllLevel(pPlayer)
+    self:RemoveWenYangAttr(pPlayer.GetNpc(), nAllWYLevel, pPlayer.dwID)
+  end
+end
+
+function EquipCuiLing:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  local nCount = self:GetSyncPutOnLingZhuCount(pPlayerAsync)
+  if nCount >= Item.EQUIPPOS_MAIN_NUM then
+    self:ApplySuitActiveAttr(pNpc)
+    local nAllWYLevel = self:GetSyncWenYangAllLevel(pPlayerAsync)
+    self:ApplyWenYangAttr(pNpc, nAllWYLevel)
+  end
+end
+
+AttributeModule:Register("EquipCuiLing", EquipCuiLing)

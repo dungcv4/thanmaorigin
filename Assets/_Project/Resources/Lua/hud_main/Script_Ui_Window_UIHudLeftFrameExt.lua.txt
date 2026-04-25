@@ -1,0 +1,623 @@
+local tbWnd = Ui:CreateWindow("UIHudLeftFrameExt")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_UI_LOADED,
+      self.OnMapLoaded
+    },
+    {
+      EventNotify.EMNOTIFY_WULINGAOSHOU_STATUS_REPLY,
+      self.UpdateGoldBoss
+    },
+    {
+      EventNotify.emNOTIFY_QINSHIHUANGLING_SYNC_STATE,
+      self.UpdateQinShiHuangLingStatus
+    },
+    {
+      EventNotify.emNOTIFY_ONACTIVITY_STATE_CHANGE,
+      self.OnActivityStateChange
+    },
+    {
+      EventNotify.emNOTIFY_TEAM_UPDATE,
+      self.OnTeamUpdate
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_KIN_DATA,
+      self.UpdateChatRoomUi
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TONG_MEMBERLIST,
+      self.UpdateChatRoomUi
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TONG_BASEINFO,
+      self.UpdateChatRoomUi
+    },
+    {
+      EventNotify.emNOTIFY_CHAT_ROOM_STATUS,
+      self.UpdateChatRoomUi
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_REPORT_BUTTON,
+      self.UpdateLeftFubenFuncBtnScore,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_HANWUYIJI_IN_MATCH,
+      self.OnOpenMic
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_FUBEN_REDPACKET_BUTTON,
+      self.UpdateRedPacketButton,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  Root = "imgBG/Root",
+  ButtonGroup = "imgBG/Root/Dynamic/ButtonGroup",
+  ButtonGroup2 = "imgBG/Root/Dynamic/ButtonGroup2",
+  ToggleTeam = "imgBG/Root/Dynamic/ButtonGroup/ToggleTeam",
+  ToggleTask = "imgBG/Root/Dynamic/ButtonGroup/ToggleTask",
+  ToggleFuben = "imgBG/Root/Dynamic/ButtonGroup/ToggleFuben",
+  TeamPanelPath = "imgBG/Root/Dynamic/PanelGroup/UIHudLeftPanelTeam",
+  TaskPanelPath = "imgBG/Root/Dynamic/PanelGroup/UIHudLeftPanelTask",
+  FubenPanelPath = "imgBG/Root/Dynamic/PanelGroup/UIHudLeftPanelFuben",
+  PanelGroup = "imgBG/Root/Dynamic/PanelGroup",
+  speakerOnBt = "imgBG/Root/Dynamic/Chat/SpeakerOnBt",
+  speakerOffBt = "imgBG/Root/Dynamic/Chat/SpeakerOffBt",
+  micOnBt = "imgBG/Root/Dynamic/Chat/MicOnBt",
+  micOffBt = "imgBG/Root/Dynamic/Chat/MicOffBt",
+  ToggleTeam2 = "imgBG/Root/Dynamic/ButtonGroup2/ToggleTeam",
+  ToggleTask2 = "imgBG/Root/Dynamic/ButtonGroup2/ToggleTask",
+  ToggleFuben2 = "imgBG/Root/Dynamic/ButtonGroup2/ToggleBattle",
+  TeamButtonGroup = "imgBG/Root/Dynamic/Team",
+  btnExit = "imgBG/Root/Dynamic/Team/btnExit",
+  btnFollow = "imgBG/Root/Dynamic/Team/btnFollow",
+  btnRecruit = "imgBG/Root/Dynamic/Team/btnRecruit",
+  RedBagRoot = "imgBG/RedBagRoot",
+  btnYuanBaoRedBag = "imgBG/RedBagRoot/btnYuanBaoRedBag",
+  btnCostRedBag = "imgBG/RedBagRoot/btnCostRedBag"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  speakerOnBt = function(self)
+    ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting = false
+    self.pPanel:SetActive(self.speakerOnBt, false)
+    self.pPanel:SetActive(self.speakerOffBt, true)
+    ChatMgr:SwitchSpeakerState(false)
+  end,
+  speakerOffBt = function(self)
+    ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting = true
+    self.pPanel:SetActive(self.speakerOffBt, false)
+    self.pPanel:SetActive(self.speakerOnBt, true)
+    ChatMgr:SwitchSpeakerState(true)
+  end,
+  micOnBt = function(self)
+    self.pPanel:SetActive(self.micOnBt, false)
+    self.pPanel:SetActive(self.micOffBt, true)
+    ChatMgr:SwitchMicState(false)
+  end,
+  micOffBt = function(self)
+    self.pPanel:SetActive(self.micOffBt, false)
+    self.pPanel:SetActive(self.micOnBt, true)
+    ChatMgr:SwitchMicState(true)
+  end,
+  btnFollow = function()
+    if not TeamMgr:HasTeam() then
+      return
+    end
+    if TeamMgr:IsCaptain(me) then
+      if 0 == #TeamMgr:GetMembers() then
+        me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\178\161\230\156\137\229\143\175\229\143\172\229\155\158\231\154\132\233\152\159\229\143\139"))
+        return
+      end
+      TeamMgr:Recall()
+      return
+    end
+    local tbCaptain = TeamMgr:GetCaptainData()
+    if TeamMgr:IsFollowTeammate() then
+      TeamMgr:StopFollowMember()
+      return
+    end
+    if tbCaptain then
+      TeamMgr:StartFollowMember(tbCaptain.nPlayerID, tbCaptain.nNpcID)
+    end
+  end,
+  btnExit = function()
+    if not TeamMgr:HasTeam() then
+      return
+    end
+    
+    local function fnOK()
+      TeamMgr:Quite()
+    end
+    
+    local function fnCancel()
+    end
+    
+    Ui:OpenWindow("UIMessageBoxBig", i18n.EasyGet("\228\190\160\229\163\171\230\152\175\229\144\166\231\161\174\229\174\154\233\128\128\229\135\186\229\189\147\229\137\141\233\152\159\228\188\141\239\188\159"), {fnOK, fnCancel})
+  end,
+  btnRecruit = function()
+    if not TeamMgr:HasTeam() then
+      return
+    end
+    Ui:OpenWindowWithCallback("UIChat", function(_, tbWnd)
+      tbWnd:AddRecruit()
+    end, nil, ChatMgr.ChannelType.Public)
+  end,
+  btnYuanBaoRedBag = function(self)
+    Wedding:OpenRedPacket()
+  end,
+  btnCostRedBag = function(self)
+    Wedding:OpenRedPacket()
+  end
+}
+tbWnd.CurrentPanel = nil
+tbWnd.TP_TASK = 1
+tbWnd.TP_TEAM = 2
+tbWnd.TP_FUBEN = 4
+tbWnd.TP_TASK_TEAM = tbWnd.TP_TASK | tbWnd.TP_TEAM
+tbWnd.TP_FUBEN_TEAM = tbWnd.TP_FUBEN | tbWnd.TP_TEAM
+tbWnd.PanelInfo = {
+  {
+    Name = "UIHudLeftPanelTask",
+    bit = tbWnd.TP_TASK,
+    Toggle = tbWnd.tbControls.ToggleTask,
+    Toggle2 = tbWnd.tbControls.ToggleTask2,
+    Obj = tbWnd.tbControls.TaskPanelPath
+  },
+  {
+    Name = "UIHudLeftPanelTeam",
+    bit = tbWnd.TP_TEAM,
+    Toggle = tbWnd.tbControls.ToggleTeam,
+    Toggle2 = tbWnd.tbControls.ToggleTeam2,
+    Obj = tbWnd.tbControls.TeamPanelPath
+  },
+  {
+    Name = "UIHudLeftPanelFuben",
+    bit = tbWnd.TP_FUBEN,
+    Toggle = tbWnd.tbControls.ToggleFuben,
+    Toggle2 = tbWnd.tbControls.ToggleFuben2,
+    Obj = tbWnd.tbControls.FubenPanelPath
+  }
+}
+tbWnd.Panel = tbWnd.Panel or {}
+tbWnd.tbOnMapLoadFunc = {
+  [15] = function()
+    FubenUIController:OpenFuBenUI()
+  end
+}
+
+function tbWnd:OnCreate()
+  tbWnd.Panel = {}
+  for i = 1, #tbWnd.PanelInfo do
+    local ref = tbWnd.PanelInfo[i]
+    tbWnd.Panel[ref.Name] = {}
+    tbWnd.Panel[ref.Name].Info = tbWnd.PanelInfo[i]
+    tbWnd.Panel[ref.Name].pPanel = Ui:CreatePanel(ref.Name, ref.Obj, self)
+  end
+  self.nBattleRoyaleHonor = 0
+  for key, value in ipairs(WuLinGaoShou.tbAllTMapSetting) do
+    tbWnd.tbOnMapLoadFunc[key] = function()
+      RemoteServer.GoldBossReqUI()
+    end
+  end
+  self:UpdateRedPacketButton(false)
+end
+
+tbWnd.panelTaskTeam = 1
+tbWnd.panelTaskTeamFuBen = 2
+
+function tbWnd:SetPanelState(nPanelControl, nPanelSelected)
+  if nPanelControl and self.nPanelState == nPanelControl then
+    return
+  end
+  if nPanelSelected and nPanelSelected == self.CurrentPanel then
+    return
+  end
+  nPanelControl = nPanelControl or self.panelTaskTeam
+  nPanelSelected = nPanelSelected or self.TP_TASK
+  if nPanelControl == self.panelTaskTeam then
+    self.pPanel:SetActive(tbControls.ButtonGroup, true)
+    self.pPanel:SetActive(tbControls.ButtonGroup2, false)
+    for i = 1, #tbWnd.PanelInfo do
+      local ref = tbWnd.PanelInfo[i]
+      if nPanelSelected == ref.bit then
+        if self.pPanel:Toggle_GetChecked(ref.Toggle) == false then
+          self.pPanel:Toggle_SetChecked(ref.Toggle, true)
+        end
+        self.pPanel:SetActive(ref.Obj, true)
+        self:GetSubPanel(ref.Name):OnActivate()
+      else
+        self.pPanel:Toggle_SetChecked(ref.Toggle, false)
+        self.pPanel:SetActive(ref.Obj, false)
+        self:GetSubPanel(ref.Name):OnDeactivate()
+      end
+    end
+  else
+    self.pPanel:SetActive(tbControls.ButtonGroup, false)
+    self.pPanel:SetActive(tbControls.ButtonGroup2, true)
+    for i = 1, #tbWnd.PanelInfo do
+      local ref = tbWnd.PanelInfo[i]
+      if nPanelSelected == ref.bit then
+        if false == self.pPanel:Toggle_GetChecked(ref.Toggle2) then
+          self.pPanel:Toggle_SetChecked(ref.Toggle2, true)
+        end
+        self.pPanel:SetActive(ref.Obj, true)
+        self:GetSubPanel(ref.Name):OnActivate()
+      else
+        self.pPanel:Toggle_SetChecked(ref.Toggle2, false)
+        self.pPanel:SetActive(ref.Obj, false)
+        self:GetSubPanel(ref.Name):OnDeactivate()
+      end
+    end
+  end
+  self.CurrentPanel = nPanelSelected
+  self.nPanelState = nPanelControl
+end
+
+tbWnd.tbOnToggleClick = {
+  ToggleTeam = function(self, isOn)
+    self:OnToggleTeam(isOn, self.panelTaskTeam)
+  end,
+  ToggleTeam2 = function(self, isOn)
+    self:OnToggleTeam(isOn, self.panelTaskTeamFuBen)
+  end,
+  ToggleTask = function(self, isOn)
+    self:OnToggleTask(isOn, self.panelTaskTeam)
+  end,
+  ToggleTask2 = function(self, isOn)
+    self:OnToggleTask(isOn, self.panelTaskTeamFuBen)
+  end,
+  ToggleFuben = function(self, isOn)
+    self:OnToggleFuben(isOn, self.panelTaskTeam)
+  end,
+  ToggleFuben2 = function(self, isOn)
+    self:OnToggleFuben(isOn, self.panelTaskTeamFuBen)
+  end
+}
+
+function tbWnd:OnToggleFuben(isOn, nPanelType)
+  if not isOn then
+    self:GetSubPanel("UIHudLeftPanelFuben"):OnDeactivate()
+    self.pPanel:SetActive(tbControls.FubenPanelPath, false)
+    return
+  end
+  if self.CurrentPanel == tbWnd.TP_FUBEN and self.nPanelState == nPanelType then
+    return
+  end
+  self.CurrentPanel = tbWnd.TP_FUBEN
+  self.pPanel:SetActive(tbControls.FubenPanelPath, true)
+  if self:GetSubPanel("UIHudLeftPanelFuben").OnActivate then
+    self:GetSubPanel("UIHudLeftPanelFuben"):OnActivate()
+  end
+end
+
+function tbWnd:OnToggleTask(isOn, nPanelType)
+  if not isOn then
+    self:GetSubPanel("UIHudLeftPanelTask"):OnDeactivate()
+    self.pPanel:SetActive(tbControls.TaskPanelPath, false)
+    return
+  end
+  if self.CurrentPanel == tbWnd.TP_TASK and self.nPanelState == nPanelType then
+    Ui:OpenWindow("UITask")
+    return
+  end
+  self.CurrentPanel = tbWnd.TP_TASK
+  self.pPanel:SetActive(tbControls.TeamPanelPath, false)
+  self.pPanel:SetActive(tbControls.TaskPanelPath, true)
+  self.pPanel:SetActive(tbControls.FubenPanelPath, false)
+  if self:GetSubPanel("UIHudLeftPanelTask").OnActivate then
+    self:GetSubPanel("UIHudLeftPanelTask"):OnActivate()
+  end
+end
+
+function tbWnd:OnToggleTeam(isOn, nPanelType)
+  if not isOn then
+    self:GetSubPanel("UIHudLeftPanelTeam"):OnDeactivate()
+    self.pPanel:SetActive(tbControls.TeamPanelPath, false)
+    return
+  end
+  if self.CurrentPanel == tbWnd.TP_TEAM and self.nPanelState == nPanelType then
+    Ui:OpenWindow("UITeam")
+    return
+  end
+  self.CurrentPanel = tbWnd.TP_TEAM
+  self.pPanel:SetActive(tbControls.TeamPanelPath, true)
+  self.pPanel:SetActive(tbControls.TaskPanelPath, false)
+  self.pPanel:SetActive(tbControls.FubenPanelPath, false)
+  if self:GetSubPanel("UIHudLeftPanelTeam").OnActivate then
+    self:GetSubPanel("UIHudLeftPanelTeam"):OnActivate()
+  end
+end
+
+function tbWnd:GetSubPanel(szName)
+  return self.Panel[szName].pPanel
+end
+
+function tbWnd:OnOpen()
+  for _, tbPanel in pairs(self.Panel) do
+    if tbPanel.pPanel and tbPanel.pPanel.OnOpen then
+      tbPanel.pPanel:OnOpen()
+    end
+  end
+  self:SetPanelState(self.panelTaskTeam)
+  self:SetButtonState()
+  WuLinGaoShou:RequestActivityStatus()
+  QinShiHuangLing:RequestActivityStatus()
+  Wedding:RequestActivityStatus()
+end
+
+function tbWnd:OnOpenEnd()
+  local bInFuben, szFubenName = FubenUIController:IsInFubenMap(me)
+  if not bInFuben and not WuLinGaoShou.bCanEnterWuLinGaoShou then
+    self:SetPanelState(self.panelTaskTeam)
+  else
+    FubenUIController:OnFubenMapLoaded(me)
+  end
+  if self.tbOnMapLoadFunc[me.nMapTemplateId] then
+    self.tbOnMapLoadFunc[me.nMapTemplateId]()
+  end
+  self:UpdateChatRoomUi()
+end
+
+function tbWnd:OnMapLoaded()
+  WuLinGaoShou:RequestActivityStatus()
+  QinShiHuangLing:RequestActivityStatus()
+  if XiaKeDao:IsXiaKeDaoFuben(me.nMapTemplateId) then
+    self.pPanel:SetActive(self.Root, false)
+  else
+    self.pPanel:SetActive(self.Root, true)
+  end
+  Wedding:RequestActivityStatus()
+  local bInFuben, szFubenName = FubenUIController:IsInFubenMap(me)
+  if not bInFuben and not WuLinGaoShou.bCanEnterWuLinGaoShou then
+    self:SetPanelState(self.panelTaskTeam)
+  else
+    FubenUIController:OnFubenMapLoaded(me)
+  end
+  if self.tbOnMapLoadFunc[me.nMapTemplateId] then
+    self.tbOnMapLoadFunc[me.nMapTemplateId]()
+  end
+  self:UpdateChatRoomUi()
+end
+
+function tbWnd:OpenFubenWithTeam(szName, szFubenType, ...)
+  local subPanel = self:GetSubPanel("UIHudLeftPanelFuben")
+  subPanel.szFubenType = szFubenType
+  self:SetPanelState(self.panelTaskTeamFuBen, self.TP_FUBEN)
+  subPanel:UpdateData(szName, ...)
+  subPanel:SwitchPanel(szName)
+end
+
+function tbWnd:UpdateChatRoomUi()
+  local bInLegionChatMap = ChatMgr:InChatMap(me.nMapTemplateId, ChatMgr.tbChatRoomForLegionMap)
+  local bInKinAndTongChatMap = ChatMgr:InChatMap(me.nMapTemplateId, ChatMgr.tbChatRoomForKinAndTongMap)
+  local bInKinChatMap = ChatMgr:InChatMap(me.nMapTemplateId, ChatMgr.tbChatRoomForKinMap)
+  local bInTongChatMap = ChatMgr:InChatMap(me.nMapTemplateId, ChatMgr.tbChatRoomForTongMap)
+  local bInTeamChatMap = ChatMgr:InChatMap(me.nMapTemplateId, ChatMgr.tbChatRoomForTeamMap)
+  local bHasKinMicPermission = Kin:IsKinVoiceManager()
+  local bHasTongMicPermission = Tong:IsTongVoiceManager()
+  local bHasLegionMicPermission = Legion:IsLegionVoiceManager()
+  local bHasKin = Kin:HasKin()
+  local bHasTong = Tong:HasTong()
+  local bHasTeam = TeamMgr:HasTeam()
+  local bHasLegion = Legion:HasLegion()
+  if not bInKinChatMap and not bInTongChatMap and not bInTeamChatMap and not bInKinAndTongChatMap and not bInLegionChatMap then
+    self.pPanel:SetActive(self.micOnBt, false)
+    self.pPanel:SetActive(self.micOffBt, false)
+    self.pPanel:SetActive(self.speakerOnBt, false)
+    self.pPanel:SetActive(self.speakerOffBt, false)
+    return
+  end
+  if bInKinAndTongChatMap then
+    if bHasTong then
+      if not bHasTongMicPermission then
+        self.pPanel:SetActive(self.micOnBt, false)
+        self.pPanel:SetActive(self.micOffBt, false)
+      else
+        self.pPanel:SetActive(self.micOnBt, ChatMgr.tbChatRoom.bMicOn)
+        self.pPanel:SetActive(self.micOffBt, not ChatMgr.tbChatRoom.bMicOn)
+      end
+      self.pPanel:SetActive(self.speakerOnBt, ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting)
+      self.pPanel:SetActive(self.speakerOffBt, not ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting)
+    elseif bHasKin then
+      if not bHasKinMicPermission then
+        self.pPanel:SetActive(self.micOnBt, false)
+        self.pPanel:SetActive(self.micOffBt, false)
+      else
+        self.pPanel:SetActive(self.micOnBt, ChatMgr.tbChatRoom.bMicOn)
+        self.pPanel:SetActive(self.micOffBt, not ChatMgr.tbChatRoom.bMicOn)
+      end
+      self.pPanel:SetActive(self.speakerOnBt, ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting)
+      self.pPanel:SetActive(self.speakerOffBt, not ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting)
+    else
+      self.pPanel:SetActive(self.micOnBt, false)
+      self.pPanel:SetActive(self.micOffBt, false)
+      self.pPanel:SetActive(self.speakerOnBt, false)
+      self.pPanel:SetActive(self.speakerOffBt, false)
+    end
+  elseif bInLegionChatMap then
+    if bHasLegion then
+      if not bHasLegionMicPermission then
+        self.pPanel:SetActive(self.micOnBt, false)
+        self.pPanel:SetActive(self.micOffBt, false)
+      else
+        self.pPanel:SetActive(self.micOnBt, ChatMgr.tbChatRoom.bMicOn)
+        self.pPanel:SetActive(self.micOffBt, not ChatMgr.tbChatRoom.bMicOn)
+      end
+      self.pPanel:SetActive(self.speakerOnBt, ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting)
+      self.pPanel:SetActive(self.speakerOffBt, not ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting)
+    else
+      self.pPanel:SetActive(self.micOnBt, false)
+      self.pPanel:SetActive(self.micOffBt, false)
+      self.pPanel:SetActive(self.speakerOnBt, false)
+      self.pPanel:SetActive(self.speakerOffBt, false)
+    end
+  elseif not ((not bInKinChatMap or bHasKinMicPermission) and (not bInTongChatMap or bHasTongMicPermission)) or bInTeamChatMap and not bHasTeam then
+    self.pPanel:SetActive(self.micOnBt, false)
+    self.pPanel:SetActive(self.micOffBt, false)
+  else
+    self.pPanel:SetActive(self.micOnBt, ChatMgr.tbChatRoom.bMicOn)
+    self.pPanel:SetActive(self.micOffBt, not ChatMgr.tbChatRoom.bMicOn)
+  end
+  if bInTongChatMap then
+    if not bHasTong then
+      self.pPanel:SetActive(self.speakerOnBt, false)
+      self.pPanel:SetActive(self.speakerOffBt, false)
+    else
+      self.pPanel:SetActive(self.speakerOnBt, ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting)
+      self.pPanel:SetActive(self.speakerOffBt, not ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting)
+    end
+  end
+  if bInKinChatMap then
+    if not bHasKin then
+      self.pPanel:SetActive(self.speakerOnBt, false)
+      self.pPanel:SetActive(self.speakerOffBt, false)
+    else
+      self.pPanel:SetActive(self.speakerOnBt, ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting)
+      self.pPanel:SetActive(self.speakerOffBt, not ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting)
+    end
+  end
+  if bInTeamChatMap then
+    if not bHasTeam then
+      self.pPanel:SetActive(self.speakerOnBt, false)
+      self.pPanel:SetActive(self.speakerOffBt, false)
+    else
+      self.pPanel:SetActive(self.speakerOnBt, ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting)
+      self.pPanel:SetActive(self.speakerOffBt, not ChatMgr.tbChatRoom.bSpeakerOn_PlayerSetting)
+    end
+  end
+end
+
+function tbWnd:UpdateTimerFubenWithTeam(szName, szFubenType, ...)
+  local subPanel = self:GetSubPanel("UIHudLeftPanelFuben")
+  subPanel.szFubenType = szFubenType
+  subPanel:UpdateTimerData(szName, ...)
+end
+
+function tbWnd:UpdateContentData(szName, szFubenType, ...)
+  local subPanel = self:GetSubPanel("UIHudLeftPanelFuben")
+  subPanel.szFubenType = szFubenType
+  subPanel:UpdateContentData(szName, ...)
+end
+
+function tbWnd:UpdateCustomFubenData(szName, szFubenType, ...)
+  local subPanel = self:GetSubPanel("UIHudLeftPanelFuben")
+  subPanel.szFubenType = szFubenType
+  subPanel:UpdateData(szName, ...)
+end
+
+function tbWnd:OnFubenFinish()
+  local subPanel = self:GetSubPanel("UIHudLeftPanelFuben")
+  subPanel.szFubenType = nil
+  self:SetPanelState(self.panelTaskTeam)
+end
+
+function tbWnd:UpdateLeftFubenBtnScore()
+  local subPanel = self:GetSubPanel("UIHudLeftPanelFuben")
+  subPanel:UpdateBtnScoreStatus()
+end
+
+function tbWnd:UpdateLeftFubenFuncBtnScore()
+  local subPanel = self:GetSubPanel("UIHudLeftPanelFuben")
+  subPanel:OnChangeFuncScoreButton()
+end
+
+function tbWnd:OnClose()
+  for key, panel in pairs(self.Panel) do
+    if panel.pPanel and panel.pPanel.OnClose then
+      panel.pPanel:OnClose()
+    end
+  end
+  self.nPanelState = 0
+end
+
+function tbWnd:UpdateGoldBoss()
+  if WuLinGaoShou.bCanEnterWuLinGaoShou then
+    RemoteServer.GoldBossReqUI()
+  else
+    local bInFuben, szFubenName = FubenUIController:IsInFubenMap(me)
+    if not bInFuben then
+      self:SetPanelState(self.panelTaskTeam)
+    end
+  end
+end
+
+function tbWnd:UpdateQinShiHuangLingStatus()
+  if QinShiHuangLing:IsInMap(me) then
+    RemoteServer.QinShiHuangLingReqUI()
+  else
+    local bInFuben, szFubenName = FubenUIController:IsInFubenMap(me)
+    if not bInFuben then
+      self:SetPanelState(self.panelTaskTeam)
+    end
+  end
+end
+
+function tbWnd:OnActivityStateChange(szKey, nState)
+  self:UpdateChatRoomUi()
+end
+
+function tbWnd:OnTeamUpdate(szType)
+  self:UpdateChatRoomUi()
+  self:SetButtonState()
+  self:SwitchToTeamUI(szType)
+end
+
+function tbWnd:SetButtonState()
+  if TeamMgr:HasTeam(me) then
+    self.pPanel:SetActive(tbControls.TeamButtonGroup, true)
+  else
+    self.pPanel:SetActive(tbControls.TeamButtonGroup, false)
+    return
+  end
+  if TeamMgr:IsCaptain(me.dwID) then
+    self.pPanel:SetActive(tbControls.btnRecruit, true)
+  else
+    self.pPanel:SetActive(tbControls.btnRecruit, false)
+  end
+end
+
+function tbWnd:SwitchToTeamUI(szType)
+  if szType and "new" == szType and self.nPanelState == self.panelTaskTeam and self.CurrentPanel ~= tbWnd.TP_TEAM then
+    for i = 1, #tbWnd.PanelInfo do
+      local ref = tbWnd.PanelInfo[i]
+      if tbWnd.TP_TEAM == ref.bit then
+        if self.pPanel:Toggle_GetChecked(ref.Toggle) == false then
+          self.pPanel:Toggle_SetChecked(ref.Toggle, true)
+        end
+        self.pPanel:SetActive(ref.Obj, true)
+        self:GetSubPanel(ref.Name):OnActivate()
+      else
+        self.pPanel:SetActive(ref.Obj, false)
+        self:GetSubPanel(ref.Name):OnDeactivate()
+      end
+    end
+  end
+end
+
+function tbWnd:OnOpenMic()
+  self.pPanel:SetActive(self.micOffBt, false)
+  self.pPanel:SetActive(self.micOnBt, true)
+  ChatMgr:SwitchMicState(true)
+end
+
+function tbWnd:CloseMic()
+  self.pPanel:SetActive(self.micOffBt, true)
+  self.pPanel:SetActive(self.micOnBt, false)
+  ChatMgr:SwitchMicState(false)
+end
+
+function tbWnd:UpdateRedPacketButton(bShow)
+  if bShow then
+    self.pPanel:SetActive(tbControls.RedBagRoot, true)
+    self.pPanel:SetActive(tbControls.btnCostRedBag, true)
+    self.pPanel:SetActive(tbControls.btnYuanBaoRedBag, true)
+  else
+    self.pPanel:SetActive(tbControls.RedBagRoot, false)
+  end
+end

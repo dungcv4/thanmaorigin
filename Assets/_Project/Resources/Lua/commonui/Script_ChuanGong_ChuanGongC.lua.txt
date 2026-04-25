@@ -1,0 +1,233 @@
+ChuanGong.tbAcceptResultEnum = {
+  SuccessRightAway = 1,
+  NeedTimeReturnSafeArea = 2,
+  Fail = 3
+}
+
+function ChuanGong:AcceptChuanGong(dwOtherId, nType, emRelationType, tbClickGoToCloseWindow, fnStartChuanGongAction)
+  if nType == self.tbType.Kin and self:GetRemainCount(me, emRelationType) < 1 then
+    return self.tbAcceptResultEnum.Fail, i18n.Get(self.tbRelationTypeToText.tbTimesLask[emRelationType])
+  end
+  local bRet, szMsg = me.CanTranOpt()
+  if not bRet then
+    return self.tbAcceptResultEnum.Fail, szMsg
+  end
+  if Map:IsFuben(me.nMapTemplateId) then
+    return self.tbAcceptResultEnum.Fail, i18n.Get(ChuanGong.tbText.szSceneCanNotChuanGong)
+  end
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  RemoteServer.RequestChuanGong(dwOtherId, nType, emRelationType)
+  return self.tbAcceptResultEnum.SuccessRightAway
+end
+
+function ChuanGong:RequestChuanGongC_Kin(dwOtherId, nHisLevel, nHisVipLevel, tbClickGoToCloseWindow, emRelation)
+  nHisVipLevel = nHisVipLevel or Vip.nMaxLevel
+  local nGetLevel = emRelation == self.tbRelationType.Recieve and me.nTotalLevel or nHisLevel
+  local nGetVipLevel = emRelation == self.tbRelationType.Recieve and me.GetVipLevel() or nHisVipLevel
+  local nSendLevel = emRelation == self.tbRelationType.Send and me.nTotalLevel or nHisLevel
+  local nSendVipLevel = emRelation == self.tbRelationType.Send and me.GetVipLevel() or nHisVipLevel
+  local bRet, szMsg = self:CheckTimeFrameAndLevelLimit(nGetLevel, nGetVipLevel, nSendLevel, nSendVipLevel)
+  if not bRet then
+    me.CenterMsg(szMsg)
+    return
+  end
+  if self:GetRemainCount(me, emRelation) < 1 then
+    me.CenterMsg(i18n.Get(self.tbRelationTypeToText.tbTimesLask[emRelation]))
+    return
+  end
+  bRet, szMsg = self:RequestCheckSceneAndTran()
+  if not bRet then
+    me.CenterMsg(szMsg)
+    return
+  end
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  if emRelation == self.tbRelationType.Recieve then
+    local nNow = GetTime()
+    if me.tbGetChuanGongRequestTime and me.tbGetChuanGongRequestTime[dwOtherId] and nNow < me.tbGetChuanGongRequestTime[dwOtherId] then
+      me.CenterMsg(i18n.Get(ChuanGong.tbText.szDoNotRepeatSend))
+      return
+    end
+    me.tbGetChuanGongRequestTime = me.tbGetChuanGongRequestTime or {}
+    me.tbGetChuanGongRequestTime[dwOtherId] = nNow + self.REQUEST_CD
+  end
+  RemoteServer.RequestChuanGong(dwOtherId, self.tbType.Kin, emRelation)
+end
+
+function ChuanGong:RequestChuanGong_MP(dwOtherId, emRelationType, tbClickGoToCloseWindow)
+  local bRet, szErr = self:RequestCheckSceneAndTran()
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  self.tbCacheClickGoToCloseWindow = tbClickGoToCloseWindow
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  RemoteServer.RequestChuanGong(dwOtherId, ChuanGong.tbType.MP, emRelationType)
+end
+
+function ChuanGong:ResponeCheckSafeAreaChuanGong_MP(dwOtherId, emRelationType)
+  local function fnEndWalk()
+    self:RequestChuanGong_MP(dwOtherId, emRelationType, self.tbCacheClickGoToCloseWindow)
+  end
+  
+  if me.nFightMode ~= Npc.FIGHT_MODE.emFightMode_None then
+    local szMsg = i18n.Get(self.tbRelationTypeToText.tbAskBackSafeArea[emRelationType])
+    GeneralProcess:JoinGamePlayFormMessageBox(szMsg, self.tbCacheClickGoToCloseWindow, fnEndWalk, nil, nil)
+    return
+  end
+end
+
+function ChuanGong:RequestCheckSceneAndTran()
+  if Map:IsFuben(me.nMapTemplateId) then
+    return false, i18n.Get(ChuanGong.tbText.szSceneCanNotChuanGong)
+  end
+  local bRet, szMsg = me.CanTranOpt()
+  if not bRet then
+    return false, szMsg
+  end
+  return true
+end
+
+function ChuanGong:OnRequestGetChuanGongSuccess(dwSendId, szSendName)
+  if me.tbGetChuanGongRequestTime and me.tbGetChuanGongRequestTime[dwSendId] then
+    me.tbGetChuanGongRequestTime[dwSendId] = nil
+  end
+  me.CenterMsg(i18n.Get(ChuanGong.tbText.szSendRecieveRequestWaitConfirm, szSendName))
+end
+
+function ChuanGong:IsChuanGong()
+  return 1 == me.bChuanGong
+end
+
+function ChuanGong:BeginChuanGong(dwGetId, dwSendId, nGetAdd, nSendAdd, nChuanGongMap, szSenderName, nType)
+  self.tbWaitForOpenUIParam = nil
+  self.bMeGet = not dwGetId
+  self.dwHimId = dwGetId or dwSendId
+  if dwSendId and me.tbGetChuanGongRequestTime then
+    me.tbGetChuanGongRequestTime[dwSendId] = nil
+  end
+  me.bChuanGong = 1
+  self.bChuanGong = 1
+  Operation:BlockTouch(true)
+  Ui:CloseWindow("UIKin")
+  Ui:CloseWindow("UITong")
+  Ui:CloseWindow("UISocial")
+  local szTips = i18n.Get(ChuanGong.tbText.szProgressBarInChuanGong)
+  if nType == ChuanGong.tbType.Sit then
+    szTips = i18n.Get(ChuanGong.tbText.szProgressBarInSit)
+  end
+  if me.nMapTemplateId == nChuanGongMap then
+    Ui.ProgressBar:OpenAutoProgressBar(szTips, self.TIME_DELTA * self.TIMES * 1000, self.OnProgressFinish, {self, nType})
+  else
+    LogErr("BeginChuanGong", me.nMapTemplateId, nChuanGongMap)
+  end
+end
+
+function ChuanGong:OnLogin(bIsReconnect)
+  Ui.ProgressBar:Close()
+  if self.bChuanGong then
+    me.bChuanGong = nil
+    self.bChuanGong = nil
+    Operation:BlockTouch(false)
+  end
+end
+
+function ChuanGong:OnProgressFinish(nType)
+  Ui.ProgressBar:Close()
+  if not Login.bEnterGame then
+    return
+  end
+  if self.dwHimId then
+    if self.bMeGet then
+      if not FriendShip:IsFriend(me.dwID, self.dwHimId) then
+        me.MsgBox(i18n.Get(ChuanGong.tbText.szAskAddFriendAfterFinish, self.szSenderName or i18n.Get(ChuanGong.tbText.szOtherPerson)), {
+          {
+            i18n.Get(ChuanGong.tbText.szApply),
+            function()
+              RemoteServer.RequestAddFriend(self.dwHimId)
+            end
+          },
+          {
+            i18n.szCancel
+          }
+        })
+      end
+      me.CenterMsg(i18n.Get(ChuanGong.tbText.szShowGetALotExp), true)
+      if nType == self.tbType.Kin and ChuanGong:GetRemainCount(me, ChuanGong.tbRelationType.Recieve) <= 0 then
+        me.SendBlackBoardMsg(i18n.Get(ChuanGong.tbText.szShowCanNotRecieveToday), true)
+      end
+    elseif nType == self.tbType.Kin then
+      me.CenterMsg(i18n.Get(ChuanGong.tbText.szShowGetALotExp), true)
+      if ChuanGong:GetRemainCount(me, ChuanGong.tbRelationType.Send) > 0 then
+        me.SendBlackBoardMsg(i18n.Get(ChuanGong.tbText.szNeedSendAgainAfter30Min), true)
+      else
+        me.SendBlackBoardMsg(i18n.Get(ChuanGong.tbText.szShowCanNotSendToday), true)
+      end
+    elseif nType == self.tbType.MP then
+      me.CenterMsg(i18n.Get(ChuanGong.tbText.szPrenticeGetALotExp), true)
+    end
+  else
+    me.CenterMsg(i18n.Get(ChuanGong.tbText.szShowGetALotExp), true)
+  end
+end
+
+function ChuanGong:SendOne(nRemainTimes)
+  local fnOnFinish
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHUAN_GONG_SEND_ONE, nRemainTimes)
+  if nRemainTimes <= 0 then
+    me.bChuanGong = nil
+    self.bChuanGong = nil
+    Operation:BlockTouch(false)
+  end
+end
+
+function ChuanGong:Over()
+  me.bChuanGong = nil
+  self.bChuanGong = nil
+  Operation:BlockTouch(false)
+  Ui.ProgressBar:Close()
+end
+
+function ChuanGong:OnCalendarAction()
+  if not Kin:HasKin() then
+    me.CenterMsg(i18n.Get(ChuanGong.tbText.szNeedJoinKinFirst))
+    return
+  end
+  if Tong:HasTong() then
+    Ui:OpenWindow("UITong", "MEMBERLIST")
+  else
+    Ui:OpenWindow("UIKin", "MEMBERLIST")
+  end
+end
+
+function ChuanGong:StatusCanChuanGong_MP(tbData, emRelation, nTargetLevel, nDiffLevel)
+  local tbMPData, bMaster
+  local nId = tbData.nMemberId or tbData.dwID
+  if emRelation == self.tbRelationType.Recieve then
+    tbMPData = MasterPrentice:GetMPData(nId, me.dwID)
+    bMaster = false
+  elseif emRelation == self.tbRelationType.Send then
+    tbMPData = MasterPrentice:GetMPData(me.dwID, nId)
+    bMaster = true
+  end
+  if not tbMPData or tbMPData.status == MasterPrentice.Def.STATUS_AFTER_APPENTICE then
+    return false
+  end
+  if not tbMPData.nGMAddChuangongCount and tbMPData.nLastChuangongDate >= Lib:GetLocalDay(GetTime() - 14400) then
+    return false
+  end
+  if not nTargetLevel or not nDiffLevel then
+    return false
+  end
+  if bMaster and nDiffLevel > me.nTotalLevel - nTargetLevel then
+    return false
+  elseif not bMaster and nDiffLevel > nTargetLevel - me.nTotalLevel then
+    return false
+  end
+  return true
+end

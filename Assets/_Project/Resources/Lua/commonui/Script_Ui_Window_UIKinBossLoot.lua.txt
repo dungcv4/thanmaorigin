@@ -1,0 +1,145 @@
+local tbWnd = Ui:CreateWindow("UIKinBossLoot")
+
+function tbWnd:NotifyEvents()
+  return {}
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  List = "node/imgBG/Content/List",
+  Template = "node/imgBG/Content/List/Content/Template",
+  txtCountdownValue = "node/imgBG/Content/txtCountdown/txtCountdownValue",
+  txtMyScoreValue = "node/imgBG/Content/txtMyScore/txtMyScoreValue",
+  NotInfo = "node/imgBG/Content/NotInfo"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+tbWnd.tbOnToggleClick = {}
+
+function tbWnd:OnCreate()
+  self.tbPlunderScroll = Ui:NewScrollView(self, self.Template)
+end
+
+function tbWnd:OnOpen()
+  self.tbTimer = {}
+  self.tbPlunderScroll:Clear()
+  self.tbPlunderInfo = {}
+  self.pPanel:Label_SetText(self.txtMyScoreValue, "")
+  self.pPanel:Label_SetText(self.txtCountdownValue, "")
+  self:ReqPlunderInfo()
+  self.nRankTimer = Timer:Register(Env.GAME_FPS * 3, self.ReqPlunderInfo, self)
+end
+
+function tbWnd:OnClose()
+  if self.nRankTimer then
+    Timer:Close(self.nRankTimer)
+    self.nRankTimer = nil
+  end
+  if nil ~= self.nPlunderTimer then
+    Timer:Close(self.nPlunderTimer)
+    self.nPlunderTimer = nil
+  end
+  self:RemoveTimer()
+end
+
+function tbWnd:ReqPlunderInfo()
+  RemoteServer.OnTongChallengeRequest("OnPlunderPlayerInfoReq")
+  return true
+end
+
+function tbWnd:RemoveTimer()
+  for i, v in pairs(self.tbTimer) do
+    Timer:Close(v)
+    self.tbTimer[i] = nil
+  end
+end
+
+function tbWnd:UpdateSV(tbPlunderInfo)
+  tbPlunderInfo = tbPlunderInfo or {}
+  if #tbPlunderInfo > 1 then
+    local function fnCmp(a, b)
+      return b.nRank > a.nRank
+    end
+    
+    table.sort(tbPlunderInfo, fnCmp)
+  end
+  self.tbPlunderScroll:Reset()
+  local nCurTime = GetTime()
+  self:RemoveTimer()
+  for i, tbData in pairs(tbPlunderInfo) do
+    self.tbPlunderScroll:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      if tbData.nBePlunderTime then
+        tbElement.nLeftTime = tbData.nBePlunderTime - nCurTime
+      end
+      pPanel:Label_SetText("txtRank", tbData.nRank)
+      local szIcon = PlayerPortrait:GetIcon(tbData.nPortrait)
+      pPanel:Sprite_SetSprite("PortraitObj/Portrait/Image", szIcon)
+      PlayerPortraitFrame:SetPortraitFrame(tbElement.pPanel, "PortraitObj/PortraitFrame", tbData.nPortraitFrame)
+      pPanel:Label_SetText("PortraitObj/Level/Text", tbData.nLevel)
+      pPanel:Sprite_SetSprite("PortraitObj/imgFactionIcon", Faction:GetIcon(tbData.nFaction))
+      pPanel:Label_SetText("txtName", tbData.szName)
+      pPanel:Label_SetText("txtKin", tbData.szTongName)
+      pPanel:Label_SetText("txtScore", tbData.nScore)
+      if tbData.nBePlunderTime and tbData.nBePlunderTime > nCurTime then
+        local szDesc = Lib:TimeDesc(tbElement.nLeftTime)
+        pPanel:Label_SetText("btnRob/Text", szDesc)
+        self.tbTimer[i] = Timer:Register(Env.GAME_FPS, function()
+          tbElement.nLeftTime = tbElement.nLeftTime - 1
+          if tbElement.nLeftTime <= 0 then
+            pPanel:Label_SetText("btnRob/Text", i18n.EasyGet("\230\138\162\229\136\134"))
+            return false
+          end
+          local szDesc = Lib:TimeDesc(tbElement.nLeftTime)
+          pPanel:Label_SetText("btnRob/Text", szDesc)
+          return true
+        end)
+      else
+        pPanel:Label_SetText("btnRob/Text", i18n.EasyGet("\230\138\162\229\136\134"))
+      end
+      Ui:Button_BindEvent(pPanel, "btnRob", function()
+        if not tbData.nBePlunderTime or tbData.nBePlunderTime <= nCurTime then
+          RemoteServer.OnTongChallengeRequest("OnPlunderReq", tbData.dwID)
+          self:Close()
+        else
+          me.CenterMsg(i18n.Get(TongChallenge.ChallengeCfg.szBePlunderLimitTip))
+        end
+      end)
+    end)
+  end
+  if 0 == #tbPlunderInfo then
+    self.pPanel:SetActive(self.NotInfo, true)
+    self.pPanel:SetActive(self.List, false)
+  else
+    self.pPanel:SetActive(self.NotInfo, false)
+    self.pPanel:SetActive(self.List, true)
+  end
+end
+
+function tbWnd:UpdatePlunderInfo(nScore, nPlunderCD, tbPlunderInfo)
+  self.nPlunderCD = nPlunderCD
+  self.pPanel:Label_SetText(self.txtMyScoreValue, nScore)
+  self:UpdateSV(tbPlunderInfo)
+  if nPlunderCD > GetTime() then
+    if not self.nPlunderTimer then
+      self.nPlunderTimer = Timer:Register(Env.GAME_FPS, self.UpdatePlunderCD, self)
+    end
+  else
+    self.pPanel:Label_SetText(self.txtCountdownValue, 0)
+  end
+end
+
+function tbWnd:UpdatePlunderCD()
+  local nNowTime = GetTime()
+  local nLeftTime = self.nPlunderCD - nNowTime
+  if nLeftTime < 0 then
+    Timer:Close(self.nPlunderTimer)
+    self.nPlunderTimer = nil
+    return
+  end
+  self.pPanel:Label_SetText(self.txtCountdownValue, Lib:TimeDesc(nLeftTime))
+  return true
+end

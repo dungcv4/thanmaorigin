@@ -1,0 +1,220 @@
+Require("Script/Fuben/FubenUIController.lua")
+Require("CommonScript/Tong/TongChallengeCfg.lua")
+Require("Script/Map/Map.lua")
+TongChallenge.bIsCanPlunder = false
+TongChallenge.nActivityStatus = TongChallenge.nActivityStatus or TongChallenge.tbActivityStatus.nClose
+TongChallenge.nBossStatus = TongChallenge.tbBossStatus.nReady
+TongChallenge.nRemainTime = 0
+TongChallenge.nMultiple = 1
+
+function TongChallenge:IsChanllengeRunning()
+  if self.nActivityStatus == self.tbActivityStatus.nRunning then
+    return true
+  end
+  return false
+end
+
+function TongChallenge:IsActivityOpen()
+  if self.nActivityStatus == self.tbActivityStatus.nEnding or self.nActivityStatus == self.tbActivityStatus.nClose then
+    return false
+  end
+  if not self.bInChallengeArea then
+    return false
+  end
+  return true
+end
+
+function TongChallenge:IsCanPlunder()
+  if not self:IsActivityOpen() then
+    return false
+  end
+  return self.bIsCanPlunder
+end
+
+function TongChallenge:SCIsInChallengeArea(bInChallengeArea)
+  self.bInChallengeArea = bInChallengeArea
+  if not self.bInChallengeArea and self.nActivityStatus ~= self.tbActivityStatus.nClose then
+    FubenUIController:CloseDefaultFubenUI()
+    EventNotify.OnNotify(EventNotify.emNOTIFY_ONSHOW_ACTIVITY_REMAINTIME, false)
+  end
+  if self.bInChallengeArea and (self.nActivityStatus == self.tbActivityStatus.nReady or self.nActivityStatus == self.tbActivityStatus.nRunning) then
+    FubenUIController:OpenDefaultFuBenUI()
+    EventNotify.OnNotify(EventNotify.emNOTIFY_ONSHOW_ACTIVITY_REMAINTIME, true)
+  end
+  if Ui:WindowVisible("UIHudLeftFrameExt") then
+    Ui:GetWindow("UIHudLeftFrameExt"):UpdateLeftFubenBtnScore()
+  end
+  self:SetPlunderStatus(self:IsCanPlunder())
+  if Ui:WindowVisible("UIKinBossLoot") then
+    Ui:GetWindow("UIKinBossLoot"):Close()
+  end
+end
+
+function TongChallenge:SCActivityStatus(bStatus)
+  self.nActivityStatus = bStatus
+  if self.nActivityStatus == self.tbActivityStatus.nClose then
+    if self.bInChallengeArea then
+      FubenUIController:CloseDefaultFubenUI()
+      EventNotify.OnNotify(EventNotify.emNOTIFY_ONSHOW_ACTIVITY_REMAINTIME, false)
+    end
+  elseif self.bInChallengeArea then
+    if Ui:WindowVisible("UIHudLeftFrameExt") then
+      local tbWnd = Ui:GetWindow("UIHudLeftFrameExt")
+      if tbWnd.nPanelState and tbWnd.nPanelState ~= tbWnd.TP_FUBEN_TEAM then
+        FubenUIController:OpenDefaultFuBenUI()
+      end
+    end
+    EventNotify.OnNotify(EventNotify.emNOTIFY_ONSHOW_ACTIVITY_REMAINTIME, true)
+  end
+  if Ui:WindowVisible("UIHudLeftFrameExt") then
+    Ui:GetWindow("UIHudLeftFrameExt"):UpdateLeftFubenBtnScore()
+  end
+  if self.nActivityStatus == self.tbActivityStatus.nEnding then
+    Ui:CloseWindow("UIKinBossLoot")
+    EventNotify.OnNotify(EventNotify.emNOTIFY_TONGCHALLENGE_END)
+  elseif self.nActivityStatus == self.tbActivityStatus.nClose then
+    Ui:CloseWindow("UIHudOutputInfo")
+  end
+end
+
+function TongChallenge:UpdateBossStatus(status)
+  self.nBossStatus = status
+  if Ui:WindowVisible("UIHudLeftFrameExt") then
+    Ui:GetWindow("UIHudLeftFrameExt"):UpdateLeftFubenBtnScore()
+  end
+end
+
+function TongChallenge:SetPlunderStatus(status)
+  self.bIsCanPlunder = status
+  if Ui:WindowVisible("UIHudRightCenter") then
+    Ui:GetWindow("UIHudRightCenter"):SetFubenBtnImageAndText(self:GetFubenBtnAImagePathAndText())
+    Ui:GetWindow("UIHudRightCenter"):SetFubenBtnShowStatus(self:IsCanPlunder())
+  end
+end
+
+function TongChallenge:GetFubenBtnAImagePathAndText()
+  return "UI/atlas/hud/btn_plunder.png", i18n.EasyGet("\230\138\162\229\136\134")
+end
+
+function TongChallenge:ShowKinBossLoot()
+  if TongChallenge:IsShowPlunderBtn() then
+    if TongChallenge.nRemainTime > 0 then
+      me.CenterMsg(i18n.EasyGet("\230\138\162\229\136\134\229\134\183\229\141\180\230\151\182\233\151\180\230\156\170\229\136\176"))
+      return
+    end
+    Ui:OpenWindow("UIKinBossLoot")
+  end
+end
+
+function TongChallenge:IsShowPlunderBtn()
+  return self:IsCanPlunder()
+end
+
+function TongChallenge:IsInTongChallengePlaying()
+  if not self.bInChallengeArea then
+    return false
+  end
+  if self.nActivityStatus == self.tbActivityStatus.nClose then
+    return false
+  end
+  if self.nBossStatus == self.tbBossStatus.nReady then
+    return false
+  end
+  return true
+end
+
+function TongChallenge:IsShowBtnScore()
+  if not self:IsInTongChallengePlaying() then
+    return false
+  end
+  return true, self.ReqKCRankInfo
+end
+
+function TongChallenge.ReqKCRankInfo(nRankType)
+  RemoteServer.OnTongChallengeRequest("OnRankInfoReq", nRankType)
+end
+
+function TongChallenge:OnJoinTongChallange()
+  if self.bInChallengeArea then
+    return
+  end
+  if AFK:IsLeadFightRunning() then
+    AFK:Stop()
+  end
+  local nIndex = math.random(1, #self.tbBirthPos)
+  AutoPath:GotoAndCallEx(Tong.Def.nMainMapTemplateId, self.tbBirthPos[nIndex].nPosX, self.tbBirthPos[nIndex].nPosY, function()
+    self:StartAutoFight()
+  end)
+end
+
+function TongChallenge:UpdateRankData(nRankType, tbRankInfo)
+  if Ui:WindowVisible("UIHudOutputInfo") then
+    Ui:GetWindow("UIHudOutputInfo"):UpdateRank(nRankType, tbRankInfo)
+  end
+  if Ui:WindowVisible("UITongBossRank") then
+    Ui:GetWindow("UITongBossRank"):UpdateRank(nRankType, tbRankInfo)
+  end
+end
+
+function TongChallenge:UpdatePlunderInfo(nScore, nPlunderTime, tbBePlunderInfo)
+  if Ui:WindowVisible("UIKinBossLoot") then
+    Ui:GetWindow("UIKinBossLoot"):UpdatePlunderInfo(nScore, nPlunderTime, tbBePlunderInfo)
+  end
+end
+
+function TongChallenge:SCPlunderCD(nPlunderTime)
+  self.nRemainTime = nPlunderTime - GetTime()
+  if self.nRemainTime <= 0 then
+    if Ui:WindowVisible("UIHudRightCenter") then
+      Ui:GetWindow("UIHudRightCenter"):SetFubenBtnText(i18n.EasyGet("\230\138\162\229\136\134"))
+    end
+    return
+  end
+  if self.nPlunderTimer then
+    Timer:Close(self.nPlunderTimer)
+  end
+  self.nPlunderTimer = Timer:Register(Env.GAME_FPS, function()
+    self.nRemainTime = self.nRemainTime - 1
+    if self.nRemainTime <= 0 then
+      if Ui:WindowVisible("UIHudRightCenter") then
+        Ui:GetWindow("UIHudRightCenter"):SetFubenBtnText(i18n.EasyGet("\230\138\162\229\136\134"))
+      end
+      return false
+    else
+      local szDesc = Lib:TimeDesc(self.nRemainTime)
+      if Ui:WindowVisible("UIHudRightCenter") then
+        Ui:GetWindow("UIHudRightCenter"):SetFubenBtnText(szDesc)
+      end
+      return true
+    end
+  end)
+end
+
+function TongChallenge:OpenBattleResultWnd(bResult, nChangeScore)
+  Ui:OpenWindow("UIBattleResult", bResult, nChangeScore)
+end
+
+function TongChallenge:OpenKinBossLootScoreWnd()
+  Ui:OpenWindow("UIKinBossLootScore", self.nMultiple)
+end
+
+function TongChallenge:SetMultiple(nMultiple)
+  self.nMultiple = nMultiple
+end
+
+function TongChallenge:StartAutoFight()
+  if not AFK:IsRunning() then
+    AFK:Start()
+  end
+end
+
+function TongChallenge:ClearCache()
+  self.bIsCanPlunder = false
+  self.nActivityStatus = self.tbActivityStatus.nEnding
+  self.nBossStatus = self.tbBossStatus.nReady
+  self.bInChallengeArea = false
+  self.nMultiple = 1
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, TongChallenge)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, TongChallenge.ClearCache, TongChallenge)

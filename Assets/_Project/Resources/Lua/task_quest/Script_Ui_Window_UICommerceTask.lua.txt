@@ -1,0 +1,313 @@
+local tbWnd = Ui:CreateWindow("UICommerceTask")
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  Progress = "node/imgBG/Content/PanelProgress/PanelProgress/ProgressBg1/Progress",
+  ProgressTrail = "node/imgBG/Content/PanelProgress/PanelProgress/ProgressBg1/Progress/Trail",
+  txtStepValue = "node/imgBG/Content/PanelProgress/txtStep/txtStepValue",
+  imgBoxClose = "node/imgBG/Content/PanelProgress/imgBoxClose/imgBox",
+  imgBoxOpen = "node/imgBG/Content/PanelProgress/imgBoxOpen",
+  Effect_activate = "node/imgBG/Content/PanelProgress/imgBoxClose/Effect_activate",
+  Effect_activate01 = "node/imgBG/Content/PanelProgress/Effect_activate01",
+  Progress_PutInEffcet = "node/imgBG/Content/PanelProgress/Progress_PutInEffcet",
+  txtDesc = "node/imgBG/Content/PanelTaskDesc/ScrollDesc/Viewport/Content/txtDesc",
+  wndTaskDetail = "node/imgBG/Content/PanelTask/TaskDetail",
+  StepAwardTemplate = "node/imgBG/Content/PanelTask/TaskDetail/Award/ScrollView/Viewport/Content/AwardTemplate",
+  txtTarget = "node/imgBG/Content/PanelTask/TaskDetail/Target/txtTarget",
+  UIItemGrid = "node/imgBG/Content/PanelTask/TaskDetail/Target/DeliverItem/item/UIItemGrid",
+  btnPlus = "node/imgBG/Content/PanelTask/TaskDetail/Target/DeliverItem/item/btnPlus",
+  btnReset = "node/imgBG/Content/PanelTask/TaskDetail/Target/btnReset",
+  txtReset = "node/imgBG/Content/PanelTask/TaskDetail/Target/Reset/txtResetValue",
+  btnFinish = "node/imgBG/Content/PanelTask/TaskDetail/btnFinish",
+  wndEmpty = "node/imgBG/Content/PanelTask/Empty",
+  wndJumpTo = "node/wndJumpTo",
+  JumpToEmpty4Raycast = "node/wndJumpTo/Empty4Raycast",
+  WayTemplate = "node/wndJumpTo/imgBG/List/Viewport/Content/Template",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  wndRoundAward = "node/wndAwardPreview",
+  RoundAwardTemplate = "node/wndAwardPreview/Award/AwardList/Viewport/Content/ItemTemplate",
+  RoundAwardEmpty4Raycast = "node/wndAwardPreview/Empty4Raycast"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self.pPanel:SetActive(self.wndJumpTo, false)
+    self.tbWayScrollView:Clear()
+    self:Close()
+  end,
+  JumpToEmpty4Raycast = function(self)
+    self.pPanel:SetActive(self.wndJumpTo, false)
+    self.tbWayScrollView:Clear()
+  end,
+  RoundAwardEmpty4Raycast = function(self)
+    self.pPanel:SetActive(self.wndRoundAward, false)
+  end,
+  btnPlus = function(self)
+    Ui:OpenWindow("UICommerceTaskSubmit")
+  end,
+  btnFinish = function(self)
+    local nTaskId = CommerceTask:GetCurTaskId()
+    local tbInfo = CommerceTask:GetTaskCfg(nTaskId)
+    if not tbInfo then
+      return
+    end
+    if tbInfo.nItemTemplateId > 0 then
+      if me.GetItemCountInBags(tbInfo.nItemTemplateId) >= tbInfo.nCount then
+        self.pPanel:SetActive(self.Progress_PutInEffcet, false)
+        self.pPanel:SetActive(self.Progress_PutInEffcet, true)
+        return CommerceTask:ApplySubmitTask()
+      end
+    else
+      local nItemId = self.nItemId
+      if nItemId then
+        return CommerceTask:ApplySubmitItem(nItemId)
+      end
+    end
+    self.tbWayScrollView:Clear()
+    for i = 1, #tbInfo.tbWay do
+      local tbWayInfo = CommerceTask.CFG_WAY[tbInfo.tbWay[i]]
+      self.tbWayScrollView:SetElement(i, function(tbElement)
+        tbElement.pPanel:Label_SetText("txtName", i18n.Parse(tbWayInfo.szWayName))
+        tbElement.pPanel:Label_SetText("txtDesc", i18n.Parse(tbWayInfo.szWayDesc))
+        Ui:Button_BindEvent(tbElement.pPanel, "", function()
+          tbWayInfo.fnOnTrack(tbInfo.nItemTemplateId)
+          self.pPanel:SetActive(self.wndJumpTo, false)
+          self.tbWayScrollView:Clear()
+          self:Close()
+        end)
+      end)
+    end
+    self.pPanel:SetActive(self.wndJumpTo, true)
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("CommerceTaskHelp")
+  end,
+  btnReset = function(self)
+    self:ResetCurMission()
+  end
+}
+tbWnd.nStepAwardViewItemCountPerLine = 6
+
+function tbWnd:OnCreate()
+  self.tbStepAwardScrollView = Ui:NewItemGridScrollView(self, self.StepAwardTemplate, self.nStepAwardViewItemCountPerLine, 1)
+  self.tbStepAwardScrollView:Reset()
+  self.tbNeedItem = Ui:NewExistItemGrid(self, self.UIItemGrid)
+  self.tbWayScrollView = Ui:NewScrollView(self, self.WayTemplate)
+  self.tbRoundAwardScrollView = Ui:NewItemGridScrollView(self, self.RoundAwardTemplate, 1, 1)
+  self.tbRoundAwardScrollView:Reset()
+end
+
+function tbWnd:OnOpen()
+  self.nItemId = nil
+  self:OnUpdateCommerceTask(true)
+  self.pPanel:SetActive(self.wndRoundAward, false)
+  self.pPanel:SetActive(self.wndJumpTo, false)
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:OnUpdateCommerceTask(bIsWindowOpenCall)
+  self.nItemId = nil
+  local nFinishCount = CommerceTask:GetFinishCount()
+  local nTaskId = CommerceTask:GetCurTaskId()
+  local bIsFinishRound = CommerceTask:IsFinishRound()
+  local bCanGetAward = CommerceTask:CanGetWholeAward()
+  self.pPanel:Label_SetText(self.txtStepValue, string.format("%d/%d", nFinishCount, CommerceTask.ROUND_TASKNUM))
+  if bIsWindowOpenCall then
+    self.pPanel:SetActive(self.Progress_PutInEffcet, false)
+  end
+  local nStartRate
+  if bIsWindowOpenCall or nil == self.nLastRate then
+    nStartRate = 0
+  else
+    nStartRate = self.nLastRate
+  end
+  local nNewRate = nFinishCount / CommerceTask.ROUND_TASKNUM
+  nStartRate = math.min(nStartRate, nNewRate)
+  local bShowTrailAtStart
+  if nNewRate < 1 then
+    bShowTrailAtStart = true
+  elseif bIsWindowOpenCall or nStartRate >= 1 then
+    bShowTrailAtStart = false
+  else
+    bShowTrailAtStart = true
+  end
+  self:SetProgressEffect(nNewRate, nStartRate, bShowTrailAtStart)
+  self.nLastRate = nNewRate
+  local bBoxNeedOpen = bIsFinishRound and not bCanGetAward
+  self.pPanel:SetActive(self.imgBoxOpen, bBoxNeedOpen)
+  self.pPanel:SetActive(self.imgBoxClose, not bBoxNeedOpen)
+  if bCanGetAward then
+    Ui:Button_BindEvent(self.pPanel, self.imgBoxClose, CommerceTask.C2SGetRoundAward, CommerceTask)
+    self.pPanel:Animator_SetEnable(self.imgBoxClose, true)
+  else
+    Ui:Button_BindEvent(self.pPanel, self.imgBoxClose, self.OpenAwardPreviewPanel, self)
+    self.pPanel:Animator_SetEnable(self.imgBoxClose, false)
+  end
+  if not bBoxNeedOpen then
+    self.pPanel:SetActive(self.Effect_activate, bCanGetAward)
+    self.pPanel:SetActive(self.Effect_activate01, bCanGetAward)
+  end
+  self.pPanel:Label_SetText(self.txtDesc, i18n.Get(CommerceTask.Msg.TaskDesc))
+  self.pPanel:SetActive(self.wndEmpty, bIsFinishRound)
+  self.pPanel:SetActive(self.wndTaskDetail, not bIsFinishRound)
+  if not bIsFinishRound then
+    self.pPanel:SetActive(self.wndTaskDetail, true)
+    self.pPanel:Label_SetText(self.txtTarget, CommerceTask:GetTarget())
+    local tbAwardList = CommerceTask:GetAward()
+    self.tbStepAwardScrollView:UpdateGenericItem(tbAwardList, true)
+    local tbInfo = CommerceTask:GetTaskCfg(nTaskId)
+    if not tbInfo then
+      return
+    end
+    self.tbNeedItem:Clear()
+    local nOwnCount = 0
+    if tbInfo.nItemTemplateId > 0 then
+      nOwnCount = me.GetItemCountInBags(tbInfo.nItemTemplateId)
+      if nOwnCount > tbInfo.nCount then
+        nOwnCount = tbInfo.nCount
+      end
+      self.tbNeedItem:SetItemByTemplate(tbInfo.nItemTemplateId)
+      self.tbNeedItem:SetRBCornerText(string.format("%d/%d", nOwnCount, tbInfo.nCount))
+      self.tbNeedItem:SetClickEnable(true)
+      self.pPanel:SetActive(self.btnPlus, false)
+    else
+      local nItemId = self.nItemId
+      if nItemId then
+        nOwnCount = 1
+        self.tbNeedItem:SetItem(self.nItemId)
+        self.tbNeedItem:SetClickEnable(true)
+        self.tbNeedItem:SetRBCornerText(string.format("%d/%d", 1, tbInfo.nCount))
+        self.pPanel:SetActive(self.btnPlus, false)
+      else
+        nOwnCount = 0
+        self.tbNeedItem:ItemIcon_SetSpriteByID(tbInfo.nIconId)
+        self.tbNeedItem:SetClickEnable(false)
+        self.tbNeedItem:SetRBCornerText(string.format("%d/%d", 0, tbInfo.nCount))
+        self.pPanel:SetActive(self.btnPlus, true)
+      end
+    end
+    if nOwnCount >= tbInfo.nCount then
+      self.pPanel:Button_SetText(self.btnFinish, i18n.Get(CommerceTask.Msg.BtnSubmit), "Text")
+    else
+      self.pPanel:Button_SetText(self.btnFinish, i18n.Get(CommerceTask.Msg.BtnGoto), "Text")
+    end
+  end
+  local nAlreadyResetCount = DegreeCtrl:GetDegree(me, "CommerceTaskReplace")
+  self.pPanel:Label_SetText(self.txtReset, string.format("%d/%d", nAlreadyResetCount, CommerceTask.REPLACE_COUNT_PER_WEEK))
+end
+
+function tbWnd:SetProgressEffect(nRate, nAnimationStartRate, bShowTrailAtStart)
+  local nDuraTime = 1
+  self.pPanel:Sprite_SetFillAmount(self.Progress, nAnimationStartRate, nRate, nDuraTime, true)
+  self.pPanel:SetActive(self.ProgressTrail, bShowTrailAtStart)
+end
+
+function tbWnd:OnSyncItemEvent(dwItemId, ...)
+  local nTaskId = CommerceTask:GetCurTaskId()
+  if nTaskId <= 0 then
+    return
+  end
+  local tbInfo = CommerceTask:GetTaskCfg(nTaskId)
+  if not tbInfo then
+    return
+  end
+  local pItem = KItem.GetItemObj(dwItemId)
+  if not pItem then
+    return
+  end
+  if pItem.dwTemplateId ~= tbInfo.nItemTemplateId then
+    return
+  end
+  local nOwnCount = me.GetItemCountInBags(tbInfo.nItemTemplateId)
+  self.tbNeedItem:SetItemByTemplate(tbInfo.nItemTemplateId)
+  self.tbNeedItem:SetRBCornerText(string.format("%d/%d", nOwnCount, tbInfo.nCount))
+  self.tbNeedItem:SetClickEnable(true)
+  self.pPanel:SetActive(self.btnPlus, false)
+  self.pPanel:Label_SetText(self.txtTarget, i18n.Get(CommerceTask.Msg.TaskTarget, tbInfo.nCount, i18n.Parse(tbInfo.szItemName), nOwnCount, tbInfo.nCount))
+  if nOwnCount >= tbInfo.nCount then
+    self.pPanel:Button_SetText(self.btnFinish, i18n.Get(CommerceTask.Msg.BtnSubmit), "Text")
+  else
+    self.pPanel:Button_SetText(self.btnFinish, i18n.Get(CommerceTask.Msg.BtnGoto), "Text")
+  end
+end
+
+function tbWnd:OnSelectItem(nItemId)
+  local nTaskId = CommerceTask:GetCurTaskId()
+  local tbInfo = CommerceTask:GetTaskCfg(nTaskId)
+  if not tbInfo then
+    return
+  end
+  if tbInfo.nItemTemplateId > 0 then
+    return
+  end
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  if pItem.nItemType ~= tbInfo.nItemType then
+    return
+  end
+  if pItem.nLevel ~= tbInfo.nItemLevel then
+    return
+  end
+  self.nItemId = nItemId
+  self.tbNeedItem:SetItem(self.nItemId)
+  self.tbNeedItem:SetClickEnable(true)
+  self.tbNeedItem:SetRBCornerText(string.format("%d/%d", 1, tbInfo.nCount))
+  self.pPanel:SetActive(self.btnPlus, false)
+  self.pPanel:Label_SetText(self.txtTarget, i18n.Get(CommerceTask.Msg.TaskTarget, tbInfo.nCount, i18n.Parse(tbInfo.szItemName), 1, tbInfo.nCount))
+  if tbInfo.nCount <= 1 then
+    self.pPanel:Button_SetText(self.btnFinish, i18n.Get(CommerceTask.Msg.BtnSubmit), "Text")
+  else
+    self.pPanel:Button_SetText(self.btnFinish, i18n.Get(CommerceTask.Msg.BtnGoto), "Text")
+  end
+end
+
+function tbWnd:OpenAwardPreviewPanel()
+  self.tbRoundAwardScrollView:Clean()
+  local tbShowRoundAward = CommerceTask:GetRoundShowAward()
+  self.tbRoundAwardScrollView:UpdateGenericItem(tbShowRoundAward, true)
+  self.tbRoundAwardScrollView:ResetParent()
+  self.pPanel:SetActive(self.wndRoundAward, true)
+end
+
+function tbWnd:ResetCurMission()
+  local function func()
+    CommerceTask:C2SBuyRelpaceTaskCount()
+  end
+  
+  local nCurCount = CommerceTask:GetReplaceRemainder()
+  if nCurCount <= 0 then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\233\135\141\231\189\174\228\187\187\229\138\161\230\172\161\230\149\176\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\232\138\177\232\180\185{0}\229\133\131\229\174\157\232\180\173\228\185\1761\230\172\161\229\185\182\231\171\139\229\141\179\233\135\141\231\189\174\239\188\159", CommerceTask.REPLACE_COUNT_COST), {
+      {func},
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  else
+    CommerceTask:C2SReplaceTask()
+  end
+end
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_UPDATE_COMMERCETASK,
+      self.OnUpdateCommerceTask,
+      false
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnSyncItemEvent
+    },
+    {
+      EventNotify.emNOTIFY_DEL_ITEM,
+      self.OnSyncItemEvent
+    },
+    {
+      EventNotify.emNOTIFY_COMMERCETASK_SELECT_ITEM,
+      self.OnSelectItem
+    }
+  }
+end

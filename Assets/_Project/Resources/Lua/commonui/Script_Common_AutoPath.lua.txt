@@ -1,0 +1,418 @@
+AutoPath.tbTargetPos = nil
+AutoPath.tbParamExt = nil
+AutoPath.nMinDisSquare = Npc.MIN_DISTANCE * Npc.MIN_DISTANCE * 2
+AutoPath.PathReason = {
+  emNone = 1,
+  emAFK_AutoFightChaseTarget = 2,
+  emAFK_AutoFightGoToFightPos = 3,
+  emMiniMap_GoToTargetPos = 4,
+  emAFK_AutoFollowFightFollowLeader = 5,
+  emAFK_AutoFightPatrol = 7,
+  emFuben_GoToTargetPos = 8
+}
+
+function AutoPath:GetPathReason()
+  return self.nPathReason
+end
+
+function AutoPath:GetLastPathReason()
+  return self.nLastPathReason
+end
+
+function AutoPath:SetLastPathReason(nPathReason)
+  self.nLastPathReason = nPathReason
+end
+
+function AutoPath:InitGoAndDoSomethingDataAndfnAfterWalk()
+  Operation:SetPositionEffect(false)
+  self.bProcessAutoPath = false
+  self.nPathReason = self.PathReason.emNone
+  Operation.bIsClickMap = false
+  self:WalkFinish()
+end
+
+function AutoPath:ConnectedMoveLimits()
+  local tbConnectedMoveLimits = {}
+  tbConnectedMoveLimits[Npc.Doing.stand] = true
+  tbConnectedMoveLimits[Npc.Doing.run] = true
+  tbConnectedMoveLimits[Npc.Doing.skill] = false
+  tbConnectedMoveLimits[Npc.Doing.jump] = false
+  tbConnectedMoveLimits[Npc.Doing.teleport] = true
+  tbConnectedMoveLimits[Npc.Doing.do_hover] = true
+  tbConnectedMoveLimits[Npc.Doing.do_qingkung] = true
+  return tbConnectedMoveLimits
+end
+
+function AutoPath:WalkFinish()
+  Client.NavigationModule.ClearPathLine()
+  if self.tbTargetPos and self.tbTargetPos.fnFinish then
+    local fnCallback = self.tbTargetPos.fnFinish
+    self.tbTargetPos.fnFinish = nil
+    fnCallback(self)
+  end
+  Client.RepresentModule.StopShowClickMapEffect()
+  me.bIsForbidUpHorseFlag = false
+end
+
+function AutoPath:WalkFail()
+  Client.NavigationModule.ClearPathLine()
+  if self.tbTargetPos and self.tbTargetPos.fnFail then
+    local fnCallback = self.tbTargetPos.fnFail
+    self.tbTargetPos.fnFail = nil
+    fnCallback(self)
+  end
+  Client.RepresentModule.StopShowClickMapEffect()
+  me.bIsForbidUpHorseFlag = false
+  PlayerEvent:StopAutoPath()
+  self:InitGoAndDoSomethingDataAndfnAfterWalk()
+end
+
+function AutoPath:WalkEnd()
+  Client.NavigationModule.ClearPathLine()
+  if self.tbTargetPos and self.tbTargetPos.fnSucceed then
+    local fnCallback = self.tbTargetPos.fnSucceed
+    self.tbTargetPos.fnSucceed = nil
+    fnCallback(self)
+  end
+  Client.RepresentModule.StopShowClickMapEffect()
+  me.bIsForbidUpHorseFlag = false
+  PlayerEvent:StopAutoPath()
+  self:InitGoAndDoSomethingDataAndfnAfterWalk()
+end
+
+function AutoPath:OnMapLoaded(nMapId)
+  if not me then
+    self:StopGoto()
+    return
+  end
+  local nTargetMapId = self.tbParamExt and self.tbParamExt[1] or 0
+  if (nTargetMapId == me.nMapTemplateId or IsSameMapId(nTargetMapId, nMapId)) and self.tbParamExt then
+    self:GotoAndCallEx(self.tbParamExt[1], self.tbParamExt[2], self.tbParamExt[3], self.tbParamExt[4], self.tbParamExt[5], self.tbParamExt[6], self.tbParamExt[7], self.tbParamExt[8], self.tbParamExt[9], self.tbParamExt[10], self.tbParamExt[11], self.tbParamExt[12])
+  end
+  self.tbParamExt = nil
+end
+
+function AutoPath:IsNeedMapSwitchAutoPath()
+  if not self.tbParamExt then
+    return false
+  end
+  return true
+end
+
+function AutoPath:GetTargetPos()
+  if not self.tbTargetPos then
+    return
+  end
+  return self.tbTargetPos.nX, self.tbTargetPos.nY
+end
+
+function AutoPath:IsPathing()
+  return self.bProcessAutoPath
+end
+
+function AutoPath:IsWaitingSwitchMap()
+  if not self.tbParamExt then
+    return false
+  end
+  local nTargetMapId = AutoPath.tbParamExt[1]
+  if not nTargetMapId then
+    return false
+  end
+  return nTargetMapId ~= me.nMapId
+end
+
+function AutoPath:StopGoto()
+  if not me then
+    return
+  end
+  if Npc.Doing.stand ~= me.GetDoing() and Npc.Doing.skill ~= me.GetDoing() then
+    me.StopGoto()
+  end
+  if self.nGotoAndCallExTimer then
+    Timer:Close(self.nGotoAndCallExTimer)
+    self.nGotoAndCallExTimer = nil
+  end
+  self:InitGoAndDoSomethingDataAndfnAfterWalk()
+  me.bIsForbidUpHorseFlag = false
+end
+
+function AutoPath:GotoAndCall()
+  if not self.tbTargetPos then
+    self:WalkFail()
+    return false
+  end
+  return self:_GotoPosition()
+end
+
+function AutoPath:ServerGotoAndCallEx(nMapId, nX, nY, nNearLength, nTaskId, nNpcTemplateId, nTransX, nTransY)
+  local function funcServerCB()
+    RemoteServer.AutoPathCallback()
+  end
+  
+  self:GotoAndCallEx(nMapId, nX, nY, funcServerCB, nNearLength, nTaskId, nNpcTemplateId, nTransX, nTransY)
+end
+
+function AutoPath:CanDoAutoPath()
+  return me.GetNpc().CanDoAutoPath()
+end
+
+function AutoPath:DelayGotoAndCallEx(nFrame, nMapId, nX, nY, fnSucceed, nNearLength, nTaskId, nNpcTemplateId, nTransX, nTransY, fnFail, fnFinish, nPathReason)
+  nFrame = nFrame or 5
+  if self.nGotoAndCallExTimer then
+    Timer:Close(self.nGotoAndCallExTimer)
+    self.nGotoAndCallExTimer = nil
+  end
+  local bCanDoAutoPath = me.GetNpc().CanDoAutoPath()
+  if not bCanDoAutoPath then
+    local tbParm = {
+      nMapId,
+      nX,
+      nY,
+      fnSucceed,
+      nNearLength,
+      nTaskId,
+      nNpcTemplateId,
+      nTransX,
+      nTransY,
+      fnFail,
+      fnFinish,
+      nPathReason
+    }
+    self.nGotoAndCallExTimer = Timer:Register(nFrame, self._DelayGotoAndCallEx, self, tbParm)
+    return true
+  end
+  return self:GotoAndCallEx(nMapId, nX, nY, fnSucceed, nNearLength, nTaskId, nNpcTemplateId, nTransX, nTransY, fnFail, fnFinish, nPathReason)
+end
+
+function AutoPath:GotoAndCallEx(nMapId, nX, nY, fnSucceed, nNearLength, nTaskId, nNpcTemplateId, nTransX, nTransY, fnFail, fnFinish, nPathReason)
+  self.nPathReason = nPathReason or self.PathReason.emNone
+  AutoPath:SetLastPathReason(self.nPathReason)
+  if self.tbTargetPos and self.tbTargetPos.nTaskId and nTaskId == self.tbTargetPos.nTaskId then
+    self:WalkFail()
+    return false
+  end
+  nX = nX or 0
+  nY = nY or 0
+  nNearLength = nNearLength or Npc.DIALOG_DISTANCE
+  local bCanDoAutoPath = me.GetNpc().CanDoAutoPath()
+  if not bCanDoAutoPath then
+    self:DelayGotoAndCallEx(5, nMapId, nX, nY, fnSucceed, nNearLength, nTaskId, nNpcTemplateId, nTransX, nTransY, fnFail, fnFinish, nPathReason)
+    return true
+  end
+  if self.nGotoAndCallExTimer then
+    Timer:Close(self.nGotoAndCallExTimer)
+    self.nGotoAndCallExTimer = nil
+  end
+  self.tbTargetPos = {}
+  self.tbTargetPos.nMapId = nMapId
+  self.tbTargetPos.nX = nX
+  self.tbTargetPos.nY = nY
+  self.tbTargetPos.fnSucceed = fnSucceed
+  self.tbTargetPos.nNearLength = nNearLength
+  self.tbTargetPos.nTaskId = nTaskId
+  self.tbTargetPos.nNpcTemplateId = nNpcTemplateId
+  self.tbTargetPos.nTransX = nTransX or 0
+  self.tbTargetPos.nTransY = nTransY or 0
+  self.tbTargetPos.fnFail = fnFail
+  self.tbTargetPos.fnFinish = fnFinish
+  self.tbTargetPos.nPathReason = nPathReason
+  self:ClearSwitchMapCache()
+  local nSrcMapId = me.GetWorldPos()
+  if self.tbTargetPos.nMapId == Tong.Def.nMainMapTemplateId and self.tbTargetPos.nMapId == me.nMapTemplateId or IsSameMapId(self.tbTargetPos.nMapId, nSrcMapId) then
+    self.bProcessAutoPath = true
+    if TongChallenge:IsInTongChallengePlaying() and TongChallenge.nActivityStatus ~= TongChallenge.tbActivityStatus.nEnding and nPathReason == self.PathReason.emAFK_AutoFightGoToFightPos then
+      local tbPos = TongChallenge:GetRandomNearBossPos()
+      self.tbTargetPos.nX = tbPos[1]
+      self.tbTargetPos.nY = tbPos[2]
+      self.tbTargetPos.nNearLength = 1
+    end
+    return self:GotoAndCall()
+  end
+  local bCanSwitchMap = TeamMgr:CanSwitchMap(nMapId)
+  if not bCanSwitchMap then
+    self:WalkFail()
+    self.tbTargetPos = nil
+    return false
+  end
+  self:SetSwitchMapCache(self.tbTargetPos.nMapId, self.tbTargetPos.nX, self.tbTargetPos.nY, self.tbTargetPos.fnSucceed, self.tbTargetPos.nNearLength, self.tbTargetPos.nTaskId, self.tbTargetPos.nNpcTemplateId, nil, nil, self.tbTargetPos.fnFail, self.tbTargetPos.fnFinish, self.tbTargetPos.nPathReason)
+  if nil ~= nTransX and nil ~= nTransY then
+    self.bProcessAutoPath = true
+    return self:GotoAndCall()
+  else
+    self:StopGoto()
+    Map:SendSwitchMapRequest(self.tbTargetPos.nMapId)
+    self.tbTargetPos = nil
+    return true
+  end
+end
+
+function AutoPath:SetSwitchMapCache(nMapId, nX, nY, fnSucceed, nNearLength, nTaskId, nNpcTemplateId, nTransX, nTransY, fnFail, fnFinish, nPathReason)
+  nMapId = nMapId or 0
+  nX = nX or 0
+  nY = nY or 0
+  if nMapId <= 0 or nX <= 0 or nY <= 0 then
+    self.tbParamExt = nil
+    return
+  end
+  self.tbParamExt = {
+    nMapId,
+    nX,
+    nY,
+    fnSucceed,
+    nNearLength,
+    nTaskId,
+    nNpcTemplateId,
+    nTransX,
+    nTransY,
+    fnFail,
+    fnFinish,
+    nPathReason
+  }
+end
+
+function AutoPath:ClearSwitchMapCache()
+  self.tbParamExt = nil
+end
+
+function AutoPath:FixedActivate()
+  if 0 ~= me.nRideState then
+    return
+  end
+  if me.bIsForbidUpHorseFlag then
+    return
+  end
+  if AFK:IsLeadFightInFightStep() and AFK and AFK.AFKAutoFight and AFK.AFKAutoFight.tbAutoFightAI then
+    local tbBlackboard = AFK.AFKAutoFight.tbAutoFightAI:GetBlackboard()
+    if not tbBlackboard or not tbBlackboard.bNeedRideHorse then
+      return
+    end
+  end
+  if AFK:IsFollowFightInFightStep() and AFK and AFK.AFKAutoFollowFight and AFK.AFKAutoFollowFight.tbFollowFightAI then
+    local tbBlackboard = AFK.AFKAutoFollowFight.tbFollowFightAI:GetBlackboard()
+    if not tbBlackboard or not tbBlackboard.bNeedRideHorse then
+      return
+    end
+  end
+  me.SwitchRide(1)
+end
+
+function AutoPath:_DelayGotoAndCallEx(tbParm)
+  self:GotoAndCallEx(tbParm[1], tbParm[2], tbParm[3], tbParm[4], tbParm[5], tbParm[6], tbParm[7], tbParm[8], tbParm[9], tbParm[10], tbParm[11], tbParm[12])
+  return false
+end
+
+function AutoPath:_ChooseTargetPos()
+  local tbTargetPos = self.tbTargetPos
+  local nTargetX = 0
+  local nTargetY = 0
+  if tbTargetPos.nNpcTemplateId then
+    local nDlgX, nDlgY = Map:GetMapNpcDlgPos(me.nMapTemplateId, tbTargetPos.nNpcTemplateId, tbTargetPos.nX, tbTargetPos.nY)
+    if nDlgX > 0 and nDlgY > 0 then
+      nTargetX = nDlgX
+      nTargetY = nDlgY
+    end
+  end
+  if tbTargetPos.nTransX > 0 and tbTargetPos.nTransY > 0 and me.nMapId ~= tbTargetPos.nMapId then
+    nTargetX = tbTargetPos.nTransX
+    nTargetY = tbTargetPos.nTransY
+  end
+  if nTargetX > 0 and nTargetY > 0 then
+    tbTargetPos = {
+      nX = nTargetX,
+      nY = nTargetY,
+      nNearLength = Npc.DIALOG_DISTANCE
+    }
+  end
+  return tbTargetPos
+end
+
+function AutoPath:_GotoPosition()
+  local tbTargetPos = self:_ChooseTargetPos()
+  if not tbTargetPos then
+    self:WalkFail()
+    return false
+  end
+  local _, nMeX, nMeY = me.GetWorldPos()
+  local nDisSquareTotal = Lib:GetDistsSquare(nMeX, nMeY, tbTargetPos.nX, tbTargetPos.nY)
+  if nDisSquareTotal <= tbTargetPos.nNearLength * tbTargetPos.nNearLength then
+    self:WalkEnd()
+    return true
+  end
+  if nDisSquareTotal <= self.nMinDisSquare then
+    self:WalkEnd()
+    return true
+  end
+  local nDisSquare = Lib:GetDistsSquare(nMeX, nMeY, tbTargetPos.nX, tbTargetPos.nY)
+  if nDisSquare < tbTargetPos.nNearLength * tbTargetPos.nNearLength then
+    self:WalkEnd()
+    return true
+  end
+  if -1 == tbTargetPos.nNearLength and nDisSquare < Npc.DIALOG_DISTANCE * Npc.DIALOG_DISTANCE then
+    self:WalkEnd()
+    return true
+  end
+  local anFinalPoints = Client.NavigationModule.GetNavMeshPoint(nMeX, nMeY, 0)
+  if -1 == anFinalPoints[0] or -1 == anFinalPoints[1] or -1 == anFinalPoints[2] then
+    self:WalkFail()
+    return false
+  end
+  local bRet = me.GotoPosition(tbTargetPos.nX, tbTargetPos.nY, tbTargetPos.nNearLength, true)
+  if not bRet then
+    self:WalkFail()
+    return false
+  end
+  return true
+end
+
+function AutoPath:SetTraceTarget(nPosX, nPosY)
+  Client.NavigationModule.SetTraceTarget(nPosX, nPosY)
+end
+
+function AutoPath:ClearTarget()
+  Client.NavigationModule.ClearTarget()
+end
+
+function AutoPath:SetNpcTraceTarget(nNpcId, nPosX, nPosY)
+  if not (nNpcId and not (nNpcId <= 0) and nPosX) or not nPosY then
+    return
+  end
+  Client.NavigationModule.SetNpcTraceTarget(nNpcId, nPosX, nPosY)
+end
+
+function AutoPath:ClearNpcTarget()
+  Client.NavigationModule.ClearNpcTarget()
+end
+
+function AutoPath:SetNpcTraceTargetWithStartPos(nStartPosX, nStartPosY, nTargetPosX, nTargetPosY)
+  if not (nStartPosX and nStartPosY and nTargetPosX) or not nTargetPosY then
+    return
+  end
+  Client.NavigationModule.SetNpcTraceTargetWithStartPos(nStartPosX, nStartPosY, nTargetPosX, nTargetPosY)
+end
+
+function AutoPath:GotoStaticNpc(nMapTemplateId, nNpcTemplateId, bSuccessClick)
+  if nNpcTemplateId <= 0 or nMapTemplateId <= 0 then
+    return
+  end
+  local nPosX, nPosY, nWalkNearLength = Npc:GetNpcPos(nNpcTemplateId, nMapTemplateId, true)
+  if not (nPosX and nPosY) or not nWalkNearLength then
+    LogErr("AutoPath:GotoStaticNpc", nNpcTemplateId, nMapTemplateId, nPosX, nPosY, nWalkNearLength)
+    return
+  end
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  AFK:Stop()
+  local fnSnccess
+  if bSuccessClick then
+    function fnSnccess()
+      local nNpcId = KNpc.GetNpcIdByTemplateId(nNpcTemplateId)
+      
+      if nNpcId then
+        YiJunTask:CloseToNpc(nNpcTemplateId)
+        Operation:SimpleTap(nNpcId)
+      end
+    end
+  end
+  AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, fnSnccess, nWalkNearLength, nil, nNpcTemplateId)
+end

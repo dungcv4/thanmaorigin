@@ -1,0 +1,188 @@
+local tbWnd = Ui:CreateWindow("UIHudMinimap")
+tbWnd.tbControls = {
+  btnMiniMap = "imgBG/frame",
+  txtCurPos = "imgBG/Image/txtCurPos",
+  txtMapName = "imgBG/txtMapName",
+  miniMap = "imgBG/minimap/Mask/map",
+  arrow = "imgBG/Arrow",
+  flag = "imgBG/Flag",
+  miniMapMask = "imgBG/minimap/Mask",
+  MapPoint = "imgBG/minimap/Mask/map/MapPoint",
+  Template = "imgBG/minimap/NoMask/Template",
+  PathLine = "imgBG/minimap/Mask/map/MapPoint/PathLine",
+  btnMapNameBg = "imgBG/btnMapNameBg"
+}
+tbWnd.tbOnClick = {
+  btnMiniMap = function(self)
+    if 0 == Map:IsForbidMiniMap(me.nMapTemplateId) then
+      Ui:OpenWindow("UIMiniMap")
+    end
+  end,
+  btnMapNameBg = function(self)
+    if 0 == Map:IsForbidMiniMap(me.nMapTemplateId) and (not Ui.bInZone or not HanWuYiJi:IsInFubenMap(me)) then
+      Ui:OpenWindow("UIWorldMap")
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.arrowTransform = self.pPanel:GetTransform(self.arrow)
+  self.flagTransform = self.pPanel:GetTransform(self.flag)
+  self.maskTransform = self.pPanel:GetTransform(self.miniMapMask)
+  self.csMiniMap = self.pPanel:GetObject(self.miniMap):GetComponent(Ui.CSMiniMap)
+  self.csMiniMap:SetUIPanel(self.pPanel, self.Template, TeamMgr.Cfg.MAX_MEMBER_COUNT - 1)
+  self.tbMapPoint = Ui:CreatePanel("UIMiniMapPoint", self.MapPoint, self)
+  self.nLastShowTeam = nil
+  self:ChangeMiniMap(me.nMapTemplateId)
+end
+
+function tbWnd:OnOpen()
+  Client.QualityModule._ShowPlayerInMiniMap = Map:IsMiniMapShowFriend(me.nMapTemplateId)
+  Client.QualityModule._NotShowTeamInMiniMap = Map:IsMiniMapNotShowTeam(me.nMapTemplateId)
+end
+
+function tbWnd:OnFixedUpdate()
+  self:UpdateTeamMember()
+  self:UpdateOthers()
+  self:UpdateMiniMap()
+end
+
+function tbWnd:ChangeMiniMap(nMapTemplateId)
+  Client.QualityModule._ShowPlayerInMiniMap = Map:IsMiniMapShowFriend(me.nMapTemplateId)
+  Client.QualityModule._NotShowTeamInMiniMap = Map:IsMiniMapNotShowTeam(me.nMapTemplateId)
+  local tbMiniMapSize, szMiniMap, tbMiniMapRawInfo = Map:GetMiniMapInfo(nMapTemplateId)
+  self.tbMapRawInfo = {
+    RawWidth = tbMiniMapRawInfo.RawWidth,
+    RawHeight = tbMiniMapRawInfo.RawHeight,
+    Scene2MiniScale = tbMiniMapRawInfo.RawScale,
+    PadWidth = tbMiniMapRawInfo.PadWidth,
+    PadHeight = tbMiniMapRawInfo.PadHeight
+  }
+  self.pPanel:Sprite_SetSprite(self.miniMap, szMiniMap)
+  self.pPanel:SetActive(self.miniMap, false)
+  Timer:Register(5, function()
+    self.pPanel:SetActive(self.miniMap, true)
+    return false
+  end)
+  self.pPanel:Label_SetText(self.txtMapName, i18n.Parse(Map:GetMapSetting(nMapTemplateId).MapName))
+  self:UpdateMiniMapSuffix()
+  self.pPanel:Object_SetSize(self.MapPoint, tbMiniMapRawInfo.RawWidth + tbMiniMapRawInfo.PadWidth * 2, tbMiniMapRawInfo.RawHeight + tbMiniMapRawInfo.PadHeight * 2)
+  local pathRenderObj = self.pPanel:GetObject(self.PathLine)
+  if pathRenderObj then
+    self.pathRender = pathRenderObj:GetComponent(Ui.MapPathLine)
+    if self.pathRender then
+      self.pathRender:SetMapData(tbMiniMapRawInfo.RawWidth, tbMiniMapRawInfo.RawHeight, tbMiniMapRawInfo.RawScale, 1)
+    end
+  end
+  self.csMiniMap:SetMiniMapInfo(tbMiniMapRawInfo.RawScale, tbMiniMapRawInfo.PadWidth, tbMiniMapRawInfo.PadHeight)
+  self:UpdateMapPoint(tbMiniMapRawInfo.PadWidth, tbMiniMapRawInfo.PadHeight)
+end
+
+function tbWnd:SyncMiniMapPoint(nMapTemplateId)
+  if nMapTemplateId == me.nMapTemplateId then
+    local _, _, tbMiniMapRawInfo = Map:GetMiniMapInfo(nMapTemplateId)
+    self:UpdateMapPoint(tbMiniMapRawInfo.PadWidth, tbMiniMapRawInfo.PadHeight, true)
+  end
+end
+
+function tbWnd:UpdateTeamMember()
+  local nNow = GetTime()
+  if nNow == self.nLastShowTeam then
+    return
+  end
+  self.nLastShowTeam = nNow
+  self.csMiniMap:UpdateTeamMember()
+  if Client.QualityModule._NotShowTeamInMiniMap then
+    return
+  end
+  local tbTeamMembers = TeamMgr:GetMembers()
+  local tbTeamMatesPos = TeamMgr:GetTeamMatesPos()
+  for i = 1, TeamMgr.Cfg.MAX_MEMBER_COUNT - 1 do
+    if tbTeamMembers[i] then
+      self.csMiniMap:AddTeamMemberNpcID(tbTeamMembers[i].nNpcID)
+    end
+    if tbTeamMatesPos[i] then
+      self.csMiniMap:SetTeamMemberLogicPos(i - 1, tbTeamMatesPos[i][1], tbTeamMatesPos[i][2])
+    else
+      self.csMiniMap:SetTeamMemberLogicPos(i - 1, -1, -1)
+    end
+  end
+end
+
+function tbWnd:UpdateOthers()
+  self.csMiniMap:UpdatePlayerPos()
+end
+
+tbWnd.lastDir = -1
+
+function tbWnd:UpdateMiniMap()
+  if not me then
+    return
+  end
+  if not me.GetNpc() then
+    return
+  end
+  local nDir = me.GetNpc().GetDir()
+  if self.lastDir ~= nDir then
+    self.arrowTransform.localEulerAngles = Ui.Vector3(0, 0, nDir / 255 * 360 - 90)
+  end
+  self.lastDir = nDir
+  local _, nMyPosX, nMyPosY = me.GetWorldPos()
+  self.csMiniMap:SetPlayerLogicPos(nMyPosX, nMyPosY)
+  if EDITOR then
+    self.pPanel:Label_SetText(self.txtCurPos, string.format("(%d,%d)", nMyPosX, nMyPosY))
+  else
+    self.pPanel:Label_SetText(self.txtCurPos, string.format("(%d,%d)", math.floor(nMyPosX * Map.nShowPosScale), math.floor(nMyPosY * Map.nShowPosScale)))
+  end
+  if AutoPath:IsPathing() then
+    local x, y = AutoPath:GetTargetPos()
+    local myX = nMyPosX / self.tbMapRawInfo.Scene2MiniScale / 8 - self.tbMapRawInfo.RawWidth / 2
+    local myY = nMyPosY / self.tbMapRawInfo.Scene2MiniScale / 16 - self.tbMapRawInfo.RawHeight / 2
+    local posX = x / self.tbMapRawInfo.Scene2MiniScale / 8 - self.tbMapRawInfo.RawWidth / 2
+    local posY = y / self.tbMapRawInfo.Scene2MiniScale / 16 - self.tbMapRawInfo.RawHeight / 2
+    if math.abs(posX - myX) > self.maskTransform.rect.width / 2 or math.abs(posY - myY) > self.maskTransform.rect.height / 2 then
+      self.pPanel:SetActive(self.flag, false)
+      return
+    end
+    self.pPanel:SetActive(self.flag, true)
+    local arrowX = self.arrowTransform.anchoredPosition.x
+    local arrowY = self.arrowTransform.anchoredPosition.y
+    self.flagTransform.anchoredPosition = Ui.Vector2(posX - myX + arrowX, posY - myY + arrowY)
+  else
+    self.pPanel:SetActive(self.flag, false)
+  end
+end
+
+tbWnd.nLastMapTId = -1
+
+function tbWnd:UpdateMapPoint(nOffsetX, nOffsetY, bForce)
+  local nMapId = me.nMapTemplateId
+  if self.nLastMapTId == nMapId and not bForce then
+    return
+  end
+  self.tbMapPoint:ResetMapPoints()
+  self.tbMapPoint:ShowMapPoints(nMapId, nOffsetX, nOffsetY)
+  self.nLastMapTId = nMapId
+end
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_LOADED,
+      self.ChangeMiniMap
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_MAP_POINT,
+      self.SyncMiniMapPoint
+    }
+  }
+end
+
+function tbWnd:UpdateMiniMapSuffix()
+  local txtName = i18n.Parse(Map:GetMapSetting(me.nMapTemplateId).MapName)
+  local suffix = TieFuCheng:GetCurrentLineName() or HanHaiMiCheng:GetCurrentLineName()
+  if suffix then
+    txtName = txtName .. suffix
+  end
+  self.pPanel:Label_SetText(self.txtMapName, txtName)
+end

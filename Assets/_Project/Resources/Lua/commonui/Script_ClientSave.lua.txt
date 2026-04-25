@@ -1,0 +1,354 @@
+function Client:GetNumber(key, defaultV)
+  local value = self:GetValue(key, defaultV)
+  
+  if nil == value or type(value) ~= "number" then
+    assert(false)
+    return 0
+  end
+  return value
+end
+
+function Client:SetNumber(key, value, bNoSave)
+  if nil == value or type(value) ~= "number" then
+    assert(false)
+    return false
+  end
+  return self:SetValue(key, value, bNoSave)
+end
+
+function Client:GetString(key, defaultV)
+  local value = self:GetValue(key, defaultV)
+  if nil == value or type(value) ~= "string" then
+    assert(false)
+    return ""
+  end
+  return value
+end
+
+function Client:SetString(key, value, bNoSave)
+  if nil == value or type(value) ~= "string" then
+    assert(false)
+    return false
+  end
+  return self:SetValue(key, value, bNoSave)
+end
+
+function Client:GetBoolean(key, defaultV)
+  local value = self:GetValue(key, defaultV)
+  if nil == value or type(value) ~= "boolean" then
+    assert(false)
+    return false
+  end
+  return value
+end
+
+function Client:SetBoolean(key, value, bNoSave)
+  if nil == value or type(value) ~= "boolean" then
+    assert(false)
+    return false
+  end
+  return self:SetValue(key, value, bNoSave)
+end
+
+function Client:GetValue(key, defaultV)
+  if not key then
+    assert(false)
+    return nil
+  end
+  local tbFlag = Client:GetUserInfo("LocalFlags")
+  local value = tbFlag[key]
+  if nil == value then
+    value = defaultV
+  end
+  return value
+end
+
+function Client:SetValue(key, value, bNoSave)
+  if not key then
+    assert(false)
+    return false
+  end
+  if nil == value then
+    assert(false)
+    return false
+  end
+  local tbFlag = Client:GetUserInfo("LocalFlags")
+  tbFlag[key] = value
+  if not bNoSave then
+    self:SaveUserInfo()
+  end
+  return true
+end
+
+function Client:ClearValue(key, bNoSave)
+  local tbFlag = Client:GetUserInfo("LocalFlags")
+  tbFlag[key] = nil
+  if not bNoSave then
+    self:SaveUserInfo()
+  end
+end
+
+function Client:ResetUserInfo()
+  self.tbUserInfo = nil
+end
+
+function Client:GetUserInfo(szType, nId, bUseNewTable)
+  if not self.tbUserInfo then
+    self:InitUserInfo()
+  end
+  if not nId then
+    nId = -1
+    if me and me.dwID then
+      nId = me.dwID
+    end
+  end
+  self.tbUserInfo[nId] = self.tbUserInfo[nId] or {}
+  if bUseNewTable then
+    self.tbUserInfo[nId][szType] = {}
+  else
+    self.tbUserInfo[nId][szType] = self.tbUserInfo[nId][szType] or {}
+  end
+  return self.tbUserInfo[nId][szType]
+end
+
+function Client:SaveUserInfo()
+  local szValue = Lib:Val2Str(self.tbUserInfo)
+  local szPath = g_szUserPath .. "User/UserInfo.lua"
+  local szLuaValue = "return" .. szValue
+  local bResult = Lib:WriteFile_W(szPath, "w+", szLuaValue)
+  if not bResult then
+    Log("Client:SaveUserInfo ERR ?? file is nil !!" .. szPath)
+    return
+  end
+end
+
+function Client:TransPrivateMsg()
+  local szPath = g_szUserPath .. "User/UserPrivateMsg.lua"
+  local File = CS.System.IO.File
+  if not File.Exists(szPath) then
+    return
+  end
+  local szFileContent, nLen = Lib:ReadFile_W(szPath, "r")
+  if 0 == nLen then
+    return
+  end
+  local tbTmpEnv = {}
+  szFileContent = "local fnLoad = function () " .. szFileContent .. " end tbPrivateMsg = fnLoad();"
+  local fnFile = load(szFileContent, nil, "bt", tbTmpEnv)
+  if fnFile then
+    fnFile()
+  end
+  local szLocalDataRolePath = "%sUser/Role/%s.json"
+  if tbTmpEnv.tbPrivateMsg then
+    for nId, tbData in pairs(tbTmpEnv.tbPrivateMsg) do
+      local tb = {}
+      tb.PrivateMsg = tbData
+      local szFilePath = string.format(szLocalDataRolePath, g_szUserPath, nId)
+      Lib:WriteFile_W(szFilePath, "w+", Lib:EncodeJson(tb))
+    end
+  end
+  CS.System.IO.File.Delete(szPath)
+end
+
+function Client:InitUserInfo()
+  local szFileContent, nLen = Lib:ReadFile_W(g_szUserPath .. "User/UserInfo.lua", "r")
+  if 0 == nLen then
+    szFileContent = "return {};"
+  end
+  self.tbTmpEnv = {}
+  szFileContent = "local fnLoad = function () " .. szFileContent .. " end tbUserInfo = fnLoad();"
+  local fnFile = load(szFileContent, nil, "bt", self.tbTmpEnv)
+  if fnFile then
+    fnFile()
+  end
+  self.tbUserInfo = self.tbTmpEnv.tbUserInfo or {}
+end
+
+function Client:TransChatMsgHistory()
+  local szKey = "ChatMsgHistory"
+  self:TransUserInfoToLocalData(szKey)
+end
+
+function Client:TransChatSetting()
+  local szKey = "ChatSetting"
+  self:TransUserInfoToLocalData(szKey)
+end
+
+function Client:TransAfkSetting()
+  local szKey = "AutoFight"
+  if not self.tbUserInfo then
+    self:InitUserInfo()
+  end
+  local szLocalDataRolePath = "%sUser/Role/%s.json"
+  for nId, tbInfo in pairs(self.tbUserInfo) do
+    local tbValue = tbInfo[szKey]
+    if tbValue then
+      local nPlayerId = math.floor(nId / 10000)
+      local nFaction = nId % 10000 / 100
+      local nFactionSect = nId % 10
+      local szFilePath = string.format(szLocalDataRolePath, g_szUserPath, nPlayerId)
+      local szFileContent, nLen = Lib:ReadFile_W(szFilePath, "r")
+      if 0 == nLen then
+        szFileContent = "{}"
+      end
+      local tbRoleData = Lib:DecodeJson(szFileContent)
+      tbRoleData[szKey] = tbRoleData[szKey] or {}
+      tbRoleData[szKey][tostring(nFaction)] = tbRoleData[szKey][tostring(nFaction)] or {}
+      tbRoleData[szKey][tostring(nFaction)][tostring(nFactionSect)] = tbValue
+      local bResult = Lib:WriteFile_W(szFilePath, "w+", Lib:EncodeJson(tbRoleData))
+      if not bResult then
+        LogErr("LocalData:Flush ERR ?? file is nil !!" .. szFilePath)
+      end
+      tbInfo[szKey] = nil
+    end
+  end
+  Client:SaveUserInfo()
+end
+
+function Client:TransAutoFightMedicineUserInfo()
+  local tbKeys = {
+    AutoFight_LeftRouletteMedicineSetting = 1,
+    AutoFight_FollowType = 1,
+    AutoFight_SelectType = 1,
+    AutoFight_GoToFightMapType = 1,
+    AutoFight_LastFightMapId = 1,
+    AutoFight_LastFightMapX = 1,
+    AutoFight_LastFightMapY = 1,
+    AutoFight_OpenAttackRadius = 1,
+    AutoMedicine_ThresholdValue1 = 1,
+    AutoMedicine_MedicineCount1 = 1,
+    AutoMedicine_ThresholdValue3 = 1,
+    AutoMedicine_MedicineCount3 = 1,
+    AutoMedicine_OpenProtectFlag = 1,
+    AutoMedicine_OpenReplyMedicine = 1,
+    AutoMedicine_OpenUseJiu = 1,
+    AutoMedicine_OpenBuyJiuNotice = 1,
+    AutoMedicine_OpenUseChangXiao = 1,
+    AutoMedicine_OpenReplyRemindMsg = 1
+  }
+  self:TransLocalFlagsUserInfo(tbKeys)
+end
+
+function Client:TransReturnerServerRecommendTimeAccountInfo()
+  local tbKeys = {ReturnerServerRecommendTime = 1}
+  self:TransLocalFlagsAccountInfo(tbKeys)
+end
+
+function Client:TransLocalFlagsUserInfo(tbKeys)
+  if not self.tbUserInfo then
+    self:InitUserInfo()
+  end
+  local szParentKey = "LocalFlags"
+  local szLocalDataRolePath = "%sUser/Role/%s.json"
+  for nId, tbInfo in pairs(self.tbUserInfo) do
+    local tbValue = tbInfo[szParentKey]
+    if tbValue then
+      local szFilePath = string.format(szLocalDataRolePath, g_szUserPath, nId)
+      local szFileContent, nLen = Lib:ReadFile_W(szFilePath, "r")
+      if 0 == nLen then
+        szFileContent = "{}"
+      end
+      local tbRoleData = Lib:DecodeJson(szFileContent)
+      local bWrite = false
+      for szKey, _ in pairs(tbKeys) do
+        if nil ~= tbValue[szKey] then
+          tbRoleData[szKey] = tbValue[szKey]
+          tbInfo[szParentKey][szKey] = nil
+          bWrite = true
+        end
+      end
+      if bWrite then
+        local bResult = Lib:WriteFile_W(szFilePath, "w+", Lib:EncodeJson(tbRoleData))
+        if not bResult then
+          LogErr("LocalData:Flush ERR ?? file is nil !!" .. szFilePath)
+        end
+      end
+    end
+  end
+  Client:SaveUserInfo()
+end
+
+function Client:TransLocalFlagsAccountInfo(tbKeys)
+  if not self.tbAccountInfo then
+    local szFileContent, nLen = Lib:ReadFile_W(g_szUserPath .. "User/AccountInfo.lua", "r")
+    if 0 == nLen then
+      szFileContent = "return {};"
+    end
+    self.tbTmpEnv = {}
+    szFileContent = "local fnLoad = function () " .. szFileContent .. " end tbAccountInfo = fnLoad();"
+    local fnFile = load(szFileContent, nil, "bt", self.tbTmpEnv)
+    if fnFile then
+      fnFile()
+    end
+    self.tbAccountInfo = self.tbTmpEnv.tbAccountInfo or {}
+  end
+  local szParentKey = "LocalFlags"
+  local szLocalDataAccountPath = "%sUser/Account/%s.json"
+  for szId, tbInfo in pairs(self.tbAccountInfo) do
+    local tbValue = tbInfo[szParentKey]
+    if tbValue then
+      local szFilePath = string.format(szLocalDataAccountPath, g_szUserPath, szId)
+      local szFileContent, nLen = Lib:ReadFile_W(szFilePath, "r")
+      if 0 == nLen then
+        szFileContent = "{}"
+      end
+      local tbAccountData = Lib:DecodeJson(szFileContent)
+      local bWrite = false
+      for szKey, _ in pairs(tbKeys) do
+        if nil ~= tbValue[szKey] then
+          tbAccountData[szKey] = tbValue[szKey]
+          tbInfo[szParentKey][szKey] = nil
+          bWrite = true
+        end
+      end
+      if bWrite then
+        local bResult = Lib:WriteFile_W(szFilePath, "w+", Lib:EncodeJson(tbAccountData))
+        if not bResult then
+          LogErr("LocalData:Flush ERR ?? file is nil !!" .. szFilePath)
+        end
+      end
+    end
+  end
+  local szValue = Lib:Val2Str(self.tbAccountInfo)
+  local szPath = g_szUserPath .. "User/AccountInfo.lua"
+  local szLuaValue = "return" .. szValue
+  local bResult = Lib:WriteFile_W(szPath, "w+", szLuaValue)
+  if not bResult then
+    Log("Client:SaveAccountInfo ERR ?? file is nil !!" .. szPath)
+    return
+  end
+end
+
+function Client:TransUserInfoToLocalData(szKey)
+  if not self.tbUserInfo then
+    self:InitUserInfo()
+  end
+  local szLocalDataRolePath = "%sUser/Role/%s.json"
+  for nId, tbInfo in pairs(self.tbUserInfo) do
+    local value = tbInfo[szKey]
+    if value then
+      local szFilePath = string.format(szLocalDataRolePath, g_szUserPath, nId)
+      local szFileContent, nLen = Lib:ReadFile_W(szFilePath, "r")
+      if 0 == nLen then
+        szFileContent = "{}"
+      end
+      local tbRoleData = Lib:DecodeJson(szFileContent)
+      tbRoleData[szKey] = value
+      local bResult = Lib:WriteFile_W(szFilePath, "w+", Lib:EncodeJson(tbRoleData))
+      if not bResult then
+        LogErr("LocalData:Flush ERR ?? file is nil !!" .. szFilePath)
+      end
+      tbInfo[szKey] = nil
+    end
+  end
+  Client:SaveUserInfo()
+end
+
+function Client:GetPrivateMsgData()
+  self.tbPrivateMsg = LocalData:GetRoleTable("PrivateMsg", {})
+  return self.tbPrivateMsg
+end
+
+function Client:SavePrivateMsgData()
+  LocalData:SetRoleTable("PrivateMsg", self.tbPrivateMsg)
+end

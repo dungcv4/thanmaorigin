@@ -1,0 +1,160 @@
+local tbWnd = Ui:CreateWindow("UIMedicineShop")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SHOP_BUY_RESULT,
+      self.OnResponseBuy
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.RefreshMoney
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  ElementTemplate = "UIBg/ShopPanel/GoodsList/pnlContent/ElementTemplate",
+  imgMoney = "UIBg/MedicineBuyPanel/imgMoney",
+  txtMoneyNum = "UIBg/MedicineBuyPanel/txtMoneyNum",
+  btnBuy = "UIBg/MedicineBuyPanel/btnBuy",
+  UIAddAndSubGroup = "UIBg/MedicineBuyPanel/UIAddAndSubGroup",
+  MoneyPanel = "UIMoneyPanel"
+}
+tbWnd.tbOnClick = {
+  btnBuy = function(self)
+    self:DoBuy()
+  end
+}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, self.MoneyPanel)
+  self.AddAndSubGroup = Ui:NewExistAddAndSubGroup(self, self.UIAddAndSubGroup)
+  self.AddAndSubGroup:BindEvent(function(nValue)
+    local nResult = self:SetCount(nValue)
+    return nResult
+  end)
+  self.AddAndSubGroup:SetLongPressLoop(true, true, true)
+  self.AddAndSubGroup:SetNumPadPos(-148, -185)
+  self.tbSelectData = {
+    nId = 1,
+    nGroupId = 1,
+    nTemplateId = MedicineMgr.nDefaultMedicineTId,
+    nPrice = 20,
+    nCount = MedicineMgr.nMaxMedicineCount,
+    szMoneyType = MedicineMgr.szMoneyType
+  }
+end
+
+function tbWnd:OnOpen()
+  self:RefreshMoney()
+end
+
+function tbWnd:OnOpenEnd()
+  self:UpdatePageShow()
+end
+
+function tbWnd:RefreshMoney()
+  self.tbMoneyPanel:SetMoneyValue(true)
+end
+
+function tbWnd:UpdatePageShow()
+  self.tbSelectData.nTemplateId = MedicineMgr:GetCurMedicineTId(me)
+  local _, nIcon = KItem.GetItemShowInfo(self.tbSelectData.nTemplateId, me.nFaction, me.nFactionSect, me.GetNpc().GetBodySex())
+  local tbBase = Item:GetItemBaseProp(self.tbSelectData.nTemplateId)
+  local szIconAtlas, szIconSprite = Item:GetIcon(nIcon)
+  self.pPanel:Sprite_SetSprite(self.ElementTemplate .. "/imgIcon", szIconSprite)
+  self.pPanel:SetActive(self.ElementTemplate .. "/txtDesc", true)
+  self.pPanel:Label_SetText(self.ElementTemplate .. "/txtDesc", i18n.Parse(tbBase.szIntro))
+  self.pPanel:Label_SetText(self.ElementTemplate .. "/txtMedicineLv", i18n.EasyGet("\231\173\137\231\186\167") .. tbBase.nLevel)
+  if self.tbSelectData then
+    self.tbSelectData.nPrice = tbBase.nPrice
+    local nMoney = me.GetMoney(self.tbSelectData.szMoneyType)
+    local nCountThatMoneyCanBuy = math.floor(nMoney / tbBase.nPrice)
+    local nBagRemainCount = MedicineMgr:GetSingleRemainCount(MedicineMgr.nDefaultMedicineTId)
+    self.tbSelectData.nCount = nBagRemainCount
+    local szCanNotBuyTip
+    if nCountThatMoneyCanBuy < self.tbSelectData.nCount then
+      szCanNotBuyTip = i18n.EasyGet("\233\146\177\228\184\141\229\164\159, \228\184\141\232\131\189\229\134\141\229\162\158\229\138\160\228\186\134")
+    elseif 0 == nBagRemainCount then
+      szCanNotBuyTip = i18n.EasyGet("\229\183\178\231\187\143\232\190\190\229\136\176\230\149\176\233\135\143\228\184\138\233\153\144, \228\184\141\232\131\189\229\134\141\229\162\158\229\138\160\228\186\134")
+    end
+    self.AddAndSubGroup:SetNumRange(0, self.tbSelectData.nCount, szCanNotBuyTip)
+    self:UpdateBuyPanel(self.tbSelectData)
+    self:UpdateNumberInput(self.tbSelectData.nCount)
+  end
+end
+
+function tbWnd:UpdateBuyPanel(tbData)
+  self.AddAndSubGroup:SetInputValue(tbData.nCount or 0)
+  self.pPanel:Label_SetText(self.txtMoneyNum, tbData.nPrice)
+end
+
+function tbWnd:OpenItemTips(tbData)
+  Ui:OpenWindow("UIItemTips", "Item", tbData.nId, tbData.nTemplateId)
+end
+
+function tbWnd:DoBuy()
+  local szMoneyType = self.tbSelectData.szMoneyType
+  local nbuyCount = self.tbSelectData.nCount
+  local nTemplateId = self.tbSelectData.nTemplateId
+  if nbuyCount <= 0 then
+    me.CenterMsg(i18n.EasyGet("\232\175\183\233\135\141\230\150\176\232\190\147\229\133\165\232\180\173\228\185\176\230\149\176\233\135\143"))
+    return
+  end
+  local nPrice = self.tbSelectData.nPrice
+  if not Shop:HasEnoughMoney(me, szMoneyType, nPrice, nbuyCount) then
+    local szName = i18n.EasyGet("\233\147\182\228\184\164")
+    local szMsg = table.concat({
+      szName,
+      i18n.EasyGet("\228\184\141\232\182\179")
+    })
+    me.CenterMsg(szMsg)
+    return
+  end
+  MedicineMgr:BuyMedicine(nTemplateId, nbuyCount, true)
+end
+
+function tbWnd:SetCount(nToCount)
+  local szMoneyType = self.tbSelectData.szMoneyType
+  local nPrice = self.tbSelectData.nPrice
+  local nSingleRemainCount = MedicineMgr:GetSingleRemainCount(MedicineMgr.nDefaultMedicineTId)
+  if nToCount > nSingleRemainCount then
+    me.CenterMsg(i18n.EasyGet("\232\180\173\228\185\176\230\149\176\233\135\143\229\183\178\232\190\190\228\184\138\233\153\144"))
+    nToCount = nSingleRemainCount
+  end
+  if not Shop:HasEnoughMoney(me, szMoneyType, nPrice, nToCount) then
+    local szName = i18n.EasyGet("\233\147\182\228\184\164")
+    local szMsg = table.concat({
+      szName,
+      i18n.EasyGet("\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\229\174\140\229\133\168\232\161\165\232\182\179\232\141\175\229\147\129")
+    })
+    local nMoney = me.GetMoney(szMoneyType)
+    local nMax = math.floor(nMoney / nPrice)
+    me.CenterMsg(szMsg)
+    self.AddAndSubGroup:SetInputValue(nMax or 0)
+    self.tbSelectData.nCount = nMax
+    self.pPanel:Label_SetText(self.txtMoneyNum, nPrice * nMax)
+    return nMax
+  end
+  self.tbSelectData.nCount = nToCount
+  self.pPanel:Label_SetText(self.txtMoneyNum, nPrice * nToCount)
+  return nToCount
+end
+
+function tbWnd:UpdateNumberInput(nNum)
+  if not self.tbSelectData then
+    self.AddAndSubGroup:SetInputValue(0)
+    return 0
+  end
+  if not self:SetCount(nNum) then
+    self:SetCount(self.tbSelectData.nCount)
+    return self.tbSelectData.nCount
+  end
+  return nNum
+end
+
+function tbWnd:OnResponseBuy()
+  self:UpdatePageShow()
+end

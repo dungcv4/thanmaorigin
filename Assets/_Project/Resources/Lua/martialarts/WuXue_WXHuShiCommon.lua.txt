@@ -1,0 +1,527 @@
+Require("CommonScript/Item/ItemForEquip.lua")
+Require("CommonScript/Item/ExtEquip/ExtEquipCfg.lua")
+Require("CommonScript/Player/FightPowerCommom.lua")
+Require("CommonScript/WuXue/WXHuShiCfg.lua")
+WXHuShi = WXHuShi or {}
+WXHuShi.IS_SYS_OPEN = true
+WXHuShi.nSyncValueOffset = 250
+WXHuShi.nSyncSlotDataOffSet = 50
+WXHuShi.nSyncBaseAttrSaveBegin = 1
+WXHuShi.nSyncBaseAttrSaveEnd = 8
+WXHuShi.nSyncExtAttrSaveBegin = 9
+WXHuShi.nSyncExtAttrSaveEnd = 32
+WXHuShi.nSyncEnhanceMaxUpgradeBegin = 43
+WXHuShi.nSyncEnhanceMaxUpgradeEnd = 46
+WXHuShi.nSyncTemplateIdSaveId = 47
+WXHuShi.nSyncLimitTypeSaveId = 48
+WXHuShi.nSyncEnhanceLevelSaveId = 49
+WXHuShi.tbSaveGroupKey = WXHuShi.tbSaveGroupKey or {}
+WXHuShi.nSlotDataOffSet = 50
+WXHuShi.nBaseAttrSaveBegin = 1
+WXHuShi.nBaseAttrSaveEnd = 8
+WXHuShi.nExtAttrSaveBegin = 9
+WXHuShi.nExtAttrSaveEnd = 32
+WXHuShi.nEnhanceMaxUpgradeBegin = 43
+WXHuShi.nEnhanceMaxUpgradeEnd = 46
+WXHuShi.nTemplateIdSaveId = 47
+WXHuShi.nLimitTypeSaveId = 48
+WXHuShi.nEnhanceLevelSaveId = 49
+WXHuShi.nMaxBaseAttrCount = 2
+WXHuShi.nMaxExtAttrCount = 4
+WXHuShi.ATTR_SAVE_OFFSET = 4
+WXHuShi.nMaxWuXueCount = 4
+WXHuShi.nMaxHuShiSlot = 5
+WXHuShi.EXT_PARAM_SEED_TO_HUSHI = 1
+WXHuShi.nEnhanceMaxUpgradeLevel = 5
+WXHuShi.nMaxEnhanceLevel = 20
+WXHuShi.tbWXHuShiKey = {}
+WXHuShi.tbWXHuShiKey2WXHSIndex = {}
+for i = 1, WXHuShi.nMaxWuXueCount do
+  WXHuShi.tbWXHuShiKey[i] = "WuXueHuShi" .. i
+  WXHuShi.tbWXHuShiKey2WXHSIndex[WXHuShi.tbWXHuShiKey[i]] = i
+end
+for nWXIndex = 1, WXHuShi.nMaxWuXueCount do
+  WXHuShi.tbSaveGroupKey[nWXIndex] = GetGroupKey(WXHuShi.tbWXHuShiKey[nWXIndex])
+end
+
+function WXHuShi:GetWXHuShiData(pPlayer, nWXIndex, nHSSlot)
+  if not self.tbSaveGroupKey[nWXIndex] or nHSSlot <= 0 or nHSSlot > self.nMaxHuShiSlot then
+    return {0}
+  end
+  local tbBaseAttr = {}
+  local nIdxBegin = (nHSSlot - 1) * self.nSlotDataOffSet + self.nBaseAttrSaveBegin - 1
+  for i = 1, self.nMaxBaseAttrCount do
+    local nIdxOffSet = nIdxBegin + (i - 1) * self.ATTR_SAVE_OFFSET
+    local nAttrId = pPlayer.GetUserValue(self.tbSaveGroupKey[nWXIndex], nIdxOffSet + self.nBaseAttrSaveBegin)
+    if nAttrId > 0 then
+      tbBaseAttr[i] = {
+        nAttrId,
+        {}
+      }
+      for j = 1, 3 do
+        tbBaseAttr[i][2][j] = pPlayer.GetUserValue(self.tbSaveGroupKey[nWXIndex], nIdxOffSet + self.nBaseAttrSaveBegin + j)
+      end
+    else
+      break
+    end
+  end
+  local tbExtAttr = {}
+  nIdxBegin = (nHSSlot - 1) * self.nSlotDataOffSet + self.nExtAttrSaveBegin - 1
+  for i = 1, self.nMaxExtAttrCount do
+    local nIdxOffSet = nIdxBegin + (i - 1) * self.ATTR_SAVE_OFFSET
+    local nAttrId = pPlayer.GetUserValue(self.tbSaveGroupKey[nWXIndex], nIdxOffSet + self.nExtAttrSaveBegin)
+    if nAttrId > 0 then
+      tbExtAttr[i] = {
+        nAttrId,
+        {}
+      }
+      for j = 1, 3 do
+        tbExtAttr[i][2][j] = pPlayer.GetUserValue(self.tbSaveGroupKey[nWXIndex], nIdxOffSet + self.nExtAttrSaveBegin + j)
+      end
+    else
+      break
+    end
+  end
+  local nTemplateId = pPlayer.GetUserValue(self.tbSaveGroupKey[nWXIndex], (nHSSlot - 1) * self.nSlotDataOffSet + self.nTemplateIdSaveId)
+  local nLimitType = pPlayer.GetUserValue(self.tbSaveGroupKey[nWXIndex], (nHSSlot - 1) * self.nSlotDataOffSet + self.nLimitTypeSaveId)
+  local nEnhanceLevel = pPlayer.GetUserValue(self.tbSaveGroupKey[nWXIndex], (nHSSlot - 1) * self.nSlotDataOffSet + self.nEnhanceLevelSaveId)
+  return {
+    nTemplateId,
+    nLimitType,
+    nEnhanceLevel,
+    tbBaseAttr,
+    tbExtAttr
+  }
+end
+
+function WXHuShi:GetEnhanceMaxUpgradeData(pPlayer, nWXIndex, nHSSlot)
+  local tbAttrIndexUpgradeCount = {
+    0,
+    0,
+    0,
+    0
+  }
+  for nTimes = 1, WXHuShi.nMaxExtAttrCount do
+    local nSaveIdx = (nHSSlot - 1) * self.nSlotDataOffSet + (nTimes - 1) + self.nEnhanceMaxUpgradeBegin
+    local nAttrIndex = pPlayer.GetUserValue(self.tbSaveGroupKey[nWXIndex], nSaveIdx)
+    if nAttrIndex > 0 then
+      tbAttrIndexUpgradeCount[nAttrIndex] = tbAttrIndexUpgradeCount[nAttrIndex] + 1
+    end
+  end
+  return tbAttrIndexUpgradeCount
+end
+
+function WXHuShi:InitCfg()
+  local szFilepath = "Setting/WuXue/WXHuShiItemCfg.tab"
+  self.tbHuShiItemCfg = Lib:EasyLoadTabFile(szFilepath, {
+    "nTemplateId"
+  })
+  if not self.tbHuShiItemCfg then
+    LogErr("WXHuShi:InitCfg Load " .. szFilepath .. " Failed")
+    return false
+  end
+  szFilepath = "Setting/WuXue/WXHuShiBaseAttrPoolCfg.tab"
+  local tbBaseAttr = Lib:EasyLoadTabFile(szFilepath)
+  if not tbBaseAttr then
+    LogErr("WXHuShi:InitCfg Load " .. szFilepath .. " Failed")
+    return false
+  end
+  self.tbBaseAttrPoolCfg = {}
+  for nId, tbInfo in pairs(tbBaseAttr) do
+    if not self.tbBaseAttrPoolCfg[tbInfo.nGroupId] then
+      self.tbBaseAttrPoolCfg[tbInfo.nGroupId] = {}
+    end
+    table.insert(self.tbBaseAttrPoolCfg[tbInfo.nGroupId], tbInfo)
+  end
+  szFilepath = "Setting/WuXue/WXHuShiExtAttrPoolCfg.tab"
+  local tbExtAttr = Lib:EasyLoadTabFile(szFilepath)
+  if not tbExtAttr then
+    LogErr("WXHuShi:InitCfg Load " .. szFilepath .. " Failed")
+    return false
+  end
+  self.tbExtAttrPoolCfg = {}
+  for nId, tbInfo in pairs(tbExtAttr) do
+    if not self.tbExtAttrPoolCfg[tbInfo.nGroupId] then
+      self.tbExtAttrPoolCfg[tbInfo.nGroupId] = {}
+    end
+    table.insert(self.tbExtAttrPoolCfg[tbInfo.nGroupId], tbInfo)
+  end
+  szFilepath = "Setting/WuXue/WXHuShiExtAttrib.tab"
+  local tbEnhanceAttr = Lib:EasyLoadTabFile(szFilepath)
+  self.tbEnhanceAttrPoolCfg = {}
+  for nId, tbInfo in pairs(tbEnhanceAttr) do
+    if not self.tbEnhanceAttrPoolCfg[tbInfo.nGroupId] then
+      self.tbEnhanceAttrPoolCfg[tbInfo.nGroupId] = {}
+    end
+    self.tbEnhanceAttrPoolCfg[tbInfo.nGroupId][tbInfo.nLevel] = {
+      tbInfo.nAttrib1Value1 or 0,
+      tbInfo.nAttrib1Value2 or 0,
+      tbInfo.nAttrib1Value3 or 0
+    }
+  end
+  return true
+end
+
+WXHuShi:InitCfg()
+
+function WXHuShi:GetHuShiSeries(nTemplateId)
+  if not self.tbHuShiItemCfg[nTemplateId] then
+    return 0
+  end
+  return self.tbHuShiItemCfg[nTemplateId].nSeries
+end
+
+function WXHuShi:GetHuShiBaseAttrCfg(nTemplateId)
+  if not self.tbHuShiItemCfg[nTemplateId] then
+    return
+  end
+  local nBaseAttrGroupId = self.tbHuShiItemCfg[nTemplateId].nBaseAttrGroupId
+  local nBaseAttrNum = self.tbHuShiItemCfg[nTemplateId].nBaseAttrNum
+  if not self.tbBaseAttrPoolCfg[nBaseAttrGroupId] or not self.tbBaseAttrPoolCfg[nBaseAttrGroupId] then
+    return
+  end
+  return self.tbBaseAttrPoolCfg[nBaseAttrGroupId], nBaseAttrNum
+end
+
+function WXHuShi:GetHuShiExtAttrCfg(nTemplateId)
+  if not self.tbHuShiItemCfg[nTemplateId] then
+    return
+  end
+  local nExtAttrGroupId = self.tbHuShiItemCfg[nTemplateId].nExtAttrGroupId
+  local nExtAttrNum = self.tbHuShiItemCfg[nTemplateId].nExtAttrNum
+  if not self.tbExtAttrPoolCfg[nExtAttrGroupId] or not self.tbExtAttrPoolCfg[nExtAttrGroupId] then
+    return
+  end
+  return self.tbExtAttrPoolCfg[nExtAttrGroupId], nExtAttrNum
+end
+
+function WXHuShi:CanIdentify(pPlayer, nItemId, nCount)
+  nCount = nCount or 1
+  if not self.IS_SYS_OPEN then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  local pItem = pPlayer.GetItemInBag(nItemId)
+  if not pItem then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\228\184\141\229\173\152\229\156\168")
+  end
+  if nCount > pItem.nCount then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\230\149\176\233\135\143\228\184\141\232\182\179")
+  end
+  if pItem.nUseLevel > pPlayer.nTotalLevel then
+    return false, i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179\239\188\140\228\184\141\232\131\189\233\137\180\229\174\154")
+  end
+  local nHuShiTemplateId = KItem.GetItemExtParam(pItem.dwTemplateId, self.EXT_PARAM_SEED_TO_HUSHI)
+  if not nHuShiTemplateId or nHuShiTemplateId <= 0 then
+    return false, i18n.EasyGet("\230\138\164\231\159\179id\233\133\141\231\189\174\233\148\153\232\175\175")
+  end
+  if nCount > pPlayer.GetFreeBagCount() then
+    return false, i18n.EasyGet("\232\131\140\229\140\133\229\183\178\230\187\161")
+  end
+  return true
+end
+
+function WXHuShi:CanHuShiPutOn(pPlayer, nWXIndex, nHSSlot, nHuShiId)
+  if nWXIndex < 1 or nWXIndex > self.nMaxWuXueCount or nHSSlot < 1 or nHSSlot > self.nMaxHuShiSlot then
+    return false, i18n.EasyGet("\228\189\141\231\189\174\233\148\153\232\175\175")
+  end
+  if pPlayer.IsMaskPlayerAttr() then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\228\184\141\229\143\175\231\169\191\230\136\180\230\138\164\231\159\179")
+  end
+  local pHuShi = KItem.GetItemObj(nHuShiId)
+  if not pHuShi then
+    return false, i18n.EasyGet("\230\138\164\231\159\179\228\184\141\229\173\152\229\156\168")
+  end
+  if not self:CheckIsWXHuShi(pHuShi.dwTemplateId) then
+    return false, i18n.EasyGet("\228\184\141\230\152\175\230\138\164\231\159\179")
+  end
+  local nSeries = self:GetHuShiSeries(pHuShi.dwTemplateId)
+  if nSeries ~= nHSSlot then
+    return false, i18n.EasyGet("\230\138\164\231\159\179\228\184\142\229\173\148\228\189\141\228\184\141\229\140\185\233\133\141")
+  end
+  return true
+end
+
+function WXHuShi:CanPutOnHSEnhance(pPlayer, nWXIndex, nHSSlot)
+  local tbPutOnData = self:GetWXHuShiData(pPlayer, nWXIndex, nHSSlot)
+  if not tbPutOnData or tbPutOnData[1] <= 0 then
+    return false, i18n.EasyGet("\229\173\148\228\189\141\230\178\161\230\156\137\230\138\164\231\159\179")
+  end
+  local nTemplateId = tbPutOnData[1]
+  local nEnhanceLevel = tbPutOnData[3]
+  local nPutOnLevel = Item:GetLevel(nTemplateId)
+  if nEnhanceLevel >= #self.Cfg.tbEnhanceInfo then
+    return false, i18n.EasyGet("\230\138\164\231\159\179\229\188\186\229\140\150\229\183\178\232\190\190\228\184\138\233\153\144")
+  end
+  local nNextLevel = nEnhanceLevel + 1
+  local nNeedItemId = self.Cfg.tbEnhanceInfo[nNextLevel][1]
+  local nNeedItemNum = self.Cfg.tbEnhanceInfo[nNextLevel][nPutOnLevel + 1]
+  local nCurNum = pPlayer.GetItemCountByTypeInBag(nNeedItemId)
+  if nNeedItemNum > nCurNum then
+    return false, i18n.EasyGet("{0}\228\184\141\232\182\179", Item:GetName(nNeedItemId))
+  end
+  local tbExtAttr = tbPutOnData[5]
+  local nAttrCount = #tbExtAttr
+  if nAttrCount <= 0 then
+    return false, i18n.EasyGet("\230\178\161\230\156\137\233\153\132\229\138\160\229\177\158\230\128\167")
+  end
+  return true
+end
+
+function WXHuShi:CanEnhance(pPlayer, nHuShiId)
+  local pHuShi = KItem.GetItemObj(nHuShiId)
+  if not pHuShi then
+    return false, i18n.EasyGet("\230\138\164\231\159\179\228\184\141\229\173\152\229\156\168")
+  end
+  local dwOwnerId = GetItemOwner(nHuShiId)
+  if not dwOwnerId then
+    return false
+  end
+  if dwOwnerId ~= pPlayer.dwID then
+    return false, i18n.EasyGet("\230\138\164\231\159\179\228\184\141\229\177\158\228\186\142\228\189\160")
+  end
+  local nEnhanceLevel = Item:GetClass("WXHuShiItem"):GetEnhanceLevel(pHuShi)
+  local nNextLevel = nEnhanceLevel + 1
+  if not self.Cfg.tbEnhanceInfo[nNextLevel] then
+    return false
+  end
+  if nEnhanceLevel >= #self.Cfg.tbEnhanceInfo[nNextLevel] then
+    return false, i18n.EasyGet("\230\138\164\231\159\179\229\188\186\229\140\150\229\183\178\232\190\190\228\184\138\233\153\144")
+  end
+  local nNeedItemId = self.Cfg.tbEnhanceInfo[nNextLevel][1]
+  local nNeedItemNum = self.Cfg.tbEnhanceInfo[nNextLevel][pHuShi.nLevel + 1]
+  local nCurNum = pPlayer.GetItemCountByTypeInBag(nNeedItemId)
+  if nNeedItemNum > nCurNum then
+    return false, i18n.EasyGet("{0}\228\184\141\232\182\179", Item:GetName(nNeedItemId))
+  end
+  local tbExtAttr = Item:GetClass("WXHuShiItem"):GetRandomExtAttrInfo(pHuShi)
+  local nAttrCount = #tbExtAttr
+  if nAttrCount <= 0 then
+    return false, i18n.EasyGet("\230\178\161\230\156\137\233\153\132\229\138\160\229\177\158\230\128\167")
+  end
+  return true
+end
+
+function WXHuShi:CheckIsWXHuShi(nItemTemplateId)
+  if not self.tbHuShiItemCfg[nItemTemplateId] then
+    return false
+  end
+  return true
+end
+
+function WXHuShi:UpdateEnhanceAttr(pNpc, nHSSlot, tbPutOnData, tbMaxUpgradeData, bIsApply, nPlayerId)
+  if not tbPutOnData or tbPutOnData[1] <= 0 then
+    return
+  end
+  local nTemplateId = tbPutOnData[1]
+  local nEnhanceLevel = tbPutOnData[3]
+  if nEnhanceLevel <= 0 then
+    return
+  end
+  local tbBaseAttr = tbPutOnData[4]
+  local tbExtAttr = tbPutOnData[5]
+  local nQuality = Item:GetQuality(nTemplateId)
+  local nItemLevel = Item:GetLevel(nTemplateId)
+  local nBeginIndex = WXHuShi.Cfg.tbEnhanceAttr[nQuality][nHSSlot][nItemLevel]
+  local nAttrLevel = nBeginIndex + nEnhanceLevel * self.Cfg.nEnhanceAddFactor
+  for nIndex, tbV in ipairs(tbBaseAttr) do
+    local nAttrId = tbV[1]
+    local tbEnhanceAttrValue = self.tbEnhanceAttrPoolCfg[nAttrId][nAttrLevel]
+    local szAttrType = WXHuShi.Cfg.tbAttrId2AttrType[nAttrId]
+    if bIsApply then
+      pNpc.ApplyMagicAttrib(szAttrType, tbEnhanceAttrValue[1], tbEnhanceAttrValue[2], tbEnhanceAttrValue[3])
+      if nPlayerId then
+        AttributeHelp:LogAttrApply(nPlayerId, "WuXueHuShiEnhance", szAttrType, tbEnhanceAttrValue[1], tbEnhanceAttrValue[2], tbEnhanceAttrValue[3])
+      end
+    else
+      pNpc.RemoveMagicAttrib(szAttrType, tbEnhanceAttrValue[1], tbEnhanceAttrValue[2], tbEnhanceAttrValue[3])
+      if nPlayerId then
+        AttributeHelp:LogAttrRemove(nPlayerId, "WuXueHuShiEnhance", szAttrType, tbEnhanceAttrValue[1], tbEnhanceAttrValue[2], tbEnhanceAttrValue[3])
+      end
+    end
+  end
+  for nAttrIndex, tbV in ipairs(tbExtAttr) do
+    local nAttrId = tbV[1]
+    local nExtAttrLevel = nAttrLevel + tbMaxUpgradeData[nAttrIndex] * self.Cfg.nEnhanceMaxAddFactor
+    local tbEnhanceAttrValue = self.tbEnhanceAttrPoolCfg[nAttrId][nExtAttrLevel]
+    local szAttrType = WXHuShi.Cfg.tbAttrId2AttrType[nAttrId]
+    if bIsApply then
+      pNpc.ApplyMagicAttrib(szAttrType, tbEnhanceAttrValue[1], tbEnhanceAttrValue[2], tbEnhanceAttrValue[3])
+      if nPlayerId then
+        AttributeHelp:LogAttrApply(nPlayerId, "WuXueHuShiEnhance", szAttrType, tbEnhanceAttrValue[1], tbEnhanceAttrValue[2], tbEnhanceAttrValue[3])
+      end
+    else
+      pNpc.RemoveMagicAttrib(szAttrType, tbEnhanceAttrValue[1], tbEnhanceAttrValue[2], tbEnhanceAttrValue[3])
+      if nPlayerId then
+        AttributeHelp:LogAttrRemove(nPlayerId, "WuXueHuShiEnhance", szAttrType, tbEnhanceAttrValue[1], tbEnhanceAttrValue[2], tbEnhanceAttrValue[3])
+      end
+    end
+  end
+end
+
+function WXHuShi:UpdateWXHuShiAttr(pNpc, bIsApply, tbSaveData, nPlayerId)
+  local tbBaseAttr = tbSaveData[4]
+  local tbExtAttr = tbSaveData[5]
+  for nIndex, tbV in ipairs(tbBaseAttr) do
+    local nAttrId = tbV[1]
+    local tbV = tbV[2]
+    local szAttrType = WXHuShi.Cfg.tbAttrId2AttrType[nAttrId]
+    if bIsApply then
+      pNpc.ApplyMagicAttrib(szAttrType, tbV[1], tbV[2], tbV[3])
+      if nPlayerId then
+        AttributeHelp:LogAttrApply(nPlayerId, "WuXueHuShi", szAttrType, tbV[1], tbV[2], tbV[3])
+      end
+    else
+      pNpc.RemoveMagicAttrib(szAttrType, tbV[1], tbV[2], tbV[3])
+      if nPlayerId then
+        AttributeHelp:LogAttrRemove(nPlayerId, "WuXueHuShi", szAttrType, tbV[1], tbV[2], tbV[3])
+      end
+    end
+  end
+  for nIndex, tbV in ipairs(tbExtAttr) do
+    local nAttrId = tbV[1]
+    local tbV = tbV[2]
+    local szAttrType = WXHuShi.Cfg.tbAttrId2AttrType[nAttrId]
+    if bIsApply then
+      pNpc.ApplyMagicAttrib(szAttrType, tbV[1], tbV[2], tbV[3])
+      if nPlayerId then
+        AttributeHelp:LogAttrApply(nPlayerId, "WuXueHuShi", szAttrType, tbV[1], tbV[2], tbV[3])
+      end
+    else
+      pNpc.RemoveMagicAttrib(szAttrType, tbV[1], tbV[2], tbV[3])
+      if nPlayerId then
+        AttributeHelp:LogAttrRemove(nPlayerId, "WuXueHuShi", szAttrType, tbV[1], tbV[2], tbV[3])
+      end
+    end
+  end
+end
+
+function WXHuShi:CalcFightPower(pPlayer)
+  local nTotalPower = 0
+  for nWXIndex = 1, self.nMaxWuXueCount do
+    for nHSSlot = 1, self.nMaxHuShiSlot do
+      local tbPutOnData = self:GetWXHuShiData(pPlayer, nWXIndex, nHSSlot)
+      if tbPutOnData and tbPutOnData[1] > 0 then
+        nTotalPower = nTotalPower + self.tbHuShiItemCfg[tbPutOnData[1]].nFightPower
+        local nEnhanceLevel = tbPutOnData[3]
+        if nEnhanceLevel > 0 then
+          local nItemLevel = Item:GetLevel(tbPutOnData[1])
+          nTotalPower = nTotalPower + self.Cfg.tbEnhanceFight[nEnhanceLevel][nItemLevel]
+        end
+      end
+    end
+  end
+  return nTotalPower
+end
+
+if FightPower.RegisterFPSystemModule then
+  FightPower:RegisterFPSystemModule({"WXHuShi"}, WXHuShi)
+end
+
+function WXHuShi:OnEquip(pPlayer)
+  for nWXIndex = 1, self.nMaxWuXueCount do
+    for nHSSlot = 1, self.nMaxHuShiSlot do
+      local tbPutOnData = self:GetWXHuShiData(pPlayer, nWXIndex, nHSSlot)
+      if tbPutOnData and tbPutOnData[1] > 0 then
+        self:UpdateWXHuShiAttr(pPlayer.GetNpc(), true, tbPutOnData, pPlayer.dwID)
+      end
+      local tbMaxUpgradeData = self:GetEnhanceMaxUpgradeData(pPlayer, nWXIndex, nHSSlot)
+      self:UpdateEnhanceAttr(pPlayer.GetNpc(), nHSSlot, tbPutOnData, tbMaxUpgradeData, true, pPlayer.dwID)
+    end
+  end
+end
+
+function WXHuShi:OnUnEquip(pPlayer)
+  for nWXIndex = 1, self.nMaxWuXueCount do
+    for nHSSlot = 1, self.nMaxHuShiSlot do
+      local tbPutOnData = self:GetWXHuShiData(pPlayer, nWXIndex, nHSSlot)
+      if tbPutOnData and tbPutOnData[1] > 0 then
+        self:UpdateWXHuShiAttr(pPlayer.GetNpc(), false, tbPutOnData, pPlayer.dwID)
+      end
+      local tbMaxUpgradeData = self:GetEnhanceMaxUpgradeData(pPlayer, nWXIndex, nHSSlot)
+      self:UpdateEnhanceAttr(pPlayer.GetNpc(), nHSSlot, tbPutOnData, tbMaxUpgradeData, true, pPlayer.dwID)
+    end
+  end
+end
+
+function WXHuShi:GetSyncWXHuShiData(pPlayerAsync, nWXIndex, nHSSlot)
+  if not self.tbSaveGroupKey[nWXIndex] or nHSSlot <= 0 or nHSSlot > self.nMaxHuShiSlot then
+    return {0}
+  end
+  local tbBaseAttr = {}
+  local nSyncIdxBegin = (nWXIndex - 1) * self.nSyncValueOffset + (nHSSlot - 1) * self.nSyncSlotDataOffSet + self.nSyncBaseAttrSaveBegin - 1
+  for i = 1, self.nMaxBaseAttrCount do
+    local nIdxOffSet = nSyncIdxBegin + (i - 1) * self.ATTR_SAVE_OFFSET
+    local nAttrId = pPlayerAsync.GetWuXueHuShi(nIdxOffSet + self.nSyncBaseAttrSaveBegin)
+    if nAttrId > 0 then
+      tbBaseAttr[i] = {
+        nAttrId,
+        {}
+      }
+      for j = 1, 3 do
+        tbBaseAttr[i][2][j] = pPlayerAsync.GetWuXueHuShi(nIdxOffSet + self.nSyncBaseAttrSaveBegin + j)
+      end
+    else
+      break
+    end
+  end
+  local tbExtAttr = {}
+  nSyncIdxBegin = (nWXIndex - 1) * self.nSyncValueOffset + (nHSSlot - 1) * self.nSyncSlotDataOffSet + self.nSyncExtAttrSaveBegin - 1
+  for i = 1, self.nMaxExtAttrCount do
+    local nIdxOffSet = nSyncIdxBegin + (i - 1) * self.ATTR_SAVE_OFFSET
+    local nAttrId = pPlayerAsync.GetWuXueHuShi(nIdxOffSet + self.nSyncExtAttrSaveBegin)
+    if nAttrId > 0 then
+      tbExtAttr[i] = {
+        nAttrId,
+        {}
+      }
+      for j = 1, 3 do
+        tbExtAttr[i][2][j] = pPlayerAsync.GetWuXueHuShi(nIdxOffSet + self.nSyncExtAttrSaveBegin + j)
+      end
+    else
+      break
+    end
+  end
+  nSyncIdxBegin = (nWXIndex - 1) * self.nSyncValueOffset + (nHSSlot - 1) * self.nSlotDataOffSet
+  local nTemplateId = pPlayerAsync.GetWuXueHuShi(nSyncIdxBegin + self.nTemplateIdSaveId)
+  local nLimitType = pPlayerAsync.GetWuXueHuShi(nSyncIdxBegin + self.nLimitTypeSaveId)
+  local nEnhanceLevel = pPlayerAsync.GetWuXueHuShi(nSyncIdxBegin + self.nEnhanceLevelSaveId)
+  return {
+    nTemplateId,
+    nLimitType,
+    nEnhanceLevel,
+    tbBaseAttr,
+    tbExtAttr
+  }
+end
+
+function WXHuShi:GetSyncEnhanceMaxUpgradeData(pPlayerAsync, nWXIndex, nHSSlot)
+  local tbAttrIndexUpgradeCount = {
+    0,
+    0,
+    0,
+    0
+  }
+  for nTimes = 1, WXHuShi.nMaxExtAttrCount do
+    local nSyncIdxBegin = (nWXIndex - 1) * self.nSyncValueOffset + (nHSSlot - 1) * self.nSlotDataOffSet + (nTimes - 1) + self.nSyncEnhanceMaxUpgradeBegin
+    local nAttrIndex = pPlayerAsync.GetWuXueHuShi(nSyncIdxBegin)
+    if nAttrIndex > 0 then
+      tbAttrIndexUpgradeCount[nAttrIndex] = tbAttrIndexUpgradeCount[nAttrIndex] + 1
+    end
+  end
+  return tbAttrIndexUpgradeCount
+end
+
+function WXHuShi:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  for nWXIndex = 1, self.nMaxWuXueCount do
+    for nHSSlot = 1, self.nMaxHuShiSlot do
+      local tbSyncPutOnData = self:GetSyncWXHuShiData(pPlayerAsync, nWXIndex, nHSSlot)
+      if tbSyncPutOnData and tbSyncPutOnData[1] > 0 then
+        self:UpdateWXHuShiAttr(pNpc, true, tbSyncPutOnData)
+      end
+      local tbMaxUpgradeData = self:GetSyncEnhanceMaxUpgradeData(pPlayerAsync, nWXIndex, nHSSlot)
+      self:UpdateEnhanceAttr(pNpc, nHSSlot, tbSyncPutOnData, tbMaxUpgradeData, true)
+    end
+  end
+end
+
+AttributeModule:Register("WXHuShi", WXHuShi)

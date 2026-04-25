@@ -1,0 +1,104 @@
+local tbWnd = Ui:CreateWindow("UIFestival_GetYuanXiaoFlower")
+tbWnd.ElementPath = {
+  btnGo = "ImgAll/btnGo",
+  txtActivityName = "ImgAll/txtActivityName"
+}
+tbWnd.tbType = {Person = 1, Rank = 2}
+tbWnd.tbOnClick = {
+  btnRank = function(self)
+    Ui:OpenWindow("UITemporaryActivityRank", self.tbEntranceRankData, 1)
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.szHelpKey)
+  end
+}
+tbWnd.nSmallListPerLine = 4
+
+function tbWnd:OnOpen(nEntranceIndex, nIndex)
+  self.nEntranceIndex = nEntranceIndex or self.nEntranceIndex
+  if self.nEntranceIndex then
+    self:UpdateInfo(self.nEntranceIndex, nIndex)
+  end
+end
+
+function tbWnd:UpdateInfo(nEntranceIndex, nIndex)
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(nEntranceIndex)
+  local tbInfo = self.tbActivityList[nIndex]
+  if not tbInfo then
+    return
+  end
+  self.tbEntranceRankData = ActivityMgr.EntranceSchedule:GetEntranceRankData(nEntranceIndex)
+  self.nIndex = nIndex
+  self.szHelpKey = tbInfo.szHelpKey
+  self.pPanel:Label_SetText(self.szTime, tbInfo.szShowTime)
+  local pInstance = ActivityMgr:GetInstanceById(tbInfo.nId)
+  local nEndTime = pInstance:GetEndTime()
+  if nEndTime > GetTime() then
+    local nDiff = nEndTime - GetTime()
+    local szTime = i18n.EasyGet("<color=#1FFB24>{0}</color>{1}\229\144\142\231\187\147\230\157\159", tbInfo.szShowTime, Lib:TimeDesc2(nDiff))
+    self.pPanel:Label_SetText(self.szTime, szTime)
+  end
+  self.pPanel:SetActive(self.txtInfo, false)
+  self.pPanel:Label_SetText(self.txtSecondTittle, i18n.EasyGet("\228\184\137\229\164\167\228\184\187\229\159\142\229\175\187\230\137\190\232\138\177\231\129\175\231\173\148\233\162\152"))
+  self.pPanel:Label_SetText(self.txtLV, i18n.EasyGet("\231\173\137\231\186\167\233\153\144\229\136\182{0}", tbInfo.nLevel))
+  self:UpdateLeftActivity()
+  self:UpdateRightActivity()
+end
+
+function tbWnd:UpdateListView(nType, tbAward, szTemplate)
+  if not tbAward then
+    return
+  end
+  if not self.tbListView[nType] then
+    self.tbListView[nType] = Ui:NewScrollView(self, szTemplate)
+  end
+  self.tbListView[nType]:Clear()
+  for i = 1, #tbAward do
+    self.tbListView[nType]:SetElement(i, function(tbElement)
+      self:UpdateListElement(tbElement, tbAward[i])
+    end, true)
+  end
+end
+
+function tbWnd:UpdateLeftActivity()
+  local tbSetting = ActivityMgr.CommonEntryLinkData[self.tbActivityList[self.nIndex].nId].tbSetting
+  if tbSetting then
+    for index, szValue in ipairs(tbSetting.tbszInfo) do
+      local tbPath = self.tbLeftElementPath[index]
+      if tbPath then
+        self.pPanel:Label_SetText(tbPath.txtSecondTittle, i18n.EasyGet("{0}", i18n.Get(szValue)))
+      end
+      local nShowAwardKey = tbSetting.tbShowAwardKey[index]
+      local nShowItemId = tbSetting.tbShowItemId[index]
+      if nShowAwardKey and nShowItemId then
+        local tbAward = Award:GetAward(nShowItemId, nShowAwardKey)
+        self:UpdateListView(index, tbAward, tbPath.Template)
+      end
+    end
+  end
+end
+
+function tbWnd:UpdateRightActivity()
+  self.tbScrollView:Clear()
+  for index, tbInfo in ipairs(ActivityMgr.CommonEntryLinkData[self.tbActivityList[self.nIndex].nId].tbSetp) do
+    self.tbScrollView:SetElement(index, function(tbElement)
+      tbElement.pPanel:SetActive(self.ElementPath.btnGo, true)
+      tbElement.pPanel:Label_SetText(self.ElementPath.txtActivityName, i18n.Get(tbInfo.szInfo))
+      Ui:Button_BindEvent(tbElement.pPanel, self.ElementPath.btnGo, self.OnClickGo, self, tbInfo.szCallBack, tbInfo.szParam)
+    end)
+  end
+end
+
+function tbWnd:OnClickGo(szCallBack, szParam)
+  local fn = ActivityMgr.tbJumpFunc[szCallBack]
+  local tbParam = Lib:SplitStrTry2Num(szParam, "|")
+  fn(self.tbActivityList[self.nIndex].nId, table.unpack(tbParam))
+  Ui:CloseWindow("UITheLanternFestival")
+end
+
+function tbWnd:OnClose()
+  for key, ItemGridScrollView in pairs(self.tbListView or {}) do
+    ItemGridScrollView:Clear()
+  end
+  self.tbScrollView:Clear()
+end

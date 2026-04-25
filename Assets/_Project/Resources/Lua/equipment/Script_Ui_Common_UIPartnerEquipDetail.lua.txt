@@ -1,0 +1,259 @@
+local tbWnd = Ui:CreateClass("UIPartnerEquipDetail", "UIPanel")
+local PartnerEquipC = Item.PartnerEquip
+local tbControls = {
+  AttrTemplate = "ItemIntro/ScrollView/Viewport/Content/Template",
+  ScrollView = "ItemIntro/ScrollView",
+  SalePrice = "ItemIntro/SalePrice",
+  txtTradeLimitState = "ItemIntro/txtTradeLimitState",
+  HasEquipped = "ItemIntro/imgMarkEquipped",
+  txtFightPower = "ItemIntro/txtFightPower",
+  ItemGridTemplate = "ItemIntro/ItemGrid",
+  txtEquipBelong = "ItemIntro/txtEquipBelong",
+  txtLevelLimit = "ItemIntro/txtLevelLimit",
+  txtRank = "ItemIntro/txtRank",
+  txtTitle = "imgTitle/txtTitle",
+  txtItemTime = "ItemIntro/txtItemTime"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self.pPanel:SetActive(tbControls.txtEquipBelong, false)
+  self.itemGrid = Ui:NewExistItemGrid(self, tbControls.ItemGridTemplate)
+  self.tbTradePanel = {}
+end
+
+function tbWnd:Update(tbInfo)
+  self.pPanel:SetActive(tbControls.txtItemTime, false)
+  self.szOpt = tbInfo.szOpt
+  self.pItem = tbInfo.pItem
+  self.nItemId = tbInfo.nItemId
+  self.nTemplateId = tbInfo.nTemplateId
+  self.nFaction = tbInfo.nFaction
+  self.nFactionSect = tbInfo.nFactionSect
+  self.nSex = tbInfo.nSex
+  self.pAsyncData = tbInfo.pAsyncData
+  self.bIsCompare = tbInfo.bIsCompare
+  self.nSeries = tbInfo.nSeries
+  local tbItemInfo = Item:GetItemBaseProp(self.nTemplateId)
+  tbInfo.tbItemExtParams = tbInfo.tbItemExtParams or {}
+  self.nTimeOutValue = tbInfo.tbItemExtParams.nItemTimeOut or 0
+  self.nTradeLimitType = tbInfo.tbItemExtParams.nTradeLimitType or tbItemInfo.nTradeLimitType
+  self.nTradeLimitValue = tbInfo.tbItemExtParams.nTradeLimitValue or 0
+  self.tbTradeInfo = tbInfo.tbItemExtParams.tbTradeInfo
+  self.tbLinkInfo = tbInfo.tbLinkInfo
+  self.tbItemExtParams = tbInfo.tbItemExtParams
+  self:UpdateSaleMoney()
+  self:UpdateIcon()
+  self:UpdateLevelAndDesc()
+  self:UpdateBindStateDesc()
+  self:UpdateEquiped()
+  self:UpdateAttrib()
+end
+
+function tbWnd:GetItemGrid()
+  return self.itemGrid
+end
+
+function tbWnd:UpdateSaleMoney()
+  local szCurrency, nPrice = Item.tbItemSell:GetSellCurrencyValue(self.nTemplateId)
+  if szCurrency then
+    self.pPanel:SetActive(tbControls.SalePrice, true)
+    self.pPanel:Label_SetText(tbControls.SalePrice .. "/txtSalePrice", nPrice)
+    local szIcon = Currency:GetIcon(szCurrency)
+    self.pPanel:Sprite_SetSprite(tbControls.SalePrice .. "/imgMoney", szIcon)
+  else
+    self.pPanel:SetActive(tbControls.SalePrice, false)
+  end
+end
+
+function tbWnd:UpdateIcon()
+  local szName = ""
+  if self.pItem then
+    szName = KItem.GetItemShowInfo(self.pItem.dwTemplateId, self.nFaction or me.nFaction, self.nFactionSect or me.nFactionSect, self.nSex or me.nSex)
+  else
+    szName = KItem.GetItemShowInfo(self.nTemplateId, self.nFaction or me.nFaction, self.nFactionSect or me.nFactionSect, self.nSex or me.nSex)
+  end
+  local bShowTip = true
+  if self.pAsyncData then
+    bShowTip = false
+  end
+  local nLianHuaLevel = -1
+  szName = i18n.Parse(szName)
+  if EDITOR then
+    szName = string.format("%s (ID:%d)", szName, self.nTemplateId)
+  end
+  self.pPanel:Label_SetText(tbControls.txtTitle, szName)
+  self.itemGrid:SetItem(self.nItemId, self.nTemplateId, {bShowTip = bShowTip}, self.nFaction, self.nFactionSect, self.nSex, self.pAsyncData, nil, {nLianHuaLevel = nLianHuaLevel})
+end
+
+function tbWnd:UpdateLevelAndDesc()
+  local tbInfo = Item:GetItemBaseProp(self.nTemplateId)
+  local szColor = me.nTotalLevel >= tbInfo.nRequireLevel and "#52D455" or "#b60000"
+  if ZongShiSkill:IsZongShiByLevel(tbInfo.nRequireLevel) then
+    self.pPanel:Label_SetText(tbControls.txtLevelLimit, i18n.EasyGet("\233\156\128\230\177\130\231\173\137\231\186\167\239\188\154<color={0}>{1}</color>", szColor, Lib:GetLevelText(tbInfo.nRequireLevel)))
+  else
+    self.pPanel:Label_SetText(tbControls.txtLevelLimit, i18n.EasyGet("\233\156\128\230\177\130\231\173\137\231\186\167\239\188\154<color={0}>{1}</color>\231\186\167", szColor, Lib:GetLevelText(tbInfo.nRequireLevel)))
+  end
+  self.pPanel:Label_SetColorByName(tbControls.txtLevelLimit, Item.tbTipsColorDef.EquipLevel.ColorName or "Red")
+  self.pPanel:Label_SetText(tbControls.txtRank, i18n.EasyGet("{0}\233\152\182", self.pItem and self.pItem.nLevel or tbInfo.nLevel))
+  self.pPanel:Label_SetColorByName(tbControls.txtRank, Item.tbTipsColorDef.EquipRank.ColorName or "Red")
+  self.pPanel:SetActive(tbControls.txtLevelLimit, true)
+  self.pPanel:SetActive(tbControls.txtRank, true)
+end
+
+function tbWnd:UpdateBindStateDesc()
+  if self.pItem and 1 == self.pItem.dwTradeLimitType then
+    self.pPanel:SetActive(tbControls.txtTradeLimitState, false)
+  elseif not self.pItem and self.tbItemExtParams and self.tbItemExtParams.nBindType and self.tbItemExtParams.nBindType == Item.eBINDTYPE.UNBIND then
+    self.pPanel:SetActive(tbControls.txtTradeLimitState, false)
+  elseif not self.pItem and self.tbItemExtParams and self.tbItemExtParams.nTradeLimitType and self.tbItemExtParams.nTradeLimitType == Item.eBINDTYPE.UNBIND then
+    self.pPanel:SetActive(tbControls.txtTradeLimitState, false)
+  else
+    self.pPanel:SetActive(tbControls.txtTradeLimitState, false)
+  end
+end
+
+function tbWnd:UpdateEquiped()
+  local nEquipedType = self:GetHasEquippedType()
+  self.pPanel:SetActive(tbControls.HasEquipped, nEquipedType == Item.Equip.EQUIPED_TYPE.ME)
+end
+
+function tbWnd:GetHasEquippedType()
+  local nEquipedType = Item.Equip.EQUIPED_TYPE.NOT
+  if self.pItem then
+    if not self.pAsyncData then
+      if self.pItem.nEquipPos == Item.EQUIPPOS_EXTEND then
+        local nSlot = Item.ExtEquip:GetSlot(self.pItem)
+        local pThisSlotWearEquip = Item.ExtEquip:GetEquipObj(me, nSlot)
+        if nil ~= pThisSlotWearEquip and pThisSlotWearEquip.dwId == self.nItemId then
+          nEquipedType = Item.Equip.EQUIPED_TYPE.ME
+        end
+      end
+    else
+      local nSlot = Item.ExtEquip:GetSlot(self.pItem)
+      if self.tbItemExtParams[nSlot] and self.tbItemExtParams[nSlot] == self.nItemId then
+        nEquipedType = Item.Equip.EQUIPED_TYPE.ASYNCDATA
+      end
+    end
+  end
+  return nEquipedType
+end
+
+function tbWnd:UpdateAttrib()
+  local tbClass = Item:GetClass("PartnerEquipItem")
+  local tbBaseAttrib, tbRandomAttrib, tbHideAttrib
+  if self.pItem then
+    local nFightPower = PartnerEquipC:GetEquipFightPower(self.pItem)
+    local pPlayer = self.pAsyncData or me
+    local nEquipedType = self:GetHasEquippedType()
+    if nEquipedType == Item.Equip.EQUIPED_TYPE.ME then
+      local nSlot = Item.ExtEquip:GetSlot(self.pItem)
+    else
+      if nEquipedType == Item.Equip.EQUIPED_TYPE.ASYNCDATA then
+        local nSlot = Item.ExtEquip:GetSlot(self.pItem)
+      else
+      end
+    end
+    tbBaseAttrib, tbRandomAttrib, tbHideAttrib = tbClass:GetTip(self.pItem, pPlayer)
+    self.pPanel:SetActive(tbControls.txtFightPower, true)
+    self.pPanel:Label_SetText(tbControls.txtFightPower, i18n.EasyGet("\230\136\152\229\138\155\229\128\188\239\188\154{0}", nFightPower))
+    self.pPanel:Label_SetColorByName(tbControls.txtFightPower, Item.tbTipsColorDef.EquipFightPower.ColorName or "Red")
+    self:SetTips(tbBaseAttrib, tbRandomAttrib, tbHideAttrib)
+  elseif self.tbLinkInfo and self.tbLinkInfo.tbBaseAttr then
+    tbBaseAttrib, tbRandomAttrib, tbHideAttrib = tbClass:GetTipByTemplate(self.nTemplateId, self.tbLinkInfo)
+    self.pPanel:SetActive(tbControls.txtFightPower, true)
+    self.pPanel:Label_SetText(tbControls.txtFightPower, i18n.EasyGet("\230\136\152\229\138\155\229\128\188\239\188\154{0}", self.tbLinkInfo.nFightPower))
+    self.pPanel:Label_SetColorByName(tbControls.txtFightPower, Item.tbTipsColorDef.EquipFightPower.ColorName or "Red")
+    self:SetTips(tbBaseAttrib, tbRandomAttrib, tbHideAttrib)
+  else
+    self.pPanel:SetActive(tbControls.AttrTemplate .. "/line1", tbBaseAttrib and not Lib:IsEmptyTB(tbBaseAttrib))
+    self.pPanel:SetActive(tbControls.AttrTemplate .. "/line2", nil ~= tbRandomAttrib)
+    self.pPanel:SetActive(tbControls.AttrTemplate .. "/line3", nil ~= tbHideAttrib)
+    self.pPanel:SetActive(tbControls.txtFightPower, false)
+    local tbBaseProp = KItem.GetItemBaseProp(self.nTemplateId)
+    if tbBaseProp then
+      self.pPanel:Label_SetText(tbControls.AttrTemplate .. "/equipInfo/txtInfo", i18n.Parse(tbBaseProp.szIntro))
+      self.pPanel:SetActive(tbControls.AttrTemplate .. "/equipInfo", true)
+    else
+      self.pPanel:SetActive(tbControls.AttrTemplate .. "/equipInfo", false)
+    end
+  end
+end
+
+function tbWnd:SetTips(tbBaseAttrib, tbRandomAttrib, tbHideAttrib)
+  self.pPanel:SetActive(tbControls.AttrTemplate .. "/line1", tbBaseAttrib and not Lib:IsEmptyTB(tbBaseAttrib))
+  self.pPanel:SetActive(tbControls.AttrTemplate .. "/line2", nil ~= tbRandomAttrib)
+  self.pPanel:SetActive(tbControls.AttrTemplate .. "/line3", nil ~= tbHideAttrib)
+  self.pPanel:SetActive(tbControls.AttrTemplate .. "/equipInfo", false)
+  if not self.tbBaseAttrView then
+    self.tbBaseAttrView = Ui:NewScrollView(self, tbControls.AttrTemplate .. "/line1/Attribute1")
+  end
+  for nIndex, tbInfo in ipairs(tbBaseAttrib) do
+    self.tbBaseAttrView:SetElement(nIndex, function(tbElement)
+      tbElement.pPanel:Label_SetText("txtAttr", tbInfo[1])
+      tbElement.pPanel:Label_SetText("txtAttr/txtRange", tbInfo[2])
+      tbElement.pPanel:SetActive("txtAttr/txtUpgrade", nil ~= tbInfo[3])
+      tbElement.pPanel:Label_SetText("txtAttr/txtUpgrade", tbInfo[3])
+    end)
+  end
+  if not self.tbRandomAttrView then
+    self.tbRandomAttrView = Ui:NewScrollView(self, tbControls.AttrTemplate .. "/line2/Attribute1")
+  end
+  if tbRandomAttrib then
+    for i = 1, PartnerEquipC.MAX_RANDOMATTR_NUM do
+      self.tbRandomAttrView:SetElement(i, function(tbElement)
+        tbElement.pPanel:SetActive("txtAttr/txtRange", nil ~= tbRandomAttrib[i] and nil ~= tbRandomAttrib[i][2])
+        tbElement.pPanel:Label_SetText("txtAttr", tbRandomAttrib[i][1])
+        tbElement.pPanel:Label_SetText("txtAttr/txtRange", tbRandomAttrib[i][2] or "")
+      end)
+    end
+  end
+  if tbHideAttrib then
+    local szHideAttr = table.concat(tbHideAttrib, "\n")
+    if Lib:IsEmptyStr(szHideAttr) then
+      self.pPanel:Label_SetText(tbControls.AttrTemplate .. "/line3/txtAttr", i18n.EasyGet("\233\135\141\233\147\184\230\187\161\231\186\167\229\144\142\232\167\163\233\148\129"))
+    else
+      self.pPanel:Label_SetText(tbControls.AttrTemplate .. "/line3/txtAttr", szHideAttr)
+    end
+  end
+end
+
+function tbWnd:OnFixedUpdate()
+  local pItem = KItem.GetItemObj(self.nItemId or 0)
+  if pItem then
+    local bHas, nGenTime, nTimeOut = Item:GetTimeOut(pItem)
+    if bHas then
+      local bIsTimeOut = Item:CheckIsTimeOut(pItem)
+      if bIsTimeOut then
+        self.pPanel:Label_SetText(tbControls.txtItemTime, i18n.EasyGet("\229\183\178\229\164\177\230\149\136"))
+      else
+        local nLeaveSec = nTimeOut - GetTime()
+        local nLeaveTime = Lib:TimeDesc2(nLeaveSec)
+        if nLeaveSec < 600 then
+          nLeaveTime = string.format("<color=#b60000>%s</color>", nLeaveTime)
+        else
+          nLeaveTime = string.format("<color=#ffff0e>%s</color>", nLeaveTime)
+        end
+        self.pPanel:Label_SetText(tbControls.txtItemTime, i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154{0}", nLeaveTime))
+      end
+      self.pPanel:SetActive(tbControls.txtItemTime, true)
+    end
+  elseif self.nTimeOutValue then
+    if "string" == type(self.nTimeOutValue) and not Lib:IsEmptyStr(self.nTimeOutValue) then
+      self.nTimeOutValue = Lib:ParseConfigDateTime(self.nTimeOutValue) or 0
+    end
+    if type(self.nTimeOutValue) == "number" and self.nTimeOutValue > 0 then
+      local nLeaveSec = self.nTimeOutValue - GetTime()
+      if nLeaveSec <= 0 then
+        self.pPanel:Label_SetText(tbControls.txtItemTime, i18n.EasyGet("\229\183\178\229\164\177\230\149\136"))
+      elseif nLeaveSec < 600 then
+        local szLeaveSec = string.format("<color=#b60000>%s</color>", Lib:TimeDesc2(nLeaveSec))
+        self.pPanel:Label_SetText(tbControls.txtItemTime, i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154{0}", szLeaveSec))
+      else
+        local szLeaveSec = string.format("<color=#ffff0e>%s</color>", Lib:TimeDesc2(nLeaveSec))
+        self.pPanel:Label_SetText(tbControls.txtItemTime, i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154{0}", szLeaveSec))
+      end
+      self.pPanel:SetActive(tbControls.txtItemTime, true)
+    end
+  end
+end

@@ -1,0 +1,500 @@
+local tbWnd = Ui:CreateWindow("UIWuLinLianSai")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  Team = "node/imgBG/Content/Team",
+  txtTeamName = "node/imgBG/Content/Team/txtTeamName",
+  btnExit = "node/imgBG/Content/Team/btnExit",
+  btnRecruit = "node/imgBG/Content/Team/btnRecruit",
+  txtTips = "node/imgBG/Content/Team/txtTips",
+  Member = "node/imgBG/Content/Team/Member",
+  Member1 = "node/imgBG/Content/Team/Member1",
+  Member2 = "node/imgBG/Content/Team/Member2",
+  Member3 = "node/imgBG/Content/Team/Member3",
+  NpcModel = "node/imgBG/Content/Team/Member%d/imgModel",
+  ToggleAutoTeam = "node/imgBG/Content/Team/ToggleAutoTeam",
+  Guessing = "node/imgBG/Content/Guessing",
+  Group = "node/imgBG/Content/Guessing/TeamGroup/Group",
+  btnGuess = "node/imgBG/Content/Guessing/btnGuess",
+  imgGuessingBg = "node/imgBG/Content/Guessing/imgGuessingBg",
+  txtGuessing = "node/imgBG/Content/Guessing/txtGuessing",
+  txtCountdown = "node/imgBG/Content/Guessing/txtCountdown",
+  btnRanking = "node/imgBG/Content/Bottom/btnRanking",
+  btnAward = "node/imgBG/Content/Bottom/btnAward",
+  btnPartner = "node/imgBG/Content/Bottom/btnPartner",
+  btnResult = "node/imgBG/Content/Bottom/btnResult",
+  btnJoin = "node/imgBG/Content/Bottom/btnJoin",
+  txtType = "node/imgBG/Content/Bottom/txtType",
+  txtTodayTimes = "node/imgBG/Content/Bottom/txtTodayTimes",
+  txtMonthTimes = "node/imgBG/Content/Bottom/txtMonthTimes",
+  wndResult = "wndResult",
+  txtTemplate = "wndResult/imgBg/ResultList/txtTemplate",
+  Empty4Raycast = "wndResult/Empty4Raycast"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnToggleClick = {
+  ToggleAutoTeam = function(self, isOn)
+    MultiPvP:RequestSetAutoFight(isOn)
+  end
+}
+tbWnd.tbMember = {
+  tbControls.Member1,
+  tbControls.Member2,
+  tbControls.Member3
+}
+tbWnd.tbUIGroup = {
+  [2] = {
+    tbControls.Group .. 7
+  },
+  [4] = {
+    tbControls.Group .. 5,
+    tbControls.Group .. 6
+  },
+  [8] = {
+    tbControls.Group .. 1,
+    tbControls.Group .. 3,
+    tbControls.Group .. 4,
+    tbControls.Group .. 2
+  }
+}
+tbWnd.MAX_MEMBER = 3
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("WuLinLianSaiHelp")
+  end,
+  btnRecruit = function(self)
+    self:SendChatRecruit()
+  end,
+  btnExit = function(self)
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\231\161\174\229\174\154\233\128\128\229\135\186\233\152\159\228\188\141"), {
+      {
+        MultiPvP.SendProtocolLeaveTeam,
+        MultiPvP
+      },
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    }, nil, nil, true)
+  end,
+  btnRanking = function(self)
+    Ui:OpenWindow("UIRanking", "MultiPvP")
+  end,
+  btnAward = function(self)
+    Ui:OpenWindow("UIWuLinLianSaiAward")
+  end,
+  btnPartner = function(self)
+    Ui:OpenWindow("UIPartnerSettingWuLin", "MultiPvP")
+  end,
+  btnResult = function(self)
+    self:ShowResult()
+  end,
+  btnJoin = function(self)
+    if MultiPvP:IsPreliminaryOpen() and MultiPvP:GetBattleTeamId(me.dwID) <= 0 then
+      local tbCondition = {
+        [MultiPvP.emMsgNotBegin] = 1,
+        [MultiPvP.emMsgMinLevel] = 1
+      }
+      if not MultiPvP:ChkConditionAndSendMsg(me, tbCondition) then
+        return false
+      end
+      Ui:OpenWindow("UICreateBattleTeam", "MultiPvP")
+    else
+      MultiPvP:SendProtocolSwitchMap()
+    end
+  end,
+  Empty4Raycast = function(self)
+    self.pPanel:SetActive(tbControls.wndResult, false)
+  end,
+  btnGuess = function(self)
+    if me.nLevel < MultiPvP.Cfg.GUESS_LEVEL then
+      me.CenterMsg(i18n.EasyGet("\228\189\160\231\154\132\231\173\137\231\186\167\228\184\141\232\182\179{0}\231\186\167\239\188\140\228\184\141\232\131\189\229\143\130\228\184\142\231\171\158\231\140\156\239\188\129", MultiPvP.Cfg.GUESS_LEVEL))
+      return
+    end
+    MultiPvP:OpenGuessUI()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbModelList = {}
+  for nIndex = 1, self.MAX_MEMBER do
+    local pObj = self.pPanel:GetObject(string.format(tbControls.NpcModel, nIndex))
+    local pModel = pObj:GetComponent(Ui.UINpcModel)
+    self.tbModelList[nIndex] = pModel
+  end
+  for nPhase, tbGroup in pairs(self.tbUIGroup) do
+    for nIndex, szGroup in ipairs(tbGroup) do
+      Ui:Button_BindEvent(self.pPanel, szGroup .. "/btnView", function()
+        MultiPvP:C2SWatchBattle(nPhase, nIndex)
+      end)
+    end
+  end
+end
+
+function tbWnd:OnClose()
+  for _, pModel in ipairs(self.tbModelList) do
+    pModel:Release()
+  end
+  if self.nTimer ~= nil then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  self:UnRegistRedPoint()
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.MultiPvPView)
+end
+
+function tbWnd:OnOpen(bShowTeamInfo, bShowViewRedPoint)
+  self.bShowTeamInfo = bShowTeamInfo
+  self.bShowSelf = false
+  self.bShowFinal = MultiPvP:IsShowFinalMatchDate()
+  bShowViewRedPoint = true == bShowViewRedPoint and true or false
+  if self.bShowFinal and not self.bShowTeamInfo then
+    self:UpdateFinalPage()
+  else
+    self:UpdateTeamPage()
+  end
+  self:RegistRedPoint()
+  self:UpdateRedPoint()
+  if bShowViewRedPoint then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.MultiPvPView)
+  end
+end
+
+function tbWnd:UpdateTeamPage()
+  self.pPanel:SetActive(tbControls.Team, true)
+  self.pPanel:SetActive(tbControls.Guessing, false)
+  self.m_tbTeamInfo = MultiPvP:GetCurTeamInfo()
+  self.m_tbMembers = MultiPvP:GetCurTeamDetail()
+  if not self.m_tbTeamInfo or not self.m_tbMembers then
+    self.bShowSelf = true
+    self:UpdateCreateTeam()
+  else
+    self.bShowSelf = self.m_tbTeamInfo[MPTeam.TEAM_ID] == MultiPvP:GetBattleTeamId(me.dwID)
+    self.pPanel:SetActive(tbControls.ToggleAutoTeam, self.bShowSelf)
+    local bAutoFight = 0 == me.GetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_NOT_AUTOFIGHT)
+    self.pPanel:Toggle_SetChecked(tbControls.ToggleAutoTeam, bAutoFight)
+    self:SetOtherState(self.bShowSelf, true)
+    self:UpdateBottomInfo()
+    self:UpdateTeamInfo()
+  end
+end
+
+function tbWnd:CleanTeamMember()
+  for i = 1, self.MAX_MEMBER do
+    self.pPanel:Button_SetEnable(self.tbMember[i], false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/imgEmpty", false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/txtName", false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/HonorTitle", false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/imgFaction", false)
+    self.pPanel:SetActive(self.tbMember[i] .. "/imgModel", false)
+  end
+end
+
+function tbWnd:SetOtherState(bShow, bEnable)
+  self.pPanel:SetActive(tbControls.txtTips, bShow)
+  self.pPanel:SetActive(tbControls.btnExit, bShow)
+  self.pPanel:SetActive(tbControls.btnRecruit, bShow)
+  self.pPanel:SetActive(tbControls.btnRanking, bShow)
+  self.pPanel:SetActive(tbControls.btnAward, bShow)
+  self.pPanel:SetActive(tbControls.btnPartner, bShow)
+  self.pPanel:SetActive(tbControls.btnJoin, bShow)
+  self.pPanel:Button_SetEnable(tbControls.btnResult, bEnable)
+  self.pPanel:Button_SetEnable(tbControls.btnExit, bEnable)
+  self.pPanel:Button_SetEnable(tbControls.btnRecruit, bEnable)
+end
+
+function tbWnd:UpdateCreateTeam()
+  self:SetOtherState(true, false)
+  self.pPanel:SetActive(tbControls.ToggleAutoTeam, false)
+  local nType = MultiPvP:GetCurSeasonType()
+  self.pPanel:Label_SetText(tbControls.txtType, i18n.EasyGet("\230\156\172\229\173\163\232\181\155\229\136\182\239\188\154{0}", i18n.Get(MultiPvP.BATTLE_SETTING[nType].szDesc)))
+  self.pPanel:Label_SetText(tbControls.txtTodayTimes, "")
+  self.pPanel:Label_SetText(tbControls.txtMonthTimes, "")
+  self.pPanel:Button_SetText(tbControls.btnJoin, i18n.EasyGet("\229\136\155\229\187\186\230\136\152\233\152\159"), "Text")
+  self.pPanel:Label_SetText(tbControls.txtTeamName, i18n.EasyGet("\230\136\152\233\152\159\229\144\141\231\167\176"))
+  self:CleanTeamMember()
+end
+
+function tbWnd:UpdateBottomInfo()
+  if not self.bShowSelf or self.bShowFinal then
+    self.pPanel:Label_SetText(tbControls.txtType, "")
+    self.pPanel:Label_SetText(tbControls.txtTodayTimes, "")
+    self.pPanel:Label_SetText(tbControls.txtMonthTimes, "")
+  else
+    local nType = MultiPvP:GetCurSeasonType()
+    self.pPanel:Label_SetText(tbControls.txtType, i18n.EasyGet("\230\156\172\229\173\163\232\181\155\229\136\182\239\188\154{0}", i18n.Get(MultiPvP.BATTLE_SETTING[nType].szDesc)))
+    self.pPanel:Label_SetText(tbControls.txtTodayTimes, i18n.EasyGet("\228\187\138\230\151\165\229\143\175\230\175\148\232\181\155\239\188\154{0}", self.m_tbTeamInfo[MPTeam.DAY_JOIN] .. "/" .. MultiPvP:GetDayLimitBattleCount()))
+    self.pPanel:Label_SetText(tbControls.txtMonthTimes, i18n.EasyGet("\230\156\172\230\156\136\229\143\175\230\175\148\232\181\155\239\188\154{0}", self.m_tbTeamInfo[MPTeam.TOTAL_JOIN] .. "/" .. MultiPvP.Cfg.TOTAL_COUNT))
+    self.pPanel:Button_SetEnable(tbControls.btnResult, true)
+    self.pPanel:Button_SetText(tbControls.btnJoin, i18n.EasyGet("\229\143\130\229\138\160\230\180\187\229\138\168"), "Text")
+    if MPTeam:ChkPlayerInMapEx(me) then
+      self.pPanel:Button_SetEnable(tbControls.btnJoin, false)
+    else
+      self.pPanel:Button_SetEnable(tbControls.btnJoin, true)
+    end
+  end
+end
+
+function tbWnd:UpdateTeamInfo()
+  self.pPanel:Label_SetText(tbControls.txtTeamName, self.m_tbMembers.szTeamName)
+  self:CleanTeamMember()
+  for i = 1, 3 do
+    if self.m_tbMembers.tbMember[i] then
+      local tbInfo = self.m_tbMembers.tbMember[i]
+      self.pPanel:Button_SetEnable(self.tbMember[i], true)
+      Ui:Button_BindEvent(self.pPanel, self.tbMember[i], function()
+        ViewRole:OpenWindow("UIViewRole", tbInfo.nPlayerId)
+      end)
+      self.pPanel:SetActive(self.tbMember[i] .. "/imgEmpty", false)
+      self.pPanel:SetActive(self.tbMember[i] .. "/txtName", true)
+      self.pPanel:SetActive(self.tbMember[i] .. "/HonorTitle", true)
+      self.pPanel:SetActive(self.tbMember[i] .. "/imgFaction", true)
+      self.pPanel:SetActive(self.tbMember[i] .. "/imgModel", true)
+      self.pPanel:Label_SetText(self.tbMember[i] .. "/txtName", tbInfo.szPlayerName)
+      local szHonorName, szHonorColor = HonorLevel:GetHonorNameByStarLevel(tbInfo.nHonorStarLevel, false)
+      local obj = self.pPanel:GetObject(self.tbMember[i] .. "/HonorTitle")
+      if obj then
+        local pHonorTitle = obj:GetComponent(Ui.UIHonorTitle)
+        if pHonorTitle then
+          pHonorTitle:SetHonorTitle(i18n.Parse(szHonorName), szHonorColor)
+        end
+      end
+      self.pPanel:Sprite_SetSprite(self.tbMember[i] .. "/imgFaction", Faction:GetIcon(tbInfo.nFaction))
+      self:ShowModel(i, tbInfo.nPlayerId)
+    else
+      local nTeamSize = MultiPvP:GetSeasonSettingValue("nMemberNeed", true)
+      local nCurMember = #self.m_tbMembers.tbMember
+      if self.bShowSelf and nTeamSize > nCurMember then
+        self.pPanel:Button_SetEnable(self.tbMember[i], true)
+        Ui:Button_BindEvent(self.pPanel, self.tbMember[i], function()
+          Ui:OpenWindow("UITeamInviteWuLin", "MultiPvP")
+        end)
+        self.pPanel:SetActive(self.tbMember[i] .. "/imgEmpty", true)
+      else
+        self.pPanel:Button_SetEnable(self.tbMember[i], false)
+        self.pPanel:SetActive(self.tbMember[i] .. "/imgEmpty", false)
+      end
+      self.pPanel:SetActive(self.tbMember[i] .. "/txtName", false)
+      self.pPanel:SetActive(self.tbMember[i] .. "/HonorTitle", false)
+      self.pPanel:SetActive(self.tbMember[i] .. "/imgFaction", false)
+      self.pPanel:SetActive(self.tbMember[i] .. "/imgModel", false)
+    end
+  end
+end
+
+function tbWnd:ShowModel(i, nPlayerId)
+  if self.m_tbTeamInfo[MPTeam.MEMBER] then
+    for nIdx, tbData in pairs(self.m_tbTeamInfo[MPTeam.MEMBER]) do
+      if nPlayerId == tbData.nPlayerId and tbData.tbFeature then
+        self.tbModelList[i]:ShowModel(tbData.tbFeature.nSex, 1, tbData.tbFeature.nBodyResID, tbData.tbFeature.nWeaponResID, tbData.tbFeature.nMantleResID, 0, tbData.tbFeature.nHeadResID, tbData.tbFeature.nWindID, tbData.tbFeature.nWeaponEffectResID or 0)
+        return
+      end
+    end
+  end
+end
+
+function tbWnd:ShowResult()
+  self.m_tbTeamInfo = MultiPvP:GetCurTeamInfo()
+  if not self.m_tbTeamInfo then
+    me.CenterMsg(i18n.EasyGet("\229\176\145\228\190\160\230\178\161\230\156\137\230\136\152\233\152\159"))
+    return
+  end
+  self.pPanel:SetActive(tbControls.wndResult, true)
+  local nWin = MPTeam:GetWinCount(self.m_tbTeamInfo)
+  local nFail = MPTeam:GetFailCount(self.m_tbTeamInfo)
+  local nDraw = MPTeam:GetDrawCount(self.m_tbTeamInfo)
+  local nAll = #self.m_tbTeamInfo[MPTeam.WIN_COUNT]
+  local nWinRate = 50
+  if nAll > 0 then
+    nWinRate = math.floor(nWin / nAll * 100)
+  end
+  local nNextWinRate = math.floor((nWin + 1) / (nAll + 1) * 100)
+  local nNextFailRate = math.floor(nWin / (nAll + 1) * 100)
+  local nScore = self.m_tbTeamInfo[MPTeam.SCORE]
+  local szText = i18n.EasyGet("\230\136\152\233\152\159\230\136\152\231\187\169\239\188\154{0}\232\131\156 {1}\229\185\179 {2}\232\180\159\n\230\136\152\233\152\159\232\131\156\231\142\135\239\188\154{3}%\n\228\184\139\229\156\186\232\142\183\232\131\156\229\144\142\232\131\156\231\142\135\239\188\154{4}%\n\228\184\139\229\156\186\229\164\177\232\180\165\232\131\156\231\142\135\239\188\154{5}%\n\230\175\148\232\181\155\231\167\175\229\136\134\239\188\154{6}", nWin, nDraw, nFail, nWinRate, nNextWinRate, nNextFailRate, nScore)
+  self.pPanel:Label_SetText(tbControls.txtTemplate, szText)
+end
+
+function tbWnd:UpdateFinalPage()
+  self.pPanel:SetActive(tbControls.Guessing, true)
+  self.pPanel:SetActive(tbControls.Team, false)
+  self:SetOtherState(true, true)
+  self:UpdateBottomInfo()
+  self:UpdateLeftTime()
+  self.tbMatchList, self.tbTeamData, self.tbIndexMapId, self.bBattleBegin = MultiPvP:GetFinalData()
+  if not self.tbMatchList or Lib:IsEmptyTB(self.tbMatchList) then
+    return
+  end
+  for nPhase, tbTeamData in pairs(self.tbMatchList) do
+    if self.tbUIGroup[nPhase] then
+      for i = 1, nPhase / 2 do
+        local nIdx1 = i
+        if tbTeamData[nIdx1] and self.tbTeamData[tbTeamData[nIdx1].nTeamId] then
+          self.pPanel:Label_SetText(self.tbUIGroup[nPhase][nIdx1] .. "/txtTeam1", self.tbTeamData[tbTeamData[nIdx1].nTeamId].szTeamName)
+          self.pPanel:SetActive(self.tbUIGroup[nPhase][nIdx1] .. "/MarkWin1", tbTeamData[nIdx1].nResult == MPTeam.Win)
+          Ui:Button_BindEvent(self.pPanel, self.tbUIGroup[nPhase][nIdx1] .. "/txtTeam1", function()
+            MultiPvP:OpenGuessUI(tbTeamData[nIdx1].nTeamId)
+          end)
+        else
+          self.pPanel:Label_SetText(self.tbUIGroup[nPhase][nIdx1] .. "/txtTeam1", i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+          self.pPanel:SetActive(self.tbUIGroup[nPhase][nIdx1] .. "/MarkWin1", false)
+        end
+        local nIdx2 = nPhase - i + 1
+        if tbTeamData[nIdx2] and self.tbTeamData[tbTeamData[nIdx2].nTeamId] then
+          self.pPanel:Label_SetText(self.tbUIGroup[nPhase][nIdx1] .. "/txtTeam2", self.tbTeamData[tbTeamData[nIdx2].nTeamId].szTeamName)
+          self.pPanel:SetActive(self.tbUIGroup[nPhase][nIdx1] .. "/MarkWin2", tbTeamData[nIdx2].nResult == MPTeam.Win)
+          Ui:Button_BindEvent(self.pPanel, self.tbUIGroup[nPhase][nIdx1] .. "/txtTeam2", function()
+            MultiPvP:OpenGuessUI(tbTeamData[nIdx2].nTeamId)
+          end)
+        else
+          self.pPanel:Label_SetText(self.tbUIGroup[nPhase][nIdx1] .. "/txtTeam2", i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+          self.pPanel:SetActive(self.tbUIGroup[nPhase][nIdx1] .. "/MarkWin2", false)
+        end
+      end
+    end
+  end
+  local szText = i18n.EasyGet("\229\137\141\229\190\128\232\167\130\230\136\152")
+  for i = 1, MultiPvP.PHASE_INIT do
+    if self.tbMatchList[i] and Lib:CountTB(self.tbMatchList[i]) > 0 then
+      if MultiPvP:IsInMatchList(self.tbMatchList[i], MultiPvP:GetBattleTeamId(me.dwID)) then
+        szText = i18n.EasyGet("\229\143\130\229\138\160\230\180\187\229\138\168")
+      end
+      break
+    end
+  end
+  local bShowWatch = MPTeam:ChkPlayerInMapEx(me) and 1 == me.GetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_WATCH)
+  for nPhase, tbGroup in pairs(self.tbUIGroup) do
+    for nIndex, szGroup in ipairs(tbGroup) do
+      local bHaveMatch = false
+      if self.tbIndexMapId and self.tbIndexMapId[nPhase] and self.tbIndexMapId[nPhase][nIndex] then
+        bHaveMatch = true
+      end
+      local bShowViewBtn = bHaveMatch and bShowWatch or false
+      self.pPanel:SetActive(szGroup .. "/btnView", bShowViewBtn)
+    end
+  end
+  self.pPanel:Button_SetText(tbControls.btnJoin, szText, "Text")
+  self:UpdateGuessTeam()
+end
+
+function tbWnd:UpdateGuessTeam()
+  local nTeamId = me.GetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_GUESS)
+  local szTeam = i18n.EasyGet("\231\171\158\231\140\156\233\152\159\228\188\141")
+  self.pPanel:SetActive(tbControls.imgGuessingBg, true)
+  if nTeamId >= 0 and self.tbTeamData[nTeamId] then
+    szTeam = self.tbTeamData[nTeamId].szTeamName
+  elseif not MultiPvP:IsGuessOpen() or self.bBattleBegin then
+    szTeam = ""
+    self.pPanel:SetActive(tbControls.imgGuessingBg, false)
+  end
+  self.pPanel:Label_SetText(tbControls.txtGuessing, szTeam)
+  self.pPanel:SetActive(tbControls.btnGuess, MultiPvP:IsGuessOpen() and not self.bBattleBegin and Lib:IsEmptyTB(self.tbMatchList[1]))
+end
+
+function tbWnd:UpdateLeftTime()
+  local szTime = i18n.EasyGet("\231\171\158\231\140\156\229\183\178\231\187\147\230\157\159")
+  local nTimeRemaining
+  if MultiPvP:IsFinalOpen() then
+    nTimeRemaining = Lib:ParseTodayTime(MultiPvP.Cfg.OPEN_TIME) - Lib:GetTodaySec()
+  else
+    nTimeRemaining = 86400 - Lib:GetTodaySec() + Lib:ParseTodayTime(MultiPvP.Cfg.OPEN_TIME)
+  end
+  if MultiPvP:IsGuessOpen() and nTimeRemaining > 0 then
+    local nHour, nMin = Lib:TransferSecond2NormalTime(nTimeRemaining)
+    szTime = i18n.EasyGet("\231\173\137\229\190\133\230\175\148\232\181\155\229\188\128\229\144\175\229\128\146\232\174\161\230\151\182\239\188\154{0}\229\176\143\230\151\182{1}\229\136\134", nHour, nMin)
+  end
+  self.pPanel:Label_SetText(tbControls.txtCountdown, szTime)
+  local nCurTime = tonumber(os.date("%Y%m%d%H%M", GetTime()))
+  local nNextTime = Lib:GetDate2Time(nCurTime + 1) - GetTime()
+  if self.nTimer ~= nil then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  if nTimeRemaining > 0 then
+    self.nTimer = Timer:Register(nNextTime * Env.GAME_FPS, self.UpdateLeftTime, self)
+  end
+  return false
+end
+
+function tbWnd:SendChatRecruit()
+  local tbCondition = {
+    [MultiPvP.emMsgNeedBattleTeam] = 1
+  }
+  if not MultiPvP:ChkConditionAndSendMsg(me, tbCondition) then
+    return false
+  end
+  local nTeamSize = MultiPvP:GetSeasonSettingValue("nMemberNeed", true)
+  local nCurMember = #self.m_tbMembers.tbMember
+  if nTeamSize <= nCurMember then
+    me.CenterMsg(i18n.EasyGet("\230\136\152\233\152\159\228\186\186\230\149\176\229\183\178\232\190\190\229\136\176\230\156\172\232\181\155\229\173\163\231\187\132\233\152\159\228\186\186\230\149\176\233\153\144\229\136\182"))
+    return
+  end
+  Ui:CloseWindow(self.ClassName)
+  Ui:OpenWindowWithCallback("UIChat", function(_, tbWnd)
+    tbWnd:AddMultiPvPRecruit(self.m_tbMembers.nTeamId, self.m_tbMembers.szTeamName, nCurMember, nTeamSize)
+  end, nil, ChatMgr.ChannelType.Public)
+end
+
+function tbWnd:UpdateRedPoint()
+  local nCurPartnerId = me.GetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_PARTNER)
+  if 0 == nCurPartnerId then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.MultiPvPPartner)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.MultiPvPPartner)
+  end
+end
+
+function tbWnd:RegistRedPoint()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnPartner, {
+    RedPointMgr.EVENT.MultiPvPPartner
+  })
+  for nPhase, tbGroup in pairs(self.tbUIGroup) do
+    for nIndex, szGroup in ipairs(tbGroup) do
+      RedPointMgr:DynamicRegisteRedPoint(self.pPanel, szGroup .. "/btnView", {
+        RedPointMgr.EVENT.MultiPvPView
+      })
+    end
+  end
+end
+
+function tbWnd:UnRegistRedPoint()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnPartner)
+  for nPhase, tbGroup in pairs(self.tbUIGroup) do
+    for nIndex, szGroup in ipairs(tbGroup) do
+      RedPointMgr:DynamicRegisteRedPoint(self.pPanel, szGroup .. "/btnView")
+    end
+  end
+end
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MULTIPVP_CREATE_TEAM,
+      self.UpdateTeamPage,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MULTIPVP_LEAVE_TEAM,
+      self.UpdateCreateTeam,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MULTIPVP_SYNC_TEAM,
+      self.UpdateTeamPage,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MULTIPVP_SYNC_TEAM_MEMBER,
+      self.UpdateTeamPage,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MULTIPVP_SYNC_FINAL_MATCH,
+      self.UpdateFinalPage,
+      self
+    }
+  }
+end

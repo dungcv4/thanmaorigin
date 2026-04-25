@@ -1,0 +1,830 @@
+Require("CommonScript/Calendar/Calendar_common.lua")
+Map.CELL_WIDTH_TO_LOGIC = 800
+Map.CELL_WIDTH = 1 / Map.CELL_WIDTH_TO_LOGIC
+Map.nShowPosScale = 0.001953125
+Map.tbMapList = Map.tbMapList or Lib:LoadTabFileEx("Setting/Map/maplist.tab", "dsssssddddddddsddsddddddddddddddddddddsddddd", "TemplateId", {
+  "TemplateId",
+  "ResName",
+  "InfoFilePath",
+  "LogicFilePath",
+  "MapName",
+  "Class",
+  "TeamForbidden",
+  "TransForbidden",
+  "MapLevel",
+  "MapType",
+  "SoundID",
+  "NearbyChat",
+  "ForcePkMode",
+  "ForbidRide",
+  "LoadingTexture",
+  "Exercise",
+  "FightState",
+  "MiniMap",
+  "HideRide",
+  "HideMsgNotify",
+  "ForbidQingKung",
+  "HideLoginAward",
+  "IsSecretMap",
+  "HideActivities",
+  "SearchCoefficient",
+  "FollowCoefficient",
+  "ForbidKinQuit",
+  "ForbidKinChangeCamp",
+  "ForbidKillMode",
+  "AllowPk",
+  "HideName",
+  "ResetSkillCD",
+  "FubenMaxCount",
+  "CanTrade",
+  "ForbidMiniMap",
+  "MiniMapShowFriend",
+  "Weather",
+  "ChangePkValue",
+  "TeamLimit",
+  "CanOfflineExp",
+  "IsDisableSyncZoneMedicine",
+  "IsDisableBuyMedicine",
+  "IgnoreTeamLimitInFuben",
+  "IsNotClearAssistNpc"
+})
+Map.tbMapListEx = {}
+
+function Map:InitSetting()
+  for _, tbMap in pairs(self.tbMapList) do
+    if type(tbMap.TeamLimit) == "string" and tbMap.TeamLimit == "" then
+      tbMap.TeamLimit = {}
+    elseif type(tbMap.TeamLimit) == "string" then
+      tbMap.TeamLimit = Lib:SplitStr(tbMap.TeamLimit, "|")
+    end
+  end
+  for nTemplateId, tbMap in pairs(self.tbMapList) do
+    if not self.tbMapListEx[nTemplateId] then
+      self.tbMapListEx[nTemplateId] = {}
+    end
+    local szMiniMapInfoSettingPath = string.format("Setting/Map/%s/info/minimap_info.ini", tbMap.InfoFilePath)
+    local tbMiniMapInfoSetting = Lib:LoadIniFile(szMiniMapInfoSettingPath).MiniMapInfo
+    if tbMiniMapInfoSetting then
+      self.tbMapListEx[nTemplateId].RawWidth = tonumber(tbMiniMapInfoSetting.RawWidth)
+      self.tbMapListEx[nTemplateId].RawHeight = tonumber(tbMiniMapInfoSetting.RawHeight)
+      self.tbMapListEx[nTemplateId].RawScale = tonumber(tbMiniMapInfoSetting.RawScale)
+      self.tbMapListEx[nTemplateId].PadWidth = tonumber(tbMiniMapInfoSetting.PadWidth)
+      self.tbMapListEx[nTemplateId].PadHeight = tonumber(tbMiniMapInfoSetting.PadHeight)
+    end
+    self.tbMapListEx[nTemplateId].tbDefaultPos = Lib:LoadTabFileEx(string.format("Setting/Map/%s/info/default_pos_info.txt", tbMap.LogicFilePath), "dd", nil, {"PosX", "PosY"})
+  end
+end
+
+function Map:InitWorldMapSetting()
+  local tbKey = {
+    TemplateId = 1,
+    MapType = 1,
+    MapLevel = 1,
+    EnterLevel = 1,
+    bDynamicLevel = 1,
+    LevelSettingKey
+  }
+  local tbFile = Lib:LoadTabFile("Setting/Map/worldmap.tab", tbKey)
+  assert(tbFile)
+  local tbSwitchMap = {}
+  local tbUnOpenMap = {}
+  for _, v in pairs(tbFile) do
+    if v.TemplateId > 0 then
+      local tbMap = {
+        nTemplateId = v.TemplateId,
+        nMapLevel = v.MapLevel,
+        nEnterLevel = v.EnterLevel,
+        szShowTimeFrame = v.ShowTimeFrame,
+        szOpenTimeFrame = v.OpenTimeFrame,
+        bDynamicLevel = v.bDynamicLevel,
+        szLevelSettingKey = v.LevelSettingKey
+      }
+      if MODULE_GAMECLIENT then
+        tbMap.szUIKey = v.UIKey
+        tbMap.nMapType = v.MapType
+      end
+      tbSwitchMap[v.TemplateId] = tbMap
+    else
+      table.insert(tbUnOpenMap, v.UIKey)
+    end
+  end
+  Map.tbSwitchMap = SetReadOnly(tbSwitchMap)
+  Map.tbUnOpenMap = SetReadOnly(tbUnOpenMap)
+end
+
+function Map:InitDynamicLevelSetting()
+  local tbLevelList = Lib:EasyLoadTabFile("Setting/Map/MapDynamicLevel.tab")
+  self.tbDynamicLevelList = {}
+  self.tbDynamicLevelExpList = {}
+  for _, tbInfo in ipairs(tbLevelList) do
+    self.tbDynamicLevelList[tbInfo.szKey] = self.tbDynamicLevelList[tbInfo.szKey] or {}
+    self.tbDynamicLevelExpList[tbInfo.szKey] = self.tbDynamicLevelExpList[tbInfo.szKey] or {}
+    self.tbDynamicLevelExpList[tbInfo.szKey][tbInfo.nNpcLevel] = {
+      tbInfo.nNpcExp,
+      tbInfo.nBossNpcExp
+    }
+    table.insert(self.tbDynamicLevelList[tbInfo.szKey], tbInfo)
+  end
+  
+  local function compareFunc(tbFirst, tbSecond)
+    local nFirstTime = Lib:IsEmptyStr(tbFirst.szTimeFrame) and 0 or Lib:CalcTimeFrameOpenTime(tbFirst.szTimeFrame)
+    local nSecondTime = Lib:IsEmptyStr(tbSecond.szTimeFrame) and 0 or Lib:CalcTimeFrameOpenTime(tbSecond.szTimeFrame)
+    return nFirstTime > nSecondTime
+  end
+  
+  for _, tbList in pairs(self.tbDynamicLevelList) do
+    table.sort(tbList, compareFunc)
+  end
+  self.tbDynamicLevelList = SetReadOnly(self.tbDynamicLevelList, true)
+  self.tbDynamicLevelExpList = SetReadOnly(self.tbDynamicLevelExpList, true)
+end
+
+Map:InitSetting()
+Map:InitWorldMapSetting()
+Map:InitDynamicLevelSetting()
+Map.tbMapNpcInfo = Map.tbMapNpcInfo or {}
+Map.tbMapTextPosInfo = Map.tbMapTextPosInfo or {}
+Map.emMap_None = 0
+Map.emMap_Public = 1
+Map.emMap_Fuben = 2
+Map.emMap_Public_Fuben = 3
+Map.emMap_Zone_Public = 4
+Map.emMap_Zone_Fuben = 5
+Map.tbMainMap = {
+  LinAn = 17,
+  XiangYang = 66,
+  FengXiang = 95
+}
+Map.tbMapTimeFrame = {}
+Map.ZHU_CHENG = 5
+Map.CreateFubenResult = {
+  crFubenSuccess = 0,
+  crFubenMaxCount = 1,
+  crFubenFail = 2
+}
+Map.tbMapBaseShare = Map.tbMapBaseShare or {}
+
+function Map:GetMapSetting(nTemplateId)
+  return Map.tbMapList[nTemplateId]
+end
+
+function Map:GetMapSettingEx(nTemplateId)
+  return Map.tbMapListEx[nTemplateId]
+end
+
+function Map:GetForcePkMode(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  return tbMapSetting.ForcePkMode
+end
+
+function Map:GerMapResetCDType(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  return tbMapSetting.ResetSkillCD
+end
+
+function Map:CanTrade(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  return 1 == tbMapSetting.CanTrade
+end
+
+function Map:IsForbidMiniMap(nTemplateId)
+  local tbMapSetting = self:GetMapSetting(nTemplateId)
+  return tbMapSetting.ForbidMiniMap
+end
+
+function Map:IsMiniMapShowFriend(nTemplateId)
+  local tbMapSetting = self:GetMapSetting(nTemplateId)
+  return 1 == tbMapSetting.MiniMapShowFriend
+end
+
+function Map:IsMiniMapNotShowTeam(nTemplateId)
+  return false
+end
+
+function Map:IsDisableSyncZoneMedicine(nTemplateId)
+  local tbMap = self:GetMapSetting(nTemplateId)
+  if tbMap and 1 == tbMap.IsDisableSyncZoneMedicine then
+    return true
+  end
+  return false
+end
+
+function Map:IsDisableBuyMedicine(nTemplateId)
+  local tbMap = self:GetMapSetting(nTemplateId)
+  if tbMap and 1 == tbMap.IsDisableBuyMedicine then
+    return true
+  end
+  return false
+end
+
+function Map:CanOnHook(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  if not tbMapSetting then
+    return false
+  end
+  return 1 == tbMapSetting.CanOfflineExp
+end
+
+function Map:IsForceKillMode(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  return tbMapSetting.ForbidKillMode and 1 == tbMapSetting.ForbidKillMode
+end
+
+function Map:GetEnterLevel(nTemplateId)
+  local tbSwitchMapSetting = Map.tbSwitchMap[nTemplateId]
+  if tbSwitchMapSetting and tbSwitchMapSetting.bDynamicLevel > 0 then
+    local nCurMaxLevel = 0
+    if MODULE_GAMESERVER then
+      nCurMaxLevel = GetMaxTotalLevel()
+    end
+    if MODULE_GAMECLIENT then
+      nCurMaxLevel = Client.nServerMaxTotalLevel
+    end
+    if nCurMaxLevel <= tbSwitchMapSetting.nMapLevel then
+      return tbSwitchMapSetting.nEnterLevel
+    end
+    return nCurMaxLevel - nCurMaxLevel % 10
+  end
+  return tbSwitchMapSetting and tbSwitchMapSetting.nEnterLevel or 0
+end
+
+function Map:GetMapLevel(nTemplateId)
+  local tbSwitchMapSetting = Map.tbSwitchMap[nTemplateId]
+  if tbSwitchMapSetting and tbSwitchMapSetting.bDynamicLevel > 0 then
+    local nCurMaxLevel = 0
+    if MODULE_GAMESERVER then
+      nCurMaxLevel = GetMaxTotalLevel()
+    end
+    if MODULE_GAMECLIENT then
+      nCurMaxLevel = Client.nServerMaxTotalLevel
+    end
+    if nCurMaxLevel <= tbSwitchMapSetting.nMapLevel then
+      return tbSwitchMapSetting.nMapLevel
+    end
+    return nCurMaxLevel - nCurMaxLevel % 10
+  end
+  local nLevel = tbSwitchMapSetting and tbSwitchMapSetting.nMapLevel or 0
+  if tbSwitchMapSetting and not Lib:IsEmptyStr(tbSwitchMapSetting.szLevelSettingKey) then
+    return self:GetDynamicLevel(tbSwitchMapSetting.szLevelSettingKey, nLevel)
+  end
+  return nLevel
+end
+
+function Map:GetDynamicLevelHelper(szLevelKey, szFieldKey, nLevel)
+  for _, tbInfo in ipairs(self.tbDynamicLevelList[szLevelKey] or {}) do
+    if 1 == GetTimeFrameState(tbInfo.szTimeFrame) then
+      return tbInfo[szFieldKey]
+    end
+  end
+  return nLevel
+end
+
+function Map:GetDynamicLevel(szLevelKey, nLevel)
+  return self:GetDynamicLevelHelper(szLevelKey, "nMapLevel", nLevel)
+end
+
+function Map:GetDynamicNpcLevel(szLevelKey, nLevel)
+  return self:GetDynamicLevelHelper(szLevelKey, "nNpcLevel", nLevel)
+end
+
+function Map:GetDynamicNpcExp(szLevelKey, nLevel, nBaseExperience, bBoss)
+  if not self.tbDynamicLevelExpList[szLevelKey] or not self.tbDynamicLevelExpList[szLevelKey][nLevel] then
+    return nBaseExperience
+  end
+  return Lib:IIF(bBoss, self.tbDynamicLevelExpList[szLevelKey][nLevel][2], self.tbDynamicLevelExpList[szLevelKey][nLevel][1])
+end
+
+function Map:IsOpenTimeFrame(nTemplateId)
+  local tbSwitchMapSetting = Map.tbSwitchMap[nTemplateId]
+  if not tbSwitchMapSetting then
+    return true
+  end
+  local szTimeFrame = tbSwitchMapSetting.szOpenTimeFrame
+  if not szTimeFrame or "" == szTimeFrame then
+    return true
+  end
+  return 1 == GetTimeFrameState(szTimeFrame)
+end
+
+function Map:IsShowTimeFrame(nTemplateId)
+  local tbSwitchMapSetting = Map.tbSwitchMap[nTemplateId]
+  if not tbSwitchMapSetting then
+    return true
+  end
+  local szTimeFrame = tbSwitchMapSetting.szShowTimeFrame
+  if not szTimeFrame or "" == szTimeFrame then
+    return true
+  end
+  return 1 == GetTimeFrameState(szTimeFrame)
+end
+
+function Map:GetMapName(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  if nil == tbMapSetting then
+    return ""
+  end
+  return i18n.Parse(tbMapSetting.MapName)
+end
+
+function Map:GetMapResName(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  if nil == tbMapSetting then
+    return ""
+  end
+  return tbMapSetting.ResName
+end
+
+function Map:GetMapType(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId) or {}
+  return tbMapSetting.MapType or Map.emMap_None
+end
+
+function Map:GetIsHideName(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId) or {}
+  return 1 == tbMapSetting.HideName
+end
+
+function Map:IsFuben(nTemplateId)
+  if nTemplateId == Tong.Def.nMainMapTemplateId then
+    return false
+  end
+  local nMapType = self:GetMapType(nTemplateId)
+  return nMapType == Map.emMap_Fuben
+end
+
+function Map:IsZonePublic(nTemplateId)
+  local nMapType = self:GetMapType(nTemplateId)
+  return nMapType == Map.emMap_Zone_Public
+end
+
+function Map:IsZoneHangUpMap(nMapTemplateId)
+  if self:IsZonePublic(nMapTemplateId) and not self:IsTransForbid(nMapTemplateId) then
+    return true
+  end
+  return false
+end
+
+function Map:IsSecretMap(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  return tbMapSetting and tbMapSetting.IsSecretMap and tbMapSetting.IsSecretMap > 0
+end
+
+function Map:IsForbidKinQuite(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  return tbMapSetting and tbMapSetting.ForbidKinQuit and tbMapSetting.ForbidKinQuit > 0
+end
+
+function Map:IsForbidKinChangeCamp(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  return tbMapSetting and tbMapSetting.ForbidKinChangeCamp and tbMapSetting.ForbidKinChangeCamp > 0
+end
+
+function Map:GetMapHideMap(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId) or {}
+  return tbMapSetting.HideRide or 0
+end
+
+function Map:IsAllowPk(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId) or {}
+  return tbMapSetting.AllowPk and tbMapSetting.AllowPk > 0
+end
+
+function Map:ShouldChangePkValue(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId) or {}
+  return tbMapSetting.ChangePkValue and tbMapSetting.ChangePkValue > 0
+end
+
+function Map:GetMapHideMsgNotify(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId) or {}
+  return tbMapSetting.HideMsgNotify or 0
+end
+
+function Map:GetMapHideLoginAward(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId) or {}
+  return tbMapSetting.HideLoginAward or 0
+end
+
+function Map:GetMapAutoFightCoefficient(nTemplateId)
+  local nSearchCoefficient = 1
+  local nFollowCoefficient = 1
+  local tbMapSetting = Map:GetMapSetting(nTemplateId) or {}
+  if tbMapSetting then
+    if tbMapSetting.SearchCoefficient and tbMapSetting.SearchCoefficient > 0 then
+      nSearchCoefficient = tbMapSetting.SearchCoefficient / 100
+    end
+    if tbMapSetting.FollowCoefficient and tbMapSetting.FollowCoefficient > 0 then
+      nFollowCoefficient = tbMapSetting.FollowCoefficient / 100
+    end
+  end
+  return nSearchCoefficient, nFollowCoefficient
+end
+
+function Map:GetMapHideActivities(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId) or {}
+  return tbMapSetting.HideActivities or 0
+end
+
+function Map:CanNearbyChat(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId) or {}
+  return 1 == tbMapSetting.NearbyChat
+end
+
+function Map:GetMapPosFile(nTemplateId, szFileName)
+  local tbMapSetting = self:GetMapSetting(nTemplateId)
+  return string.format("Setting/Map/%s/info/%s", tbMapSetting.LogicFilePath, szFileName)
+end
+
+function Map:GetMapNpcFile(nTemplateId)
+  local tbMapInfo = Map:GetMapSetting(nTemplateId)
+  local szPath = tbMapInfo and "Setting/Map/" .. tbMapInfo.LogicFilePath .. "/info/npc_info.txt"
+  return szPath
+end
+
+function Map:GetMapTextPosInfoPath(nTemplateId)
+  local tbMapInfo = Map:GetMapSetting(nTemplateId)
+  local szPath = tbMapInfo and "Setting/Map/" .. tbMapInfo.LogicFilePath .. "/info/text_pos_info.txt"
+  return szPath
+end
+
+function Map:LoadMapNpcInfo(nMapTemplateId)
+  local szPath = Map:GetMapNpcFile(nMapTemplateId)
+  self.tbMapNpcInfo[nMapTemplateId] = Lib:LoadTabFileEx(szPath, "ssdddddddddddddd", nil, {
+    "NpcName",
+    "ShowName",
+    "NpcTemplateId",
+    "CanAutoPath",
+    "XPos",
+    "YPos",
+    "ZPos",
+    "DlgXPos",
+    "DlgYPos",
+    "DlgZPos",
+    "WalkNearLength",
+    "IsMapMonster",
+    "XUiPos",
+    "YUiPos",
+    "nShareType",
+    "Index"
+  }, nil, nil, false)
+  self.tbMapNpcByNpcId = self.tbMapNpcByNpcId or {}
+  self.tbMapNpcByNpcId[nMapTemplateId] = {}
+  for _, tbRow in pairs(self.tbMapNpcInfo[nMapTemplateId] or {}) do
+    self.tbMapNpcByNpcId[nMapTemplateId][tbRow.NpcTemplateId] = self.tbMapNpcByNpcId[nMapTemplateId][tbRow.NpcTemplateId] or {}
+    tbRow.WalkNearLength = tbRow.WalkNearLength * 5.12
+    table.insert(self.tbMapNpcByNpcId[nMapTemplateId][tbRow.NpcTemplateId], tbRow)
+  end
+  if self.tbMapNpcInfo[nMapTemplateId] then
+    self.tbMapNpcInfo[nMapTemplateId] = SetReadOnly(self.tbMapNpcInfo[nMapTemplateId])
+  end
+end
+
+function Map:GetMapNpcInfoByNpcTemplate(nMapTemplateId, nNpcTemplateId)
+  if not Map:GetMapSetting(nMapTemplateId) then
+    return
+  end
+  if not self.tbMapNpcByNpcId or not self.tbMapNpcByNpcId[nMapTemplateId] then
+    self:LoadMapNpcInfo(nMapTemplateId)
+  end
+  return self.tbMapNpcByNpcId[nMapTemplateId][nNpcTemplateId]
+end
+
+function Map:GetMapNpcInfo(nMapTemplateId)
+  if not Map:GetMapSetting(nMapTemplateId) then
+    return
+  end
+  if not self.tbMapNpcInfo[nMapTemplateId] then
+    self:LoadMapNpcInfo(nMapTemplateId)
+  end
+  return self.tbMapNpcInfo[nMapTemplateId]
+end
+
+function Map:GetAllFieldMapNpcByMapId(nMapTemplateId)
+  if not Map:GetMapSetting(nMapTemplateId) then
+    return
+  end
+  if not self.tbMapNpcByNpcId or not self.tbMapNpcByNpcId[nMapTemplateId] then
+    self:LoadMapNpcInfo(nMapTemplateId)
+  end
+  local tbNpcList = self.tbMapNpcByNpcId[nMapTemplateId]
+  local tbNpcTemplateIds = {}
+  for nNpcTemplateId, _ in pairs(tbNpcList) do
+    local tbNpcTemplateInfo = KNpc.GetNpcTemplateInfo(nNpcTemplateId)
+    if tbNpcTemplateInfo and tbNpcTemplateInfo.szClassName == "FieldMapNpc" then
+      table.insert(tbNpcTemplateIds, nNpcTemplateId)
+    end
+  end
+  return tbNpcTemplateIds
+end
+
+function Map:LoadMapTextPosInfo(nMapTemplateId)
+  local szPath = Map:GetMapTextPosInfoPath(nMapTemplateId)
+  self.tbMapTextPosInfo[nMapTemplateId] = Lib:LoadTabFileEx(szPath, "sddssd", nil, {
+    "Index",
+    "XPos",
+    "YPos",
+    "Text",
+    "Color",
+    "FontSize"
+  }) or {}
+end
+
+function Map:GetMapTextPosInfo(nMapTemplateId)
+  if not Map:GetMapSetting(nMapTemplateId) then
+    return
+  end
+  if not self.tbMapTextPosInfo[nMapTemplateId] then
+    self:LoadMapTextPosInfo(nMapTemplateId)
+  end
+  return self.tbMapTextPosInfo[nMapTemplateId]
+end
+
+function Map:GetClassDesc(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  if not tbMapSetting then
+    LogErr("Map Settting nil ", nTemplateId)
+    return
+  end
+  return tbMapSetting.Class
+end
+
+function Map:GetSoundID(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  if not tbMapSetting then
+    return 0
+  end
+  return tbMapSetting.SoundID
+end
+
+function Map:GetDefaultPos(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  local tbDefaultPos = Map:GetMapSettingEx(nTemplateId).tbDefaultPos
+  local nRandom = MathRandom(#tbDefaultPos)
+  return tbDefaultPos[nRandom].PosX, tbDefaultPos[nRandom].PosY, tbMapSetting.FightState
+end
+
+function Map:IsForbidRide(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  if 1 ~= tbMapSetting.ForbidRide then
+    return false
+  end
+  return true
+end
+
+function Map:IsForbidQingKung(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  if nil == tbMapSetting then
+    return false
+  end
+  if 1 ~= tbMapSetting.ForbidQingKung then
+    return false
+  end
+  return true
+end
+
+function Map:IsFieldFightMap(nTemplateId)
+  local szClass = Map:GetClassDesc(nTemplateId)
+  return "fight" == szClass
+end
+
+function Map:IsCityMap(nTemplateId)
+  local szClass = Map:GetClassDesc(nTemplateId)
+  return "city" == szClass
+end
+
+function Map:IsBossMap(nTemplateId)
+  local szClass = Map:GetClassDesc(nTemplateId)
+  return "boss" == szClass
+end
+
+function Map:IsBattleMap(nTemplateId)
+  local szClass = Map:GetClassDesc(nTemplateId)
+  return "battle" == szClass
+end
+
+function Map:IsTongMap(nTemplateId)
+  if nTemplateId == Tong.Def.nMainMapTemplateId then
+    return true
+  end
+  local szClass = Map:GetClassDesc(nTemplateId)
+  return "tong" == szClass
+end
+
+function Map:IsFubenMap(nTemplateId)
+  local szClass = Map:GetClassDesc(nTemplateId)
+  return "fuben" == szClass
+end
+
+function Map:IsTransForbid(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  if not tbMapSetting then
+    Log("Map:IsTransForbid can't find map setting. nTemplateId = ", nTemplateId)
+    return false
+  end
+  return tbMapSetting.TransForbidden > 0
+end
+
+function Map:IsIgnoreTeamLimitInFuben(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  return tbMapSetting and 1 == tbMapSetting.IgnoreTeamLimitInFuben
+end
+
+function Map:IsNotClearAssistNpc(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  return tbMapSetting and 1 == tbMapSetting.IsNotClearAssistNpc or false
+end
+
+function Map:GetMiniMapInfo(nTemplateId)
+  local tbMapSetting = Map:GetMapSetting(nTemplateId)
+  local tbMapSettingEx = Map:GetMapSettingEx(nTemplateId)
+  local szMiniMap = tbMapSetting.MiniMap or ""
+  local tbMapInfo = Map:GetMapSetting(nTemplateId)
+  local szResInfoPath = tbMapInfo and "Setting/Map/" .. tbMapInfo.InfoFilePath .. "/3d/info.txt"
+  local nRealRegionX = 0
+  local nRealRegionY = 0
+  if Client.RepresentModule.IsResourceExist(szResInfoPath) then
+    local tbLogicMapSetting = Lib:LoadIniFile(szResInfoPath).BaseInfo
+    nRealRegionX = tbLogicMapSetting.RegionCountX
+    nRealRegionY = tbLogicMapSetting.RegionCountY
+  else
+    local nRegionX, nRegionY = GetMapBaseInfo(nTemplateId)
+    if nil ~= nRegionX and nil ~= nRegionY then
+      nRealRegionX = nRegionX
+      nRealRegionY = nRegionY
+    end
+  end
+  local tbMiniMapSetting = {}
+  tbMiniMapSetting.SizeX = nRealRegionX * 8 * 800 / 25
+  tbMiniMapSetting.SizeY = nRealRegionY * 4 * 800 / 25
+  return tbMiniMapSetting, szMiniMap, tbMapSettingEx
+end
+
+function Map:CheckCanLeave(nTemplateId)
+  if not self.tbSafeMap then
+    self.tbSafeMap = {
+      [Battle.READY_MAP_ID] = 1,
+      [TeamBattle.PRE_MAP_ID] = 1,
+      [Fuben.FenglingduFuben.OUTSIDE_MAPID] = 1,
+      [608] = 1,
+      [FactionBattle.Cfg.PREPARE_MAP_TAMPLATE_ID] = 1,
+      [MultiPvP.Cfg.PRE_MAP_ID] = 1,
+      [BattleRoyaleDef.MATCH_MAP_TEMPLATE_ID] = 1,
+      [BattleRoyaleDef.ROUND_MAP_TEMPLATE_ID] = 1
+    }
+    for nDomainMapTemplate = 501, 513 do
+      self.tbSafeMap[nDomainMapTemplate] = 1
+    end
+  end
+  if not self.tbIsMapCanLeave then
+    self.tbIsMapCanLeave = {
+      [TeamBattle.PRE_MAP_ID] = function()
+        return TeamBattle:IsPreMapCanLeave()
+      end
+    }
+  end
+  return nTemplateId and self.tbSafeMap[nTemplateId]
+end
+
+function Map:GetLoadingTexture(nMapTemplateId)
+  nMapTemplateId = nMapTemplateId or 0
+  local tbSetting = self.tbMapList[nMapTemplateId]
+  local szResult
+  if tbSetting and tbSetting.LoadingTexture and tbSetting.LoadingTexture ~= "" then
+    szResult = tbSetting.LoadingTexture
+  end
+  return szResult or "Textures/loading_scene.png"
+end
+
+function Map:GetMapNpcDlgPos(nMapTemplateId, nNpcTemplateId, nXPos, nYPos)
+  local nDlgX = 0
+  local nDlgY = 0
+  if not nMapTemplateId or nMapTemplateId < 0 then
+    return nDlgX, nDlgY
+  end
+  if not nNpcTemplateId or nNpcTemplateId < 0 then
+    return nDlgX, nDlgY
+  end
+  local tbMapNpcInfo = Map:GetMapNpcInfoByNpcTemplate(nMapTemplateId, nNpcTemplateId)
+  if not tbMapNpcInfo then
+    return nDlgX, nDlgY
+  end
+  for _, info in ipairs(tbMapNpcInfo) do
+    if nXPos == info.XPos and nYPos == info.YPos then
+      nDlgX = tbMapNpcInfo[1].DlgXPos or 0
+      nDlgY = tbMapNpcInfo[1].DlgYPos or 0
+      break
+    end
+  end
+  return nDlgX, nDlgY
+end
+
+function Map:IsDengLuMap(nTemplateId)
+  return 0 == nTemplateId
+end
+
+local tbNormalMapType = {
+  fight = true,
+  city = true,
+  kin = true
+}
+
+function Map:IsInActivity(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local nMapTemplateId = pPlayer.nMapTemplateId
+  local szMapType = Map:GetClassDesc(nMapTemplateId)
+  return not tbNormalMapType[szMapType]
+end
+
+function Map:CanSwitchMap(nPlayerLevel, nMapTemplateId)
+  local tbSwitchMapSetting = Map.tbSwitchMap[nMapTemplateId]
+  if not tbSwitchMapSetting then
+    return true
+  end
+  local nEnterLevel = Map:GetEnterLevel(nMapTemplateId) or 0
+  if nPlayerLevel < nEnterLevel then
+    local szMsg
+    if ZongShiSkill:IsZongShiByLevel(nEnterLevel) then
+      szMsg = i18n.EasyGet("\229\137\141\230\150\185\229\141\129\229\136\134\229\135\182\233\153\169\239\188\140\229\176\145\228\190\160\233\156\128\229\133\136\229\141\135\229\136\176\229\174\151\229\184\136{0}\231\186\167\229\134\141\230\157\165\229\176\157\232\175\149", ZongShiSkill:ToZongShiLevel(nEnterLevel))
+    else
+      szMsg = i18n.EasyGet("\229\137\141\230\150\185\229\141\129\229\136\134\229\135\182\233\153\169\239\188\140\229\176\145\228\190\160\233\156\128\229\133\136\229\141\135\229\136\176{0}\231\186\167\229\134\141\230\157\165\229\176\157\232\175\149", nEnterLevel)
+    end
+    return false, szMsg
+  end
+  local szOpenTimeFrame = tbSwitchMapSetting.szOpenTimeFrame
+  if not szOpenTimeFrame or "" == szOpenTimeFrame then
+    return true
+  end
+  if 1 ~= GetTimeFrameState(szOpenTimeFrame) then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\229\156\176\229\155\190\229\176\154\230\156\170\229\188\128\230\148\190")
+  end
+  return true
+end
+
+function Map:CheckNpcLevelConfig(tbNpcInfoList, tbMapInfo)
+  local tbNpcInfoMap = {}
+  local tbMapLevelNpcMap = {}
+  local bRet = true
+  for _, tbNpcInfo in ipairs(tbNpcInfoList) do
+    local nMapTemplateId = tbNpcInfo[1]
+    local nNpcId = tbNpcInfo[2]
+    tbMapLevelNpcMap[nNpcId] = 1
+    local szNpcFile = Map:GetMapPosFile(nMapTemplateId, "npc_info.txt")
+    local tbNpcInfoSetting = Lib:LoadTabFileEx(szNpcFile, "ds", nil, {
+      "NpcTemplateId",
+      "LevelSettingKey"
+    }, nil, nil, false)
+    if not tbNpcInfoSetting then
+      LogErr("[Map:CheckNpcLevelConfig] load failed!", szNpcFile)
+      return false
+    end
+    local bError = true
+    for _, tbV2 in pairs(tbNpcInfoSetting) do
+      if tbV2.NpcTemplateId == nNpcId then
+        bError = false
+        if tbV2.LevelSettingKey ~= tbMapInfo.szKey then
+          LogErr("[Map:CheckNpcLevelConfig] tbV2.LevelSettingKey ~= tbV.szKey", tbV2.LevelSettingKey, tbMapInfo.szKey, nNpcId, szNpcFile)
+          bRet = false
+        end
+      end
+      if tbV2.LevelSettingKey and not Lib:IsEmptyStr(tbV2.LevelSettingKey) then
+        tbNpcInfoMap[tbV2.NpcTemplateId] = nMapTemplateId
+      end
+    end
+    if bError then
+      LogErr("[Map:CheckNpcLevelConfig] not find nNpcId", szNpcFile, nNpcId, szNpcFile)
+      bRet = false
+    end
+  end
+  for NpcTemplateId, nMapTemplateId in pairs(tbNpcInfoMap) do
+    if not tbMapLevelNpcMap[NpcTemplateId] then
+      local szNpcFile = Map:GetMapPosFile(nMapTemplateId, "npc_info.txt")
+      LogErr("[Map:CheckNpcLevelConfig]  not tbMapLevelNpcMap[NpcTemplateId]", szNpcFile, NpcTemplateId)
+      bRet = false
+    end
+  end
+  return bRet
+end
+
+function Map:CheckMapLevelConfig()
+  local bRet = true
+  for _, tbInfo in pairs(self.tbDynamicLevelList) do
+    for _, tbMapInfo in ipairs(tbInfo) do
+      if tbMapInfo.szNpcInfo and not Lib:IsEmptyStr(tbMapInfo.szNpcInfo) then
+        local tbszNpcInfo = Lib:SplitStr(tbMapInfo.szNpcInfo, ";")
+        local tbNpcInfoList = {}
+        for _, tbszValue in ipairs(tbszNpcInfo) do
+          local tbNpcInfo = Lib:SplitStr2Num(tbszValue, "|")
+          table.insert(tbNpcInfoList, tbNpcInfo)
+        end
+        if not self:CheckNpcLevelConfig(tbNpcInfoList, tbMapInfo) then
+          bRet = false
+        end
+      end
+    end
+  end
+  Log("-------------Map:CheckNpcLevelConfig() bRet = ", bRet)
+  return bRet
+end
+
+Validator:Register(Map.CheckMapLevelConfig, Map)

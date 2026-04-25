@@ -1,0 +1,472 @@
+Shop.szFashionNewRecommendRedPointKey = "FashionNewRecommendRedPoint"
+
+function Shop:LoadAppearanceSingleShop()
+  local tbOrderedShopCfg = Lib:LoadTabFileEx("Setting/Appearance/AppearanceSingleShop.tab", "dddd", nil, {
+    "nId",
+    "nEnable",
+    "nPart",
+    "nLayer"
+  }, nil, 3, true)
+  if tbOrderedShopCfg then
+    self.tbFashionSingleShop = {}
+    for _, tbShop in ipairs(tbOrderedShopCfg) do
+      tbShop.nPart = tbShop.nPart - 1
+      self.tbFashionSingleShop[tbShop.nId] = tbShop
+    end
+  end
+  Validator:Register(self.CheckAppearanceShopDuplicateId, self, tbOrderedShopCfg)
+end
+
+function Shop:LoadAppearanceSuitShop()
+  self.tbFashionSuitShop = Lib:LoadTabFileEx("Setting/Appearance/AppearanceSuitShop.tab", "dsdddss", nil, {
+    "nId",
+    "szName",
+    "nEnable",
+    "nSort",
+    "nPart",
+    "szNormalIcon",
+    "szSelectedIcon"
+  }, nil, 3, false)
+  if self.tbFashionSuitShop then
+    table.sort(self.tbFashionSuitShop, function(a, b)
+      return a.nSort > b.nSort
+    end)
+    for _, tbShop in ipairs(self.tbFashionSuitShop) do
+      tbShop.nPart = tbShop.nPart - 1
+    end
+  end
+  Validator:Register(self.CheckAppearanceShopDuplicateId)
+end
+
+function Shop:CheckAppearanceShopDuplicateId()
+  if not self.tbFashionSuitShop then
+    return false
+  end
+  local tbRecord = {}
+  for _, tbShop in ipairs(self.tbFashionSuitShop) do
+    if tbRecord[tbShop.nId] then
+      LogErr(string.format("CheckAppearanceShopDuplicateId failed, nId %d is duplicate", tbShop.nId))
+      return false
+    end
+    tbRecord[tbShop.nId] = true
+  end
+  return true
+end
+
+function Shop:GetFashionSuitShop()
+  return self.tbFashionSuitShop
+end
+
+function Shop:CheckFashionSuitShopOpen(nIndex)
+  if not self.tbFashionSuitShop[nIndex] then
+    return false
+  end
+  if 1 ~= self.tbFashionSuitShop[nIndex].nEnable then
+    return false
+  end
+  local nShopId = self.tbFashionSuitShop[nIndex].nId
+  local tbSuits = self.tbFashionShopId2Suit[nShopId]
+  if not tbSuits or Lib:IsEmptyTB(tbSuits) then
+    LogErr("Shop:CheckFashionSuitShopOpen error. tbFashionShopId2Suit does not have nShopId:", nShopId)
+    return false
+  end
+  return true
+end
+
+function Shop:GetFashionSuitsByShopId(nShopIndex)
+  if not self:CheckFashionSuitShopOpen(nShopIndex) then
+    LogErr("Shop:GetFashionSuitsByShopId error. Shop is not Open. nShopIndex:", nShopIndex)
+    return {}
+  end
+  local nShopId = self.tbFashionSuitShop[nShopIndex].nId
+  self:RefreshShopSuitNewTip()
+  self:RefreshSuitDiscountPrice()
+  local tbNewTipList = {}
+  local tbNotTipList = {}
+  local tbDiscountTipList = {}
+  local tbNewDiscountTipList = {}
+  local tbFashionSuits = self.tbFashionShopId2Suit[nShopId]
+  for _, tbSuit in ipairs(tbFashionSuits) do
+    if self:IsFashionSuitCanShow(tbSuit.nSuitId) then
+      tbSuit.bShowNewTip = self.tbNewTipShopSuit[tbSuit.nSuitId]
+      tbSuit.nDiscountPrice = self:GetFashionSuitDiscountPrice(tbSuit.nSuitId)
+      if tbSuit.nDiscountPrice > 0 and tbSuit.bShowNewTip then
+        table.insert(tbNewDiscountTipList, tbSuit)
+      elseif tbSuit.nDiscountPrice > 0 then
+        table.insert(tbDiscountTipList, tbSuit)
+      elseif tbSuit.bShowNewTip then
+        table.insert(tbNewTipList, tbSuit)
+      else
+        table.insert(tbNotTipList, tbSuit)
+      end
+    end
+  end
+  
+  local function fnSort(a, b)
+    return a.nSort > b.nSort
+  end
+  
+  table.sort(tbNewTipList, fnSort)
+  table.sort(tbNotTipList, fnSort)
+  table.sort(tbDiscountTipList, fnSort)
+  table.sort(tbNewDiscountTipList, fnSort)
+  local tbSuits1 = Lib:MergeTable(tbNewTipList, tbNotTipList)
+  local tbSuits2 = Lib:MergeTable(tbNewDiscountTipList, tbDiscountTipList)
+  local tbResultSuits = Lib:MergeTable(tbSuits2, tbSuits1)
+  return tbResultSuits
+end
+
+function Shop:CheckFashionSingleShopOpen(nShopId)
+  local bOpen = false
+  for _, tbItem in pairs(self.tbFashionWares) do
+    if self:IsFashionWareCanShow(tbItem) and Lib:Is_include(nShopId, tbItem.tbShopIds) then
+      bOpen = true
+    end
+  end
+  if not self.tbFashionSingleShop[nShopId] then
+    bOpen = false
+  elseif 1 ~= self.tbFashionSingleShop[nShopId].nEnable then
+    bOpen = false
+  end
+  return bOpen
+end
+
+function Shop:GetFashionSinglesByPart(nPart, nLayer)
+  nLayer = nLayer or 0
+  local tbShopItems = self:GetFashionPartAllShopSingles(nPart, nLayer)
+  if Lib:IsEmptyTB(tbShopItems) then
+    LogErr(" Shop:GetFashionSinglesByPart error. tbFashionPart2Single no data for this part.", nPart, nLayer)
+    return
+  end
+  self:RefreshShopItemNewTip()
+  self:RefreshItemDiscountPrice()
+  local tbNoTipList = {}
+  local tbNewTipList = {}
+  local tbDiscountTipList = {}
+  local tbNewDiscountTipList = {}
+  for _, tbItem in ipairs(tbShopItems) do
+    if self:IsFashionWareCanShow(tbItem) then
+      tbItem.bShowNewTip = self.tbNewTipShopItem[tbItem.nId]
+      tbItem.nDiscountPrice = self:GetFashionItemDiscountPrice(tbItem.nId)
+      if tbItem.nDiscountPrice > 0 and tbItem.bShowNewTip then
+        table.insert(tbNewDiscountTipList, tbItem)
+      elseif tbItem.nDiscountPrice > 0 then
+        table.insert(tbDiscountTipList, tbItem)
+      elseif tbItem.bShowNewTip then
+        table.insert(tbNewTipList, tbItem)
+      else
+        table.insert(tbNoTipList, tbItem)
+      end
+    end
+  end
+  
+  local function fnSort(a, b)
+    return a.nSort > b.nSort
+  end
+  
+  table.sort(tbNoTipList, fnSort)
+  table.sort(tbNewTipList, fnSort)
+  table.sort(tbDiscountTipList, fnSort)
+  table.sort(tbNewDiscountTipList, fnSort)
+  local tbItems1 = Lib:MergeTable(tbNewTipList, tbNoTipList)
+  local tbItems2 = Lib:MergeTable(tbNewDiscountTipList, tbDiscountTipList)
+  local tbResultItems = Lib:MergeTable(tbItems2, tbItems1)
+  return tbResultItems
+end
+
+function Shop:GetFashionPartAllShopSingles(nPart, nLayer)
+  nLayer = nLayer or 0
+  local tbItems = {}
+  local tbRecord = {}
+  local tbShops = self.tbFashionPart2Single[nPart][nLayer]
+  for _, tbShop in pairs(tbShops) do
+    for _, tbWare in pairs(tbShop) do
+      if not tbRecord[tbWare.nId] then
+        tbRecord[tbWare.nId] = true
+        table.insert(tbItems, tbWare)
+      end
+    end
+  end
+  return tbItems
+end
+
+function Shop:BuyFashionItemReq(nShopItemId)
+  local bRet, szTip = self:CanBuyFashionWare(me, nShopItemId)
+  if not bRet then
+    me.CenterMsg(szTip, true)
+    return
+  end
+  RemoteServer.BuyFashionItem(nShopItemId, self.nRequestIndex)
+  local pUIClosetSingle = Ui:GetPanelByName("UIClosetSingle")
+  if pUIClosetSingle then
+    pUIClosetSingle.bIsBuying = true
+  end
+end
+
+function Shop:BuyFashionSuitReq(nSuitId)
+  local bRet, szTip = self:CanBuyFashionSuit(me, nSuitId)
+  if not bRet then
+    me.CenterMsg(szTip, true)
+    return
+  end
+  RemoteServer.BuyFashionSuit(nSuitId, self.nRequestIndex)
+  local pUIClosetSuit = Ui:GetPanelByName("UIClosetSuit")
+  if pUIClosetSuit then
+    pUIClosetSuit.bIsBuying = true
+  end
+end
+
+function Shop:BuyFashionItemWithCouponReq(nId, nCouponTemplateId)
+  if not Shop.Def.bOpenFashionCoupon then
+    return
+  end
+  local bRet, szTip = self:CanBuyFashionWareWithCoupon(me, nId, nCouponTemplateId)
+  if not bRet then
+    me.CenterMsg(szTip, true)
+    return
+  end
+  RemoteServer.BuyFashionItemWithCoupon(nId, nCouponTemplateId, self.nRequestIndex)
+  local pUIClosetSingle = Ui:GetPanelByName("UIClosetSingle")
+  if pUIClosetSingle then
+    pUIClosetSingle.bIsBuying = true
+  end
+end
+
+function Shop:BuyFashionSuitWithCouponReq(nSuitId, nCouponTemplateId)
+  if not Shop.Def.bOpenFashionCoupon then
+    return
+  end
+  local bRet, szTip = self:CanBuyFashionSuitWithCoupon(me, nSuitId, nCouponTemplateId)
+  if not bRet then
+    me.CenterMsg(szTip, true)
+    return
+  end
+  RemoteServer.BuyFashionSuitWithCoupon(nSuitId, nCouponTemplateId, self.nRequestIndex)
+  local pUIClosetSuit = Ui:GetPanelByName("UIClosetSuit")
+  if pUIClosetSuit then
+    pUIClosetSuit.bIsBuying = true
+  end
+end
+
+function Shop:OnBuyResponse_FS(bSuccess, szTip, nRequestIndex, bUseCoupon)
+  if nRequestIndex then
+    self.nRequestIndex = nRequestIndex
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SHOP_FASHION_BUY_RESULT, bSuccess)
+  if szTip then
+    me.CenterMsg(szTip)
+  end
+  if bSuccess and not bUseCoupon then
+    local function gotoBagFn()
+      Ui:CloseWindow("UIClosetShopNew")
+      
+      Ui:OpenWindow("UIBag", 1)
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\164\150\232\167\130\232\180\173\228\185\176\230\136\144\229\138\159\239\188\140\230\152\175\229\144\166\232\183\179\232\189\172\232\131\140\229\140\133"), {
+      {gotoBagFn},
+      {}
+    }, {
+      i18n.EasyGet("\231\161\174\229\174\154"),
+      i18n.EasyGet("\229\143\150\230\182\136")
+    })
+  end
+end
+
+function Shop:GiveFashionInsideBag(nAcceptId, nTemplateId, nCount)
+  local bCanGive, szTip = self:CheckCanGiveFashion(me, nAcceptId, nTemplateId, nCount)
+  if not bCanGive then
+    me.CenterMsg(szTip)
+    return
+  end
+  RemoteServer.GiveFashionInsideBag(nAcceptId, nTemplateId, nCount)
+end
+
+function Shop:RefreshShopItemNewTip()
+  self.tbNewTipShopItem = {}
+  for nId, tbItem in pairs(self.tbFashionWares) do
+    if not Lib:IsEmptyStr(tbItem.szNewTimeStart) and not Lib:IsEmptyStr(tbItem.szNewTimeEnd) then
+      local nNowTime = GetTime()
+      local nEndTime = Lib:ParseNumbericDateToTime(tbItem.szNewTimeEnd)
+      local nStartTime = Lib:ParseNumbericDateToTime(tbItem.szNewTimeStart)
+      if nNowTime < nEndTime and nNowTime > nStartTime then
+        self.tbNewTipShopItem[nId] = true
+      else
+        self.tbNewTipShopItem[nId] = false
+      end
+    else
+      self.tbNewTipShopItem[nId] = false
+    end
+  end
+end
+
+function Shop:RefreshShopSuitNewTip()
+  self.tbNewTipShopSuit = {}
+  for nSuitId, tbSuit in pairs(self.tbFashionSuit) do
+    if not Lib:IsEmptyStr(tbSuit.szNewTimeStart) and not Lib:IsEmptyStr(tbSuit.szNewTimeEnd) then
+      local nNowTime = GetTime()
+      local nEndTime = Lib:ParseNumbericDateToTime(tbSuit.szNewTimeEnd)
+      local nStartTime = Lib:ParseNumbericDateToTime(tbSuit.szNewTimeStart)
+      if nNowTime < nEndTime and nNowTime > nStartTime then
+        self.tbNewTipShopSuit[nSuitId] = true
+      end
+    else
+      self.tbNewTipShopSuit[nSuitId] = false
+    end
+  end
+end
+
+function Shop:HasNewFashion()
+  self:RefreshShopItemNewTip()
+  self:RefreshShopSuitNewTip()
+  for _, bTip in pairs(self.tbNewTipShopItem) do
+    if bTip then
+      return true
+    end
+  end
+  for _, bTip in pairs(self.tbNewTipShopSuit) do
+    if bTip then
+      return true
+    end
+  end
+  return false
+end
+
+function Shop:OpenNewFashionRecommendPanel()
+  if not self:HasNewFashion() then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\178\161\230\156\137\230\150\176\229\147\129\229\164\150\232\167\130"))
+    return
+  end
+  Ui:OpenWindow("UIClosetShopNew", nil, nil, 2)
+end
+
+function Shop:GetNewFashionEndTime()
+  if not self:HasNewFashion() then
+    return 0
+  end
+  local nMaxEndTime = 0
+  local nNowTime = GetTime()
+  for _, tbWare in pairs(self.tbFashionWares) do
+    if self:IsFashionWareCanShow(tbWare) and not Lib:IsEmptyStr(tbWare.szNewTimeStart) and not Lib:IsEmptyStr(tbWare.szNewTimeEnd) then
+      local nEndTime = Lib:ParseNumbericDateToTime(tbWare.szNewTimeEnd) or 0
+      local nStartTime = Lib:ParseNumbericDateToTime(tbWare.szNewTimeStart) or 0
+      if nNowTime < nEndTime and nNowTime > nStartTime and nMaxEndTime < nEndTime then
+        nMaxEndTime = nEndTime
+      end
+    end
+  end
+  for _, tbSuit in pairs(self.tbFashionSuit) do
+    if self:IsFashionSuitCanShow(tbSuit.nSuitId) and not Lib:IsEmptyStr(tbSuit.szNewTimeStart) and not Lib:IsEmptyStr(tbSuit.szNewTimeEnd) then
+      local nEndTime = Lib:ParseNumbericDateToTime(tbSuit.szNewTimeEnd) or 0
+      local nStartTime = Lib:ParseNumbericDateToTime(tbSuit.szNewTimeStart) or 0
+      if nNowTime < nEndTime and nNowTime > nStartTime and nMaxEndTime < nEndTime then
+        nMaxEndTime = nEndTime
+      end
+    end
+  end
+  return nMaxEndTime
+end
+
+function Shop:RefreshFashionShopClientTime()
+  for _, tbWare in pairs(self.tbFashionWares) do
+    local szOpenTime = tbWare.szSellTimeStart
+    local szCloseTime = tbWare.szSellTimeEnd
+    local nBeginTime, nEndTime
+    if not (not szOpenTime or Lib:IsEmptyStr(szOpenTime)) or szCloseTime and not Lib:IsEmptyStr(szCloseTime) then
+      if not Lib:IsEmptyStr(szOpenTime) and Lib:IsEmptyStr(szCloseTime) then
+        nBeginTime = Lib:GetConfigDate2Time(tonumber(szOpenTime))
+      elseif Lib:IsEmptyStr(szOpenTime) and not Lib:IsEmptyStr(szCloseTime) then
+        nBeginTime = GetServerCreateTime()
+        nEndTime = Lib:GetConfigDate2Time(tonumber(szCloseTime))
+      elseif not Lib:IsEmptyStr(szOpenTime) and not Lib:IsEmptyStr(szCloseTime) then
+        nBeginTime = Lib:GetConfigDate2Time(tonumber(szOpenTime))
+        nEndTime = Lib:GetConfigDate2Time(tonumber(szCloseTime))
+      end
+    end
+    tbWare.nBeginTime = nBeginTime
+    tbWare.nEndTime = nEndTime
+  end
+end
+
+function Shop:GMRefreshFashionShop()
+  Ui:DestroyWindow("UIBag")
+  Ui:DestroyWindow("UIClosetShop")
+  Ui:DestroyWindow("UIClosetShopNew")
+end
+
+Shop:LoadAppearanceSuitShop()
+Shop:LoadAppearanceSingleShop()
+
+function Shop:OnGameInitFinish()
+  self:InitFashionWareFashionID()
+  self:InitFashionPart2Single()
+end
+
+function Shop:InitFashionWareFashionID()
+  for _, tbItem in pairs(self.tbFashionWares) do
+    local nFashionID = self:GetFashionTemplateExtParam(tbItem.nTemplateId, self.FASHION_PARAM.FASHIONID)
+    if nFashionID then
+      tbItem.nFashionID = nFashionID
+    else
+      LogErr("FashionShopClient OnGameInitFinish GetFashionID is nil by tbItem.nTemplateId of SingItem", tbItem.nTemplateId)
+    end
+  end
+  for _, tbSuit in pairs(self.tbFashionSuit) do
+    for _, tbItem in ipairs(tbSuit.tbGroup) do
+      local nFashionID = self:GetFashionTemplateExtParam(tbItem.nTemplateId, self.FASHION_PARAM.FASHIONID)
+      if nFashionID then
+        tbItem.nFashionID = nFashionID
+      else
+        LogErr("FashionShopClient OnGameInitFinish GetFashionID is nil by tbItem.nTemplateId of SuitItem", tbItem.nTemplateId)
+      end
+    end
+  end
+end
+
+function Shop:InitFashionPart2Single()
+  self.tbFashionPart2Single = {}
+  for _, tbWare in pairs(self.tbFashionWares) do
+    for _, nShopId in ipairs(tbWare.tbShopIds) do
+      if self:CheckFashionSingleShopOpen(nShopId) then
+        local tbShop = self.tbFashionSingleShop[nShopId]
+        if not self.tbFashionPart2Single[tbShop.nPart] then
+          self.tbFashionPart2Single[tbShop.nPart] = {}
+        end
+        local nLayer = tbShop.nLayer or 0
+        if not self.tbFashionPart2Single[tbShop.nPart][nLayer] then
+          self.tbFashionPart2Single[tbShop.nPart][nLayer] = {}
+        end
+        if not self.tbFashionPart2Single[tbShop.nPart][nLayer][nShopId] then
+          self.tbFashionPart2Single[tbShop.nPart][nLayer][nShopId] = {}
+        end
+        table.insert(self.tbFashionPart2Single[tbShop.nPart][nLayer][nShopId], tbWare)
+      end
+    end
+  end
+end
+
+function Shop:TryLightNewRecommendRedPoint()
+  local nCurTime = GetTime()
+  local nLastTime = LocalData:GetRoleNumber(self.szFashionNewRecommendRedPointKey, 0)
+  if self:HasNewFashion() and Lib:IsDiffDay(14400, nCurTime, nLastTime) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.FashionHasNewRecommend)
+  else
+    self:TryFadeNewRecommendRedPoint()
+  end
+end
+
+function Shop:TryFadeNewRecommendRedPoint()
+  if RedPointMgr:CheckEvent(RedPointMgr.EVENT.FashionHasNewRecommend) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.FashionHasNewRecommend)
+    LocalData:SetRoleNumber(self.szFashionNewRecommendRedPointKey, GetTime())
+  end
+end
+
+function Shop:OnCrossDay()
+  Shop:UpdateFashionShop()
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_GAME_INIT_FINISH, Shop)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_GAME_INIT_FINISH, Shop.OnGameInitFinish, Shop)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, Shop)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, Shop.OnCrossDay, Shop)

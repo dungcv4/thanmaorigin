@@ -1,0 +1,131 @@
+Require("CommonScript/Dungeon/GuardXiangYang/GuardXiangYangMgrDef.lua")
+Require("CommonScript/Tong/GuardXiangYangCfg.lua")
+Require("CommonScript/tree.lua")
+
+function GuardXiangYangMgr:LoadConfig()
+  self.tbNpcReviveGroupCfg = {}
+  self.tbNpcAutoPathCfg = {}
+  self.tbBuffCfg = {}
+  self.tbTraceNpcTid2Type = {}
+  local tbConfig = Lib:LoadTabFileEx(self.Def.szNpcRevivePosInfoFile, "ddddd", nil, {
+    "nGroup",
+    "nIndex",
+    "PosX",
+    "PosY",
+    "nPathId"
+  }, nil, nil, false)
+  for _, tbNpcCfg in pairs(tbConfig) do
+    if not self.tbNpcReviveGroupCfg[tbNpcCfg.nGroup] then
+      self.tbNpcReviveGroupCfg[tbNpcCfg.nGroup] = {}
+    end
+    table.insert(self.tbNpcReviveGroupCfg[tbNpcCfg.nGroup], tbNpcCfg)
+  end
+  tbConfig = Lib:LoadTabFileEx(self.Def.szMainAutoPathFile, "dddd", nil, {
+    "nMainPathId",
+    "nIndex",
+    "PosX",
+    "PosY"
+  }, nil, nil, false)
+  local tbMainPathConfig = {}
+  for _, tbCfg in pairs(tbConfig) do
+    tbMainPathConfig[tbCfg.nMainPathId] = tbMainPathConfig[tbCfg.nMainPathId] or {}
+    tbMainPathConfig[tbCfg.nMainPathId][tbCfg.nIndex] = tbCfg
+  end
+  tbConfig = Lib:LoadTabFileEx(self.Def.szAutoPathFile, "dddd", nil, {
+    "nPathId",
+    "nIndex",
+    "PosX",
+    "PosY"
+  }, nil, nil, false)
+  for _, tbPathPointCfg in pairs(tbConfig) do
+    if not self.tbNpcAutoPathCfg[tbPathPointCfg.nPathId] then
+      self.tbNpcAutoPathCfg[tbPathPointCfg.nPathId] = {}
+    end
+    self.tbNpcAutoPathCfg[tbPathPointCfg.nPathId][tbPathPointCfg.nIndex] = tbPathPointCfg
+  end
+  for nMainPathId, tbGroups in pairs(self.Cfg.tbNpcGroupMainPath) do
+    for _, nPathId in ipairs(tbGroups) do
+      local tbPathInfo = self.tbNpcAutoPathCfg[nPathId]
+      if not tbPathInfo then
+        LogErr("GuardXiangYang load autopath config bad!", nPathId)
+      end
+      for _, tbPoint in ipairs(tbMainPathConfig[nMainPathId] or {}) do
+        table.insert(tbPathInfo, tbPoint)
+      end
+    end
+  end
+  tbConfig = Lib:LoadTabFileEx(self.Def.szBuffListFile, "ddsddd", nil, {
+    "nBuffId",
+    "nSkillId",
+    "szTimeFrame",
+    "nStartLevel",
+    "nAddLevel",
+    "nMaxLevel"
+  }, nil, nil, false)
+  for _, tbBuffInfoCfg in pairs(tbConfig) do
+    if not self.tbBuffCfg[tbBuffInfoCfg.nBuffId] then
+      self.tbBuffCfg[tbBuffInfoCfg.nBuffId] = {}
+    end
+    table.insert(self.tbBuffCfg[tbBuffInfoCfg.nBuffId], tbBuffInfoCfg)
+  end
+  self.tbEventNpcTid2GroupType = {}
+  for _, nType in pairs(self.Cfg.tbNpcGroupType) do
+    if self.Cfg.tbNpcGroupCfg[nType].tbEventNpcList then
+      for _, nNpcId in ipairs(self.Cfg.tbNpcGroupCfg[nType].tbEventNpcList) do
+        if not self.tbEventNpcTid2GroupType[nNpcId] then
+          self.tbEventNpcTid2GroupType[nNpcId] = {}
+        end
+        table.insert(self.tbEventNpcTid2GroupType[nNpcId], nType)
+      end
+    end
+  end
+  for nType, tbNpcTid in pairs(self.Cfg.tbTraceEventCfg.tbNpcGroup) do
+    for _, nNpcTid in pairs(tbNpcTid or {}) do
+      self.tbTraceNpcTid2Type[nNpcTid] = nType
+    end
+  end
+  self.tbNpcReviveGroupCfg = SetReadOnly(self.tbNpcReviveGroupCfg)
+  self.tbNpcAutoPathCfg = SetReadOnly(self.tbNpcAutoPathCfg)
+  self.tbTraceNpcTid2Type = SetReadOnly(self.tbTraceNpcTid2Type)
+  Validator:Register(self.CheckConfig, self)
+end
+
+function GuardXiangYangMgr:CheckConfig()
+  local function fnCheck(tb)
+    local nCount = 0
+    
+    for _ in ipairs(tb) do
+      nCount = nCount + 1
+    end
+    return nCount == #tb
+  end
+  
+  for nPathId, tbInfo in ipairs(self.tbNpcAutoPathCfg) do
+    if not fnCheck(tbInfo) then
+      LogErr("[GuardXiangYangMgr] please check [auto_path.txt] nPathId=", nPathId)
+      return false
+    end
+  end
+  if not fnCheck(self.tbNpcAutoPathCfg) then
+    LogErr("[GuardXiangYangMgr] please check [auto_path.txt]")
+    return false
+  end
+  local nNum = 0
+  for _, tbNpcIds in ipairs(self.Cfg.tbTraceEventCfg.tbNpcGroup) do
+    nNum = nNum + 1
+  end
+  if 5 ~= nNum then
+    LogErr("[GuardXiangYangMgr] bad tbTraceEventCfg")
+    return false
+  end
+  return true
+end
+
+function GuardXiangYangMgr:IsInFuben(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  return pPlayer.nMapTemplateId == self.Cfg.nMapTid
+end
+
+GuardXiangYangMgr:LoadConfig()

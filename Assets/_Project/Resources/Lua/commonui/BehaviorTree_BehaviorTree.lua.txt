@@ -1,0 +1,442 @@
+BTClassMgr = {}
+BTClassMgr.tbClass = BTClassMgr.tbClass or {}
+
+function BTClassMgr:GetClass(szClass)
+  if not self.tbClass[szClass] then
+    error(szClass)
+    assert(false)
+    return
+  end
+  return self.tbClass[szClass]
+end
+
+function BTClassMgr:CreateClass(szClass, szBaseClass)
+  if szBaseClass and self.tbClass[szBaseClass] then
+    self.tbClass[szClass] = Lib:NewClass(self.tbClass[szBaseClass])
+    return self.tbClass[szClass]
+  end
+  self.tbClass[szClass] = self.tbClass[szClass] or {}
+  return self.tbClass[szClass]
+end
+
+local BTNode = BTClassMgr:CreateClass("BTNode")
+BTClassMgr.tbTaskState = {
+  emReady = 0,
+  emRunning = 1,
+  emSuccess = 2,
+  emFailure = 3
+}
+
+function BTNode:init()
+  self.szName = ""
+  self.tbParent = nil
+  self.nState = BTClassMgr.tbTaskState.emReady
+  self.tbOwner = nil
+end
+
+function BTNode:GetName()
+  return self.szName
+end
+
+function BTNode:SetName(szName)
+  self.szName = szName
+end
+
+function BTNode:GetParent()
+  return self.tbParent
+end
+
+function BTNode:SetParent(tbParent)
+  self.tbParent = tbParent
+end
+
+function BTNode:GetState()
+  return self.nState
+end
+
+function BTNode:SetState(nState)
+  self.nState = nState
+end
+
+function BTNode:GetOwner()
+  return self.tbOwner
+end
+
+function BTNode:SetOwner(tbOwner)
+  self.tbOwner = tbOwner
+end
+
+function BTNode:Activate()
+end
+
+function BTNode:Reset()
+  self.nState = BTClassMgr.tbTaskState.emReady
+end
+
+function BTNode:Suspend()
+end
+
+function BTNode:Resume()
+end
+
+local BTWaitingTime = BTClassMgr:CreateClass("BTWaitingTime", "BTNode")
+
+function BTWaitingTime:Activate()
+  local tbBlackboard = self.tbOwner.tbBlackboard
+  if not tbBlackboard then
+    self.nState = BTClassMgr.tbTaskState.emSuccess
+    return
+  end
+  local nNowTime = GetTime()
+  if tbBlackboard.nBTWaitTime and nNowTime <= tbBlackboard.nBTWaitTime then
+    self.nState = BTClassMgr.tbTaskState.emRunning
+  else
+    self.nState = BTClassMgr.tbTaskState.emSuccess
+  end
+end
+
+local BTDeciderNode = BTClassMgr:CreateClass("BTDeciderNode", "BTNode")
+
+function BTDeciderNode:init()
+  self.tbChildren = {}
+end
+
+function BTDeciderNode:GetNodeNum()
+  return #self.tbChildren
+end
+
+function BTDeciderNode:GetIndexOfNode(node)
+  if not self.tbChildren then
+    assert(false)
+    return -1
+  end
+  for i, v in ipairs(self.tbChildren) do
+    if v == node then
+      return i
+    end
+  end
+  return 0
+end
+
+function BTDeciderNode:HasNode(node)
+  for _, v in ipairs(self.tbChildren) do
+    if v == node then
+      return true
+    end
+  end
+  return false
+end
+
+function BTDeciderNode:AddNode(node)
+  if not node then
+    return
+  end
+  if self:HasNode(node) then
+    return
+  end
+  node.tbParent = self
+  node.tbOwner = self.tbOwner
+  table.insert(self.tbChildren, node)
+end
+
+function BTDeciderNode:DelNode(node)
+  if not node then
+    return
+  end
+  for i, v in ipairs(self.tbChildren) do
+    if v == node then
+      table.remove(self.tbChildren, i)
+    end
+  end
+  node.tbParent = nil
+  node.tbOwner = nil
+end
+
+function BTDeciderNode:Suspend()
+  for _, v in ipairs(self.tbChildren) do
+    if v and v.Suspend then
+      v:Suspend()
+    end
+  end
+end
+
+function BTDeciderNode:Reset()
+  for _, v in ipairs(self.tbChildren) do
+    if v and v.Reset then
+      v:Reset()
+    end
+  end
+end
+
+function BTDeciderNode:Resume()
+  for _, v in ipairs(self.tbChildren) do
+    if v and v.Resume then
+      v:Resume()
+    end
+  end
+end
+
+local BTPrioritySelector = BTClassMgr:CreateClass("BTPrioritySelector", "BTDeciderNode")
+
+function BTPrioritySelector:Activate()
+  local nChildNum = self:GetNodeNum()
+  if nChildNum <= 0 then
+    self.nState = BTClassMgr.tbTaskState.emFailure
+    return
+  end
+  local node
+  for _, v in ipairs(self.tbChildren) do
+    node = v
+    if node then
+      node:Activate()
+      if BTClassMgr.tbTaskState.emFailure ~= node.nState then
+        break
+      end
+    end
+  end
+  self.nState = node.nState
+end
+
+local BTNonPrioritySelector = BTClassMgr:CreateClass("BTNonPrioritySelector", "BTDeciderNode")
+
+function BTNonPrioritySelector:init()
+  self.tbLastNode = nil
+  for _, v in ipairs(self.tbChildren) do
+    if v then
+      v:Reset()
+    end
+  end
+end
+
+function BTNonPrioritySelector:Rese()
+  self.tbLastNode = nil
+end
+
+function BTNonPrioritySelector:Activate()
+  local nChildNum = self:GetNodeNum()
+  if nChildNum <= 0 then
+    self.nState = BTClassMgr.tbTaskState.emFailure
+    return
+  end
+  local nStartIdx = 1
+  if self.tbLastNode then
+    nStartIdx = self:GetIndexOfNode(self.tbLastNode)
+    if nStartIdx <= 0 then
+      nStartIdx = 1
+    end
+  end
+  local node
+  for i = 0, nChildNum do
+    node = self.tbChildren[nStartIdx]
+    if node then
+      node:Activate()
+      if BTClassMgr.tbTaskState.emFailure ~= node.nState then
+        self.tbLastNode = node
+        break
+      end
+      nStartIdx = (nStartIdx + 1) % nChildNum
+    end
+  end
+  self.nState = node.nState
+end
+
+local BTSequenceNode = BTClassMgr:CreateClass("BTSequenceNode", "BTDeciderNode")
+
+function BTSequenceNode:init()
+  self.tbConditions = {}
+  self.tbLastNode = nil
+end
+
+function BTSequenceNode:Reset()
+  self.tbLastNode = nil
+  for _, v in ipairs(self.tbConditions) do
+    if v then
+      v:Reset()
+    end
+  end
+  for _, v in ipairs(self.tbChildren) do
+    if v then
+      v:Reset()
+    end
+  end
+end
+
+function BTSequenceNode:HasCond(node)
+  if not node then
+    return false
+  end
+  for _, v in ipairs(self.tbConditions) do
+    if v == node then
+      return true
+    end
+  end
+  return false
+end
+
+function BTSequenceNode:AddCond(node)
+  if not node then
+    return
+  end
+  if self:HasCond(node) then
+    return
+  end
+  node.tbParent = self
+  node.tbOwner = self.tbOwner
+  table.insert(self.tbConditions, node)
+end
+
+function BTSequenceNode:DelCond(node)
+  if not node then
+    return
+  end
+  node.tbParent = nil
+  node.tbOwner = nil
+  for i, v in ipairs(self.tbConditions) do
+    if v == node then
+      table.remove(self.tbConditions, i)
+      return
+    end
+  end
+end
+
+function BTSequenceNode:CheckConds()
+  for _, v in ipairs(self.tbConditions) do
+    if v then
+      v:Activate()
+    end
+    if BTClassMgr.tbTaskState.emFailure == v.nState then
+      return false
+    end
+  end
+  return true
+end
+
+function BTSequenceNode:Activate()
+  if not self:CheckConds() then
+    self.nState = BTClassMgr.tbTaskState.emFailure
+    return
+  end
+  local nChildNum = #self.tbChildren
+  if nChildNum <= 0 then
+    self.nState = BTClassMgr.tbTaskState.emFailure
+    return
+  end
+  local nStartIdx = 1
+  if self.tbLastNode and BTClassMgr.tbTaskState.emRunning == self.tbLastNode.nState then
+    nStartIdx = self:GetIndexOfNode(self.tbLastNode)
+    if nStartIdx <= 0 then
+      nStartIdx = 1
+    end
+  end
+  for i = nStartIdx, nChildNum do
+    local node = self.tbChildren[i]
+    if node then
+      node:Activate()
+      self.nState = node.nState
+      if BTClassMgr.tbTaskState.emRunning == node.nState then
+        self.tbLastNode = node
+        break
+      end
+      if BTClassMgr.tbTaskState.emFailure == node.nState then
+        break
+      end
+    end
+  end
+end
+
+local BehaviourTree = BTClassMgr:CreateClass("BehaviourTree")
+
+function BehaviourTree:init()
+  self.tbRootNode = nil
+  self.tbBlackboard = {}
+  self.bIsRunning = false
+end
+
+function BehaviourTree:GetRootNode()
+  return self.tbRootNode
+end
+
+function BehaviourTree:SetRootNode(tbRootNode)
+  self.tbRootNode = tbRootNode
+end
+
+function BehaviourTree:GetBlackboard()
+  return self.tbBlackboard
+end
+
+function BehaviourTree:SetBlackboard(tbBlackboard)
+  self.tbBlackboard = tbBlackboard
+end
+
+function BehaviourTree:Activate()
+  if not self.bIsRunning then
+    return
+  end
+  if not self.tbRootNode then
+    assert(false)
+    return
+  end
+  if not self.tbRootNode.Activate then
+    assert(false)
+    return
+  end
+  self.tbRootNode:Activate()
+end
+
+function BehaviourTree:Init(tbBlackboard)
+  self.tbBlackboard = tbBlackboard
+  self.bIsRunning = true
+end
+
+function BehaviourTree:UnInit()
+  self.tbBlackboard = {}
+  self.bIsRunning = false
+end
+
+function BehaviourTree:Suspend()
+  if not self.bIsRunning then
+    return
+  end
+  if not self.tbRootNode then
+    assert(false)
+    return
+  end
+  if not self.tbRootNode.Suspend then
+    return
+  end
+  self.tbRootNode:Suspend()
+  self.bIsRunning = false
+end
+
+function BehaviourTree:Reset()
+  if not self.bIsRunning then
+    return
+  end
+  if not self.tbRootNode then
+    assert(false)
+    return
+  end
+  if not self.tbRootNode.Reset then
+    return
+  end
+  self.tbRootNode:Reset()
+end
+
+function BehaviourTree:IsRunning()
+  return self.bIsRunning
+end
+
+function BehaviourTree:Resume()
+  if self.bIsRunning then
+    return
+  end
+  if not self.tbRootNode then
+    assert(false)
+    return
+  end
+  if not self.tbRootNode.Resume then
+    return
+  end
+  self.tbRootNode:Resume()
+  self.bIsRunning = true
+end

@@ -1,0 +1,292 @@
+Require("Script/PartnerEquip/PartnerEquipC.lua")
+local tbWnd = Ui:CreateClass("UIPartnerNew_EquipDissolve", "UIPanel")
+local PartnerEquipC = Item.PartnerEquip
+local DISSOLVE_LIMIT = 50
+local tbControls = {
+  leftTemplate = "TabScrollView/Viewport/Content/Template",
+  itemTemplate = "itemListScrollView/Viewport/Content/itemTemplate",
+  itemListScrollView = "itemListScrollView",
+  imgEmpty = "imgEmpty ",
+  btnDissolve = "btnDissolve",
+  TogAllItem = "txtQuickSelect/TogAllItem",
+  TogPurpleItem = "txtQuickSelect/TogPurpleItem",
+  TogBlueItem = "txtQuickSelect/TogBlueItem",
+  TogWhiteItem = "txtQuickSelect/TogWhiteItem",
+  txtRewardTips = "txtRewardTips"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbToggle = {
+  [1] = "txtQuickSelect/TogAllItem",
+  [2] = "txtQuickSelect/TogPurpleItem",
+  [3] = "txtQuickSelect/TogBlueItem",
+  [4] = "txtQuickSelect/TogWhiteItem"
+}
+tbWnd.tbToggleCallBack = {
+  [1] = function(tbSelf, bIsOn)
+    tbSelf:SelectHelper(tbSelf.tbSelectFunc.SelectAll, bIsOn)
+    tbSelf:SetToggleCheckWithOutTrigger(1, bIsOn)
+    tbSelf:SetToggleCheckWithOutTrigger(2, bIsOn)
+    tbSelf:SetToggleCheckWithOutTrigger(3, bIsOn)
+    tbSelf:SetToggleCheckWithOutTrigger(4, bIsOn)
+  end,
+  [2] = function(tbSelf, bIsOn)
+    tbSelf:SelectHelper(tbSelf.tbSelectFunc.SelectRare, bIsOn)
+    tbSelf:CheckIsAllToggleOn()
+  end,
+  [3] = function(tbSelf, bIsOn)
+    tbSelf:SelectHelper(tbSelf.tbSelectFunc.SelectExcellent, bIsOn)
+    tbSelf:CheckIsAllToggleOn()
+  end,
+  [4] = function(tbSelf, bIsOn)
+    tbSelf:SelectHelper(tbSelf.tbSelectFunc.SelectSimple, bIsOn)
+    tbSelf:CheckIsAllToggleOn()
+  end
+}
+tbWnd.tbSelectFunc = {
+  SelectAll = function(tbSelf, tbItemData, bIsOn)
+    return bIsOn
+  end,
+  SelectRare = function(tbSelf, tbItemData, bIsOn)
+    local nQuality = Item:GetQuality(tbItemData.nTemplateId)
+    if nQuality == PartnerEquipC.eEquipQuality.Rare then
+      return bIsOn
+    end
+  end,
+  SelectExcellent = function(tbSelf, tbItemData, bIsOn)
+    local nQuality = Item:GetQuality(tbItemData.nTemplateId)
+    if nQuality == PartnerEquipC.eEquipQuality.Excellent then
+      return bIsOn
+    end
+  end,
+  SelectSimple = function(tbSelf, tbItemData, bIsOn)
+    local nQuality = Item:GetQuality(tbItemData.nTemplateId)
+    if nQuality == PartnerEquipC.eEquipQuality.Simple then
+      return bIsOn
+    end
+  end
+}
+tbWnd.tbEventCallBack = {}
+
+function tbWnd:OnCreate()
+  self.tbLeftTabView = Ui:NewScrollView(self, tbControls.leftTemplate, self.OnClickLeftTab)
+  self.tbRightGridView = Ui:NewItemGridScrollView(self, tbControls.itemTemplate, 1, 1)
+  self.tbSelectIndex = {}
+  self.tbItemDataList = {}
+  self.nSelectNum = 0
+end
+
+function tbWnd:OnOpen()
+  for nIndex, szTogglePath in ipairs(self.tbToggle) do
+    Ui:Toggle_BindEvent(self.pPanel, szTogglePath, self.tbToggleCallBack[nIndex], self)
+  end
+  
+  local function fnOK(tbSelectedItemIdList)
+    PartnerEquipC:ReqPartnerEquipDecomposeByBatch(tbSelectedItemIdList)
+  end
+  
+  Ui:Button_BindEvent(self.pPanel, tbControls.btnDissolve, function(tbSelf)
+    if Lib:IsEmptyTB(tbSelf.tbSelectIndex) then
+      return
+    end
+    local tbSelectedItemIdList = {}
+    local nRewardXuanShiNum = 0
+    for nSelectIndex, _ in pairs(tbSelf.tbSelectIndex) do
+      if tbSelf.tbSelectIndex[nSelectIndex] and tbSelf.tbItemDataList[nSelectIndex] then
+        local pEquip = me.GetItemInAllSpace(tbSelf.tbItemDataList[nSelectIndex].nItemId)
+        local nRewardNum = PartnerEquipC:GetNeedRewardMaterial(pEquip)
+        if nRewardNum then
+          nRewardXuanShiNum = nRewardXuanShiNum + nRewardNum
+        else
+          me.CenterMsg(i18n.EasyGet("\233\133\141\231\189\174\233\148\153\232\175\175"))
+          return
+        end
+        table.insert(tbSelectedItemIdList, tbSelf.tbItemDataList[nSelectIndex].nItemId)
+      end
+    end
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\231\161\174\232\174\164\229\136\134\232\167\163\229\185\182\232\142\183\229\190\151{0}\231\142\132\231\159\179\239\188\159", nRewardXuanShiNum), {
+      {fnOK, tbSelectedItemIdList},
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  end, self)
+  self:UpdateLeftTab()
+  self.pPanel:Toggle_SetChecked(tbControls.TogAllItem, false)
+  self.nSelectNum = 0
+end
+
+function tbWnd:CheckIsAllToggleOn()
+  for i = 2, #self.tbToggle do
+    if not self.pPanel:Toggle_GetChecked(self.tbToggle[i]) then
+      self:SetToggleCheckWithOutTrigger(1, false)
+      return
+    end
+  end
+  self:SetToggleCheckWithOutTrigger(1, true)
+end
+
+function tbWnd:SetToggleCheckWithOutTrigger(nToggleIndex, bCheck)
+  Ui:Toggle_UnBindEvent(self.pPanel, self.tbToggle[nToggleIndex])
+  self.pPanel:Toggle_SetChecked(self.tbToggle[nToggleIndex], bCheck)
+  Ui:Toggle_BindEvent(self.pPanel, self.tbToggle[nToggleIndex], self.tbToggleCallBack[nToggleIndex], self)
+end
+
+function tbWnd:SelectHelper(func, bIsOn)
+  for nIndex, tbItemData in ipairs(self.tbItemDataList) do
+    local tbElement = self.tbRightGridView.tbGridList[nIndex][1]
+    if tbElement then
+      local bRet = func(self, tbItemData, bIsOn)
+      if true == bRet and not self.tbSelectIndex[nIndex] and self.nSelectNum < DISSOLVE_LIMIT then
+        tbElement.pPanel:SetActive("../imgSelected", true)
+        self.tbSelectIndex[nIndex] = true
+        self.nSelectNum = self.nSelectNum + 1
+      elseif false == bRet and self.tbSelectIndex[nIndex] then
+        tbElement.pPanel:SetActive("../imgSelected", false)
+        self.tbSelectIndex[nIndex] = false
+        self.nSelectNum = self.nSelectNum - 1
+      end
+    end
+  end
+  self:UpdateRewardInfo()
+end
+
+function tbWnd:UpdateLeftTab()
+  for nEquipType = Item.PartnerEquip.WEAPON, Item.PartnerEquip.BOOTS do
+    if 0 ~= GetTimeFrameState(Item.PartnerEquip.CFG.OpenTimeFrame[nEquipType]) then
+      self.tbLeftTabView:SetElement(nEquipType, function(tbElement)
+        self:__SetLeftTabElement(tbElement, nEquipType)
+      end)
+    end
+  end
+  if not self.nLeftClickIndex then
+    self.tbLeftTabView:SelectElement(Item.PartnerEquip.WEAPON)
+  else
+    self.tbLeftTabView:SelectElement(self.nLeftClickIndex)
+  end
+end
+
+function tbWnd:__SetLeftTabElement(tbElement, nEquipType)
+  tbElement.pPanel:Label_SetText("txtName", i18n.Get(Item.PartnerEquip.CFG.EquipPosDesc[nEquipType]))
+end
+
+function tbWnd:OnClickLeftTab(nEquipType)
+  if nEquipType < Item.PartnerEquip.WEAPON or nEquipType > Item.PartnerEquip.BOOTS then
+    return
+  end
+  self.nLeftClickIndex = nEquipType
+  self:UpdateRightPanel(nEquipType)
+end
+
+function tbWnd:RebootToggle()
+  self.tbSelectIndex = {}
+  self.nSelectNum = 0
+  for i = #self.tbToggle, 2, -1 do
+    if self.pPanel:Toggle_GetChecked(self.tbToggle[i]) then
+      self.tbToggleCallBack[i](self, true)
+    else
+      self.tbToggleCallBack[i](self, false)
+    end
+  end
+end
+
+function tbWnd:UpdateRightPanel(nEquipType)
+  local tbItemList = PartnerEquipC:GetAllPartnerEquipInBagByPos(me, nEquipType) or {}
+  self.tbItemDataList = {}
+  if Lib:IsEmptyTB(tbItemList) then
+    self.pPanel:SetActive(tbControls.imgEmpty, true)
+    self.pPanel:SetActive(tbControls.itemListScrollView, false)
+    self:RebootToggle()
+    return
+  else
+    self.pPanel:SetActive(tbControls.imgEmpty, false)
+    self.pPanel:SetActive(tbControls.itemListScrollView, true)
+  end
+  for i = 1, #self.tbRightGridView.tbGridList do
+    local tbGrid = self.tbRightGridView.tbGridList[i] and self.tbRightGridView.tbGridList[i][1] or nil
+    if tbGrid then
+      tbGrid.pPanel:SetActive("../imgSelected", false)
+      tbGrid.pPanel:SetActive("../txtLv", false)
+      tbGrid:SetEmpty()
+    end
+  end
+  table.sort(tbItemList, function(pEquipA, pEquipB)
+    return pEquipA.nQuality < pEquipB.nQuality
+  end)
+  for _, pEquip in ipairs(tbItemList) do
+    table.insert(self.tbItemDataList, {
+      nTemplateId = pEquip.dwTemplateId,
+      nItemId = pEquip.dwId
+    })
+  end
+  self.tbRightGridView:AdjustGridCount(#self.tbItemDataList)
+  for nIndex, tbItemData in ipairs(self.tbItemDataList) do
+    local tbGrid = self.tbRightGridView:SetItem(nIndex, tbItemData.nItemId, nil, nil, true, self.OnClickItemGrid, nil, self, tbItemData, nIndex)
+    tbGrid.pPanel:SetActive("../txtLv", true)
+    local pEquip = me.GetItemInAllSpace(tbItemData.nItemId)
+    local nEquipLevel = PartnerEquipC:GetEquipLevel(pEquip)
+    tbGrid.pPanel:SetActive("../txtLv", nEquipLevel and nEquipLevel > 0)
+    tbGrid.pPanel:Label_SetText("../txtLv", "+" .. (nEquipLevel or 0))
+    local pItem, nPos = me.GetItemInAllSpace(tbItemData.nItemId)
+    if pItem and (Item:IsInBag(nPos) or Item:IsInWarehouse(nPos)) then
+      local bRet = Item:GetItemTradeLimitDescBySettings(pItem.dwTemplateId, pItem.dwTradeLimitType)
+      if bRet and (pItem.dwTradeLimitType == Item.eTRADELIMITTYPE.TRADE_TIMES and pItem.dwTradeLimitValue > 0 or pItem.dwTradeLimitType == Item.eTRADELIMITTYPE.NORMAL) then
+        tbGrid:DealTip_SetActive(true, pItem.dwTemplateId)
+      end
+    end
+  end
+  self:RebootToggle()
+  self.pPanel:ScrollRect_SetVerticalNormalizedPosition(tbControls.itemListScrollView, 1)
+end
+
+function tbWnd:OnClickItemGrid(tbData, nIndex)
+  if self.tbSelectIndex[nIndex] or self.nSelectNum < DISSOLVE_LIMIT then
+    local tbElement = self.tbRightGridView.tbGridList[nIndex][1]
+    if tbElement and tbData.nItemId == self.tbItemDataList[nIndex].nItemId then
+      tbElement.pPanel:SetActive("../imgSelected", Lib:IIF(self.tbSelectIndex[nIndex] == true, false, true))
+      self.tbSelectIndex[nIndex] = Lib:IIF(self.tbSelectIndex[nIndex] == true, false, true)
+      self.nSelectNum = self.nSelectNum + Lib:IIF(self.tbSelectIndex[nIndex] == true, 1, -1)
+    end
+  end
+  self:UpdateRewardInfo()
+end
+
+function tbWnd:UpdateRewardInfo()
+  local nTotalReward = 0
+  for nIndex, bSelected in pairs(self.tbSelectIndex) do
+    if bSelected and self.tbItemDataList[nIndex] then
+      local pEquip = me.GetItemInAllSpace(self.tbItemDataList[nIndex].nItemId)
+      if pEquip then
+        nTotalReward = nTotalReward + PartnerEquipC:GetNeedRewardMaterial(pEquip)
+      end
+    end
+  end
+  self.pPanel:Label_SetText(tbControls.txtRewardTips, i18n.EasyGet("<color=#{0}>\229\136\134\232\167\163\229\143\175\232\142\183\229\190\151\231\142\132\231\159\179 *{1}</color>", Ui.tbColor:GetColorHexByDefineName("Black"), nTotalReward))
+end
+
+function tbWnd:OnEventNotify(...)
+  if not self.nRefreshTimer then
+    self.nRefreshTimer = Timer:Register(5, function()
+      self:UpdateLeftTab()
+      Timer:Close(self.nRefreshTimer)
+      self.nRefreshTimer = nil
+      return false
+    end)
+  end
+end
+
+function tbWnd:OnClose()
+  if self.nRefreshTimer then
+    Timer:Close(self.nRefreshTimer)
+    self.nRefreshTimer = nil
+  end
+end
+
+function tbWnd:SetActive(bActive)
+  self.pPanel:SetActive("Main", bActive)
+  if bActive then
+    self:OnOpen()
+  else
+    self:OnClose()
+  end
+end

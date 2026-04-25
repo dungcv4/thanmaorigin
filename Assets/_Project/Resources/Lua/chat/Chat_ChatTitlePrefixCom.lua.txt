@@ -1,0 +1,168 @@
+Require("CommonScript/Chat/ChatDef.lua")
+Require("CommonScript/Kin/KinDef.lua")
+Require("CommonScript/Tong/TongDef.lua")
+ChatMgr.bEnableChatTitlePrefix = true
+ChatMgr.CHAT_TITLE_PREFIX_SCRIPT_TABLE_KEY = "ChatTitlePrefix"
+ChatMgr.CHAT_TITLE_PREFIX_PLAYER_SAVE_GROUP = GetGroupKey("ChatTitlePrefix")
+ChatMgr.CHAT_TITLE_PREFIX_PLAYER_SAVE_KEY_ID = 1
+ChatMgr.CHAT_TITLE_PREFIX_PLAYER_SAVE_KEY_SHOW_IN_HUD = 2
+ChatMgr.tbNormalChatTitlePrefixType = {
+  ChatPrefix = 1,
+  TongCareer = 2,
+  KinCareer = 3
+}
+ChatMgr.tbChatTitlePrefixType = {
+  "Static",
+  "Dynamic",
+  "Normal"
+}
+ChatMgr.CHAT_TITLE_PREFIX_CLIENT_CMD = {
+  C2S_SyncAllChatTitlePrefixPlayerData = true,
+  C2S_UseChatTitlePrefix = true,
+  C2S_UnuseChatTitlePrefix = true,
+  C2S_ClientReqChatTitlePrefixTimeOut = true
+}
+
+function ChatMgr:GetChatPrefixName(nTemplateId)
+  local tbCfg = self:GetChatPrefixConfig(nTemplateId)
+  if tbCfg then
+    return tbCfg.Name
+  end
+end
+
+function ChatMgr:GetKinCareerName(szCareer)
+  local nCareer = Kin.Def[szCareer]
+  if nCareer then
+    return Kin.Def.Career_Name[nCareer]
+  end
+end
+
+function ChatMgr:GetTongCareerName(szCareer)
+  local nCareer = Tong.Def[szCareer]
+  if nCareer then
+    return Tong.Def.CareerName[nCareer]
+  end
+end
+
+function ChatMgr:GetChatTitlePrefixType(nTemplateId)
+  local nType = math.floor(nTemplateId / 1000)
+  return self.tbChatTitlePrefixType[nType]
+end
+
+function ChatMgr:GetChatTitlePrefixColorInChat(nTemplateId)
+  local tbCfg = ChatMgr:GetStaticChatTitlePrefixConfig(nTemplateId)
+  if tbCfg then
+    local nColor = tbCfg.nColorIdInChat
+    local szColor = Ui.tbColor:GetColorHexBySettingId(nColor)
+    return szColor
+  end
+end
+
+function ChatMgr:LoadChatTitlePrefixConfig()
+  self.tbStaticChatTitlePrefixConfig = {}
+  local tbConfig = Lib:LoadTabFileEx("Setting/Chat/ChatTitlePrefix.tab", "dsddddsdssd", "nTemplateId", {
+    "nTemplateId",
+    "szName",
+    "nSortOrder",
+    "nGradientColorId1",
+    "nGradientColorId2",
+    "nFontOutlineColorId",
+    "szSpritePath",
+    "bShow",
+    "szDesc",
+    "szGainWay",
+    "nColorIdInChat"
+  }, nil, nil, false)
+  for nTemplateId, tbCfg in pairs(tbConfig) do
+    tbCfg.bShow = Lib:IIF(1 == tbCfg.bShow, true, false)
+    self.tbStaticChatTitlePrefixConfig[nTemplateId] = tbCfg
+  end
+  self.tbStaticChatTitlePrefixConfig = SetReadOnly(self.tbStaticChatTitlePrefixConfig)
+  self.tbNormalChatTitlePrefixConfig = {}
+  local tbConfig2 = Lib:LoadTabFileEx("Setting/Chat/NormalChatTitlePrefix.tab", "dddsss", "nTemplateId", {
+    "nTemplateId",
+    "nSortOrder",
+    "bShow",
+    "szPrefixType",
+    "szDesc",
+    "szGainWay"
+  }, nil, nil, false)
+  for nTemplateId, tbCfg in pairs(tbConfig2) do
+    tbCfg.bShow = Lib:IIF(1 == tbCfg.bShow, true, false)
+    local tbPrefixType = Lib:SplitStrTry2Num(tbCfg.szPrefixType, "|")
+    tbCfg.tbPrefixType = {
+      szType = tbPrefixType[1],
+      tbParam = {
+        table.unpack(tbPrefixType, 2)
+      }
+    }
+    tbCfg.szName = ChatMgr:GetNormalChatTitlePrefixName(tbPrefixType[1], table.unpack(tbPrefixType, 2))
+    self.tbNormalChatTitlePrefixConfig[nTemplateId] = tbCfg
+  end
+  self.tbNormalChatTitlePrefixConfig = SetReadOnly(self.tbNormalChatTitlePrefixConfig)
+end
+
+function ChatMgr:GetStaticChatTitlePrefixConfig(nId)
+  for _, tbCfg in pairs(self.tbStaticChatTitlePrefixConfig) do
+    if tbCfg.nTemplateId == nId then
+      return tbCfg
+    end
+  end
+  return nil
+end
+
+function ChatMgr:GetNormalChatTitlePrefixConfig(nId)
+  for _, tbCfg in pairs(self.tbNormalChatTitlePrefixConfig) do
+    if tbCfg.nTemplateId == nId then
+      return tbCfg
+    end
+  end
+  return nil
+end
+
+function ChatMgr:GetAllStaticChatTitlePrefixConfig()
+  return self.tbStaticChatTitlePrefixConfig
+end
+
+function ChatMgr:GetAllNormalChatTitlePrefixConfig()
+  return self.tbNormalChatTitlePrefixConfig
+end
+
+function ChatMgr:GetCurChatTitlePrefixTempId(pPlayer)
+  return pPlayer.GetUserValue(self.CHAT_TITLE_PREFIX_PLAYER_SAVE_GROUP, self.CHAT_TITLE_PREFIX_PLAYER_SAVE_KEY_ID)
+end
+
+function ChatMgr:GetCurChatTitlePrefixShowInHudState(pPlayer)
+  return pPlayer.GetUserValue(self.CHAT_TITLE_PREFIX_PLAYER_SAVE_GROUP, self.CHAT_TITLE_PREFIX_PLAYER_SAVE_KEY_SHOW_IN_HUD)
+end
+
+function ChatMgr:GetShowInHudChatTitlePrefixTempId(pPlayer)
+  if not self.bEnableChatTitlePrefix then
+    return 0
+  end
+  local nCurTemplateId = pPlayer.GetUserValue(self.CHAT_TITLE_PREFIX_PLAYER_SAVE_GROUP, self.CHAT_TITLE_PREFIX_PLAYER_SAVE_KEY_ID)
+  local nShowInHud = pPlayer.GetUserValue(self.CHAT_TITLE_PREFIX_PLAYER_SAVE_GROUP, self.CHAT_TITLE_PREFIX_PLAYER_SAVE_KEY_SHOW_IN_HUD)
+  if 0 == nShowInHud then
+    return 0
+  else
+    return nCurTemplateId
+  end
+end
+
+ChatMgr.tbGetNormalChatTitlePrefixNameFunc = {
+  [ChatMgr.tbNormalChatTitlePrefixType.ChatPrefix] = ChatMgr.GetChatPrefixName,
+  [ChatMgr.tbNormalChatTitlePrefixType.KinCareer] = ChatMgr.GetKinCareerName,
+  [ChatMgr.tbNormalChatTitlePrefixType.TongCareer] = ChatMgr.GetTongCareerName
+}
+
+function ChatMgr:GetNormalChatTitlePrefixName(szType, ...)
+  if not self.tbNormalChatTitlePrefixType[szType] then
+    return
+  end
+  local funcGetName = self.tbGetNormalChatTitlePrefixNameFunc[self.tbNormalChatTitlePrefixType[szType]]
+  if funcGetName then
+    return funcGetName(self, ...)
+  end
+end
+
+ChatMgr:LoadChatTitlePrefixConfig()

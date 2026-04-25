@@ -1,0 +1,381 @@
+local ZhenYuan = Item.ZhenYuan
+ZhenYuan.PANEL_TYPE_NINGJU = 1
+ZhenYuan.PANEL_TYPE_LIANHUA = 2
+ZhenYuan.tbMingXiaMap = ZhenYuan.tbMingXiaMap or {}
+ZhenYuan.ITEM_MAXSTAR = 8
+ZhenYuan.CacheItemList = ZhenYuan.CacheItemList or {}
+ZhenYuan.tbPartnerList = ZhenYuan.tbPartnerList or {}
+ZhenYuan.tbEquipPosRedPoint = {
+  [Item.ExtEquip.CFG.SLOT.ZHENYUAN_METAL] = {
+    nEquipRed = RedPointMgr.EVENT.ZhenYuanMetal,
+    nLianHuaRed = RedPointMgr.EVENT.ZhenYuanLianHuaMetal
+  },
+  [Item.ExtEquip.CFG.SLOT.ZHENYUAN_WOOD] = {
+    nEquipRed = RedPointMgr.EVENT.ZhenYuanWood,
+    nLianHuaRed = RedPointMgr.EVENT.ZhenYuanLianHuaWood
+  },
+  [Item.ExtEquip.CFG.SLOT.ZHENYUAN_WATER] = {
+    nEquipRed = RedPointMgr.EVENT.ZhenYuanWater,
+    nLianHuaRed = RedPointMgr.EVENT.ZhenYuanLianHuaWater
+  },
+  [Item.ExtEquip.CFG.SLOT.ZHENYUAN_FIRE] = {
+    nEquipRed = RedPointMgr.EVENT.ZhenYuanFire,
+    nLianHuaRed = RedPointMgr.EVENT.ZhenYuanLianHuaFire
+  },
+  [Item.ExtEquip.CFG.SLOT.ZHENYUAN_EARTH] = {
+    nEquipRed = RedPointMgr.EVENT.ZhenYuanEarth,
+    nLianHuaRed = RedPointMgr.EVENT.ZhenYuanLianHuaEarth
+  }
+}
+ZhenYuan.tbStarInfoImg = {
+  szImg_HuTiStar1 = "UI/atlas/zhenyuan/img_HutiStar.png",
+  szImg_HuTiStar2 = "UI/atlas/zhenyuan/img_HutiStar2.png"
+}
+
+function ZhenYuan:CanWear(nPos)
+  local pEquip = Item.ExtEquip:GetEquipObj(me, nPos)
+  local tbItemList = self:GetPlayerZhenYuanItemBySeries(nPos)
+  if pEquip then
+    local nPower = self:GetEquipPower(pEquip)
+    local nQuality = Item:GetQuality(pEquip.dwTemplateId)
+    for _, tbItem in ipairs(tbItemList) do
+      local pItem = me.GetItemInBag(tbItem.dwId)
+      if pItem and pItem.nUseLevel <= me.nTotalLevel and nQuality <= tbItem.nQuality then
+        if nQuality < tbItem.nQuality then
+          return true
+        end
+        if nPower < tbItem.nFightPower then
+          return true
+        end
+      end
+    end
+  else
+    for _, tbItem in ipairs(tbItemList) do
+      local pItem = me.GetItemInBag(tbItem.dwId)
+      if pItem and pItem.nUseLevel <= me.nTotalLevel then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function ZhenYuan:CanLianHua(nPos)
+  local nCurrencyType = Item.ZhenYuan.tbZhenYuanCostSeriesMap[nPos].nId
+  local bRet = Item.ZhenYuan:CanHunDunEnhance(me, nPos, nCurrencyType)
+  return bRet
+end
+
+function ZhenYuan:CanHuTiLianHua()
+  for nId, _ in ipairs(Item.ZhenYuan.tbZhenYuanCostCfg) do
+    for nGroupId = 1, 5 do
+      if Item.ZhenYuan:CanHTEnhance(me, nGroupId, nId) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function ZhenYuan:OnCheckRedPoint(nReconnect)
+  if not Item.ZhenYuan:IsSystemOpen(me) then
+    return
+  end
+  for nPos = Item.ExtEquip.CFG.SLOT.ZHENYUAN_METAL, Item.ExtEquip.CFG.SLOT.ZHENYUAN_EARTH do
+    if self:CanWear(nPos) then
+      if not RedPointMgr:CheckEvent(self.tbEquipPosRedPoint[nPos].nEquipRed) then
+        RedPointMgr:LightRedPoint(self.tbEquipPosRedPoint[nPos].nEquipRed)
+      end
+    else
+      RedPointMgr:FadeRedPoint(self.tbEquipPosRedPoint[nPos].nEquipRed)
+    end
+    if nReconnect and self:CanLianHua(nPos) then
+      if not RedPointMgr:CheckEvent(self.tbEquipPosRedPoint[nPos].nLianHuaRed) then
+        RedPointMgr:LightRedPoint(self.tbEquipPosRedPoint[nPos].nLianHuaRed)
+      end
+    else
+      RedPointMgr:FadeRedPoint(self.tbEquipPosRedPoint[nPos].nLianHuaRed)
+    end
+  end
+  if nReconnect and self:CanHuTiLianHua() then
+    if not RedPointMgr:CheckEvent(RedPointMgr.EVENT.ZhenYuanLianHuaHuTi) then
+      RedPointMgr:LightRedPoint(RedPointMgr.EVENT.ZhenYuanLianHuaHuTi)
+    end
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ZhenYuanLianHuaHuTi)
+  end
+end
+
+function ZhenYuan:RefreshZhenYuanItemList()
+  self.CacheItemList[1] = {}
+  for nSeries = Item.ExtEquip.CFG.SLOT.ZHENYUAN_METAL, Item.ExtEquip.CFG.SLOT.ZHENYUAN_EARTH do
+    self.CacheItemList[nSeries] = {}
+  end
+  for nTemplateId, tbValue in pairs(self.tbZhenYuanItemCfg) do
+    local nCount, tbItemList = me.GetItemCountByTypeInBag(nTemplateId)
+    if nCount > 0 then
+      for i = 1, nCount do
+        local nFightPower = Item.ZhenYuan:GetEquipPower(tbItemList[i])
+        local nQuality = Item:GetQuality(nTemplateId)
+        local nOrder = tbValue.nOrder
+        table.insert(self.CacheItemList[1], {
+          dwId = tbItemList[i].dwId,
+          nTemplateId = nTemplateId,
+          nFightPower = nFightPower,
+          nOrder = nOrder,
+          nQuality = nQuality
+        })
+        table.insert(self.CacheItemList[tbValue.nSeries], {
+          dwId = tbItemList[i].dwId,
+          nTemplateId = nTemplateId,
+          nFightPower = nFightPower,
+          nOrder = nOrder,
+          nQuality = nQuality
+        })
+      end
+    end
+  end
+  table.sort(self.CacheItemList[1], function(tbA, tbB)
+    if tbA.nQuality ~= tbB.nQuality then
+      return tbA.nQuality > tbB.nQuality
+    end
+    return tbA.nFightPower > tbB.nFightPower
+  end)
+  for nSeries = Item.ExtEquip.CFG.SLOT.ZHENYUAN_METAL, Item.ExtEquip.CFG.SLOT.ZHENYUAN_EARTH do
+    table.sort(self.CacheItemList[nSeries], function(tbA, tbB)
+      if tbA.nQuality ~= tbB.nQuality then
+        return tbA.nQuality > tbB.nQuality
+      end
+      return tbA.nFightPower > tbB.nFightPower
+    end)
+  end
+  self:OnCheckRedPoint()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_ZHENYUAN_ITEM_CACHE, true)
+end
+
+function ZhenYuan:OnCurrencyChange(szType)
+  local bCheckRed = false
+  if Currency.TYPE.Coin == Currency.TYPE.Coin then
+    self:OnCheckRedPoint(1)
+    return
+  end
+  for nId, tbValue in ipairs(Item.ZhenYuan.tbZhenYuanCostCfg) do
+    if tbValue.szCurrencyType == szType then
+      bCheckRed = true
+    end
+  end
+  if bCheckRed then
+    self:OnCheckRedPoint(1)
+  end
+end
+
+function ZhenYuan:GetPlayerZhenYuanItemBySeries(nSeries)
+  if not self.CacheItemList[1] then
+    self:RefreshZhenYuanItemList()
+  end
+  return self.CacheItemList[nSeries]
+end
+
+function ZhenYuan:GetZhenYuanItemCfgBySeriesAndOrder(nSeries, nOrder)
+  local tbRet = {}
+  for nTemplateId, tbValue in pairs(self.tbZhenYuanItemCfg) do
+    if nOrder == tbValue.nOrder and nSeries and nSeries == tbValue.nSeries and nSeries then
+      table.insert(tbRet, nTemplateId)
+    end
+  end
+  return tbRet
+end
+
+function ZhenYuan:GetAllPartners()
+  if not self.tbPartnerList then
+    self:RefreshAllList()
+  end
+  return self.tbPartnerList
+end
+
+function ZhenYuan:RefreshAllList()
+  local tbPartnerList = {}
+  local tbAllPartner = me.GetAllPartner()
+  for nPartnerId in pairs(tbAllPartner) do
+    local pPartner = me.GetPartnerObj(nPartnerId)
+    if pPartner and Item.ZhenYuan.tbZhenYuanCfg[pPartner.nTemplateId] then
+      local tbPartner = {
+        nPartnerId = nPartnerId,
+        nTemplateId = pPartner.nTemplateId,
+        nLevel = pPartner.nLevel,
+        nQualityLevel = Partner.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel,
+        nSeries = Partner.tbAllPartnerInfo[pPartner.nTemplateId].nSeries,
+        szName = pPartner.szName,
+        dwId = pPartner.dwId
+      }
+      table.insert(tbPartnerList, tbPartner)
+    end
+  end
+  table.sort(tbPartnerList, function(tbA, tbB)
+    if tbA.nQualityLevel ~= tbB.nQualityLevel then
+      return tbA.nQualityLevel < tbB.nQualityLevel
+    end
+    return tbA.nSeries < tbB.nSeries
+  end)
+  self.tbPartnerList = tbPartnerList
+  return tbPartnerList
+end
+
+function ZhenYuan:OnPlayerLogin()
+  ZhenYuan.CacheItemList = {}
+  ZhenYuan.tbPartnerList = nil
+  self.bContinuousState = false
+  self:OnCheckRedPoint(1)
+end
+
+function ZhenYuan:ClearData()
+  self.tbZhenYuanClientData = nil
+end
+
+function ZhenYuan:HDZYEnhance(nPower)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ZHENYUAN_SYNC_LIANHUA, nPower)
+end
+
+function ZhenYuan:HDHTEnhanceReq(nPower)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ZHENYUAN_SYNC_LIANHUA, nPower)
+end
+
+function ZhenYuan:EnhanceFail()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ZHENYUAN_ENHANCE_FAIL)
+end
+
+function ZhenYuan:ActYinTieNumEnd()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ZHENYUAN_YINTIEACTNUMEND)
+end
+
+function ZhenYuan:ActZhiZhenNumEnd()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ZHENYUAN_ZHIZHENACTNUMEND)
+end
+
+function ZhenYuan:HuTiEnhance(nGroupId, nCostType)
+  RemoteServer.OnEquipZhenYuanRequest("HTEnhanceReq", nGroupId, nCostType)
+end
+
+function ZhenYuan:ZhenYuanEnhance(nPos, nCostType)
+  RemoteServer.OnEquipZhenYuanRequest("HDZYEnhanceReq", nPos, nCostType)
+end
+
+function ZhenYuan:MingXiaSynAccept(tbMingXiaMap)
+  self.tbMingXiaMap = tbMingXiaMap
+end
+
+function ZhenYuan:OnSynActivityState(bActState)
+  self.bIsOpenZhenYuanProbUpgrade = bActState
+end
+
+function ZhenYuan:GetMingXiaTable()
+  return self.tbMingXiaMap
+end
+
+function ZhenYuan:OnUpStar(nCurStar)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ZHENYUAN_STAR, nCurStar)
+end
+
+function ZhenYuan:NingJu(nPartnerId, nOrder)
+  RemoteServer.OnEquipZhenYuanRequest("Compound", nPartnerId, nOrder, self.bContinuousState)
+end
+
+function ZhenYuan:CompoundRsp()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ZHENYUAN_SYNC_RECORD)
+end
+
+function ZhenYuan:SetNotShowValue(bNotShowToday)
+  if bNotShowToday then
+    LocalData:SetRoleNumber("AutoMedicine_CloseZhenYuanLianHuaNoticeTime", GetTime())
+  end
+end
+
+function ZhenYuan:ClientRefreshHTAttrib(nGroupId, nOldLv, nNewLv)
+  self:RefreshHTAttrib(me, nGroupId, nOldLv, nNewLv)
+  self:OnCheckRedPoint(1)
+end
+
+function ZhenYuan:ClientRefreshHDZYAttrib(nPos, nOldLv, nIntensifyLv)
+  self:RefreshHDZYAttrib(me, nPos, nOldLv, nIntensifyLv)
+  self:OnCheckRedPoint(1)
+end
+
+function ZhenYuan:GetContinuousState()
+  return self.bContinuousState
+end
+
+function ZhenYuan:SetContinuousState(bContinuousState)
+  self.bContinuousState = bContinuousState
+end
+
+function ZhenYuan:ShowAwardsWin(tbAwards)
+  for _, tbAward in ipairs(tbAwards) do
+    Ui:AddShowAwards(tbAward)
+  end
+  Ui:OpenGetAwardShow()
+end
+
+function ZhenYuan:OnDelItem(_, dwTemplateId)
+  if not self.tbZhenYuanItemCfg[dwTemplateId] then
+    return false
+  end
+  self:RefreshZhenYuanItemList()
+end
+
+function ZhenYuan:OnAddItem(nItemId)
+  if nItemId then
+    local pItem = KItem.GetItemObj(nItemId)
+    if not pItem then
+      return false
+    end
+    if pItem.dwTemplateId == Item.ZhenYuan.nZhenYuanJinTieId or pItem.dwTemplateId == Item.ZhenYuan.nZhenYuanYinTieId then
+      EventNotify.OnNotify(EventNotify.emNOTIFY_ZHENYUAN_SYNC_RECORD)
+    end
+    if not self.tbZhenYuanItemCfg[pItem.dwTemplateId] then
+      return false
+    end
+  end
+  self:RefreshZhenYuanItemList()
+end
+
+function ZhenYuan:GetActivityId()
+  if self.bIsOpenZhenYuanProbUpgrade then
+    return Item.ZhenYuan.nActivityId
+  end
+end
+
+function ZhenYuan:IsShowActivity(nPartnerId)
+  if self.bIsOpenZhenYuanProbUpgrade then
+    local pInstance = ActivityMgr:GetInstanceById(Item.ZhenYuan.nActivityId)
+    if pInstance then
+      local nStartTime = pInstance:GetStartTime()
+      local nEndTime = pInstance:GetEndTime()
+      if nStartTime < GetTime() and nEndTime > GetTime() then
+        local nQualityLevel = Partner.tbAllPartnerInfo[nPartnerId].nQualityLevel
+        if 2 == nQualityLevel and me.GetUserValue(self.SAVE_ZHENYUAN_GROUP, ZhenYuan.nActZhiZhenNum) < Item.ZhenYuan.nActTotalZhiZhenNum then
+          return true
+        elseif 2 ~= nQualityLevel and me.GetUserValue(self.SAVE_ZHENYUAN_GROUP, ZhenYuan.nActYinTieMakeNum) < Item.ZhenYuan.nActTotalYinTieMakeNum then
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
+function ZhenYuan:IsCanJoinActivity()
+  return false
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, ZhenYuan)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_DEL_ITEM, ZhenYuan)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, ZhenYuan.OnAddItem, ZhenYuan)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_DEL_ITEM, ZhenYuan.OnDelItem, ZhenYuan)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_PARTNER_ADD, ZhenYuan)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_PARTNER_ADD, ZhenYuan.RefreshAllList, ZhenYuan)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_PARTNER_DELETE, ZhenYuan)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_PARTNER_DELETE, ZhenYuan.RefreshAllList, ZhenYuan)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, ZhenYuan)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, ZhenYuan.OnPlayerLogin, ZhenYuan)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, ZhenYuan)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, ZhenYuan.OnCurrencyChange, ZhenYuan)

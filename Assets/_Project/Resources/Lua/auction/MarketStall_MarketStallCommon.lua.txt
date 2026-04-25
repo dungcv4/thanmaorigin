@@ -1,0 +1,531 @@
+MarketStallBase.nOpenLevel = 1
+MarketStallBase.nManualRefreshCost = 20
+MarketStallBase.nTimeout = 86400
+MarketStallBase.nPriceChangePercent = 10
+MarketStallBase.nShowCountOneType = 200
+MarketStallBase.nAddShowCountVipLevel = 10
+MarketStallBase.nMinStallPrice = 2
+MarketStallBase.nUpdateStallItemListTime = 1800
+MarketStallBase.tbLevel2StoreMaxItems = {
+  {1, 5},
+  {25, 10},
+  {30, 15},
+  {40, 20}
+}
+MarketStallBase.nJoinGlobalStallSpace = 1800
+MarketStallBase.tbForbiddenTime = {2, 10}
+MarketStallBase.nMaxTimeFrameCount = 6
+MarketStallBase.nAvaragePriceCount = 10
+MarketStallBase.nGoldStallNormalMaxCount = 1000
+MarketStallBase.tbForbiddenTime[1] = MarketStallBase.tbForbiddenTime[1] * 3600
+MarketStallBase.tbForbiddenTime[2] = MarketStallBase.tbForbiddenTime[2] * 3600
+MarketStallBase.emEvent_OnItemSelled = 1
+MarketStallBase.emEvent_OnItemTimeout = 2
+MarketStallBase.emEvent_OnNewSellItem = 3
+MarketStallBase.emEvent_OnUpdateMyItemPrice = 4
+MarketStallBase.emEvent_OnCancelSellItem = 5
+MarketStallBase.emEvent_OnGetCacheMoney = 6
+MarketStallBase.emEvent_OnGetMySellItemInfo = 7
+MarketStallBase.emEvent_OnGetItemList = 8
+MarketStallBase.emEvent_OnUpdateAllStall = 9
+MarketStallBase.emEvent_OnBuyItem = 10
+MarketStallBase.emEvent_OnGetAvaragePrice = 11
+MarketStallBase.emEvent_OnUpdateItemList = 12
+MarketStallBase.emEvent_OnAddStar = 13
+MarketStallBase.emEvent_OnDelStar = 14
+MarketStallBase.emEvent_OnSyncStar = 15
+MarketStallBase.emEvent_OnGetShowDetailInfo = 18
+MarketStallBase.emEvent_OnAllCancelSellItem = 19
+MarketStallBase.emEvent_OnUpdateNP2PItem = 21
+MarketStallBase.nMaxStarNum = 20
+MarketStallBase.nStarType = -1
+MarketStallBase.tbStallType = {YuanBao = 1, Gold = 2}
+MarketStallBase.tbMoneyType = {
+  [MarketStallBase.tbStallType.YuanBao] = "YuanBao",
+  [MarketStallBase.tbStallType.Gold] = "Gold"
+}
+MarketStallBase.tbReqItemDataCbType = {BUY_INFO_PANEL = 1, SELL_INFO_PANEL = 2}
+MarketStallBase.tbUIName = {
+  [MarketStallBase.tbReqItemDataCbType.SELL_INFO_PANEL] = "UIMarketStallSell",
+  [MarketStallBase.tbReqItemDataCbType.BUY_INFO_PANEL] = "UIMarketStallBuy"
+}
+MarketStallBase.tbItemStates = {TimeOut = 2, Normal = 3}
+MarketStallBase.tbMapTotalSellMoneyNum = {
+  [MarketStallBase.tbStallType.YuanBao] = 10000
+}
+MarketStallBase.nMarketTotalLimitKeyBegin = 1
+MarketStallBase.tbMapSellMoneyLimit = {
+  [MarketStallBase.tbStallType.YuanBao] = 1
+}
+MarketStallBase.nMarketTotalLimitKeyEnd = 1
+MarketStallBase.nMarketLimitKeyBegin = 5
+MarketStallBase.nMarketLimitKeyEnd = 100
+MarketStallBase.nPerLimitKeyNeed = 4
+MarketStallBase.tbDataType2IndexMap = {
+  nSellCountLimitKey = 0,
+  nSellMoneyLimitKey = 1,
+  nBuyCountLimitKey = 2,
+  nBuyMoneyLimitKey = 3
+}
+MarketStallBase.nMarketLimitMaxIndex = math.floor((MarketStallBase.nMarketLimitKeyEnd - MarketStallBase.nMarketLimitKeyBegin + 1) / MarketStallBase.nPerLimitKeyNeed)
+MarketStallBase.nWaitForNextPage = 9
+if MODULE_GAMESERVER then
+  MarketStallBase.nWaitForNextPage = 7.2
+end
+MarketStallBase.tbPlayerPageTime = {}
+MarketStallBase.szCheckTimeFrame = "OpenLevel49"
+MarketStallBase.nMaxLevelDiff = 18
+
+function MarketStallBase:Load()
+  local szType = "dsdddddssdd"
+  local tbParam = {
+    "nStallItemTempId",
+    "szMoneyType",
+    "nSeType",
+    "nDetailType",
+    "nIndex",
+    "nMinPercent",
+    "nMaxPercent",
+    "szOpenTimeFrame",
+    "szEndTimeFrame",
+    "nPrice",
+    "nShieldStudio"
+  }
+  for i = 1, self.nMaxTimeFrameCount do
+    szType = szType .. "sd"
+    table.insert(tbParam, "szTimeFrame" .. i)
+    table.insert(tbParam, "nPrice" .. i)
+  end
+  self.tbYuanBaoTypeSetting = Lib:LoadTabFileEx("Setting/MarketStall/MarketYuanBaoTypeDef.tab", "ddddsssddd", "nDetailTypeId", {
+    "nDetailTypeId",
+    "nSeTypeId",
+    "nTypeId",
+    "nSeTypeSort",
+    "szTypeName",
+    "szSeTypeName",
+    "szDetailTypeName",
+    "nIcon",
+    "nShowType",
+    "nSort"
+  })
+  self.tbGoldTypeSetting = Lib:LoadTabFileEx("Setting/MarketStall/MarketGoldTypeDef.tab", "ddddsssdddd", "nDetailTypeId", {
+    "nDetailTypeId",
+    "nSeTypeId",
+    "nTypeId",
+    "nSeTypeSort",
+    "szTypeName",
+    "szSeTypeName",
+    "szDetailTypeName",
+    "nIcon",
+    "nShowType",
+    "nItemType",
+    "nSort"
+  })
+  self.tbYuanBaoSeTypeSettings = {}
+  for _, tbStallTypeSetting in pairs(self.tbYuanBaoTypeSetting) do
+    self.tbYuanBaoSeTypeSettings[tbStallTypeSetting.nSeTypeId] = self.tbYuanBaoSeTypeSettings[tbStallTypeSetting.nSeTypeId] or {}
+    table.insert(self.tbYuanBaoSeTypeSettings[tbStallTypeSetting.nSeTypeId], tbStallTypeSetting)
+  end
+  self.tbGoldSeTypeSettings = {}
+  for _, tbStallTypeSetting in pairs(self.tbGoldTypeSetting) do
+    self.tbGoldSeTypeSettings[tbStallTypeSetting.nSeTypeId] = self.tbGoldSeTypeSettings[tbStallTypeSetting.nSeTypeId] or {}
+    table.insert(self.tbGoldSeTypeSettings[tbStallTypeSetting.nSeTypeId], tbStallTypeSetting)
+  end
+  self.tbYuanBaoDetailTypeList = {}
+  for nSeType, tbStallSettingInfo in pairs(self.tbYuanBaoSeTypeSettings) do
+    self.tbYuanBaoDetailTypeList[nSeType] = {}
+    for _, tbStallDetailTypeInfo in pairs(tbStallSettingInfo) do
+      self.tbYuanBaoDetailTypeList[nSeType][tbStallDetailTypeInfo.nDetailTypeId] = true
+    end
+  end
+  self.tbGoldDetailTypeList = {}
+  for nSeType, tbStallSettingInfo in pairs(self.tbGoldSeTypeSettings) do
+    self.tbGoldDetailTypeList[nSeType] = {}
+    for _, tbStallDetailTypeInfo in pairs(tbStallSettingInfo) do
+      self.tbGoldDetailTypeList[nSeType][tbStallDetailTypeInfo.nDetailTypeId] = true
+    end
+  end
+  local tbStallItemSettings = Lib:LoadTabFileEx("Setting/MarketStall/MarketStallItem.tab", szType, nil, tbParam)
+  self.tbYuanBaoStallItemSettings = {}
+  self.tbGoldStallItemSettings = {}
+  self.tbYuanBaoDetailType2TempId = {}
+  self.tbGoldDetailType2TempId = {}
+  for _, tbInfo in pairs(tbStallItemSettings) do
+    tbInfo.tbPriceInfo = {}
+    for i = 1, self.nMaxTimeFrameCount do
+      local szTimeFrame = tbInfo["szTimeFrame" .. i]
+      local nPrice = tbInfo["nPrice" .. i]
+      if szTimeFrame and "" ~= szTimeFrame then
+        assert(nPrice > 0, string.format("Setting/MarketStall/MarketStallItem.tab price error !!! nPrice = %d", nPrice))
+        table.insert(tbInfo.tbPriceInfo, {szTimeFrame = szTimeFrame, nPrice = nPrice})
+      end
+    end
+    self:UpdatePrice(tbInfo)
+    if tbInfo.szMoneyType == "YuanBao" then
+      assert(not self.tbYuanBaoStallItemSettings[tbInfo.nStallItemTempId], string.format("Setting/MarketStall/MarketStallItem.tab item repeat !!! %d", tbInfo.nStallItemTempId))
+      self.tbYuanBaoStallItemSettings[tbInfo.nStallItemTempId] = tbInfo
+      self.tbYuanBaoDetailType2TempId[tbInfo.nDetailType] = tbInfo.nStallItemTempId
+    elseif tbInfo.szMoneyType == "Gold" then
+      assert(not self.tbGoldStallItemSettings[tbInfo.nStallItemTempId], string.format("Setting/MarketStall/MarketStallItem.tab item repeat !!! %d", tbInfo.nStallItemTempId))
+      self.tbGoldStallItemSettings[tbInfo.nStallItemTempId] = tbInfo
+      self.tbGoldDetailType2TempId[tbInfo.nDetailType] = tbInfo.nStallItemTempId
+    end
+  end
+  local tbStallYuanBaoLimitSetting = Lib:LoadTabFileEx("Setting/MarketStall/MarketYuanBaoLimitSetting.tab", "ddddd", nil, {
+    "nItemTempId",
+    "nSellCountLimit",
+    "nSellMoneyLimit",
+    "nBuyCountLimit",
+    "nBuyMoneyLimit"
+  })
+  self.tbStallYuanBaoLimitSetting = {}
+  local nSaveDataIndex = 0
+  for _, tbSetting in ipairs(tbStallYuanBaoLimitSetting) do
+    if nSaveDataIndex >= MarketStallBase.nMarketLimitMaxIndex then
+      LogErr("MarketYuanBaoLimitSetting.tab setting error! nSaveDataIndex out of range! size:", MarketStallBase.nMarketLimitMaxIndex)
+      break
+    end
+    if not self.tbStallYuanBaoLimitSetting[tbSetting.nItemTempId] then
+      self.tbStallYuanBaoLimitSetting[tbSetting.nItemTempId] = {
+        nSaveDataIndex = nSaveDataIndex,
+        nSellCountLimit = tbSetting.nSellCountLimit,
+        nSellMoneyLimit = tbSetting.nSellMoneyLimit,
+        nBuyCountLimit = tbSetting.nBuyCountLimit,
+        nBuyMoneyLimit = tbSetting.nBuyMoneyLimit
+      }
+      nSaveDataIndex = nSaveDataIndex + 1
+    else
+      LogErr("MarketYuanBaoLimitSetting.tab setting error! Id conflict!,Id:", tbSetting.nItemTempId)
+    end
+  end
+  self.tbYuanBaoSeTypeSettings = SetReadOnly(self.tbYuanBaoSeTypeSettings)
+  self.tbGoldSeTypeSettings = SetReadOnly(self.tbGoldSeTypeSettings)
+  self.tbYuanBaoDetailTypeList = SetReadOnly(self.tbYuanBaoDetailTypeList)
+  self.tbGoldDetailTypeList = SetReadOnly(self.tbGoldDetailTypeList)
+  self.tbYuanBaoStallItemSettings = SetReadOnly(self.tbYuanBaoStallItemSettings)
+  self.tbGoldStallItemSettings = SetReadOnly(self.tbGoldStallItemSettings)
+  self.tbYuanBaoDetailType2TempId = SetReadOnly(self.tbYuanBaoDetailType2TempId)
+  self.tbGoldDetailType2TempId = SetReadOnly(self.tbGoldDetailType2TempId)
+end
+
+function MarketStallBase:UpdatePrice(tbInfo)
+  for _, tbPriceInfo in ipairs(tbInfo.tbPriceInfo) do
+    local nPrice = tbPriceInfo.nPrice
+    local szTimeFrame = tbPriceInfo.szTimeFrame
+    if 1 == GetTimeFrameState(szTimeFrame) then
+      tbInfo.nPrice = nPrice
+    else
+      tbInfo.szNextTimeFrame = szTimeFrame
+      break
+    end
+  end
+  if tbInfo.szMoneyType == "YuanBao" then
+    self:UpdateAllowPrice(tbInfo)
+  end
+end
+
+function MarketStallBase:UpdateAllowPrice(tbInfo)
+  tbInfo.tbAllowPrice = {}
+  for nCurPercent = 100, tbInfo.nMaxPercent, self.nPriceChangePercent do
+    local nCurPrice
+    if 100 == nCurPercent then
+      nCurPrice = tbInfo.nPrice
+    else
+      nCurPrice = math.floor(tbInfo.nPrice * nCurPercent / 100)
+    end
+    tbInfo.tbAllowPrice[nCurPrice] = 1
+  end
+  for nCurPercent = 100, tbInfo.nMinPercent, -self.nPriceChangePercent do
+    local nCurPrice
+    if 100 == nCurPercent then
+      nCurPrice = tbInfo.nPrice
+    else
+      nCurPrice = math.floor(tbInfo.nPrice * nCurPercent / 100)
+    end
+    tbInfo.tbAllowPrice[nCurPrice] = 1
+  end
+end
+
+MarketStallBase:Load()
+
+function MarketStallBase:CheckOpen()
+  if MarketStallBase.bClose then
+    return false
+  end
+  return true
+end
+
+function MarketStallBase:IsMarketOpen(pPlayer)
+  return pPlayer.nLevel >= self.nOpenLevel
+end
+
+function MarketStallBase:CheckCanSellItem(pPlayer, dwItemId)
+  local nCurCount = 0
+  local pItem, nPos
+  pItem, nPos = pPlayer.GetItemInAllSpace(dwItemId)
+  if not pItem then
+    return false, i18n.EasyGet("\230\151\160\230\149\136\233\129\147\229\133\183\239\188\140\228\184\141\229\143\175\229\135\186\229\148\174")
+  end
+  if not Item:IsInBag(nPos) then
+    return false, i18n.EasyGet("\233\129\147\229\133\183\228\184\141\229\156\168\232\131\140\229\140\133\228\184\173\239\188\140\228\184\141\229\143\175\229\135\186\229\148\174")
+  end
+  local bCanSell = Item:CheckCanSell(pItem)
+  if not bCanSell then
+    return false, i18n.EasyGet("\230\173\164\231\137\169\229\147\129\228\184\141\229\143\175\229\135\186\229\148\174")
+  end
+  nCurCount = pItem.nCount
+  local tbPriceInfo = {}
+  tbPriceInfo = self:GetPriceInfo(pItem.dwTemplateId)
+  if not tbPriceInfo then
+    return false, i18n.EasyGet("\228\184\141\229\143\175\228\184\138\230\158\182\231\137\169\229\147\129")
+  end
+  if pItem.IsInTradeLimit(Item.eTRADELIMITWAY.MARKETSTALL) then
+    return false, i18n.EasyGet("\230\151\160\230\179\149\228\184\138\230\158\182\229\164\132\228\186\142\231\187\145\229\174\154\231\138\182\230\128\129\228\184\173\231\154\132\233\129\147\229\133\183")
+  end
+  return true, "", nCurCount, tbPriceInfo
+end
+
+function MarketStallBase:CheckCanNewSellItem(pPlayer, dwItemId, nCount, nPrice, bIgnorCheckCost)
+  if self:IsMyStoreFull(pPlayer) then
+    return false, i18n.EasyGet("\228\184\141\232\131\189\228\184\138\230\158\182\230\155\180\229\164\154\231\137\169\229\147\129")
+  end
+  local pItem = KItem.GetItemObj(dwItemId)
+  if not pItem then
+    return false, i18n.EasyGet("\233\129\147\229\133\183\228\184\141\229\173\152\229\156\168")
+  end
+  local bRet, szMsg, nCurCount, tbPriceInfo = self:CheckCanSellItem(pPlayer, dwItemId)
+  if not bRet then
+    return false, szMsg
+  end
+  if not bIgnorCheckCost and nCount > nCurCount then
+    return false, i18n.EasyGet("\229\176\145\228\190\160\230\178\161\230\156\137\232\191\153\228\185\136\229\164\154\231\137\169\229\147\129\229\145\128\239\188\129")
+  end
+  local nCost, szCurrencyType = self:GetSellCost(nCount * nPrice)
+  local nHasMoney = pPlayer.GetMoney(szCurrencyType)
+  if not bIgnorCheckCost and nCost > nHasMoney then
+    return false, i18n.EasyGet("\229\176\145\228\190\160\230\137\139\231\187\173\232\180\185\228\184\141\232\182\179\239\188\129")
+  end
+  return true, "", nCost, szCurrencyType
+end
+
+function MarketStallBase:GetStallAward(nStallItemTempId, nCount)
+  if not nStallItemTempId or nStallItemTempId <= 0 then
+    return {nCount}
+  end
+  return {
+    "Item",
+    nStallItemTempId,
+    nCount
+  }
+end
+
+function MarketStallBase:UpdateRedPoint(bSkipOnce)
+  if not bSkipOnce then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.MarketStallTimeoutOnce)
+  end
+  RedPointMgr:LightRedPoint(MarketStallMgr.tbStallType2RedPoint[self.nStallType])
+end
+
+function MarketStallBase:ClearRedPoint()
+  RedPointMgr:FadeRedPoint(MarketStallMgr.tbStallType2RedPoint[self.nStallType])
+end
+
+function MarketStallBase:GetItemName(nStallItemTempId)
+  return KItem.GetItemShowInfo(nStallItemTempId)
+end
+
+function MarketStallBase:GetItemState(tbData)
+  local ret = self.tbItemStates.Normal
+  if tbData.nTime < GetTime() - MarketStallBase.nTimeout then
+    ret = self.tbItemStates.TimeOut
+  end
+  return ret
+end
+
+function MarketStallBase:GetLevel2StoreMaxItem(nLevel)
+  for i = #self.tbLevel2StoreMaxItems, 1, -1 do
+    if nLevel >= self.tbLevel2StoreMaxItems[i][1] then
+      return self.tbLevel2StoreMaxItems[i][2]
+    end
+  end
+  return 0
+end
+
+function MarketStallBase:IsMyStoreFull(pPlayer)
+  local tbPlayerInfo = {}
+  local tbItems = {}
+  if MODULE_GAMESERVER then
+    tbPlayerInfo = self.tbStallInfoByPlayer[pPlayer.dwID] or {}
+    return Lib:CountTB(tbPlayerInfo) >= self:GetLevel2StoreMaxItem(pPlayer.nLevel)
+  else
+    tbItems = self.tbMyItems
+    return #tbItems >= self:GetLevel2StoreMaxItem(pPlayer.nLevel)
+  end
+end
+
+function MarketStallBase:GetSellCost(nTotalPrice)
+  return math.max(math.ceil(nTotalPrice * 0.01), 1), "YuanBao"
+end
+
+function MarketStallBase:CheckCanUpdateItemPrice(pPlayer, nStallItemTempId, nCount, nPrice, bIgnorCheckCost)
+  if nCount <= 0 then
+    return false, i18n.EasyGet("\230\173\164\231\137\169\229\147\129\229\183\178\231\187\143\229\148\174\229\174\140\239\188\140\230\151\160\233\156\128\233\135\141\230\150\176\228\184\138\230\158\182\239\188\129")
+  end
+  local nCost, szCurrencyType = self:GetSellCost(nCount * nPrice)
+  local nHasMoney = pPlayer.GetMoney(szCurrencyType)
+  if not bIgnorCheckCost and nCost > nHasMoney then
+    return false, i18n.EasyGet("\229\176\145\228\190\160\230\137\139\231\187\173\232\180\185\228\184\141\232\182\179\239\188\129")
+  end
+  return true, "", nCost, szCurrencyType
+end
+
+function MarketStallBase:GetTradeWayinMarket(nItemTempId)
+  if self.tbYuanBaoStallItemSettings[nItemTempId] then
+    return true, i18n.EasyGet("\229\133\131\229\174\157\230\145\134\230\145\138")
+  end
+  return false
+end
+
+function MarketStallBase:IsCanNextPage(pPlayer, szType)
+  if not szType then
+    return false
+  end
+  self.tbPlayerPageTime[pPlayer.dwID] = self.tbPlayerPageTime[pPlayer.dwID] or {}
+  self.tbPlayerPageTime[pPlayer.dwID][szType] = self.tbPlayerPageTime[pPlayer.dwID][szType] or 0
+  local nLastTime = self.tbPlayerPageTime[pPlayer.dwID][szType]
+  local nCurTime = GetFrame()
+  local nGapTime = nCurTime - nLastTime
+  if nGapTime <= self.nWaitForNextPage then
+    return false
+  end
+  self.tbPlayerPageTime[pPlayer.dwID][szType] = nCurTime
+  return true
+end
+
+function MarketStallBase:ClearPageTimeData(nPlayerId)
+  if self.tbPlayerPageTime[nPlayerId] then
+    self.tbPlayerPageTime[nPlayerId] = {}
+  end
+end
+
+function MarketStallBase:IsNeedInstance(nStallItemTempId)
+  local _, nDetailType = self:GetItemType(nStallItemTempId)
+  if not nDetailType then
+    return false
+  end
+  local tbTypeInfo = self.tbGoldTypeSetting[nDetailType]
+  if not tbTypeInfo then
+    return false
+  end
+  return 1 == tbTypeInfo.nItemType
+end
+
+function MarketStallBase:IsNeedInstanceByDetailType(nDetailType)
+  local tbTypeInfo = self.tbGoldTypeSetting[nDetailType]
+  if not tbTypeInfo then
+    return false
+  end
+  return 1 == tbTypeInfo.nItemType
+end
+
+function MarketStallBase:CheckTotalSellOutOfLimit(pPlayer, nMoney)
+  local nSellMoneyLimitKey = self.tbMapSellMoneyLimit[self.nStallType]
+  local nTotalSellMoney = self.tbMapTotalSellMoneyNum[self.nStallType]
+  if not nSellMoneyLimitKey or not nTotalSellMoney then
+    return false
+  end
+  local nCurrTotalSellMoney = pPlayer.GetUserValue(self.nMarketLimitGroup, nSellMoneyLimitKey)
+  if nTotalSellMoney < nCurrTotalSellMoney + nMoney then
+    return true
+  end
+  return false
+end
+
+function MarketStallBase:CheckSellItemOutOfLimit(pPlayer, nItemTemplateId, nCount, nMoney)
+  if not self.tbStallLimitSetting then
+    return false
+  end
+  local tbSetting = self.tbStallLimitSetting[nItemTemplateId]
+  if not tbSetting then
+    return false
+  end
+  local nSaveDataIndex = tbSetting.nSaveDataIndex
+  local nKeySellCount = self.nMarketLimitKeyBegin + nSaveDataIndex * self.nPerLimitKeyNeed + self.tbDataType2IndexMap.nSellCountLimitKey
+  local nKeySellMoney = self.nMarketLimitKeyBegin + nSaveDataIndex * self.nPerLimitKeyNeed + self.tbDataType2IndexMap.nSellMoneyLimitKey
+  local nCurrSellCount = pPlayer.GetUserValue(self.nMarketLimitGroup, nKeySellCount)
+  local nCurrSellMoney = pPlayer.GetUserValue(self.nMarketLimitGroup, nKeySellMoney)
+  if nCurrSellCount + nCount > tbSetting.nSellCountLimit or nCurrSellMoney + nMoney > tbSetting.nSellMoneyLimit then
+    return true
+  end
+  return false
+end
+
+function MarketStallBase:CheckBuyItemOutOfLimit(pPlayer, nItemTemplateId, nCount, nMoney)
+  if not self.tbStallLimitSetting then
+    return false
+  end
+  local tbSetting = self.tbStallLimitSetting[nItemTemplateId]
+  if not tbSetting then
+    return false
+  end
+  local nSaveDataIndex = tbSetting.nSaveDataIndex
+  local nKeyBuyCount = self.nMarketLimitKeyBegin + nSaveDataIndex * self.nPerLimitKeyNeed + self.tbDataType2IndexMap.nBuyCountLimitKey
+  local nKeyBuyMoney = self.nMarketLimitKeyBegin + nSaveDataIndex * self.nPerLimitKeyNeed + self.tbDataType2IndexMap.nBuyMoneyLimitKey
+  local nCurrBuyCount = pPlayer.GetUserValue(self.nMarketLimitGroup, nKeyBuyCount)
+  local nCurrBuyMoney = pPlayer.GetUserValue(self.nMarketLimitGroup, nKeyBuyMoney)
+  if nCurrBuyCount + nCount > tbSetting.nBuyCountLimit or nCurrBuyMoney + nMoney > tbSetting.nBuyMoneyLimit then
+    return true
+  end
+  return false
+end
+
+function MarketStallBase:ShowTest()
+  self.nMarketLimitGroup = GetGroupKey("MarketLimitYuanBao")
+  for nItemTemplateId, tbSetting in pairs(self.tbStallYuanBaoLimitSetting) do
+    print("------------------------------------------------------------")
+    local nSaveDataIndex = tbSetting.nSaveDataIndex
+    local nKeyBuyCount = self.nMarketLimitKeyBegin + nSaveDataIndex * self.nPerLimitKeyNeed + self.tbDataType2IndexMap.nBuyCountLimitKey
+    local nKeyBuyMoney = self.nMarketLimitKeyBegin + nSaveDataIndex * self.nPerLimitKeyNeed + self.tbDataType2IndexMap.nBuyMoneyLimitKey
+    print(nItemTemplateId, "nKeyBuyCount:", me.GetUserValue(self.nMarketLimitGroup, nKeyBuyCount), "LimitBuyCount:", tbSetting.nBuyCountLimit)
+    print(nItemTemplateId, "nKeyBuyMoney:", me.GetUserValue(self.nMarketLimitGroup, nKeyBuyMoney), "LimitBuyMoney:", tbSetting.nBuyMoneyLimit)
+    local nKeySellCount = self.nMarketLimitKeyBegin + nSaveDataIndex * self.nPerLimitKeyNeed + self.tbDataType2IndexMap.nSellCountLimitKey
+    local nKeySellMoney = self.nMarketLimitKeyBegin + nSaveDataIndex * self.nPerLimitKeyNeed + self.tbDataType2IndexMap.nSellMoneyLimitKey
+    print(nItemTemplateId, "nKeySellCount:", me.GetUserValue(self.nMarketLimitGroup, nKeySellCount), "LimitBuyCount:", tbSetting.nSellCountLimit)
+    print(nItemTemplateId, "nKeySellMoney:", me.GetUserValue(self.nMarketLimitGroup, nKeySellMoney), "LimitBuyMoney:", tbSetting.nSellMoneyLimit)
+  end
+end
+
+function MarketStallBase:CheckMarketSellItemTypeSettings(pItem)
+  local nErrCheck = 0
+  local bCanMarketStall = false
+  local nMarketStallType
+  if not pItem then
+    return false, nil
+  end
+  if pItem.IsInTradeLimit(Item.eTRADELIMITWAY.MARKETSTALL) then
+    return false, nil
+  end
+  if MarketStallBase.tbYuanBaoStallItemSettings[pItem.dwTemplateId] then
+    local szOpenTimeFrame = MarketStallBase.tbYuanBaoStallItemSettings[pItem.dwTemplateId].szOpenTimeFrame
+    local szEndTimeFrame = MarketStallBase.tbYuanBaoStallItemSettings[pItem.dwTemplateId].szEndTimeFrame
+    if (Lib:IsEmptyStr(szOpenTimeFrame) or 1 == GetTimeFrameState(szOpenTimeFrame)) and (Lib:IsEmptyStr(szEndTimeFrame) or 1 ~= GetTimeFrameState(szEndTimeFrame)) then
+      bCanMarketStall = true
+      nMarketStallType = MarketStallBase.tbStallType.YuanBao
+      nErrCheck = nErrCheck + 1
+    end
+  end
+  if MarketStallBase.tbGoldStallItemSettings[pItem.dwTemplateId] then
+    local szOpenTimeFrame = MarketStallBase.tbGoldStallItemSettings[pItem.dwTemplateId].szOpenTimeFrame
+    local szEndTimeFrame = MarketStallBase.tbGoldStallItemSettings[pItem.dwTemplateId].szEndTimeFrame
+    if (Lib:IsEmptyStr(szOpenTimeFrame) or 1 == GetTimeFrameState(szOpenTimeFrame)) and (Lib:IsEmptyStr(szEndTimeFrame) or 1 ~= GetTimeFrameState(szEndTimeFrame)) then
+      bCanMarketStall = true
+      nMarketStallType = MarketStallBase.tbStallType.Gold
+      nErrCheck = nErrCheck + 1
+    end
+  end
+  if nErrCheck > 1 then
+    LogErr("MarketStallBase:CheckMarketSellItemTypeSettings error detected! ItemTemplateId:", pItem.dwTemplateId)
+    return false, nil
+  end
+  return bCanMarketStall, nMarketStallType
+end

@@ -1,0 +1,348 @@
+local tbWnd = Ui:CreateClass("UINewInfomation_FriendAward", "UIPanel")
+local tbControls = {
+  btnTypeTemp = "btnList2/btnTemplate",
+  goLevelAwards = "LevelAwards",
+  goInviteAwards = "InviteAwards",
+  goInviteCode = "InviteCode",
+  goLevelAwardTemp = "LevelAwards/LevelList/List/Template",
+  txtLevelAwardInfo1 = "LevelAwards/ActivityInfo/info1",
+  txtLevelAwardInfo2 = "LevelAwards/ActivityInfo/info2",
+  goInviteLevelAwardTemp = "InviteAwards/Level/Viewport/Content/Template",
+  goInviteRechargeAwardTemp = "InviteAwards/Recharge/Viewport/Content/Template",
+  txtInvitedValue = "InviteAwards/InvitedCount/txtInvitedValue",
+  btnGetAllInviteAward = "InviteAwards/btnGetAll",
+  txtInviteTime = "InviteAwards/txtTime",
+  txtInviteDesc = "InviteCode/txtInfo",
+  inSeekCode = "InviteCode/InputFieldSeek",
+  btnCopyCode = "InviteCode/btnCopy",
+  btnUseCode = "InviteCode/btnUseCode",
+  btnEmpty = "InviteCode/btnEmpty"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnGetAllInviteAward = function(self)
+    self:OnClickGetAllInviteAward()
+  end,
+  btnCopyCode = function(self)
+    self:OnClickCopyCode()
+  end,
+  btnUseCode = function(self)
+    self:OnClickUseCode()
+  end,
+  btnEmpty = function(self)
+    if me.nLevel >= BlissSharing.INVITE_AWARD.INVITER_LEVEL_REQ and not BlissSharing.tbInviteInfo.szMyInviteCode then
+      me.CenterMsg(i18n.EasyGet("\231\142\169\229\174\182\229\164\167\228\186\142{0}\231\186\167\239\188\140\230\151\160\230\179\149\230\191\128\230\180\187\233\130\128\232\175\183\231\160\129", BlissSharing.INVITE_AWARD.INVITER_LEVEL_REQ))
+    end
+  end
+}
+tbWnd.PANEL_TYPE = {
+  LEVEL_AWARD = 1,
+  INVITE_AWARD = 2,
+  INVITE_CODE = 3
+}
+tbWnd.PANEL_SETTING = {
+  [tbWnd.PANEL_TYPE.LEVEL_AWARD] = {
+    NAME = function()
+      return i18n.EasyGet("\231\173\137\231\186\167\229\165\150\229\138\177")
+    end,
+    OBJ = tbControls.goLevelAwards,
+    FUNC = "ShowLevelAward",
+    REDPOINT = "BlissSharingSelfAward"
+  },
+  [tbWnd.PANEL_TYPE.INVITE_AWARD] = {
+    NAME = function()
+      return i18n.EasyGet("\233\130\128\232\175\183\232\128\133\229\165\150\229\138\177")
+    end,
+    OBJ = tbControls.goInviteAwards,
+    FUNC = "ShowInviteAward",
+    REDPOINT = "BlissSharingInviteAward"
+  },
+  [tbWnd.PANEL_TYPE.INVITE_CODE] = {
+    NAME = function()
+      return i18n.EasyGet("\233\130\128\232\175\183\231\160\129")
+    end,
+    OBJ = tbControls.goInviteCode,
+    FUNC = "ShowInviteCode"
+  }
+}
+
+function tbWnd:OnCreate()
+  self.tbTypeScrollView = Ui:NewScrollView(self, tbControls.btnTypeTemp, self.SwitchPanel)
+  for nIndex, tbSetting in ipairs(self.PANEL_SETTING) do
+    self.tbTypeScrollView:SetElement(nIndex, function(tbElement)
+      tbElement.pPanel:Label_SetText("Text", tbSetting.NAME())
+      RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, "Main", {
+        RedPointMgr.EVENT[tbSetting.REDPOINT]
+      })
+    end)
+  end
+  self.tbLevelAwardScrollView = Ui:NewScrollView(self, tbControls.goLevelAwardTemp)
+  self.tbInviteLevelAwardScrollView = Ui:NewScrollView(self, tbControls.goInviteLevelAwardTemp)
+  self.tbInviteRechargeAwardScrollView = Ui:NewScrollView(self, tbControls.goInviteRechargeAwardTemp)
+end
+
+function tbWnd:OnOpen()
+  BlissSharing:QueryInviteInfo()
+  self.bGenCode = false
+  self.bUseCode = false
+  self.nPanelIndex = 0
+  self.tbTypeScrollView:SelectElement(self.PANEL_TYPE.LEVEL_AWARD)
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:SwitchPanel(nIndex)
+  if self.nPanelIndex == nIndex then
+    return
+  end
+  self.nPanelIndex = nIndex
+  for nOtherIndex, tbSetting in ipairs(self.PANEL_SETTING) do
+    self.pPanel:SetActive(tbSetting.OBJ, nOtherIndex == nIndex)
+  end
+  self[self.PANEL_SETTING[nIndex].FUNC](self)
+end
+
+function tbWnd:ShowLevelAward()
+  self.tbLevelAwardScrollView:Reset()
+  local tbSetting = BlissSharing.SELF_AWARD.LEVEL
+  local tbRedPointList = {}
+  for nIndex, tbInfo in ipairs(tbSetting.AWARD) do
+    self.tbLevelAwardScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("Level/txtLevelValue", tostring(tbInfo.COND))
+      if not tbElement.tbItemScrollView then
+        tbElement.tbItemScrollView = Ui:NewItemGridView(tbElement, "AwardList/Viewport/Content/ItemTemplate")
+      end
+      local tbItemScrollView = tbElement.tbItemScrollView
+      local tbAwardList = Award:GetAward(tbInfo.AWARD_ID, tbInfo.AWARD_KEY)
+      for nAwardIndex, tbAward in ipairs(tbAwardList) do
+        tbItemScrollView:SetItem(nAwardIndex, tbAward, true)
+      end
+      tbItemScrollView:ResetFrom(#tbAwardList + 1)
+      local nValue = me.GetUserValue(BlissSharing.SAVE_GROUP, BlissSharing.AWARD_SAVE_ID[BlissSharing.AWARD_TYPE.LEVEL])
+      local nFlag = Lib:LoadBits(nValue, nIndex - 1, nIndex - 1)
+      if 1 == nFlag then
+        pPanel:SetActive("btnGet", false)
+        pPanel:SetActive("imgRecieved", true)
+      else
+        pPanel:SetActive("btnGet", true)
+        pPanel:SetActive("imgRecieved", false)
+        if 0 == me.GetUserValue(BlissSharing.SAVE_GROUP, BlissSharing.SAVE_ID_INVITER) then
+          pPanel:Button_SetEnable("btnGet", false)
+          pPanel:Button_SetText("btnGet", i18n.EasyGet("\230\156\170\232\190\190\229\136\176"), "Text")
+        else
+          local bMeet = BlissSharing.AWARD_CHECKER[BlissSharing.AWARD_TYPE.LEVEL](me, tbInfo.COND)
+          if bMeet then
+            pPanel:Button_SetEnable("btnGet", true)
+            pPanel:Button_SetText("btnGet", i18n.EasyGet("\233\162\134\229\143\150"), "Text")
+            Ui:Button_BindEvent(pPanel, "btnGet", self.OnClickGetAward, self, BlissSharing.AWARD_TYPE.LEVEL, nIndex)
+            tbRedPointList[nIndex] = true
+          else
+            pPanel:Button_SetEnable("btnGet", false)
+            pPanel:Button_SetText("btnGet", i18n.EasyGet("\230\156\170\232\190\190\229\136\176"), "Text")
+          end
+        end
+      end
+    end)
+  end
+  for nIndex, _ in pairs(tbRedPointList) do
+    RedPointMgr:ForceLightRedPoint(self.tbLevelAwardScrollView:GetElement(nIndex).pPanel, "btnGet")
+  end
+  self.pPanel:Label_SetText(tbControls.txtLevelAwardInfo1, i18n.Get(tbSetting.DESC))
+  self.pPanel:Label_SetText(tbControls.txtLevelAwardInfo2, i18n.EasyGet("\230\180\187\229\138\168\230\151\182\233\151\180\232\135\179{0}", self:GetOpenDateDesc()))
+end
+
+function tbWnd:ShowInviteAward()
+  self.tbInviteLevelAwardScrollView:Reset()
+  self.tbInviteRechargeAwardScrollView:Reset()
+  local bHasAward = false
+  local tbSetting = BlissSharing.INVITE_AWARD.LEVEL
+  local tbRedPointList = {}
+  for nIndex, tbInfo in ipairs(tbSetting) do
+    self.tbInviteLevelAwardScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("ListTitleLevel/txtLevelValue", tostring(tbInfo.COND))
+      if not tbElement.tbItemGrid then
+        tbElement.tbItemGrid = Ui:NewExistItemGrid(tbElement, "Item/UIItemGrid")
+        tbElement.tbItemGrid:SetClickEnable(true)
+      end
+      local tbItemGrid = tbElement.tbItemGrid
+      local tbAward = Award:GetAward(tbInfo.AWARD_ID, tbInfo.AWARD_KEY)[1]
+      if tbAward[1] == Player.AwardType2Name[Player.award_type_item] then
+        tbItemGrid:SetItemByTemplate(tbAward[2], tbAward[3])
+      else
+        tbItemGrid:SetGenericItem(tbAward)
+      end
+      local nGotNum = 0
+      for nCnt = 1, BlissSharing.INVITEE_NUM_LIMIT do
+        local nValue = me.GetUserValue(BlissSharing.SAVE_GROUP, BlissSharing.INVITE_AWARD_SAVE_ID[BlissSharing.AWARD_TYPE.LEVEL] + nCnt - 1)
+        local nFlag = Lib:LoadBits(nValue, nIndex - 1, nIndex - 1)
+        if 0 ~= nFlag then
+          nGotNum = nGotNum + 1
+        end
+      end
+      local bDone = nGotNum >= BlissSharing.INVITEE_NUM_LIMIT
+      pPanel:SetActive("RecieveCount", not bDone)
+      pPanel:SetActive("btnGet", not bDone)
+      pPanel:SetActive("imgRecieved", bDone)
+      if not bDone then
+        pPanel:Label_SetText("RecieveCount/txtRecieveCountValue", string.format("%d/%d", nGotNum, BlissSharing.INVITEE_NUM_LIMIT))
+        local bMeet = BlissSharing.tbInviteInfo.tbLevelAwardFlag and BlissSharing.tbInviteInfo.tbLevelAwardFlag[nIndex] or false
+        if bMeet then
+          pPanel:Button_SetEnable("btnGet", true)
+          Ui:Button_BindEvent(pPanel, "btnGet", self.OnClickGetInviteAward, self, BlissSharing.AWARD_TYPE.LEVEL, nIndex)
+          tbRedPointList[nIndex] = true
+          bHasAward = true
+        else
+          pPanel:Button_SetEnable("btnGet", false)
+        end
+      end
+    end)
+  end
+  for nIndex, _ in pairs(tbRedPointList) do
+    RedPointMgr:ForceLightRedPoint(self.tbInviteLevelAwardScrollView:GetElement(nIndex).pPanel, "btnGet")
+  end
+  tbSetting = BlissSharing.INVITE_AWARD.RECHARGE
+  tbRedPointList = {}
+  for nIndex, tbInfo in ipairs(tbSetting) do
+    self.tbInviteRechargeAwardScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:SetActive("ListTitleRecharge/RechargeValue/imgMoney", false)
+      pPanel:Label_SetText("ListTitleRecharge/RechargeValue/txtRechargeValue", tostring(tbInfo.COND))
+      if not tbElement.tbItemGrid then
+        tbElement.tbItemGrid = Ui:NewExistItemGrid(tbElement, "Item/UIItemGrid")
+        tbElement.tbItemGrid:SetClickEnable(true)
+      end
+      local tbItemGrid = tbElement.tbItemGrid
+      local tbAward = Award:GetAward(tbInfo.AWARD_ID, tbInfo.AWARD_KEY)[1]
+      if tbAward[1] == Player.AwardType2Name[Player.award_type_item] then
+        tbItemGrid:SetItemByTemplate(tbAward[2], tbAward[3])
+      else
+        tbItemGrid:SetGenericItem(tbAward)
+      end
+      local nGotNum = 0
+      for nCnt = 1, BlissSharing.INVITEE_NUM_LIMIT do
+        local nValue = me.GetUserValue(BlissSharing.SAVE_GROUP, BlissSharing.INVITE_AWARD_SAVE_ID[BlissSharing.AWARD_TYPE.RECHARGE] + nCnt - 1)
+        local nFlag = Lib:LoadBits(nValue, nIndex - 1, nIndex - 1)
+        if 0 ~= nFlag then
+          nGotNum = nGotNum + 1
+        end
+      end
+      local bDone = nGotNum >= BlissSharing.INVITEE_NUM_LIMIT
+      pPanel:SetActive("RecieveCount", not bDone)
+      pPanel:SetActive("btnGet", not bDone)
+      pPanel:SetActive("imgRecieved", bDone)
+      if not bDone then
+        pPanel:Label_SetText("RecieveCount/txtRecieveCountValue", string.format("%d/%d", nGotNum, BlissSharing.INVITEE_NUM_LIMIT))
+        local bMeet = BlissSharing.tbInviteInfo.tbRechargeAwardFlag and BlissSharing.tbInviteInfo.tbRechargeAwardFlag[nIndex] or false
+        if bMeet then
+          pPanel:Button_SetEnable("btnGet", true)
+          Ui:Button_BindEvent(pPanel, "btnGet", self.OnClickGetInviteAward, self, BlissSharing.AWARD_TYPE.RECHARGE, nIndex)
+          tbRedPointList[nIndex] = true
+          bHasAward = true
+        else
+          pPanel:Button_SetEnable("btnGet", false)
+        end
+      end
+    end)
+  end
+  for nIndex, _ in pairs(tbRedPointList) do
+    RedPointMgr:ForceLightRedPoint(self.tbInviteRechargeAwardScrollView:GetElement(nIndex).pPanel, "btnGet")
+  end
+  self.pPanel:Label_SetText(tbControls.txtInvitedValue, string.format("%d/%d", BlissSharing.tbInviteInfo.nInviteeNum or 0, BlissSharing.INVITEE_NUM_LIMIT))
+  self.pPanel:Label_SetText(tbControls.txtInviteTime, i18n.EasyGet("\230\180\187\229\138\168\230\151\182\233\151\180\232\135\179{0}", self:GetOpenDateDesc()))
+  self.pPanel:Button_SetEnable(tbControls.btnGetAllInviteAward, bHasAward)
+end
+
+function tbWnd:ShowInviteCode()
+  self.pPanel:Label_SetText(tbControls.txtInviteDesc, i18n.Get(BlissSharing.INVITE_AWARD.DESC))
+  if BlissSharing.tbInviteInfo.szHisInviteCode then
+    self.pPanel:Input_SetText(tbControls.inSeekCode, BlissSharing.tbInviteInfo.szHisInviteCode)
+    self.pPanel:Input_SetEnable(tbControls.inSeekCode, false)
+    self.pPanel:Button_SetEnable(tbControls.btnCopyCode, false)
+    self.pPanel:Button_SetEnable(tbControls.btnUseCode, false)
+    self.pPanel:Button_SetText(tbControls.btnUseCode, i18n.EasyGet("\230\191\128\230\180\187\233\130\128\232\175\183\231\160\129"), "Text")
+    self.pPanel:SetActive(tbControls.btnEmpty, false)
+    self.bGenCode = false
+    self.bUseCode = false
+    return
+  end
+  if me.nLevel >= BlissSharing.INVITE_AWARD.INVITER_LEVEL_REQ then
+    if BlissSharing.tbInviteInfo.szMyInviteCode then
+      self.pPanel:Input_SetText(tbControls.inSeekCode, BlissSharing.tbInviteInfo.szMyInviteCode)
+      self.pPanel:Input_SetEnable(tbControls.inSeekCode, false)
+      self.pPanel:Button_SetEnable(tbControls.btnCopyCode, true)
+      self.pPanel:Button_SetEnable(tbControls.btnUseCode, false)
+      self.pPanel:Button_SetText(tbControls.btnUseCode, i18n.EasyGet("\231\148\159\230\136\144\233\130\128\232\175\183\231\160\129"), "Text")
+      self.pPanel:SetActive(tbControls.btnEmpty, false)
+      self.bGenCode = false
+      self.bUseCode = false
+    else
+      self.pPanel:Input_SetText(tbControls.inSeekCode, "")
+      self.pPanel:Input_SetEnable(tbControls.inSeekCode, false)
+      self.pPanel:Button_SetEnable(tbControls.btnCopyCode, false)
+      self.pPanel:Button_SetEnable(tbControls.btnUseCode, true)
+      self.pPanel:Button_SetText(tbControls.btnUseCode, i18n.EasyGet("\231\148\159\230\136\144\233\130\128\232\175\183\231\160\129"), "Text")
+      self.pPanel:SetActive(tbControls.btnEmpty, true)
+      self.bGenCode = true
+      self.bUseCode = false
+    end
+  else
+    self.pPanel:Input_SetText(tbControls.inSeekCode, "")
+    self.pPanel:Input_SetEnable(tbControls.inSeekCode, true)
+    self.pPanel:Button_SetEnable(tbControls.btnCopyCode, false)
+    self.pPanel:Button_SetEnable(tbControls.btnUseCode, true)
+    self.pPanel:Button_SetText(tbControls.btnUseCode, i18n.EasyGet("\230\191\128\230\180\187\233\130\128\232\175\183\231\160\129"), "Text")
+    self.pPanel:SetActive(tbControls.btnEmpty, false)
+    self.bGenCode = false
+    self.bUseCode = true
+  end
+end
+
+function tbWnd:GetOpenDateDesc()
+  local nTime = GetServerCreateTime()
+  nTime = nTime - (nTime + Lib:GetGMTSec()) % 86400 + 14400
+  nTime = nTime + BlissSharing.CONDITION.SERVER_OPEN_DAY_LIMIT * 24 * 3600
+  local szTime = Lib:TimeDesc7(nTime)
+  return szTime
+end
+
+function tbWnd:OnClickGetAward(szType, nIndex)
+  BlissSharing:GetAward(szType, nIndex)
+end
+
+function tbWnd:OnClickGetInviteAward(szType, nIndex)
+  BlissSharing:GetInviteAward(szType, nIndex)
+end
+
+function tbWnd:OnClickGetAllInviteAward()
+  BlissSharing:GetAllInviteAward()
+end
+
+function tbWnd:OnClickCopyCode()
+  local szCode = self.pPanel:Input_GetText(tbControls.inSeekCode)
+  if "" ~= szCode then
+    Ui.ToolFunction.CopyText(szCode)
+    me.CenterMsg(i18n.EasyGet("\229\164\141\229\136\182\230\136\144\229\138\159\239\188\129"))
+  end
+end
+
+function tbWnd:OnClickUseCode()
+  if self.bGenCode then
+    BlissSharing:GenInviteCode()
+    return
+  end
+  if self.bUseCode then
+    local szCode = self.pPanel:Input_GetText(tbControls.inSeekCode)
+    if "" ~= szCode then
+      BlissSharing:UseInviteCode(szCode)
+    end
+  end
+end
+
+function tbWnd:OnRefresh()
+  if self.nPanelIndex then
+    self[self.PANEL_SETTING[self.nPanelIndex].FUNC](self)
+  end
+end

@@ -1,0 +1,231 @@
+Require("Script/Fuben/FubenUIController.lua")
+DragonBoatRace = DragonBoatRace or {}
+DragonBoatRace.tbRankList = {}
+DragonBoatRace.nShowTime = 0
+DragonBoatRace.nReceiveTime = 0
+DragonBoatRace.RaceMap = DragonBoatRace.RaceMap or {}
+local RaceMap = DragonBoatRace.RaceMap
+
+function DragonBoatRace:RegisterFubenUIChecker()
+  FubenUIController:RegisterChecker({
+    DragonBoatRace.Cfg.nPreMapTemplate
+  }, self)
+end
+
+function DragonBoatRace:RegisterRaceMapUIChecker()
+  FubenUIController:RegisterChecker({
+    DragonBoatRace.Cfg.nRaceMapTemplate
+  }, RaceMap)
+end
+
+function DragonBoatRace:OnFubenMapLoaded(pPlayer)
+  FubenUIController:OpenFuBenUI()
+  if Ui:WindowVisible("UIDuanWuActivity") then
+    Ui:CloseWindow("UIDuanWuActivity")
+  end
+  if Ui:WindowVisible("UIHud") then
+    Ui:GetWindow("UIHud"):SetSitButtonVisable(false)
+  end
+  self.bEnd = false
+end
+
+function DragonBoatRace:OnLeave()
+  FubenUIController:CloseFubenUI()
+  self.IsCanExit = nil
+end
+
+function DragonBoatRace:IsNeedExitFubenButton()
+  return self.IsCanExit or false
+end
+
+function DragonBoatRace:RequieExit()
+  FubenUIController:RequireQuit()
+end
+
+function DragonBoatRace:SetCanExit(bCanExit)
+  self.IsCanExit = bCanExit
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+DragonBoatRace:RegisterFubenUIChecker()
+DragonBoatRace:RegisterRaceMapUIChecker()
+
+function DragonBoatRace:ShowReadyGo(szProgress, nTime)
+  Ui:OpenWindow("UIReadyGo", DragonBoatRace.Cfg.nReadyGoTime)
+  DragonBoatRace:OnSyncData(self.tbRankList, DragonBoatRace.Cfg.nReadyGoTime)
+end
+
+function DragonBoatRace:ShowRank()
+  Ui:OpenHudFubenCustomWithTeam("UIDuanWuOutputInfo")
+end
+
+function DragonBoatRace:OnSyncData(tbRankList, nTime)
+  self.nReceiveTime = GetTime()
+  self.nShowTime = nTime
+  self.tbRankList = tbRankList
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DRAGONBOATRACE_DATA_SYNC)
+end
+
+function DragonBoatRace:OnS2CSyncMathcResult(tbMatchResult)
+  Ui:OpenWindow("UIBattleRankDuanWu", tbMatchResult)
+end
+
+function DragonBoatRace:InitUI(tbRankList, nTime)
+  self:ShowRank()
+  DragonBoatRace:FadeRedPoint()
+  self:OnSyncData(tbRankList, nTime)
+end
+
+function DragonBoatRace:ShowEndEffect()
+  self.bEnd = true
+  Ui:OpenWindow("UIArenaResult", 1, nil, i18n.EasyGet("\230\175\148\232\181\155\231\187\147\230\157\159"))
+end
+
+function DragonBoatRace:UpdatePreMapCount(nTime, nCount)
+  local szProgress = i18n.EasyGet("\231\173\137\229\190\133\228\184\139\228\184\128\232\189\174\230\175\148\232\181\155\229\188\128\229\144\175")
+  local szIntro = i18n.EasyGet("\229\189\147\229\137\141\229\135\134\229\164\135\229\156\186\228\186\186\230\149\176\239\188\154{0}", nCount)
+  FubenUIController:ShowInfo(nil, szProgress, {nTime}, szIntro)
+end
+
+function DragonBoatRace:GetPlayerOneSkillInfoWithoutConfig(nSortInUI)
+  local tbInfo = self.tbSkills[nSortInUI]
+  local nSkillId = tbInfo.SkillId
+  local nSkillLevel = me.GetSkillLevel(nSkillId)
+  local nSkillInfoLevel = nSkillLevel
+  if not nSkillInfoLevel or nSkillInfoLevel <= 0 then
+    nSkillInfoLevel = 1
+  end
+  local tbSkillInfo = FightSkill:GetSkillSetting(nSkillId, nSkillInfoLevel)
+  local nMaxSkillLevel = 1
+  local bMax = nSkillLevel >= nMaxSkillLevel
+  local szCurMagicDesc, szNextMagicDesc, szClassName = FightSkill:FormatMagicDesc(nSkillId, nSkillLevel)
+  local tbSkillResultInfo = {
+    nId = nSkillId,
+    nLevel = nSkillLevel,
+    nMaxLevel = nMaxSkillLevel,
+    bMax = bMax,
+    szName = tbSkillInfo.SkillName or "",
+    szDesc = tbSkillInfo.Desc or "",
+    szProperty = tbSkillInfo.Property or "",
+    nCD = tbSkillInfo.TimePerCast or 0,
+    bPassive = tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_passivity or tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_inst_missile,
+    nRadius = tbSkillInfo.AttackRadius or 0,
+    nSort = tbInfo.SortInUI,
+    szIconAltlas = tbInfo.szIconAltlas,
+    szCurMagicDesc = szCurMagicDesc or "",
+    szNextMagicDesc = szNextMagicDesc or "",
+    szClassName = szClassName or "",
+    bNotNextInfo = bMax
+  }
+  if tbSkillResultInfo.IsAura then
+    tbSkillResultInfo.bPassive = true
+  end
+  return tbSkillResultInfo
+end
+
+function RaceMap:OnFubenMapLoaded()
+  FubenUIController:OpenFuBenUI()
+  DragonBoatRace:ShowRank()
+  local tbOptList = {}
+  local tb = {
+    Text = i18n.Get(DragonBoatRace.Cfg.szTeachDialog),
+    OptList = tbOptList
+  }
+  Dialog:ShowNpcDialog(tb, me, DragonBoatRace.Cfg.nTeachDialogNpc)
+end
+
+function RaceMap:OnLeave()
+  FubenUIController:CloseFubenUI()
+  Ui:CloseWindow("UIBattleRankDuanWu")
+end
+
+function DragonBoatRace:CheckInDragonBoatRace()
+  if me.nMapTemplateId == DragonBoatRace.Cfg.nPreMapTemplate or me.nMapTemplateId == DragonBoatRace.Cfg.nRaceMapTemplate then
+    return true
+  else
+    return false
+  end
+end
+
+function DragonBoatRace:ResetAttrbuteModule()
+  for szClass, tbClass in pairs(AttributeModule.tbModule) do
+    if AttributeModule.bEnable[szClass] and not self.tbIgnoredModuleList[szClass] and tbClass.OnUnEquip then
+      tbClass:OnUnEquip(me)
+    end
+  end
+end
+
+function DragonBoatRace:ResetLianHuaSuitAttr()
+  Item.EquipLianHua:RemoveSuitAttr(me)
+end
+
+function DragonBoatRace:FadeRedPoint()
+  local tbEventList = {
+    RedPointMgr.EVENT.PotentialPointLeft
+  }
+  for index, nEvent in ipairs(tbEventList) do
+    RedPointMgr:FadeRedPoint(nEvent)
+  end
+end
+
+function DragonBoatRace:LightSignRedPoint()
+  local bLight = true
+  local nJoinCount = DegreeCtrl:GetDegree(me, self.szDegreeName)
+  if nJoinCount <= 0 then
+    bLight = false
+  end
+  if bLight then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.DragonBoatRace)
+  end
+end
+
+function DragonBoatRace:TrySyncInfo()
+  RemoteServer.DragonBoatRaceRequest("TrySyncInfo")
+end
+
+function DragonBoatRace:OnSyncInfo(nRet, nLeftTime, nTotalNum)
+  local szState = Lib:IIF(nRet == self.GAME_STATE.CLOSE, i18n.EasyGet("\230\178\167\230\181\170\231\171\158\233\128\159\230\156\170\229\188\128\229\144\175"), i18n.EasyGet("\230\178\167\230\181\170\231\171\158\233\128\159\230\138\165\229\144\141\228\184\173"))
+  if not Ui:WindowVisible("UIBattleEntrance_Common") then
+    local szDegreeName = "DragonBoatRace"
+    local tbInfo = Item:GetClass("CountAddProp"):GetAddDegreeInfo(szDegreeName)
+    local tbData = {
+      szDegreeName = szDegreeName,
+      szOpenTimeDesc = self.Cfg.szOpenTimeDesc,
+      tbUpdateFn = {
+        self.TryGetInfo,
+        self
+      },
+      tbSignUpFn = {
+        self.RequestSignUp,
+        self
+      },
+      szTittle = i18n.EasyGet("\230\178\167\230\181\170\231\171\158\233\128\159"),
+      szState = szState
+    }
+    Ui:OpenWindow("UIBattleEntrance_Common", tbData)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UI_BATTLEENTRANCE_COMMON_UPDATE, szState, nTotalNum or 0, nLeftTime)
+end
+
+function DragonBoatRace:TryGetInfo()
+  self:TrySyncInfo()
+end
+
+function DragonBoatRace:RequestSignUp()
+  if DegreeCtrl:GetDegree(me, self.szDegreeName) <= 0 then
+    me.CenterMsg(i18n.Get(self.Cfg.Msg.DegreeNotEnough))
+    return
+  end
+  
+  local function fCall()
+    RemoteServer.DragonBoatRaceRequest("SignUp")
+  end
+  
+  local bRet, szErr = ActivityCheck:CheckCanEnterActivityEx(me, nil, fCall, false, true, true, nil, {
+    "UIBattleEntrance_Common"
+  }, false)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+end

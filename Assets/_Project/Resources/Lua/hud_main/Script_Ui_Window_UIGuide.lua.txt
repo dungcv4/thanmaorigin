@@ -1,0 +1,728 @@
+Require("CommonScript/Guide/GuideDef.lua")
+local tbWnd = Ui:CreateWindow("UIGuide")
+tbWnd.GuideID = 0
+tbWnd.GuideStep = 0
+tbWnd.WorkingGroup = nil
+tbWnd.ActivateObject = {}
+tbWnd.WorkingForeground = nil
+tbWnd.WorkingHighLight = nil
+tbWnd.WorkingBackground = nil
+tbWnd.WorkingBtnGroup = nil
+local tbControls = {
+  BtnGroup = "imgBG/BtnGroup",
+  ForegroundGroup = "imgBG/ForegroundGroup",
+  DefaultBtn = "imgBG/DefaultBtn",
+  Background = "imgBG/mask_bg",
+  BtnSkip = "imgBG/BtnSkip",
+  CommonDialog = "imgBG/CommonDialog",
+  CommonDialogText = "imgBG/CommonDialog/bg/Text",
+  CommonDialogBtnOK = "imgBG/CommonDialog/bg/btnOK",
+  DynamicHighLight = "imgBG/DynamicHighLight",
+  Region = "imgBG/DynamicHighLight/Region",
+  HightLightHand = "imgBG/DynamicHighLight/Region/handIcon",
+  TopComment = "imgBG/DynamicHighLight/Region/TopComment",
+  BottomComment = "imgBG/DynamicHighLight/Region/BottomComment",
+  LeftComment = "imgBG/DynamicHighLight/Region/LeftComment",
+  RightComment = "imgBG/DynamicHighLight/Region/RightComment",
+  Hint = "imgBG/DynamicHighLight/Hint",
+  SkillGuide1 = "imgBG/ForegroundGroup/SkillGuide1",
+  SkillGuide2 = "imgBG/ForegroundGroup/SkillGuide2",
+  SkillGuide3 = "imgBG/ForegroundGroup/SkillGuide3"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  DefaultBtn = function(self)
+    self.pPanel:SetActive(self.DefaultBtn, false)
+    self:FinishGuideStep()
+  end,
+  BtnSkip = function(self)
+    Guide:FinishWholeGuide(self.GuideID)
+  end,
+  CommonDialogBtnOK = function(self)
+  end
+}
+tbWnd.funcRelease = {}
+tbWnd.ForegroundHandle = {
+  DialogSelection1 = function(self)
+    local wnd = Ui:GetWindow("UINpcDialog")
+    if wnd then
+      local elem = wnd.tbScrollView:GetElement(1)
+      if elem then
+        elem.pPanel:SetActive("FX", true)
+        table.insert(self.funcRelease, function()
+          local wnd = Ui:GetWindow("UINpcDialog")
+          if wnd then
+            local elem = wnd.tbScrollView:GetElement(1)
+            if elem then
+              elem.pPanel:SetActive("FX", false)
+            end
+          end
+        end)
+      end
+    end
+  end,
+  IntroduceJoystick = function(self)
+    local wnd = Ui:GetWindow("UIJoyStick")
+    wnd:SetHandActive(true)
+    table.insert(self.funcRelease, function()
+      local wnd = Ui:GetWindow("UIJoyStick")
+      if wnd then
+        wnd:SetHandActive(false)
+      end
+    end)
+  end
+}
+
+function tbWnd:FinishEventHandle_ButtonEvent(szPath)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_BUTTON_EVENT, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_BUTTON_EVENT, function(self, szPathInner)
+    if szPath == szPathInner then
+      self:FinishGuideStep()
+    end
+  end, self)
+  table.insert(self.funcRelease, function()
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_BUTTON_EVENT, self)
+  end)
+end
+
+function tbWnd:FinishEventHandle_ToggleEvent(szPath, bIsOn)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_TOGGLE_EVENT, function(self, szPathInner, bInnerIsOn)
+    if szPath == szPathInner and bIsOn == bInnerIsOn then
+      self:FinishGuideStep()
+    end
+  end, self)
+  table.insert(self.funcRelease, function()
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_TOGGLE_EVENT, self)
+  end)
+end
+
+local tbFactionSectToAnotherIndex = {
+  [1] = 1,
+  [0] = 2
+}
+tbWnd.FinishEventHandle = {
+  AnyClick = function(self)
+    self.pPanel:SetActive(self.DefaultBtn, true)
+  end,
+  Timeout = function(self, szTime)
+    local nTime = tonumber(szTime)
+    self.nTimer_Finish = Timer:Register(Env.GAME_FPS * nTime, self.FinishGuideStep, self)
+  end,
+  Move = function(self)
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_MOVE_BY_STICK, function()
+      self:FinishGuideStep()
+    end, self)
+    table.insert(self.funcRelease, function()
+      EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MOVE_BY_STICK, self)
+    end)
+  end,
+  Talk = function(self, nNpcTemplateID)
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_TALK_TO_NPC, function(self, nTemplateID)
+      if nTemplateID ~= tonumber(nNpcTemplateID) then
+        return
+      end
+      self:FinishGuideStep()
+    end, self)
+    table.insert(self.funcRelease, function()
+      EventNotify:UnRegistNotify(EventNotify.emNOTIFY_TALK_TO_NPC, self)
+    end)
+  end,
+  OpenUI = function(self, szUIName)
+    self.pPanel:SetActive(self.DefaultBtn, false)
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_WND_OPENED, function(self, szUI)
+      if szUIName ~= szUI then
+        return
+      end
+      self:FinishGuideStep()
+    end, self)
+    table.insert(self.funcRelease, function()
+      EventNotify:UnRegistNotify(EventNotify.emNOTIFY_WND_OPENED, self)
+    end)
+  end,
+  Try2DoSkill = function(self, ...)
+    local tbSkillList = {
+      ...
+    }
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_TRY_USE_SKILL, function(self, nUISkill)
+      for _, szUISkillID in pairs(tbSkillList) do
+        if tonumber(szUISkillID) == nUISkill then
+          self:FinishGuideStep()
+          return
+        end
+      end
+    end, self)
+    table.insert(self.funcRelease, function()
+      EventNotify:UnRegistNotify(EventNotify.emNOTIFY_TRY_USE_SKILL, self)
+    end)
+  end,
+  Try2DoJump = function(self)
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_TRY_USE_JUMP, function(self)
+      self:FinishGuideStep()
+    end, self)
+    table.insert(self.funcRelease, function()
+      EventNotify:UnRegistNotify(EventNotify.emNOTIFY_TRY_USE_JUMP, self)
+    end)
+  end,
+  ButtonEvent = function(self, szPath)
+    self:FinishEventHandle_ButtonEvent(szPath)
+  end,
+  ToggleEvent = function(self, szPath, szIsOn)
+    self:FinishEventHandle_ToggleEvent(szPath, "0" ~= szIsOn)
+  end,
+  ClickBagItemByTempID = function(self, szTemplateId)
+    local wnd = Ui:GetWindow("UIBag")
+    local bFind = false
+    if nil ~= wnd then
+      local panelItemGrid = wnd:FindBagItemGridByTemplateID(tonumber(szTemplateId))
+      if nil ~= panelItemGrid then
+        local szPath = Ui:GetUIGameObjectKey(panelItemGrid.pPanel.gameObject) .. "/" .. panelItemGrid.btnClick
+        if nil ~= szPath then
+          self:FinishEventHandle_ButtonEvent(szPath)
+          bFind = true
+        end
+      end
+    end
+    if not bFind then
+      Guide:FinishWholeGuide(self.GuideID)
+      LogWarn("Guide:ClickBagItemByTempID fail! GuideID:", self.GuideID)
+    end
+  end,
+  ClickButtonInUIEquipTips = function(self, szButtonType)
+    local szUiPanelName = "UIEquipTips"
+    local wnd = Ui:GetWindow(szUiPanelName)
+    local bFindButton = false
+    if nil ~= wnd then
+      local nButtonType = Ui.UIEquipTips.tbDynamicOperationTypeEnum[szButtonType]
+      if nil ~= nButtonType then
+        local szButtonKey = wnd:GetDynamicButtonPath(nButtonType)
+        if nil ~= szButtonKey then
+          self:FinishEventHandle_ButtonEvent(szUiPanelName .. "/" .. szButtonKey)
+          bFindButton = true
+        end
+      end
+    end
+    if not bFindButton then
+      Guide:FinishWholeGuide(self.GuideID)
+      LogWarn("Guide:ClickButtonInUIEquipTips fail! GuideID:", self.GuideID)
+    end
+  end,
+  ClickALevelXuanJingInEquip = function(self, szLevel)
+    local wnd = Ui:GetWindow("UIEquipment")
+    local bFind = false
+    if nil ~= wnd then
+      local panelEnhance = wnd.tbTabControl.tbPanelList[Ui.UIEquipment.tbSubPanelIndex.PANEL_TYPE_ENHANCE]
+      if nil ~= panelEnhance then
+        local panelItemGrid = panelEnhance:GetXuanJingInBagUIItemGrid(tonumber(szLevel))
+        local szPath = Ui:GetUIGameObjectKey(panelItemGrid.pPanel.gameObject) .. "/" .. panelItemGrid.btnClick
+        if nil ~= szPath then
+          self:FinishEventHandle_ButtonEvent(szPath)
+          bFind = true
+        end
+      end
+    end
+    if not bFind then
+      Guide:FinishWholeGuide(self.GuideID)
+      LogWarn("Guide:ClickALevelXuanJingInEquip fail! GuideID:", self.GuideID)
+    end
+  end,
+  ClickInsetButtonInEquipInsetPanel = function(self, szTemplateID)
+    local wnd = Ui:GetWindow("UIEquipment")
+    local bFind = false
+    if nil ~= wnd then
+      local wndEquipStone = wnd.tbTabControl.tbPanelList[Ui.UIEquipment.tbSubPanelIndex.PANEL_TYPE_STONE]
+      if wndEquipStone then
+        local tbAStonePanel = wndEquipStone:FindCanInsertStone(tonumber(szTemplateID))
+        if nil ~= tbAStonePanel then
+          local btnAddGameObject = tbAStonePanel.pPanel:GetObject("btnAdd").gameObject
+          local szPath = Ui:GetUIGameObjectKey(btnAddGameObject)
+          if nil ~= szPath then
+            self:FinishEventHandle_ButtonEvent(szPath)
+            bFind = true
+          end
+        end
+      end
+    end
+    if not bFind then
+      Guide:FinishWholeGuide(self.GuideID)
+      LogWarn("Guide:ClickInsetButtonInEquipInsetPanel fail! GuideID:", self.GuideID)
+    end
+  end,
+  MoveDownScrollRectShowUI = function(self, szUIWnd, szScrollRect, szShowUIPath)
+    local tbInnerWnd = Ui:GetWindow(szUIWnd)
+    local scrollRect = tbInnerWnd[szScrollRect]
+    local fViewportHeight = scrollRect.viewport.rect.height
+    local fContentHeight = scrollRect.content.rect.height
+    if fViewportHeight >= fContentHeight then
+      self:FinishGuideStep()
+    else
+      local showUITransform = tbInnerWnd.pPanel:GetObject(szShowUIPath).transform
+      local fShowUILocalYValue = showUITransform.rect.yMin + showUITransform.localPosition.y
+      local fShowUIVerticalNormalizedPosition = (fContentHeight + fShowUILocalYValue) / (fContentHeight - fViewportHeight)
+      
+      local function fnListenMoveDown(vec2)
+        if vec2.y <= fShowUIVerticalNormalizedPosition then
+          self:FinishGuideStep()
+        end
+      end
+      
+      scrollRect.onValueChanged:AddListener(fnListenMoveDown)
+      table.insert(self.funcRelease, function()
+        scrollRect.onValueChanged:RemoveAllListeners()
+      end)
+    end
+  end,
+  ClickAnotherSectButtonInFactionSkillPanel = function(self)
+    local wnd = Ui:GetWindow("UISkill")
+    local bFind = false
+    if nil ~= wnd then
+      local wndFactionSkill = wnd.tbTabControl.tbPanelList[wnd.PANEL_TYPE_FACTION]
+      if nil ~= wndFactionSkill then
+        local nButtonIndex = tbFactionSectToAnotherIndex[me.nFactionSect]
+        local szButtonKey = wndFactionSkill.tbFactionGroup.tbBtnKeyList[nButtonIndex]
+        local btnGameObject = wndFactionSkill.pPanel:GetObject(szButtonKey).gameObject
+        local szPath = Ui:GetUIGameObjectKey(btnGameObject)
+        if nil ~= szPath then
+          self:FinishEventHandle_ButtonEvent(szPath)
+          bFind = true
+        end
+      end
+    end
+    if not bFind then
+      Guide:FinishWholeGuide(self.GuideID)
+      LogWarn("Guide:ClickAnotherSectButtonInFactionSkillPanel fail! GuideID:", self.GuideID)
+    end
+  end
+}
+tbWnd.FailEventHandle = {
+  SwitchRightHudPanel = function(self, bSystemPanel)
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_TRY_SWITCH_RIGHT_HUD_PANEL, function(self, isShowSystemPanel)
+      if tostring(isShowSystemPanel) == bSystemPanel then
+        self:CloseGuideStep()
+      end
+    end, self)
+    table.insert(self.funcRelease, function()
+      EventNotify:UnRegistNotify(EventNotify.emNOTIFY_TRY_SWITCH_RIGHT_HUD_PANEL, self)
+    end)
+  end,
+  CloseHudRightBottomPanel = function(self)
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_ON_CLOSE_HUD_RIGHT_BOTTOM, function(self)
+      self:CloseGuideStep()
+    end, self)
+    table.insert(self.funcRelease, function()
+      EventNotify:UnRegistNotify(EventNotify.emNOTIFY_ON_CLOSE_HUD_RIGHT_BOTTOM, self)
+    end)
+  end
+}
+tbWnd.JumpCondition = {
+  IsShenheVersion = function(self)
+    return Ui.GameEnv.IsShenHe
+  end,
+  TaskFinished = function(self, szTaskId)
+    return Task:IsFinished(tonumber(szTaskId))
+  end,
+  CheckFightState = function(self, szState)
+    local nFightMode = me.nFightMode
+    if nFightMode == tonumber(szState) then
+      return true
+    end
+    return false
+  end,
+  HasMed = function(self, num)
+    return MedicineMgr:HasMedicine()
+  end,
+  HasPartner = function(self)
+    return false
+  end,
+  HasMaster = function(self)
+    local tbMP = MasterPrentice:GetMPInfo(me)
+    return tbMP and tbMP.tbMyMaster and #tbMP.tbMyMaster > 0
+  end,
+  HasPrentice = function(self)
+    local tbMP = MasterPrentice:GetMPInfo(me)
+    return tbMP and tbMP.tbMyPrentices and #tbMP.tbMyPrentices > 0
+  end,
+  InBattleHud = function(self)
+    local wndRB = Ui:GetWindow("UIHudRightBottom")
+    if wndRB then
+      return wndRB.isShowSystemPanel
+    end
+    return false
+  end,
+  InLeftHud = function(self, szIdx)
+    local leftHud = Ui:GetWindow("UIHudLeftFrameExt")
+    if leftHud then
+      return leftHud.CurrentPanel == tonumber(szIdx)
+    end
+    return false
+  end,
+  LifeSkillSetSpecial = function(self)
+    local tbPlayerData = LifeSkill:GetClientData()
+    local nPlayerSpecialtyId = tbPlayerData.nSpecialty
+    return nil ~= nPlayerSpecialtyId
+  end,
+  HasSocialJieYi = function(self)
+    return SocialJieYi:GetJieYiData() ~= nil
+  end,
+  UICardPickingInYuanBaoSubPanel = function(self)
+    local tbUIWnd = Ui:GetWindow(Partner.szCardPickingUIClassName)
+    return nil ~= tbUIWnd and tbUIWnd.nCurCardPickType == Ui.UICardPicking.tbSubPanelIndex.PANEL_TYPE_YUANBAO
+  end,
+  HavePartner = function(self)
+    local nHavePartnerKey = Task.SubTaskManager.tbEventFinishKey.havePartner
+    return 1 == me.GetUserValue(GetGroupKey("SubTaskEventFinish"), nHavePartnerKey)
+  end,
+  HaveShenBingIdentify = function(self)
+    local nHaveIdentifyKey = 33
+    return 1 == me.GetUserValue(GetGroupKey("SubTaskEventFinish"), nHaveIdentifyKey)
+  end,
+  HaveShenBingPutOn = function(self)
+    local nHavePutOnKey = 27
+    return 1 == me.GetUserValue(GetGroupKey("SubTaskEventFinish"), nHavePutOnKey)
+  end,
+  HaveShenBingActivate = function(self)
+    local nHaveActivateKey = 28
+    return 1 == me.GetUserValue(GetGroupKey("SubTaskEventFinish"), nHaveActivateKey)
+  end
+}
+
+function tbWnd:UpdateSortingLayer(targetPanel)
+  if not self.nOverrideSortingOrder then
+    self.RelativeSortingGroup:SetSortingOrder(targetPanel:GetMaxSortingOrderInChildren() + 1)
+  end
+end
+
+tbWnd.DynamicMaskElemHandle = {
+  FindBagItemByTempID = function(self, szTemplateId)
+    local wnd = Ui:GetWindow("UIBag")
+    if nil ~= wnd then
+      local tbItemGrid = wnd:FindBagItemGridByTemplateID(tonumber(szTemplateId))
+      if nil ~= tbItemGrid then
+        local path = Ui:GetUIGameObjectKey(tbItemGrid.pPanel.gameObject)
+        if nil ~= path then
+          local nIndex = string.find(path, "/")
+          self:DynamicTraceByPath(string.sub(path, 1, nIndex - 1), string.sub(path, nIndex + 1))
+        end
+      end
+    end
+  end,
+  FindButtonInUIEquipTips = function(self, szButtonType)
+    local szUiPanelName = "UIEquipTips"
+    local wnd = Ui:GetWindow(szUiPanelName)
+    if nil ~= wnd then
+      local nButtonType = Ui.UIEquipTips.tbDynamicOperationTypeEnum[szButtonType]
+      if nil ~= nButtonType then
+        local szButtonKey = wnd:GetDynamicButtonPath(nButtonType)
+        if nil ~= szButtonKey then
+          self:DynamicTraceByPath(szUiPanelName, szButtonKey)
+        else
+          LogErr("szButtonType:", szButtonType, "is not exsit in this equip")
+        end
+      else
+        LogErr("szButtonType:", szButtonType, "is not legal")
+      end
+    else
+      self:CloseGuideStep()
+    end
+  end,
+  FindALevelXuanJingInEquip = function(self, szLevel)
+    local wnd = Ui:GetWindow("UIEquipment")
+    if nil ~= wnd then
+      local panelEnhance = wnd.tbTabControl.tbPanelList[Ui.UIEquipment.tbSubPanelIndex.PANEL_TYPE_ENHANCE]
+      if nil ~= panelEnhance then
+        local tbItemGrid = panelEnhance:GetXuanJingInBagUIItemGrid(tonumber(szLevel))
+        local szPath = Ui:GetUIGameObjectKey(tbItemGrid.pPanel.gameObject)
+        if nil ~= szPath then
+          local nIndex = string.find(szPath, "/")
+          self:DynamicTraceByPath(string.sub(szPath, 1, nIndex - 1), string.sub(szPath, nIndex + 1))
+        end
+      end
+    end
+  end,
+  FindArenaAboveSelfChallengeButton = function(self)
+    local wnd = Ui:GetWindow("UIArena")
+    if nil ~= wnd then
+      local szPath = Ui:GetUIGameObjectKey(wnd:GetChallengeButtonFromItemInfo(wnd:GetAboveSelfChallengeItemInfo()))
+      if nil ~= szPath then
+        local nIndex = string.find(szPath, "/")
+        self:DynamicTraceByPath(string.sub(szPath, 1, nIndex - 1), string.sub(szPath, nIndex + 1))
+      end
+    end
+  end,
+  FindInsetButtonInEquipInsetPanel = function(self, szTemplateID)
+    local wnd = Ui:GetWindow("UIEquipment")
+    if nil ~= wnd then
+      local wndEquipStone = wnd.tbTabControl.tbPanelList[Ui.UIEquipment.tbSubPanelIndex.PANEL_TYPE_STONE]
+      if wndEquipStone then
+        local tbAStonePanel = wndEquipStone:FindCanInsertStone(tonumber(szTemplateID))
+        if nil ~= tbAStonePanel then
+          local btnAddGameObject = tbAStonePanel.pPanel:GetObject("btnAdd").gameObject
+          local szPath = Ui:GetUIGameObjectKey(btnAddGameObject)
+          if nil ~= szPath then
+            local nIndex = string.find(szPath, "/")
+            self:DynamicTraceByPath(string.sub(szPath, 1, nIndex - 1), string.sub(szPath, nIndex + 1))
+          end
+        end
+      end
+    end
+  end,
+  FindAnotherSectButtonInFactionSkillPanel = function(self)
+    local wnd = Ui:GetWindow("UISkill")
+    if nil ~= wnd then
+      local wndFactionSkill = wnd.tbTabControl.tbPanelList[wnd.PANEL_TYPE_FACTION]
+      if nil ~= wndFactionSkill then
+        local nButtonIndex = tbFactionSectToAnotherIndex[me.nFactionSect]
+        local szButtonKey = wndFactionSkill.tbFactionGroup.tbBtnKeyList[nButtonIndex]
+        local btnGameObject = wndFactionSkill.pPanel:GetObject(szButtonKey).gameObject
+        local szPath = Ui:GetUIGameObjectKey(btnGameObject)
+        if nil ~= szPath then
+          local nIndex = string.find(szPath, "/")
+          print("DynamicTraceByPath", string.sub(szPath, 1, nIndex - 1), string.sub(szPath, nIndex + 1))
+          self:DynamicTraceByPath(string.sub(szPath, 1, nIndex - 1), string.sub(szPath, nIndex + 1))
+        end
+      end
+    end
+  end
+}
+
+function tbWnd:CheckJumpCondition(szJumpCondition)
+  local EventList = Lib:SplitStr(szJumpCondition, "|")
+  for _, Event in pairs(EventList) do
+    local Params = Lib:SplitStr(Event, ",")
+    local Args = {}
+    for idx = 2, #Params do
+      table.insert(Args, Params[idx])
+    end
+    if tbWnd.JumpCondition[Params[1]] and tbWnd.JumpCondition[Params[1]](self, table.unpack(Args)) == true then
+      return true
+    end
+  end
+  return false
+end
+
+function tbWnd:ProcessFinishEvent(szFinishEvent)
+  local EventList = Lib:SplitStr(szFinishEvent, "|")
+  for _, Event in pairs(EventList) do
+    local Params = Lib:SplitStr(Event, ",")
+    local Args = {}
+    for idx = 2, #Params do
+      table.insert(Args, Params[idx])
+    end
+    if tbWnd.FinishEventHandle[Params[1]] then
+      tbWnd.FinishEventHandle[Params[1]](self, table.unpack(Args))
+    end
+  end
+end
+
+function tbWnd:ProcessDynamicMask(szDynamicMask)
+  local Params = Lib:SplitStr(szDynamicMask, ",")
+  local Args = {}
+  for idx = 2, #Params do
+    table.insert(Args, Params[idx])
+  end
+  if tbWnd.DynamicMaskElemHandle[Params[1]] then
+    tbWnd.DynamicMaskElemHandle[Params[1]](self, table.unpack(Args))
+  else
+    self:DynamicTraceByPath(Params[1], Params[2])
+  end
+end
+
+function tbWnd:DynamicTraceByPath(szWindowName, szPath)
+  local wnd = Ui:GetWindow(szWindowName)
+  if wnd and Ui:IsWindowLogicOpen(szWindowName) then
+    local go = wnd.pPanel:GetObject(szPath)
+    if go then
+      self.DynamicMask:SetTarget(go)
+      self.RelativeSortingGroup:SetSortingOrder(wnd.pPanel:GetMaxSortingOrderInChildren() + 1)
+      self.pPanel:SetActive(self.DynamicHighLight, true)
+      self.pPanel:SetActive(self.Region, true)
+      local nStep = Guide:GetNowStep()
+      EventNotify:RegistNotify(EventNotify.emNOTIFY_WND_CLOSED, function(self, szUI)
+        if szWindowName == szUI then
+          Timer:Register(1, function()
+            if not Ui:IsWindowLogicOpen(szUI) and nStep == Guide:GetNowStep() then
+              self:CloseGuideStep()
+            end
+          end)
+        end
+      end, self)
+      table.insert(self.funcRelease, function()
+        EventNotify:UnRegistNotify(EventNotify.emNOTIFY_WND_CLOSED, self)
+      end)
+      return
+    end
+  end
+  self:CloseGuideStep()
+end
+
+function tbWnd:ProcessFailEvent(szFinishEvent)
+  local EventList = Lib:SplitStr(szFinishEvent, "|")
+  for _, Event in pairs(EventList) do
+    local Params = Lib:SplitStr(Event, ",")
+    local Args = {}
+    for idx = 2, #Params do
+      table.insert(Args, Params[idx])
+    end
+    if tbWnd.FailEventHandle[Params[1]] then
+      tbWnd.FailEventHandle[Params[1]](self, table.unpack(Args))
+    end
+  end
+end
+
+function tbWnd:Init()
+  self.pPanel:SetActive(self.DynamicHighLight, false)
+  self.pPanel:SetActive(self.DefaultBtn, false)
+  self.pPanel:SetActive(self.Background, true)
+  self.pPanel:SetActive(self.CommonDialog, false)
+  self.pPanel:SetActive(self.BtnSkip, false)
+  self.pPanel:SetActive(self.HightLightHand, false)
+  self.pPanel:SetActive(self.TopComment, false)
+  self.pPanel:SetActive(self.BottomComment, false)
+  self.pPanel:SetActive(self.LeftComment, false)
+  self.pPanel:SetActive(self.RightComment, false)
+  self.pPanel:SetActive(self.SkillGuide1, false)
+  self.pPanel:SetActive(self.SkillGuide2, false)
+  self.pPanel:SetActive(self.SkillGuide3, false)
+  self.RelativeSortingGroup = self.pPanel:GetComponent(Ui.RelativeSortingGroup)
+  if self.nOverrideSortingOrder and 0 ~= self.nOverrideSortingOrder then
+    self.RelativeSortingGroup:SetSortingOrder(self.nOverrideSortingOrder)
+  else
+    self.RelativeSortingGroup:SetSortingOrder(self.nDefaultSortingOrder)
+  end
+  if self.WorkingHighLight then
+    self.pPanel:SetActive(self.WorkingHighLight, false)
+  end
+  if self.WorkingForeground then
+    self.pPanel:SetActive(self.WorkingForeground, false)
+  end
+  if self.WorkingBtnGroup then
+    self.pPanel:SetActive(self.WorkingBtnGroup, false)
+  end
+end
+
+function tbWnd:OnCreate()
+  self.nDefaultSortingOrder = self.pPanel:GetMaxSortingOrderInChildren()
+end
+
+function tbWnd:OnOpen(config)
+  self.nOverrideSortingOrder = tonumber(config.nOverrideSortingOrder)
+  self:Init()
+  self.GuideID = tonumber(config.ID)
+  self.GuideStep = tonumber(config.Step)
+  if config.JumpCondition and config.JumpCondition ~= "" and self:CheckJumpCondition(config.JumpCondition) == true and config.JumpTo and "" ~= config.JumpTo then
+    if config.JumpTo == "end" then
+      Guide:FinishWholeGuide(self.GuideID)
+    else
+      local nToward = tonumber(config.JumpTo)
+      if nil ~= nToward and nToward > 1 and nToward <= #Guide.Config[self.GuideID] then
+        self:JumpCurrentGuide2step(nToward)
+      end
+    end
+    return
+  end
+  if not config.FinishEvent or "" == config.FinishEvent then
+    LogErr(string.format("There is no valid FinishEvent in Guild[%d, %d]", self.GuideID, self.GuideStep))
+    self:Close()
+    return
+  end
+  self:ProcessFinishEvent(config.FinishEvent)
+  if config.FailEvent and "" ~= config.FailEvent then
+    self:ProcessFailEvent(config.FailEvent)
+  end
+  if config.Foreground and "" ~= config.Foreground then
+    if self.ForegroundHandle[config.Foreground] then
+      self.ForegroundHandle[config.Foreground](self)
+    else
+      self.WorkingForeground = tbControls.ForegroundGroup .. "/" .. config.Foreground
+      self.pPanel:SetActive(self.WorkingForeground, true)
+    end
+  end
+  self.pPanel:SetActive(tbControls.Background, false)
+  if config.DynamicHighLight and "" ~= config.DynamicHighLight then
+    local objDynamicHighLight = self.pPanel:GetObject(tbControls.DynamicHighLight)
+    if objDynamicHighLight then
+      self.DynamicMask = objDynamicHighLight:GetComponent(Ui.DynamicMask)
+      if config.HighLightOverrideSize and "" ~= config.HighLightOverrideSize then
+        local tbSzCount = Lib:SplitStr(config.HighLightOverrideSize, ",")
+        self.DynamicMask:SetGuideOverrideSize(Ui.Vector2(tonumber(tbSzCount[1]), tonumber(tbSzCount[2])))
+      else
+        self.DynamicMask:SetGuideSizeNotOverride()
+      end
+      if config.HighLightOffset and "" ~= config.HighLightOffset then
+        local tbSzCount = Lib:SplitStr(config.HighLightOffset, ",")
+        self.DynamicMask:SetGuideOffset(Ui.Vector2(tonumber(tbSzCount[1]), tonumber(tbSzCount[2])))
+      else
+        self.DynamicMask:SetGuideNoOffset()
+      end
+      self:ProcessDynamicMask(config.DynamicHighLight)
+      if config.Comment and "" ~= config.Comment and "" ~= config.CommentType then
+        self.pPanel:Label_SetText(self[config.CommentType] .. "/imgTxtBg/Text", i18n.Parse(config.Comment))
+        self.pPanel:SetActive(self[config.CommentType], true)
+      end
+    end
+  end
+  if config.CommonDialog and "" ~= config.CommonDialog then
+    self.pPanel:Label_SetText(tbControls.CommonDialogText, i18n.Parse(config.CommonDialog))
+    self.pPanel:SetActive(tbControls.CommonDialog, true)
+  end
+  if config.ShowJumpBtn and config.ShowJumpBtn == "1" then
+    self.pPanel:SetActive(tbControls.BtnSkip, true)
+  end
+  if config.HightLightHandIcon and "" ~= config.HightLightHandIcon then
+    self.pPanel:SetActive(tbControls.HightLightHand .. "/long", config.HightLightHandIcon == "long")
+    self.pPanel:SetActive(tbControls.HightLightHand .. "/short", config.HightLightHandIcon == "short")
+    if config.HandOffset and "" ~= config.HandOffset then
+      local offset = Lib:SplitStr(config.HandOffset, ",")
+      self.DynamicMask:SetHandOffset(tonumber(offset[1]), tonumber(offset[2]))
+    else
+      self.DynamicMask:SetHandOffset(0, 0)
+    end
+    self.pPanel:SetActive(tbControls.HightLightHand, true)
+  end
+end
+
+function tbWnd:OnClose()
+  self:ReleaseUI()
+end
+
+function tbWnd:ReleaseUI()
+  if self.nTimer_Finish then
+    Timer:Close(self.nTimer_Finish)
+    self.nTimer_Finish = nil
+  end
+  if self.nTimer_Fail then
+    Timer:Close(self.nTimer_Fail)
+    self.nTimer_Fail = nil
+  end
+  if self.WorkingHighLight then
+    self.pPanel:SetActive(self.WorkingHighLight, false)
+  end
+  if self.WorkingForeground then
+    self.pPanel:SetActive(self.WorkingForeground, false)
+  end
+  if self.WorkingBtnGroup then
+    self.pPanel:SetActive(self.WorkingBtnGroup, false)
+  end
+  self.WorkingHighLight = nil
+  self.WorkingForeground = nil
+  self.WorkingBtnGroup = nil
+  for _, funcRelease in ipairs(tbWnd.funcRelease) do
+    funcRelease()
+  end
+  self.funcRelease = {}
+end
+
+function tbWnd:CloseGuideStep()
+  self:Close()
+  Guide:UnLockGuide()
+  Guide:UpdateTrigger(self.GuideID)
+end
+
+function tbWnd:FinishGuideStep()
+  self:Close()
+  Guide:FinishGuideStep(self.GuideID, self.GuideStep)
+end
+
+function tbWnd:JumpCurrentGuide2step(nStep)
+  self:Close()
+  Guide:JumpToStep(self.GuideID, nStep)
+end

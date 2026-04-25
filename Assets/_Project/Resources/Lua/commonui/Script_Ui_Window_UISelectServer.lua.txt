@@ -1,0 +1,308 @@
+local tbWnd = Ui:CreateWindow("UISelectServer")
+local ServerItemInOnePage = 12
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  KindTemplate = "node/imgBG/Content/PanelKindList/MaskView/List/KindTemplate",
+  ServerTemplate = "node/imgBG/Content/PanelServerList/MaskView/List/ServerTemplate",
+  NotInfo = "node/imgBG/Content/PanelServerList/NotInfo",
+  btnServerSetting = "node/imgBG/Content/btnServerSetting",
+  wndServerSetting = "node/wndServerSetting",
+  btnSettingOK = "node/wndServerSetting/btnOK",
+  btnSettingClose = "node/wndServerSetting/imgBG/btnClose",
+  SettingClickEmptyToClose = "node/wndServerSetting/ClickEmptyToClose",
+  ToggleNew = "node/wndServerSetting/ToggleServerList/ToggleNew",
+  ToggleRecommend = "node/wndServerSetting/ToggleServerList/ToggleRecommend",
+  ToggleFull = "node/wndServerSetting/ToggleServerList/ToggleFull",
+  ToggleMaintain = "node/wndServerSetting/ToggleServerList/ToggleMaintain",
+  ToggleWhiteList = "node/wndServerSetting/ToggleServerList/ToggleWhiteList"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnServerSetting = function(self)
+    self:OpenSetting()
+  end,
+  btnSettingOK = function(self)
+    self:ClickSettingOK()
+    self:CloseSetting()
+  end,
+  btnSettingClose = function(self)
+    self:CloseSetting()
+  end,
+  SettingClickEmptyToClose = function(self)
+    self:CloseSetting()
+  end
+}
+tbWnd.tbOnToggle = {
+  ToggleNew = function(self)
+    self:Refresh()
+  end,
+  ToggleRecommend = function(self)
+    self:Refresh()
+  end,
+  ToggleFull = function(self)
+    self:Refresh()
+  end,
+  ToggleMaintain = function(self)
+    self:Refresh()
+  end,
+  ToggleWhiteList = function(self)
+    self:Refresh()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_UPDATE_SERVER_LIST,
+      self.OnSyncServerListDone
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_ACC_SER_INFO,
+      self.OnSyncAccSerInfo
+    }
+  }
+end
+
+function tbWnd:SetElementInfo(pPanel, tbServer)
+  pPanel:Label_SetText("ServerIndex", i18n.EasyGet("{0}\230\156\141", tbServer.dwIndex))
+  pPanel:Label_SetText("ServerName", tbServer.szName)
+  if tbServer.nType == Login.SERVER_TYPE_NEW then
+    pPanel:Label_SetText("ServerFlag", i18n.EasyGet("\230\150\176\230\156\141"))
+    pPanel:Label_SetColorByName("ServerFlag", "Green")
+    pPanel:SetActive("ServerFlagGreen", true)
+    pPanel:SetActive("ServerFlagRed", false)
+    pPanel:SetActive("ServerFlagGray", false)
+    pPanel:SetActive("imgNew", true)
+  elseif tbServer.nType == Login.SERVER_TYPE_OFFLINE then
+    pPanel:Label_SetText("ServerFlag", i18n.EasyGet("\231\187\180\230\138\164"))
+    pPanel:Label_SetColorByName("ServerFlag", "Gray1")
+    pPanel:SetActive("ServerFlagGreen", false)
+    pPanel:SetActive("ServerFlagRed", false)
+    pPanel:SetActive("ServerFlagGray", true)
+    pPanel:SetActive("imgNew", false)
+  elseif tbServer.nType == Login.SERVER_TYPE_RECOMMEND then
+    pPanel:Label_SetText("ServerFlag", i18n.EasyGet("\230\142\168\232\141\144"))
+    pPanel:Label_SetColorByName("ServerFlag", "Green")
+    pPanel:SetActive("ServerFlagGreen", true)
+    pPanel:SetActive("ServerFlagRed", false)
+    pPanel:SetActive("ServerFlagGray", false)
+    pPanel:SetActive("imgNew", true)
+  elseif tbServer.nType == Login.SERVER_TYPE_FULL then
+    pPanel:Label_SetText("ServerFlag", i18n.EasyGet("\231\136\134\230\187\161"))
+    pPanel:Label_SetColorByName("ServerFlag", "Red")
+    pPanel:SetActive("ServerFlagGreen", false)
+    pPanel:SetActive("ServerFlagRed", true)
+    pPanel:SetActive("ServerFlagGray", false)
+    pPanel:SetActive("imgNew", false)
+  elseif tbServer.nType == Login.SERVER_TYPE_NORMAL then
+    pPanel:Label_SetText("ServerFlag", i18n.EasyGet("\230\181\129\231\149\133"))
+    pPanel:Label_SetColorByName("ServerFlag", "Green")
+    pPanel:SetActive("ServerFlagGreen", true)
+    pPanel:SetActive("ServerFlagRed", false)
+    pPanel:SetActive("ServerFlagGray", false)
+    pPanel:SetActive("imgNew", false)
+  end
+end
+
+function tbWnd:OnCreate()
+  self.Filter = {
+    ToggleNew = true,
+    ToggleRecommend = true,
+    ToggleFull = true,
+    ToggleMaintain = true,
+    ToggleWhiteList = false
+  }
+  self.pPanel:SetActive(self.ToggleWhiteList, false)
+  self.tbKindScrollView = Ui:NewScrollView(self, self.KindTemplate, function(self, nIndex, tbElement)
+    self.tbServerScrollView:Reset()
+    if 1 == nIndex then
+      self:UpdateMyServer()
+    elseif 2 == nIndex then
+      self:UpdateRecommend()
+    else
+      local tbRegionInfo = self.tbRegionList[nIndex - 2]
+      if tbRegionInfo then
+        self:UpdateRegionServer(tbRegionInfo.tbServers)
+      end
+    end
+  end, false, false)
+  self.tbServerScrollView = Ui:NewScrollView(self, self.ServerTemplate, function(self, nIndex, tbElement)
+    local tbServer = tbElement.tbServer
+    Ui:GetWindow("UILoginServer"):UpdateServerShow(tbServer)
+    Ui.PlayerPrefs.SetInt("LastServerID", tbElement.tbServer.dwServerId)
+    self:Close()
+  end, false, true)
+end
+
+function tbWnd:OnOpen(tbServerInfo)
+  self.pPanel:SetActive(self.NotInfo, false)
+  self:Refresh()
+end
+
+function tbWnd:NeedShow(v)
+  if not self.pPanel:Toggle_GetChecked(self.ToggleNew) and v.nType == Login.SERVER_TYPE_NEW then
+    return false
+  elseif not self.pPanel:Toggle_GetChecked(self.ToggleRecommend) and v.nType == Login.SERVER_TYPE_RECOMMEND then
+    return false
+  elseif not self.pPanel:Toggle_GetChecked(self.ToggleFull) and v.nType == Login.SERVER_TYPE_FULL then
+    return false
+  elseif not self.pPanel:Toggle_GetChecked(self.ToggleMaintain) and v.nType == Login.SERVER_TYPE_OFFLINE then
+    return false
+  elseif not self.pPanel:Toggle_GetChecked(self.ToggleWhiteList) and 2 == v.nShowType then
+    return false
+  else
+    return true
+  end
+end
+
+function tbWnd:Refresh(tbServerInfo)
+  tbServerInfo = tbServerInfo or GetServerList()
+  local tbRegionList = GetServerRegion()
+  local tbRegionMap = {}
+  for _, v in pairs(tbRegionList) do
+    tbRegionMap[v.dwIndex] = v
+  end
+  for _, v in pairs(tbRegionMap) do
+    v.tbServers = {}
+  end
+  self.tbServerInfo = {}
+  for _, v in pairs(tbServerInfo) do
+    if self:NeedShow(v) then
+      self.tbServerInfo[v.dwServerId] = v
+      table.insert(tbRegionMap[v.dwRegionId].tbServers, v)
+    end
+  end
+  self.tbRegionList = {}
+  for _, v in pairs(tbRegionMap) do
+    table.insert(self.tbRegionList, v)
+  end
+  table.sort(self.tbRegionList, function(a, b)
+    return a.dwIndex > b.dwIndex
+  end)
+  local nLastSelect = self.tbKindScrollView:GetIndex()
+  self.tbKindScrollView:Reset()
+  self.tbKindScrollView:SetElement(1, function(tbElement)
+    tbElement.pPanel:Label_SetText("Text", i18n.EasyGet("\230\136\145\231\154\132\230\156\141\229\138\161\229\153\168"))
+  end)
+  self.tbKindScrollView:SetElement(2, function(tbElement)
+    tbElement.pPanel:Label_SetText("Text", i18n.EasyGet("\230\142\168\232\141\144\230\156\141\229\138\161\229\153\168"))
+  end)
+  for i = 1, #self.tbRegionList do
+    self.tbKindScrollView:SetElement(i + 2, function(tbElement)
+      tbElement.pPanel:Label_SetText("Text", self.tbRegionList[i].szName)
+    end)
+  end
+  if not nLastSelect then
+    local tbMyAccSerInfo = Login:GetAccSerInfo()
+    if not Lib:IsEmptyTB(tbMyAccSerInfo) then
+      nLastSelect = 1
+    else
+      nLastSelect = 2
+    end
+  end
+  self.tbKindScrollView:SelectElement(nLastSelect or 1)
+end
+
+function tbWnd:OnSyncAccSerInfo()
+  self:Refresh()
+end
+
+function tbWnd:OnSyncServerListDone(nCode)
+  if 1 == nCode then
+    self:Refresh()
+  end
+end
+
+function tbWnd:UpdateMyServer()
+  local tbMyAccSerInfo = Login:GetAccSerInfo()
+  local tbMyServer = {}
+  for _, v in pairs(self.tbServerInfo) do
+    if tbMyAccSerInfo[v.dwServerId] then
+      table.insert(tbMyServer, {
+        v,
+        tbMyAccSerInfo[v.dwServerId]
+      })
+    end
+  end
+  self.pPanel:SetActive(self.NotInfo, not tbMyServer or Lib:IsEmptyTB(tbMyServer))
+  for i = 1, #tbMyServer do
+    self.tbServerScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      local tbServer = tbMyServer[i][1]
+      tbElement.tbServer = tbServer
+      self:SetElementInfo(pPanel, tbServer)
+      pPanel:Label_SetText("ServerRoleLevel", self:GetServerRoleLevelInfo(tbMyServer[i][2]))
+    end)
+  end
+end
+
+function tbWnd:GetServerRoleLevelInfo(nLevel)
+  if not nLevel then
+    return i18n.EasyGet("{0}\231\186\167", 0)
+  end
+  if nLevel < GameSetting.MAX_PLAYER_LEVEL then
+    return i18n.EasyGet("{0}\231\186\167", nLevel)
+  end
+  return i18n.EasyGet("\229\174\151\229\184\136{0}", nLevel - GameSetting.MAX_PLAYER_LEVEL)
+end
+
+function tbWnd:UpdateRecommend()
+  local tbMyAccSerInfo = Login:GetAccSerInfo()
+  local tRecommendServers = {}
+  for _, v in pairs(self.tbServerInfo) do
+    if v.nType == Login.SERVER_TYPE_RECOMMEND then
+      table.insert(tRecommendServers, {
+        v,
+        tbMyAccSerInfo[v.dwServerId]
+      })
+    end
+  end
+  self.pPanel:SetActive(self.NotInfo, not tRecommendServers or Lib:IsEmptyTB(tRecommendServers))
+  for i = 1, #tRecommendServers do
+    self.tbServerScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      local tbServer = tRecommendServers[i][1]
+      tbElement.tbServer = tbServer
+      self:SetElementInfo(pPanel, tbServer)
+      pPanel:Label_SetText("ServerRoleLevel", self:GetServerRoleLevelInfo(tRecommendServers[i][2]))
+    end)
+  end
+end
+
+function tbWnd:UpdateRegionServer(tbServers)
+  local tbMyAccSerInfo = Login:GetAccSerInfo()
+  self.pPanel:SetActive(self.NotInfo, false)
+  for i = 1, #tbServers do
+    self.tbServerScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      local tbServer = tbServers[i]
+      tbElement.tbServer = tbServer
+      self:SetElementInfo(pPanel, tbServer)
+      pPanel:Label_SetText("ServerRoleLevel", self:GetServerRoleLevelInfo(tbMyAccSerInfo[tbServer.dwServerId]))
+    end)
+  end
+end
+
+function tbWnd:ClickSettingOK()
+  self.Filter.ToggleNew = self.pPanel:Toggle_GetChecked(self.ToggleNew)
+  self.Filter.ToggleRecommend = self.pPanel:Toggle_GetChecked(self.ToggleRecommend)
+  self.Filter.ToggleFull = self.pPanel:Toggle_GetChecked(self.ToggleFull)
+  self.Filter.ToggleMaintain = self.pPanel:Toggle_GetChecked(self.ToggleMaintain)
+  self.Filter.ToggleWhiteList = self.pPanel:Toggle_GetChecked(self.ToggleWhiteList)
+  self:Refresh()
+end
+
+function tbWnd:OpenSetting()
+  self.pPanel:Toggle_SetChecked(self.ToggleNew, self.Filter.ToggleNew)
+  self.pPanel:Toggle_SetChecked(self.ToggleRecommend, self.Filter.ToggleRecommend)
+  self.pPanel:Toggle_SetChecked(self.ToggleFull, self.Filter.ToggleFull)
+  self.pPanel:Toggle_SetChecked(self.ToggleMaintain, self.Filter.ToggleMaintain)
+  self.pPanel:Toggle_SetChecked(self.ToggleWhiteList, self.Filter.ToggleWhiteList)
+  self.pPanel:SetActive(self.wndServerSetting, true)
+end
+
+function tbWnd:CloseSetting()
+  self.pPanel:SetActive(self.wndServerSetting, false)
+end

@@ -1,0 +1,233 @@
+local tbWnd = Ui:CreateWindow("UIGangRanking")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnInfo = "node/imgBG/txtTitle/btnInfo",
+  btnOk = "node/imgBG/Content/Right/btnOk",
+  TitleDefault = "node/imgBG/Content/Right/titles/TitleDefault",
+  ToggleAll = "node/imgBG/Content/Right/ToggleAll",
+  NotInfo = "node/imgBG/Content/Right/RankList/NotInfo",
+  ScrollView = "node/imgBG/Content/Right/RankList/Scroll View",
+  Template = "node/imgBG/Content/Right/RankList/Scroll View/Viewport/Content/Template",
+  txtlistCountValue = "node/imgBG/Content/Right/txtlistCountValue"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnInfo = function(self)
+    if not Lib:IsEmptyTB(self.tbBtnHelpCallBack) then
+      Lib:CallBack(self.tbBtnHelpCallBack)
+    end
+  end,
+  btnOk = function(self)
+    local tbCheckedToggleList = self:GetCheckedToggleList()
+    if self.nToggleMax and Lib:CountTB(tbCheckedToggleList) > self.nToggleMax then
+      me.CenterMsg(i18n.EasyGet("\230\156\128\229\164\154\229\143\170\232\131\189\233\128\137\230\139\169{0}\228\184\170", self.nToggleMax))
+      return
+    end
+    if not Lib:IsEmptyTB(self.tbBtnCallBack) then
+      local fnFunc = self.tbBtnCallBack[1]
+      local tbTable = self.tbBtnCallBack[2]
+      Lib:CallBack({
+        fnFunc,
+        tbTable,
+        tbCheckedToggleList
+      })
+    end
+  end
+}
+tbWnd.tbOnToggleClick = {
+  ToggleAll = function(self, isOn)
+    self:SetToggleAll(isOn)
+  end
+}
+local MAX_COL_NUM = 4
+local tbTitlePath = {
+  [1] = "label1",
+  [2] = "label2",
+  [3] = "label3",
+  [4] = "label4"
+}
+local tbAllRankPath = {
+  [1] = {
+    "txtPlayerName",
+    "txtPlayerName/HonorTitle",
+    "txtPlayerName",
+    "imgPlayerFaction"
+  },
+  [2] = "txtPosition",
+  [3] = "txtNum",
+  [4] = "txtState"
+}
+
+function tbWnd:OnCreate()
+  self.tbRankView = Ui:NewScrollView(self, tbControls.Template)
+end
+
+function tbWnd:OnOpen(tbBtnCallBack, tbBtnHelpCallBack, tbTitleList, tbRankDataList, nToggleMax)
+  self.tbTitleList = tbTitleList or {}
+  self.tbRankDataList = tbRankDataList or {}
+  self.tbBtnCallBack = tbBtnCallBack or {}
+  self.tbBtnHelpCallBack = tbBtnHelpCallBack or {}
+  self.nToggleMax = nToggleMax
+  Lib:CallBack({
+    self._UpdateRankTitle,
+    self
+  })
+  Lib:CallBack({
+    self._UpdateAllRank,
+    self
+  })
+  if not tbBtnHelpCallBack or Lib:IsEmptyTB(tbBtnHelpCallBack) then
+    self.pPanel:SetActive(tbControls.btnInfo, false)
+  else
+    self.pPanel:SetActive(tbControls.btnInfo, true)
+  end
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:_UpdateRankTitle()
+  for i = 1, MAX_COL_NUM do
+    local szTitle = self.tbTitleList[i]
+    local szPath = string.format("%s/%s", tbControls.TitleDefault, tbTitlePath[i])
+    if false == szTitle or "string" == type(szTitle) and Lib:IsEmptyStr(szTitle) then
+      self.pPanel:SetActive(szPath, false)
+    else
+      self.pPanel:Label_SetText(szPath, szTitle)
+      self.pPanel:SetActive(szPath, true)
+    end
+  end
+end
+
+function tbWnd:_UpdateAllRank()
+  if 0 == #self.tbRankDataList then
+    self.pPanel:SetActive(tbControls.NotInfo, true)
+    self.pPanel:SetActive(tbControls.ScrollView, false)
+    return
+  end
+  self.pPanel:SetActive(tbControls.NotInfo, false)
+  self.pPanel:SetActive(tbControls.ScrollView, true)
+  self.nCheckedValue = 0
+  self.tbRankView:Clear()
+  for nIndex, tbInfo in ipairs(self.tbRankDataList) do
+    self.tbRankView:SetElement(nIndex, function(tbElement)
+      self:_SetRankElement(tbElement, tbInfo)
+      if tbInfo[5] then
+        self.nCheckedValue = self.nCheckedValue + 1
+      end
+    end)
+  end
+  self.pPanel:Label_SetText(tbControls.txtlistCountValue, self.nCheckedValue .. "/" .. FirstTong.FinalCfg.nPlayerNum)
+  if self:IsAllChecked() then
+    self:ChangeToggleAll(true)
+  else
+    self:ChangeToggleAll(false)
+  end
+end
+
+function tbWnd:_SetRankElement(tbElement, tbRankInfo)
+  for i = 1, MAX_COL_NUM do
+    local value = tbRankInfo[i]
+    if 1 == i then
+      if not value or Lib:IsEmptyTB(value or {}) then
+        tbElement.pPanel:SetActive(tbAllRankPath[i][1], false)
+        tbElement.pPanel:SetActive(tbAllRankPath[i][2], false)
+        tbElement.pPanel:SetActive(tbAllRankPath[i][3], false)
+        tbElement.pPanel:SetActive(tbAllRankPath[i][4], false)
+      else
+        tbElement.pPanel:Label_SetText(tbAllRankPath[i][1], value.szPlayerName)
+        local obj = tbElement.pPanel:GetObject(tbAllRankPath[i][2])
+        local pHonorTitle = obj:GetComponent(Ui.UIHonorTitle)
+        pHonorTitle:SetHonorTitle(value.tbTitle.szHonorName, value.tbTitle.szHonorColor)
+        Ui:SetVipLevelEffect(tbElement.pPanel, value.nVipLevel, tbAllRankPath[i][3])
+        if value.nFaction and not Lib:IsEmptyStr(Faction:GetIcon(value.nFaction)) then
+          tbElement.pPanel:SetActive(tbAllRankPath[i][4], true)
+          tbElement.pPanel:Sprite_SetSprite(tbAllRankPath[i][4], Faction:GetIcon(value.nFaction))
+        else
+          tbElement.pPanel:SetActive(tbAllRankPath[i][4], false)
+        end
+      end
+    elseif not value then
+      tbElement.pPanel:SetActive(tbAllRankPath[i], false)
+      tbElement.pPanel:SetActive(tbAllRankPath[i], false)
+    else
+      tbElement.pPanel:Label_SetText(tbAllRankPath[i], value or "")
+      tbElement.pPanel:SetActive(tbAllRankPath[i], true)
+      tbElement.pPanel:SetActive(tbAllRankPath[i], true)
+    end
+  end
+  tbElement.pPanel:Toggle_SetChecked("Toggle", tbRankInfo[5])
+  Ui:Toggle_BindEvent(tbElement.pPanel, "Toggle", function(this, isOn)
+    if isOn and self.nToggleMax and self:GetCheckedToggleNum() == self.nToggleMax then
+      tbElement.pPanel:Toggle_SetChecked("Toggle", false)
+      me.CenterMsg(i18n.EasyGet("\230\156\128\229\164\154\229\143\170\232\131\189\233\128\137\230\139\169{0}\228\184\170", self.nToggleMax))
+      return
+    else
+      tbRankInfo[5] = isOn
+      if isOn and self:IsAllChecked() then
+        self:ChangeToggleAll(true)
+      else
+        self:ChangeToggleAll(false)
+      end
+      if isOn then
+        self.nCheckedValue = self.nCheckedValue + 1
+      else
+        self.nCheckedValue = self.nCheckedValue - 1
+      end
+      self.pPanel:Label_SetText(tbControls.txtlistCountValue, self.nCheckedValue .. "/" .. FirstTong.FinalCfg.nPlayerNum)
+    end
+  end, self)
+end
+
+function tbWnd:GetCheckedToggleNum()
+  local nCheckedToggle = 0
+  for nIndex, tbInfo in ipairs(self.tbRankDataList) do
+    if tbInfo[5] then
+      nCheckedToggle = nCheckedToggle + 1
+    end
+  end
+  return nCheckedToggle
+end
+
+function tbWnd:GetCheckedToggleList()
+  local tbCheckedToggleList = {}
+  for nIndex, tbInfo in ipairs(self.tbRankDataList) do
+    if tbInfo[5] then
+      tbCheckedToggleList[tbInfo[1].nPlayerId] = true
+    end
+  end
+  return tbCheckedToggleList
+end
+
+function tbWnd:IsAllChecked()
+  for nIndex, tbInfo in ipairs(self.tbRankDataList) do
+    if not tbInfo[5] then
+      return false
+    end
+  end
+  return true
+end
+
+function tbWnd:SetToggleAll(bIsOn)
+  for nIndex, tbInfo in ipairs(self.tbRankDataList) do
+    tbInfo[5] = bIsOn
+  end
+  Lib:CallBack({
+    self._UpdateAllRank,
+    self
+  })
+end
+
+function tbWnd:ChangeToggleAll(bIsOn)
+  if self.pPanel:Toggle_GetChecked(tbControls.ToggleAll) == bIsOn then
+    return
+  end
+  Ui:Toggle_UnBindEvent(self.pPanel, tbControls.ToggleAll)
+  self.pPanel:Toggle_SetChecked(tbControls.ToggleAll, bIsOn)
+  Ui:Toggle_BindEvent(self.pPanel, tbControls.ToggleAll, function(this, isOn)
+    self:SetToggleAll(isOn)
+  end, self)
+end

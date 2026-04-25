@@ -1,0 +1,71 @@
+Map.DynObst = Map.DynObst or {}
+local DynObst = Map.DynObst
+DynObst.tbObst2NpcDict = DynObst.tbObst2NpcDict or {}
+DynObst.tbDestroyCallbackDict = DynObst.tbDestroyCallbackDict or {}
+
+function Map:GetDynObstSetting(nObstTid)
+  local tbSetting = DynObst.tbSetting[nObstTid]
+  if not tbSetting then
+    return
+  end
+  return tbSetting.nObstRangeX, tbSetting.nObstRangeY
+end
+
+function DynObst:LoadSetting()
+  self.tbSetting = Lib:EasyLoadTabFile("Setting/Map/DynObst.tab", {"nObstId"})
+end
+
+DynObst:LoadSetting()
+
+function DynObst:AddObstacle(nObstTid, nLv, nMapId, nX, nY, nDir, tbDestroyCallback)
+  local tbSetting = self.tbSetting[nObstTid]
+  if not tbSetting then
+    return
+  end
+  local nObstId = AddDynObst(nObstTid, nMapId, nX, nY, nDir)
+  if not nObstId then
+    LogErr("Map.DynObst", string.format("obst:%d, map:%d, x:%d, y:%d, errAddObst", nObstTid, nMapId, nX, nY))
+    return
+  end
+  local pNpc = KNpc.Add(tbSetting.nNpcId, nLv, Npc.emSERIES_TYPE.SERIES_NONE, nMapId, nX + tbSetting.nNpcPosOffX, nY + tbSetting.nNpcPosOffY, 0, 0, nDir)
+  if pNpc then
+    Npc:RegNpcOnDeath(pNpc, self.OnNpcDeath, self, nObstId)
+    self.tbObst2NpcDict[nObstId] = pNpc.nId
+    self.tbDestroyCallbackDict[nObstId] = tbDestroyCallback
+  else
+    LogErr("Map.DynObst", string.format("obst:%d, map:%d, x:%d, y:%d, errAddNpc", nObstTid, nMapId, nX, nY))
+  end
+  return nObstId
+end
+
+function DynObst:DelObstacle(nObstId)
+  DelDynObst(nObstId)
+  local nNpcId = self.tbObst2NpcDict[nObstId]
+  self.tbObst2NpcDict[nObstId] = nil
+  self.tbDestroyCallbackDict[nObstId] = nil
+  if not nNpcId then
+    return
+  end
+  local pNpc = KNpc.GetById(nNpcId)
+  if not pNpc then
+    return
+  end
+  pNpc.Delete()
+end
+
+function DynObst:OnNpcDeath(nObstId)
+  local nNpcId = self.tbObst2NpcDict[nObstId]
+  local tbDestroyCallback = self.tbDestroyCallbackDict[nObstId]
+  assert(nNpcId == him.nId)
+  DelDynObst(nObstId)
+  self.tbObst2NpcDict[nObstId] = nil
+  self.tbDestroyCallbackDict[nObstId] = nil
+  if not tbDestroyCallback then
+    return
+  end
+  local tbCallback = {
+    table.unpack(tbDestroyCallback)
+  }
+  table.insert(tbCallback, nObstId)
+  Lib:CallBack(tbCallback)
+end

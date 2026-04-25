@@ -1,0 +1,66 @@
+Require("CommonScript/Item/ItemDefine.lua")
+local tbAwardNoticeItem = Item:GetClass("AwardNoticeItem")
+tbAwardNoticeItem.PARAM_AWARD_ID = 1
+tbAwardNoticeItem.PARAM_AWARD_KEY = 2
+tbAwardNoticeItem.PARAM_ACTIVITY_ID = 3
+
+function tbAwardNoticeItem:OnUse(it)
+  return self:OnUseMany(it, 1)
+end
+
+function tbAwardNoticeItem:OnTimeOut(pItem, pPlayer)
+  local nItemTid = pItem.dwTemplateId
+  local nCount = pItem.nCount
+  local szName = pItem.szName
+  local szCurrencyType, nNum = Item.tbItemSell:GetSellCurrencyValue(nItemTid)
+  if not szCurrencyType then
+    return
+  end
+  if nCount ~= pPlayer.ConsumeItem(pItem, nCount, Env.LogWay_TimeOut) then
+    Log("AwardNoticeItem:OnTimeOut", pPlayer.szName, "pid:", pPlayer.dwID, "item:", nItemTid, "count:", nCount, "errConsumeItem")
+    return
+  end
+  local nTotalNum = nNum * nCount
+  local tbAward = {
+    {szCurrencyType, nTotalNum}
+  }
+  pPlayer.SendAward(tbAward, true, true, Env.LogWay_TimeOut, nil, nil)
+  local szMsg = i18n.EasyGet("\230\130\168\230\156\137{0}\228\184\170{1}\229\183\178\232\191\135\230\156\159\239\188\140\232\191\148\232\191\152\230\130\168{2}{3}", nCount, szName, nTotalNum, Currency:GetName(szCurrencyType))
+  pPlayer.Msg(szMsg)
+  Log("AwardNoticeItem:OnTimeOut", pPlayer.szName or "", "pid:" .. (pPlayer.dwID or 0), "item:" .. nItemTid, "count:" .. nCount)
+end
+
+function tbAwardNoticeItem:OnUseMany(it, nCount)
+  if not (it.dwTemplateId and me) or not nCount then
+    return 0
+  end
+  local nAwardId = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_AWARD_ID)
+  local nAwardKey = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_AWARD_KEY)
+  local nActivityId = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_ACTIVITY_ID)
+  local pInstance = ActivityMgr:GetInstanceById(nActivityId)
+  local tbAwards = Award:GetAwardWithTimes(nAwardId, nAwardKey, nCount, {
+    nLogReason = Env.LogWay_AwardNoticeItem,
+    bNotMerge = true
+  })
+  if not next(tbAwards) then
+    return 0
+  end
+  Award:SendAward(me.dwID, tbAwards, {
+    nLogReason = Env.LogWay_AwardNoticeItem
+  })
+  if pInstance and pInstance.OnGiveNoticeAward then
+    Lib:CallBack({
+      pInstance.OnGiveNoticeAward,
+      pInstance,
+      me.dwID,
+      tbAwards
+    })
+  end
+  return nCount
+end
+
+function tbAwardNoticeItem:GetClientDefaultUseCount(nItemId)
+  local pItem = me.GetItemInBag(nItemId)
+  local nResult = math.min(pItem.nCount, Item.UseManyLimit.AwardNoticeItem)
+  return nResult
+end

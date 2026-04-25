@@ -1,0 +1,95 @@
+local tbItem = Item:GetClass("LuckyBox")
+tbItem.PARAM_AWARDID = 1
+tbItem.PARAM_AWARDKEY = 2
+tbItem.PARAM_GUARANTEED_MAXCOUNT = 3
+tbItem.PARAM_GUARANTEED_TEMPLATEID = 4
+tbItem.PARAM_GUARANTEED_STUDIO = 5
+tbItem.SAVE_GUARANTEED_GROUP = GetGroupKey("LuckyBoxGuaranteed")
+tbItem.GUARANTEED_KEY = 1
+
+function tbItem:OnUse(it)
+  return self:OnUseMany(it, 1)
+end
+
+function tbItem:OnUseMany(it, nCount)
+  local nItemTemplateId = it.dwTemplateId
+  local nAwardId = KItem.GetItemExtParam(nItemTemplateId, self.PARAM_AWARDID)
+  local nAwardKey = KItem.GetItemExtParam(nItemTemplateId, self.PARAM_AWARDKEY)
+  local nGuaranteedStudio = KItem.GetItemExtParam(nItemTemplateId, self.PARAM_GUARANTEED_STUDIO)
+  local nGuaranteedMaxCount = KItem.GetItemExtParam(nItemTemplateId, self.PARAM_GUARANTEED_MAXCOUNT)
+  local nGuaranteedTemplateId = KItem.GetItemExtParam(nItemTemplateId, self.PARAM_GUARANTEED_TEMPLATEID)
+  local tbAwardStudio = StudioRandomItem:GetStudioAward(me, nItemTemplateId)
+  if tbAwardStudio then
+    nAwardId = tbAwardStudio.nAwardId
+    nAwardKey = tbAwardStudio.nAwardKey
+  end
+  if not nAwardKey or nAwardKey <= 0 then
+    nAwardKey = Award:GetLevelAwardKey(me.nLevel)
+  end
+  local nLeftBag = me.GetFreeBagCount()
+  if nLeftBag <= 0 then
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\231\169\186\233\151\180\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\228\189\191\231\148\168\239\188\129"))
+    return 0
+  end
+  local tbGuaranteedAward = self:GetGuaranteedAward(nAwardId, nAwardKey, nGuaranteedTemplateId)
+  if not next(tbGuaranteedAward) then
+    LogErr("LuckyBox:OnAutoUse can not get GuaranteedAward by nAwardId:", nAwardId, "nGuaranteedAwardKey:", nGuaranteedTemplateId)
+    return 0
+  end
+  local tbOneAward
+  local tbAwardListForTrack = {}
+  local bIsStudio = Studio:CheckStudioSetting(me.dwID, nGuaranteedStudio)
+  local nGuaranteed = me.GetUserValue(self.SAVE_GUARANTEED_GROUP, self.GUARANTEED_KEY) or 0
+  for nIndex = 1, nCount do
+    if bIsStudio then
+      tbOneAward = Award:GetAward_Rand(nAwardId, nAwardKey)
+    elseif nGuaranteed >= nGuaranteedMaxCount - 1 then
+      nGuaranteed = 0
+      tbOneAward = tbGuaranteedAward
+    else
+      nGuaranteed = nGuaranteed + 1
+      tbOneAward = Award:GetAward_Rand(nAwardId, nAwardKey)
+      for _, tbAward in ipairs(tbOneAward) do
+        if "Item" == tbAward[1] and tbAward[2] == nGuaranteedTemplateId then
+          nGuaranteed = 0
+          break
+        end
+      end
+    end
+    Lib:MergeTable(tbAwardListForTrack, tbOneAward)
+    self:SendAward(tbOneAward, nItemTemplateId, it.szName)
+  end
+  if nGuaranteedMaxCount <= nGuaranteed then
+    nGuaranteed = nGuaranteedMaxCount - 1
+  end
+  me.SetUserValue(self.SAVE_GUARANTEED_GROUP, self.GUARANTEED_KEY, nGuaranteed)
+  local tbMoneyForTrack, tbItemForTrack = Award:GetAwardListForMBILog(Award:MergetSameTypeAward(tbAwardListForTrack), true, {
+    "Gold",
+    "YuanBao",
+    "Coin"
+  })
+  Lib:TrackEvent(me.dwID, Env.track_openbox_open, nItemTemplateId, nCount, 0, 0, tbMoneyForTrack.Gold or 0, tbMoneyForTrack.YuanBao or 0, tbMoneyForTrack.Coin or 0, Lib:EncodeJson(tbItemForTrack) or "")
+  return nCount
+end
+
+function tbItem:SendAward(tbAward, nItemTemplateId, szName)
+  local tbAwardParams = {
+    szMsg = szName,
+    nLogReason = Env.LogWay_LuckyBox,
+    nLogReason2 = nItemTemplateId,
+    bEnableMonthCardIgnore = true,
+    tbItemExtParams = {
+      nAwardTime = Lib:GetServerOpenDay()
+    }
+  }
+  Award:SendAward(me.dwID, tbAward, tbAwardParams)
+end
+
+function tbItem:GetGuaranteedAward(nAwardId, nAwardKey, nGuaranteedTemplateId)
+  local tbAllAward = Award:GetAllAwardNoRand(nAwardId, nAwardKey)
+  for _, tbAward in ipairs(tbAllAward) do
+    if tbAward[2] == nGuaranteedTemplateId then
+      return {tbAward}
+    end
+  end
+end

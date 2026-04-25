@@ -1,0 +1,276 @@
+function TongBattle:CheckCanShowIcon()
+  if not self.bCanServerJoin then
+    return false
+  end
+  return true
+end
+
+function TongBattle:RequestGuessChampion(nGuessTongID, nGuessNum)
+  local function fnAgree()
+    RemoteServer.RequestTongBattle("ApplyGuessChampion", nGuessTongID, nGuessNum)
+  end
+  
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\156\172\232\189\174\228\189\160\229\143\170\232\131\189\231\171\158\231\140\156\228\184\128\230\172\161\229\134\160\229\134\155\239\188\140\231\161\174\232\174\164\229\144\142\229\176\134\228\184\141\232\131\189\230\155\180\230\148\185\239\188\140\228\189\160\230\152\175\229\144\166\231\161\174\232\174\164\239\188\159"), {
+    {fnAgree},
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function TongBattle:RequestGuessMatch(nGuessMatch, nGuessTongID, tbGuessItem)
+  if not self.tbFinalsData[nGuessMatch] then
+    me.CenterMsg(i18n.EasyGet("\231\171\158\231\140\156\229\156\186\230\172\161\228\184\141\229\173\152\229\156\168"))
+    return
+  end
+  if -1 ~= self.tbFinalsData[nGuessMatch].nWinner then
+    me.CenterMsg(i18n.EasyGet("\230\173\164\229\156\186\230\175\148\232\181\155\229\183\178\231\187\147\230\157\159"))
+    return
+  end
+  RemoteServer.RequestTongBattle("ApplyGuessMatch", nGuessMatch, nGuessTongID, tbGuessItem)
+end
+
+function TongBattle:ApllySyncData()
+  RemoteServer.RequestTongBattle("SyncDataToClient")
+end
+
+function TongBattle:OnSyncDataToClient(bCanServerJoin, nQualificationTongId, szQualificationTongName, nWarZone, tbFinalsData, nAreaZone, tbContestTongsCache)
+  self.tbFinalsData = tbFinalsData
+  self.bCanServerJoin = bCanServerJoin
+  self.nQualificationTongId = nQualificationTongId
+  self.szQualificationTongName = szQualificationTongName
+  self.nWarZone = nWarZone
+  self.nAreaZone = nAreaZone
+  self.tbContestTongsCache = tbContestTongsCache
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TONGBATTLE_DATA)
+end
+
+function TongBattle:CheckTongQualification()
+  if not self.tbContestTongsCache then
+    return false
+  end
+  return self.tbContestTongsCache[me.dwTongId] ~= nil
+end
+
+function TongBattle:ApllySyncGuessData()
+  RemoteServer.RequestTongBattle("SyncGuessDataToClient")
+end
+
+function TongBattle:OnSyncGuessDataToClient(tbFinalsData, tbTongData, tbMyChampionGuessData, tbMyMatchGuessData)
+  self.tbFinalsData = tbFinalsData
+  self.tbTongData = tbTongData
+  self.tbMyChampionGuessData = tbMyChampionGuessData
+  self.tbMyMatchGuessData = tbMyMatchGuessData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TONGBATTLE_GUESS_DATA)
+end
+
+function TongBattle:UpdatePillarData(tbPillarState, szActiveState)
+  self.tbPillarState = tbPillarState
+  self.szActiveState = szActiveState
+end
+
+function TongBattle:DelayNotify(tbData)
+  Timer:Register(3 * Env.GAME_FPS, self.Notify, self, tbData)
+end
+
+function TongBattle:Notify(tbMsgData)
+  Ui:SynNotifyMsg(tbMsgData)
+end
+
+function TongBattle:UpdateMiniMap()
+  if Ui:WindowVisible("UIHudMinimap") then
+    Ui:GetWindow("UIHudMinimap"):UpdateMiniMapSuffix()
+  end
+end
+
+function TongBattle:SetHonorTitleIsShow(bIsShow)
+  local meObj = Ui.GameObject.Find("HeadTextSet/Me")
+  if meObj then
+    local honorTitleObj = meObj:GetComponentInChildren(Ui.UIHonorTitle)
+    if nil ~= honorTitleObj then
+      honorTitleObj:SetHonorVisible(bIsShow)
+    end
+  end
+end
+
+function TongBattle:OpenHandInItem(nItemId)
+  local nCurNum = me.GetItemCountInBags(nItemId)
+  if nCurNum > 0 then
+    local function funOK(nItemId)
+      RemoteServer.RequestTongBattle("HandInItem", nItemId)
+    end
+    
+    local szItemName = Item:GetName(nItemId, me)
+    Ui:OpenWindow("UIQuickItem", i18n.EasyGet("\228\184\138\228\186\164\231\137\169\229\147\129"), szItemName, nCurNum, i18n.EasyGet("\230\143\144\228\186\164"), function(tbItemGrid)
+      tbItemGrid:SetItemByTemplate(nItemId, nil, nil, nil, {bShowTip = true})
+      tbItemGrid:SetClickEnable(true)
+    end, function(tbUIQuickItem)
+      if not funOK then
+        return
+      end
+      if nCurNum <= 0 then
+        me.CenterMsg(i18n.EasyGet("\231\137\169\229\147\129\230\149\176\233\135\143\228\184\141\232\182\179"))
+        return
+      end
+      funOK(nItemId)
+      tbUIQuickItem:Close()
+    end, false)
+  else
+    local szItemName = Item:GetName(nItemId, me)
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\229\134\133\230\178\161\230\156\137{0}", szItemName))
+  end
+end
+
+function TongBattle:RequestAttend()
+  RemoteServer.RequestTongBattle("AttendReq")
+end
+
+function TongBattle:RequestSyncQualification()
+  Tong:UpdateBaseInfo()
+  Tong:UpdateMemberList()
+  RemoteServer.RequestTongBattle("SyncQualification")
+end
+
+function TongBattle:RequestApplyQualification(tbQualification)
+  if type(tbQualification) ~= "table" then
+    return
+  end
+  local tbTongBaseInfo = Tong:GetBaseInfo() or {}
+  if tbTongBaseInfo.nMasterId ~= me.dwID then
+    me.CenterMsg(i18n.EasyGet("\228\187\133\229\184\174\228\184\187\229\143\175\228\187\165\228\191\174\230\148\185\229\143\130\232\181\155\229\144\141\229\141\149"))
+    return
+  end
+  if Lib:IsEmptyTB(tbQualification) then
+    me.CenterMsg(i18n.EasyGet("\229\143\130\232\181\155\229\144\141\229\141\149\228\184\141\232\131\189\228\184\186\231\169\186"))
+    return
+  end
+  if Lib:CountTB(tbQualification) > self.Cfg.nFinalMaxJoinPlayer then
+    me.CenterMsg(i18n.EasyGet("\229\143\130\232\181\155\228\186\186\230\149\176\228\184\141\232\131\189\229\164\167\228\186\142{0}\228\186\186", self.Cfg.nFinalMaxJoinPlayer))
+    return
+  end
+  RemoteServer.RequestTongBattle("ApplyQualification", tbQualification)
+end
+
+function TongBattle:OnSyncQualification(tbQualification, tbPlayerScore)
+  self.tbQualification = tbQualification
+  self.tbPlayerScore = tbPlayerScore
+  local tbMemberList = Tong:GetMemberList() or {}
+  local tbOnlineMembers = Tong:GetMemberState() or {}
+  local tbTongBaseInfo = Tong:GetBaseInfo() or {}
+  local tbUIRankDataList = {}
+  for nRank, tbMember in ipairs(tbMemberList) do
+    local szHonorName, szHonorColor = HonorLevel:GetHonorNameByStarLevel(tbMember.nHonorStarLevel, false)
+    local szCareer = i18n.Get(Tong.Def.CareerName[tbMember.nCareer])
+    if tbMember.nCareer == Tong.Def.Career_Leader and tbTongBaseInfo.nMasterId == tbMember.nMemberId then
+      szCareer = szCareer .. "/" .. i18n.Get(Tong.Def.CareerName[Tong.Def.Career_Master])
+    end
+    local bOnLine = tbOnlineMembers[tbMember.nMemberId]
+    local szOnLine = ""
+    if bOnLine then
+      szOnLine = i18n.Get(Tong.Cfg.Msg.Online)
+    else
+      szOnLine = string.format("<color=#352620>%s</color>", i18n.Get(Tong.Cfg.Msg.Offline))
+    end
+    table.insert(tbUIRankDataList, {
+      [1] = {
+        nPlayerId = tbMember.nMemberId,
+        szPlayerName = tbMember.szName,
+        tbTitle = {
+          szHonorName = i18n.Parse(szHonorName),
+          szHonorColor = szHonorColor
+        },
+        nVipLevel = tbMember.nVipLevel
+      },
+      [2] = szCareer,
+      [3] = tbPlayerScore[tbMember.nMemberId] or 0,
+      [4] = szOnLine,
+      [5] = tbQualification[tbMember.nMemberId] or false
+    })
+  end
+  table.sort(tbUIRankDataList, function(a, b)
+    return a[3] > b[3]
+  end)
+  if not Ui:WindowVisible("UIGangRanking") then
+    Ui:OpenWindow("UIGangRanking", {
+      TongBattle.RequestApplyQualification,
+      TongBattle
+    }, nil, {
+      [1] = i18n.EasyGet("\229\144\141\229\173\151"),
+      [2] = i18n.EasyGet("\232\129\140\228\189\141"),
+      [3] = i18n.EasyGet("\231\167\175\229\136\134"),
+      [4] = i18n.EasyGet("\231\166\187\231\186\191"),
+      [5] = nil
+    }, tbUIRankDataList, TongBattle.Cfg.nFinalMaxJoinPlayer)
+  end
+  Ui:CloseWindow("UIActivity_Banghuizhengduosai")
+end
+
+function TongBattle:RegisterFubenUIChecker()
+  local tbRegisterMapList = {}
+  for _, tbInfo in pairs(TongBattle.MAP_FIGHT) do
+    table.insert(tbRegisterMapList, tbInfo.nMapId)
+  end
+  FubenUIController:RegisterChecker(tbRegisterMapList, self)
+end
+
+function TongBattle:CheckInTongBattle()
+  for _, tbInfo in pairs(TongBattle.MAP_FIGHT) do
+    if tbInfo.nMapId == me.nMapTemplateId then
+      return true
+    end
+  end
+  return false
+end
+
+function TongBattle:UpdateFuBenButton()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_FUBEN_BUTTON)
+end
+
+function TongBattle:OnFubenMapLoaded(pPlayer)
+  FubenUIController:OpenFuBenUI()
+end
+
+function TongBattle:IsNeedFuncScoreButton()
+  return false
+end
+
+function TongBattle:IsNeedExitFubenButton()
+  return true
+end
+
+function TongBattle:IsNeedFubenBtn()
+  if self.tbPillarState then
+    local tbBtnList = {}
+    
+    local function fnGoto(nIndex)
+      if self.tbPillarState[nIndex] then
+        if self.tbPillarState[nIndex].nTongID == me.dwTongId or TongBattle:CheckGmWarch(me) then
+          RemoteServer.RequestTongBattle("Transmit", nIndex)
+        else
+          me.CenterMsg(i18n.EasyGet("\229\141\160\233\162\134\233\190\153\230\159\177\229\144\142\230\150\185\229\143\175\228\188\160\233\128\129"))
+        end
+      end
+    end
+    
+    for nIndex, tbData in ipairs(self.tbPillarState) do
+      if tbData.nTongID == me.dwTongId or TongBattle:CheckGmWarch(me) then
+        table.insert(tbBtnList, {
+          szName = i18n.Parse(tbData.szName),
+          fnOnClick = function()
+            fnGoto(nIndex)
+          end
+        })
+      end
+    end
+    return true, nil, tbBtnList
+  end
+  return false
+end
+
+function TongBattle:GetFubenBtnAImagePathAndText()
+  return "UI/atlas/hud/btn_transfer.png", nil
+end
+
+TongBattle:RegisterFubenUIChecker()

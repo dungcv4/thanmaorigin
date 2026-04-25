@@ -1,0 +1,261 @@
+local tbWnd = Ui:CreateWindow("UIActivity_Banghuizhengduosai")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_UI_MESSAGEBOX_OPEN,
+      self.OnMsgBoxOpen,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_UI_MESSAGEBOX_CLOSE,
+      self.OnMsgBoxClose,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_WND_CLOSED,
+      self.OnWndClose,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_TONGBATTLE_DATA,
+      self.UpdateRight,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/Cont_Video/btnClose",
+  UIMoneyPanel = "node/imgBG/Cont_Video/UIMoneyPanel",
+  ViewWeb = "node/imgBG/Cont_Video/Center/RawImage",
+  txtActivityName = "node/imgBG/Cont_Video/Center/txtActivityName",
+  btnGo = "node/imgBG/Cont_Video/Right/btnGo",
+  btnRule = "node/imgBG/Cont_Video/Right/btnRule",
+  btnBattle = "node/imgBG/Cont_Video/Right/btnBattle",
+  btnQualification = "node/imgBG/Cont_Video/Right/btnRank",
+  btnAssemblylist = "node/imgBG/Cont_Video/Right/btnAssemblylist",
+  btnGuess = "node/imgBG/Cont_Video/Right/btnguess",
+  txtStartTime = "node/imgBG/Cont_Video/Right/txtStartTime",
+  btnCheck = "node/imgBG/Cont_Video/Right/btnCheck",
+  TemplateAwardList = "node/imgBG/Cont_Video/Right/Scroll View_Gift/Viewport/Content/GiftList",
+  txtInfo02 = "node/imgBG/Cont_Video/Right/txtInfo02",
+  TemplateTime = "node/imgBG/Cont_Video/Down/Scroll View/Viewport/Content/Award"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnGo = function(self)
+    self:ClickButtonGo()
+  end,
+  btnRule = function(self)
+    Ui:OpenWindow("UIGeneralWebView", TongBattle.Website.szRuleWeb, 0, 0)
+  end,
+  btnBattle = function(self)
+    Ui:OpenWindow("UIGeneralWebView", TongBattle.Website.szBattleWeb, 0, 0)
+  end,
+  btnQualification = function(self)
+    if Tong:CheckMyAuthority(Tong.Def.Authority_TongBattleList) then
+      TongBattle:RequestSyncQualification()
+    else
+      me.CenterMsg(i18n.EasyGet("\230\130\168\228\184\141\230\152\175\231\174\161\231\144\134\229\145\152\239\188\140\230\151\160\230\179\149\230\159\165\231\156\139"))
+    end
+  end,
+  btnAssemblylist = function(self)
+    Ui:OpenWindow("UIGeneralWebView", TongBattle.Website.szJiJieWeb, 0, 0)
+  end,
+  btnGuess = function(self)
+    self:Close()
+    Ui:OpenWindow("UIActivity_Banghuizhengduosai_Tip3")
+    self.bOpenGuess = true
+  end,
+  btnCheck = function(self)
+    Ui:OpenWindow("UIGeneralWebView", TongBattle.Website.szAwardWeb, 0, 0)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbScrollViewTime = Ui:NewScrollView(self, tbControls.TemplateTime)
+  self.tbAwardListView = Ui:NewScrollView(self, tbControls.TemplateAwardList)
+end
+
+function tbWnd:OnOpen()
+  TongBattle:ApllySyncData()
+  self.pPanel:SetActive(tbControls.UIMoneyPanel, false)
+  self.pPanel:SetActive(tbControls.txtActivityName, false)
+  self:UpdateCenter()
+  self:UpdateRight()
+  self:UpdateDown()
+end
+
+function tbWnd:OnClose()
+  ClientUtil:SetMusicVolume(self.nMusicVolume, false)
+  ClientUtil:SetSoundVolume(self.nSoundVolume, false)
+end
+
+function tbWnd:UpdateCenter()
+  self.pPanel:ClearCamera()
+  self.pPanel:ShowUrl(tbControls.ViewWeb, TongBattle.Website.szLiveWeb, 0, 0)
+  self.nMusicVolume = ClientUtil:SetMusicVolume(0, false)
+  self.nSoundVolume = ClientUtil:SetSoundVolume(0, false)
+end
+
+function tbWnd:UpdateRight()
+  self:UpdateButtonState()
+  self:UpdateQualification()
+end
+
+function tbWnd:UpdateButtonState()
+  if GetTime() < Lib:ParseConfigDateTime(tostring(TongBattle.TimeCfg.nZoneRankStart)) then
+    self.pPanel:Button_SetEnable(tbControls.btnAssemblylist, false)
+  else
+    self.pPanel:Button_SetEnable(tbControls.btnAssemblylist, true)
+  end
+  if GetTime() > Lib:ParseConfigDateTime(tostring(TongBattle.TimeCfg.nContestStart)) then
+    self.pPanel:Button_SetText(tbControls.btnAssemblylist, i18n.EasyGet("\228\186\137\229\164\186\230\166\156"), "Text")
+  else
+    self.pPanel:Button_SetText(tbControls.btnAssemblylist, i18n.EasyGet("\233\155\134\231\187\147\230\166\156"), "Text")
+  end
+  if not TongBattle:CheckInContestTime() and not TongBattle:CheckInFinalsTime() then
+    self.pPanel:Button_SetEnable(tbControls.btnBattle, false)
+  else
+    self.pPanel:Button_SetEnable(tbControls.btnBattle, true)
+  end
+  local nNowStage = TongBattle:GetNowFinalsSatge(TongBattle.tbFinalsData)
+  local nGuessStage = Lib:IIF(nNowStage < TongBattle.GuessCfg.nStartStage, TongBattle.GuessCfg.nStartStage, nNowStage)
+  local nGuessStartTime = TongBattle:GetStageGuessStartTime(TongBattle.nWarZone, nGuessStage)
+  self.pPanel:Button_SetText(tbControls.btnQualification, i18n.EasyGet("\232\181\132\230\160\188\231\174\161\231\144\134"), "Text")
+  local nTimeNow = GetTime()
+  if nGuessStartTime <= nTimeNow then
+    self.pPanel:Button_SetEnable(tbControls.btnGuess, true)
+    self.pPanel:SetActive(tbControls.txtStartTime, false)
+  else
+    local szStartTime = i18n.EasyGet("{0}\229\188\128\229\144\175", Lib:TimeDesc18(nGuessStartTime))
+    self.pPanel:Label_SetText(tbControls.txtStartTime, szStartTime)
+    self.pPanel:Button_SetEnable(tbControls.btnGuess, false)
+    self.pPanel:SetActive(tbControls.txtStartTime, true)
+  end
+  if nTimeNow > Lib:ParseDateTime(tostring(TongBattle.TimeCfg.nContestEnd)) and nTimeNow < Lib:ParseDateTime(tostring(TongBattle.TimeCfg.nFinalsEnd)) then
+    self.pPanel:Button_SetEnable(tbControls.btnQualification, Tong:CheckMyAuthority(Tong.Def.Authority_TongBattleList))
+  else
+    self.pPanel:Button_SetEnable(tbControls.btnQualification, false)
+  end
+  if TongBattle:CheckInZoneRankime() then
+    self.pPanel:Button_SetText(tbControls.btnGo, i18n.EasyGet("\229\143\130\228\184\142\233\155\134\231\187\147"), "Text")
+  else
+    self.pPanel:Button_SetText(tbControls.btnGo, i18n.EasyGet("\229\143\130\228\184\142\230\175\148\232\181\155"), "Text")
+  end
+end
+
+function tbWnd:UpdateQualification()
+  local szTxt = i18n.EasyGet("\228\189\160\230\178\161\230\156\137\229\143\130\232\181\155\232\181\132\230\160\188")
+  if TongBattle:CheckInRangeTime(TongBattle.TimeCfg.nZoneRankEnd, TongBattle.TimeCfg.nContestEnd) then
+    if TongBattle:CheckTongQualification() then
+      szTxt = i18n.EasyGet("\228\189\160\232\142\183\229\190\151\229\156\168\226\128\156{0}\226\128\157\229\184\174\228\188\154\229\143\130\232\181\155\232\181\132\230\160\188", Tong:GetTongName())
+    end
+  elseif TongBattle.nQualificationTongId > 0 and not Lib:IsEmptyStr(TongBattle.szQualificationTongName) then
+    local nNextMatchIndex = 0
+    for nMatchIndex, tbData in pairs(TongBattle.tbFinalsData or {}) do
+      if nMatchIndex > nNextMatchIndex and -1 == tbData.nWinner then
+        for _, nTongId in pairs(tbData.tbTongList) do
+          if nTongId == TongBattle.nQualificationTongId then
+            nNextMatchIndex = nMatchIndex
+          end
+        end
+      end
+    end
+    local szTimeDesc = ""
+    if nNextMatchIndex > 0 then
+      local tbNextTimeInfo = TongBattle.tbScheduleFinals[TongBattle.nAreaZone][nNextMatchIndex]
+      if tbNextTimeInfo then
+        local nTime = Lib:ParseNumbericDateToTime(tbNextTimeInfo.nDate * 1000000 + tbNextTimeInfo.nTime * 100)
+        szTimeDesc = Lib:TimeDesc11(nTime)
+      end
+    end
+    if not Lib:IsEmptyStr(szTimeDesc) then
+      szTxt = i18n.EasyGet("\228\189\160\232\142\183\229\190\151\229\156\168\226\128\156{0}\226\128\157\229\184\174\228\188\154\229\143\130\232\181\155\232\181\132\230\160\188\n\228\184\139\228\184\128\229\156\186\230\175\148\232\181\155\230\151\182\233\151\180\n{1}", TongBattle.szQualificationTongName, szTimeDesc)
+    else
+      szTxt = i18n.EasyGet("\228\189\160\232\142\183\229\190\151\229\156\168\226\128\156{0}\226\128\157\229\184\174\228\188\154\229\143\130\232\181\155\232\181\132\230\160\188", TongBattle.szQualificationTongName)
+    end
+  end
+  self.pPanel:Label_SetText(tbControls.txtInfo02, szTxt)
+end
+
+function tbWnd:UpdateAward()
+  self.tbAwardListView:Reset()
+  for i = 1, 1 do
+    self.tbAwardListView:SetElement(i, function(tbElement)
+      if not tbElement.tbAwardView then
+        tbElement.tbAwardView = Ui:NewItemGridScrollView(tbElement, "Content/ItemTemplate", 1, 1)
+      end
+      local tbAwards = Award:GetAward(TongBattle.UIShowAward.nAwardId, TongBattle.UIShowAward.nAwardKey)
+      tbElement.tbAwardView:UpdateGenericItem(tbAwards, false)
+    end)
+  end
+end
+
+function tbWnd:UpdateDown()
+  self.tbScrollViewTime:Reset()
+  for i, tbData in ipairs(TongBattle.UIStageCfg) do
+    self.tbScrollViewTime:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtTitle", i18n.Get(tbData.szTitle))
+      local nStartTime = Lib:ParseConfigDateTime(tostring(tbData.szTimeStart))
+      local nEndTime = Lib:ParseConfigDateTime(tostring(tbData.szTimeEnd))
+      local szStartTime = os.date("%Y/%m/%d %H:%M", nStartTime)
+      local szEndTime = os.date("%Y/%m/%d %H:%M", nEndTime)
+      pPanel:Label_SetText("txtTime01", szStartTime)
+      pPanel:Label_SetText("txtTime03", szEndTime)
+      if not tbElement.tbCPStateBg then
+        tbElement.tbCPStateBg = Ui:CreatePanel("UICP_StateBg", "UICP_StateBg", tbElement)
+      end
+      local nTime = GetTime()
+      tbElement.tbCPStateBg:HideAll()
+      if nStartTime > nTime then
+        tbElement.tbCPStateBg:ShowNotStarted()
+      elseif nEndTime < nTime then
+        tbElement.tbCPStateBg:ShowEnd()
+      else
+        tbElement.tbCPStateBg:ShowInProgress()
+      end
+      if i == #TongBattle.UIStageCfg then
+        tbElement.pPanel:SetActive("img_Arrow", false)
+      else
+        tbElement.pPanel:SetActive("img_Arrow", true)
+      end
+    end)
+  end
+end
+
+function tbWnd:ClickButtonGo()
+  if TongBattle:CheckInZoneRankime() then
+    ActivityMgr:GotoNpc(TongBattle.NPC_ID, Tong.Def.nMainMapTemplateId)
+    self:Close()
+  else
+    TongBattle:RequestAttend()
+  end
+end
+
+function tbWnd:OnWndClose(szUiName)
+  if "UIRanking" == szUiName and self.bOpenUIRanking then
+    if not Ui:WindowVisible("UIActivity_Banghuizhengduosai") then
+      Ui:OpenWindow("UIActivity_Banghuizhengduosai")
+    end
+    self.bOpenUIRanking = false
+  elseif "UIActivity_Banghuizhengduosai_Tip3" == szUiName and self.bOpenGuess then
+    if not Ui:WindowVisible("UIActivity_Banghuizhengduosai") then
+      Ui:OpenWindow("UIActivity_Banghuizhengduosai")
+    end
+    self.bOpenGuess = false
+  end
+end
+
+function tbWnd:OnMsgBoxOpen()
+  self:Close()
+end
+
+function tbWnd:OnMsgBoxClose()
+  self:Close()
+end

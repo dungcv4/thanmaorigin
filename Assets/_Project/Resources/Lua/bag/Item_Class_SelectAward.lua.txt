@@ -1,0 +1,82 @@
+local tbItem = Item:GetClass("SelectAward")
+tbItem.PARAM_SELECT_ID = 1
+
+function tbItem:OnClientUse(it)
+  local nSelectId = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_SELECT_ID)
+  Ui:OpenWindow("UISelectAwards", it.dwId, nSelectId)
+  Ui:CloseWindow("UIItemTips")
+  return 0
+end
+
+function tbItem:OnUse(it, tbIndexList)
+  return self:OnUseMany(it, 1, tbIndexList)
+end
+
+function tbItem:OnUseMany(it, nCount, tbIndexList)
+  if not (nCount and tbIndexList) or type(tbIndexList) ~= "table" then
+    return 0
+  end
+  local nLeftBag = me.GetFreeBagCount()
+  if nLeftBag <= 0 then
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\231\169\186\233\151\180\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\228\189\191\231\148\168\239\188\129"))
+    return 0
+  end
+  if nCount > it.nCount then
+    me.CenterMsg(i18n.EasyGet("\233\129\147\229\133\183\230\149\176\233\135\143\228\184\141\232\182\179"))
+    return 0
+  end
+  local nSelectId = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_SELECT_ID)
+  local tbCfg = Item.SelectAward:GetCfgById(nSelectId)
+  if not tbCfg then
+    LogErr(string.format("SelectAward:OnUseMany config is not exist, dwTemplateId=%d,nSelectId=%d", it.dwTemplateId, nSelectId))
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\233\129\147\229\133\183\230\154\130\230\151\182\228\184\141\229\143\175\228\189\191\231\148\168"))
+    return 0
+  end
+  local tbAward = {}
+  local nTotalNum = 0
+  local nSize = #tbCfg
+  for nIndex, nNum in pairs(tbIndexList) do
+    if nIndex <= 0 or nIndex > nSize then
+      return 0
+    end
+    nTotalNum = nTotalNum + nNum
+    if nCount < nTotalNum then
+      return 0
+    end
+    if nNum > 0 then
+      for i = 1, nNum do
+        table.insert(tbAward, Lib:CopyTB(tbCfg[nIndex]))
+      end
+    end
+  end
+  if not next(tbAward) then
+    return 0
+  end
+  if nTotalNum ~= nCount then
+    return 0
+  end
+  me.SendAward(tbAward, true, true, Env.LogWay_SelectAward)
+  return nCount
+end
+
+function tbItem:OnTimeOut(pItem, pPlayer)
+  local nItemTid = pItem.dwTemplateId
+  local nCount = pItem.nCount
+  local szName = pItem.szName
+  local szCurrencyType, nNum = Item.tbItemSell:GetSellCurrencyValue(nItemTid)
+  if not szCurrencyType then
+    return
+  end
+  if nCount ~= pPlayer.ConsumeItem(pItem, nCount, Env.LogWay_TimeOut) then
+    Log("TimeOutSellItem:OnTimeOut", pPlayer.szName, "pid:", pPlayer.dwID, "item:", nItemTid, "count:", nCount, "errConsumeItem")
+    return
+  end
+  local nTotalNum = nNum * nCount
+  local tbAward = {
+    {szCurrencyType, nTotalNum}
+  }
+  pPlayer.SendAward(tbAward, true, true, Env.LogWay_TimeOut, nil, nil)
+  local szMsg = i18n.EasyGet("\230\130\168\230\156\137{0}\228\184\170{1}\229\183\178\232\191\135\230\156\159\239\188\140\232\191\148\232\191\152\230\130\168{2}{3}", nCount, szName, nTotalNum, Currency:GetName(szCurrencyType))
+  pPlayer.Msg(szMsg)
+  Log("TimeOutSellItem:OnTimeOut", pPlayer.szName or "", "pid:" .. (pPlayer.dwID or 0), "item:" .. nItemTid, "count:" .. nCount)
+end

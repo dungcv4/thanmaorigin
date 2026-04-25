@@ -1,0 +1,129 @@
+Require("CommonScript/Item/Item.lua")
+
+function Item:LoadItemDefaultTimeOut()
+  self.tbItemDefaultTimeOut = {}
+  local tbConfig = Lib:LoadTabFileEx("Setting/Item/ItemTimeOut.tab", "ds", "", {
+    "nItemTemplateId",
+    "nTimeOut"
+  }, 0, 2, true)
+  for _, tbInfo in pairs(tbConfig) do
+    local nTimeOut = tonumber(tbInfo.nTimeOut)
+    if nTimeOut then
+      tbInfo.nTimeOut = nTimeOut
+    end
+    local Key = tbInfo.nItemTemplateId
+    self.tbItemDefaultTimeOut[Key] = tbInfo
+  end
+end
+
+Item:LoadItemDefaultTimeOut()
+
+function Item:GetItemDefaultItemOut(nItemTemplateId)
+  local info = self.tbItemDefaultTimeOut[nItemTemplateId]
+  if info then
+    local timeout = info.nTimeOut
+    if timeout then
+      if type(timeout) == "number" and 0 ~= timeout then
+        return timeout + GetTime()
+      end
+      if type(timeout) == "string" and "" ~= timeout then
+        return timeout
+      end
+    end
+  end
+  return -1
+end
+
+function Item:GetTimeOut(pItem)
+  local nGenTime = GetItemGenTime(pItem.dwId)
+  local nDynamicTimeOut = GetItemDynamicTimeOut(pItem.dwId)
+  if nil ~= nDynamicTimeOut and nDynamicTimeOut > 0 then
+    return true, nGenTime, nDynamicTimeOut
+  end
+  local nTimeOut = GetItemTimeOut(pItem.dwTemplateId)
+  if nTimeOut > 0 then
+    return true, nGenTime, nTimeOut
+  end
+  return false
+end
+
+function Item:CheckIsTimeOut(pItem)
+  local bHas, nGenTime, nTimeOut = self:GetTimeOut(pItem)
+  if bHas then
+    local nCurTime = GetTime()
+    local nEndTime = nTimeOut
+    if nCurTime > nEndTime then
+      SetTimeOutInvalid(pItem.dwId, true)
+      return true
+    end
+  end
+  return false
+end
+
+function Item:OnTimeOut(pPlayer, pItem)
+  local szClassName = pItem.szClass
+  local bRet = Item:HasAndCallClassFunc(pItem, "OnTimeOut", pPlayer)
+  if not bRet then
+    if 1 == pItem.IsEquip() and pItem.nPos == pItem.nEquipPos and 1 == pPlayer.UnuseEquipById(pItem.dwId) then
+      Event:OnEvent(Event.emEVENT_EQUIP_UNUSE, pPlayer.dwID, pItem.nEquipPos, pItem.dwId)
+    end
+    Log("Item:OnTimeOut:Delete", pPlayer.dwID, pItem.dwId, szClassName, pItem.nCount)
+    if pPlayer.ConsumeItem(pItem, pItem.nCount, Env.LogWay_TimeOut) <= 0 then
+      LogErr("Item:OnTimeOut:Delete Error", pPlayer.dwID, pItem.dwId, szClassName, pItem.nCount)
+    end
+  else
+    Log("Item:OnTimeOut", pPlayer.dwID, pItem.dwId, szClassName)
+  end
+end
+
+function Item:HasAndCallClassFunc(pItem, szFunc, ...)
+  local tbClass = self.tbClass[pItem.szClass]
+  if nil ~= tbClass and nil ~= tbClass[szFunc] then
+    local func = tbClass[szFunc]
+    return true, func(tbClass, pItem, ...)
+  end
+  return false
+end
+
+function Item:CheckTimeOutCallback(pPlayer, pItem)
+  local bIsTimeOut = self:CheckIsTimeOut(pItem)
+  if bIsTimeOut then
+    Item:OnTimeOut(pPlayer, pItem)
+  end
+end
+
+function Item:OnTimeOutHelper(pItem, pPlayer, szClassName)
+  local nItemTid = pItem.dwTemplateId
+  local nCount = pItem.nCount
+  local szName = pItem.szName
+  if nCount ~= pPlayer.ConsumeItem(pItem, nCount, Env.LogWay_TimeOut) then
+    LogErr(string.format("%s:OnTimeOut", szClassName), pPlayer.szName, "pid:", pPlayer.dwID, "item:", nItemTid, "count:", nCount, "errConsumeItem")
+    return
+  end
+  local szCurrencyType, nNum = Item.tbItemSell:GetSellCurrencyValue(nItemTid)
+  if not szCurrencyType then
+    return
+  end
+  local nTotalNum = nNum * nCount
+  local tbAward = {
+    {szCurrencyType, nTotalNum}
+  }
+  pPlayer.SendAward(tbAward, true, true, Env.LogWay_TimeOut, nil, nil)
+  local szMsg = i18n.EasyGet("\230\130\168\230\156\137{0}\228\184\170{1}\229\183\178\232\191\135\230\156\159\239\188\140\232\191\148\232\191\152\230\130\168{2}{3}", nCount, szName, nTotalNum, Currency:GetName(szCurrencyType))
+  pPlayer.Msg(szMsg)
+  Log(string.format("%s:OnTimeOut", szClassName), pPlayer.szName or "", "pid:" .. (pPlayer.dwID or 0), "item:" .. nItemTid, "count:" .. nCount)
+end
+
+function Item:TimeOutDelete(pPlayer, nItemId)
+  local pItem = pPlayer.GetItemInAllSpace(nItemId)
+  if nil ~= pItem then
+    Item:CheckTimeOutCallback(pPlayer, pItem)
+  end
+end
+
+function Item:OnPlayerLoginChkAllTimeout(pPlayer)
+  local tbItems = pPlayer.GetItemListInBag()
+  for _, pItem in pairs(tbItems) do
+    Item:CheckTimeOutCallback(pPlayer, pItem)
+  end
+end

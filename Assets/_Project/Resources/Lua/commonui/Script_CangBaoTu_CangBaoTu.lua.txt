@@ -1,0 +1,158 @@
+function CangBaoTu:OnUseItem(nItemId, nMapId, nX, nY)
+  local pItem = KItem.GetItemObj(nItemId)
+  
+  if not pItem then
+    return
+  end
+  if TeamMgr:IsFollowTeammate() then
+    me.CenterMsg(i18n.EasyGet("\230\173\163\229\156\168\232\183\159\230\136\152\228\184\173\239\188\140\228\184\141\229\143\175\228\189\191\231\148\168\232\151\143\229\174\157\229\155\190"))
+    return
+  end
+  local nMapTemplateId, nPosX, nPosY = Item:GetClass("CangBaoTu"):GetCangBaoTuPos(pItem)
+  nMapTemplateId = nMapId or nMapTemplateId
+  nPosX = nX or nPosX
+  nPosY = nY or nPosY
+  local tbMapSetting = Map:GetMapSetting(nMapTemplateId)
+  local nItemtype = KItem.GetItemExtParam(pItem.dwTemplateId, 1)
+  if nItemtype == Item:GetClass("CangBaoTu").TYPE_SENIOR and TeamMgr:HasTeam() then
+    local szLocaltion = i18n.EasyGet("\232\151\143\229\174\157\229\155\190\228\189\141\228\186\142<{0}({1},{2})>", i18n.Parse(tbMapSetting.MapName), Lib:MathRound(nPosX * Map.nShowPosScale), Lib:MathRound(nPosY * Map.nShowPosScale))
+    ChatMgr:SetChatLink(ChatMgr.LinkType.Position, {
+      nMapTemplateId,
+      nPosX,
+      nPosY,
+      nMapTemplateId
+    })
+    ChatMgr:SendMsg(ChatMgr.ChannelType.Team, nil, szLocaltion)
+  end
+  
+  local function fnOnArive()
+    local function __timer_Callback()
+      local bCanWaBao = Item:GetClass("CangBaoTu"):CheckCanWaBao(me, nItemId)
+      
+      if bCanWaBao then
+        RemoteServer.UseItem(nItemId)
+      else
+        me.CenterMsg(i18n.EasyGet("\232\151\143\229\174\157\231\130\185\230\151\160\230\179\149\229\136\176\232\190\190\239\188\140\232\175\183\232\132\177\231\166\187\229\141\161\230\173\187\229\144\142\229\134\141\232\175\149"))
+        LogErr(i18n.EasyGet("\232\151\143\229\174\157\231\130\185\230\151\160\230\179\149\229\136\176\232\190\190"), nPosX, nPosY)
+        RemoteServer.RandomCangBaoTuPos(nItemId)
+        self:AutoUse(nItemId)
+      end
+    end
+    
+    AFK:Stop()
+    Timer:Register(5, __timer_Callback)
+  end
+  
+  local function fnOnPosFail()
+    RemoteServer.RandomCangBaoTuPos(nItemId)
+    Log("cangbaotu:fnOnPosFail", nItemId)
+  end
+  
+  AFK:Stop()
+  AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, fnOnArive, Npc.MIN_DISTANCE, nil, nil, nil, nil, fnOnPosFail)
+  me.CenterMsg(i18n.EasyGet("\232\151\143\229\174\157\231\130\185\228\189\141\228\186\142<color=#ffff0e>{0}({1}, {2})</color>\239\188\140\230\173\163\229\156\168\229\137\141\229\190\128", i18n.Parse(tbMapSetting.MapName), Lib:MathRound(nPosX * Map.nShowPosScale), Lib:MathRound(nPosY * Map.nShowPosScale)))
+  Ui:CloseWindow("UIItemTips")
+  Ui:CloseWindow("ItemBox")
+  Ui:CloseWindow("UIBag")
+  Ui:OpenQuickUseItem(nItemId, i18n.EasyGet("\228\189\191\231\148\168"))
+end
+
+function CangBaoTu:Update(nItemId)
+  Ui:OpenQuickUseItem(nItemId, i18n.EasyGet("\228\189\191\231\148\168"))
+end
+
+function CangBaoTu:AutoUse(nItemId)
+  Ui:CloseWindow("UIProgressBar")
+  RemoteServer.UseItem(nItemId)
+end
+
+function CangBaoTu:AutoDialog(nNpcId)
+  RemoteServer.OnSimpleTapNpc(nNpcId)
+end
+
+function CangBaoTu:OnStartProgress()
+end
+
+function CangBaoTu:OnBreakProgress()
+end
+
+function CangBaoTu:OnEndProgress(nItemId, bContinue)
+  if not bContinue then
+    self:Update(nItemId)
+  end
+end
+
+function CangBaoTu:OnSyncData(tbData)
+  self.tbTaskData = tbData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_CANGBAOTU_DATA, tbData)
+end
+
+function CangBaoTu:IsFinishDailyTask()
+  self.tbTaskData = self.tbTaskData or {}
+  return Lib:IsSameDay(self.DIFF_TIME, self.tbTaskData.nFinishDailyTaskTime or 0)
+end
+
+function CangBaoTu:IsDoingTask()
+  return not self:IsFinishDailyTask() and me.nLevel >= self.LevelLimit
+end
+
+function CangBaoTu:OnTrack()
+  if self:IsDoingTask() then
+    local nPosX, nPosY, nWalkNearLength = Npc:GetNpcPos(self.TASKNPC_NPCTEMPLATEID, self.TASKNPC_MAPTEMPLATEID)
+    
+    local function fnCallback()
+      local function __timer_Callback()
+        local nNpcId = KNpc.GetNpcIdByTemplateId(CangBaoTu.TASKNPC_NPCTEMPLATEID)
+        
+        if nNpcId then
+          Operation:SimpleTap(nNpcId)
+        end
+      end
+      
+      AFK:Stop()
+      Timer:Register(5, __timer_Callback)
+    end
+    
+    AFK:Stop()
+    AutoPath:GotoAndCallEx(self.TASKNPC_MAPTEMPLATEID, nPosX, nPosY, fnCallback, nWalkNearLength, nil, self.TASKNPC_NPCTEMPLATEID)
+  else
+    for _, tbInfo in ipairs(CangBaoTu.TB_LONGMAITU_INFO) do
+      local nItemTemplateId = tbInfo.nItemTemplateId
+      local pItem = me.GetOneItemByTypeInBag(nItemTemplateId)
+      if pItem then
+        CangBaoTu:AutoUse(pItem.dwId)
+        return
+      end
+    end
+    local pItem = me.GetOneItemByTypeInBag("CangBaoTu")
+    if pItem then
+      CangBaoTu:AutoUse(pItem.dwId)
+    else
+      me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\229\134\133\230\154\130\230\151\160\233\190\153\232\132\137\229\155\190\232\191\155\232\161\140\230\142\162\231\180\162\239\188\129"))
+    end
+  end
+end
+
+function CangBaoTu:GetShowTarget()
+  return {
+    {"Item", 30004},
+    {"Item", 30002}
+  }
+end
+
+function CangBaoTu:SetAutoFight(bAuto)
+  if bAuto then
+    AFK:Start()
+  else
+    AFK:Stop()
+  end
+end
+
+function CangBaoTu:OnJoin()
+  local pItem = me.GetOneItemByTypeInBag("CangBaoTu")
+  if not pItem then
+    me.CenterMsg(i18n.EasyGet("\230\130\168\231\154\132\232\131\140\229\140\133\230\178\161\230\156\137\232\151\143\229\174\157\229\155\190"))
+    return
+  end
+  Ui:OpenQuickUseItem(pItem.dwId, i18n.EasyGet("\228\189\191\231\148\168"))
+end

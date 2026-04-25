@@ -1,0 +1,121 @@
+local tbWnd = Ui:CreateWindow("UIFreightTaskHelp")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  Template = "node/imgBG/Content/HelpList/ScrollView/Viewport/Content/Template",
+  txtEmpty = "node/imgBG/Content/txtEmpty",
+  HelpList = "node/imgBG/Content/HelpList",
+  txtHelpNum = "node/imgBG/Content/FinishCount/txtHelpNum"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbAssistScrollView = Ui:NewScrollView(self, tbControls.Template)
+end
+
+function tbWnd:OnOpen(nTargetId)
+  self.nTargetId = nTargetId
+  self.tbAssistScrollView:Clear()
+  self:UpdateAssistCount()
+  KinFreightTask:CSBeAssistInfoReq(false)
+  self.nTimer = Timer:Register(Env.GAME_FPS * 3, function(self)
+    KinFreightTask:CSBeAssistInfoReq(false)
+    return true
+  end, self)
+end
+
+function tbWnd:OnClose()
+  self.nTargetId = nil
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+end
+
+function tbWnd:UpdateView()
+  self:UpdateAssistCount()
+end
+
+function tbWnd:UpdateTaskSV(tbAssistInfo)
+  local tbSVData = {}
+  for i = #tbAssistInfo, 1, -1 do
+    if tbAssistInfo[i].dwID ~= me.dwID then
+      table.insert(tbSVData, tbAssistInfo[i])
+    end
+  end
+  if #tbSVData > 0 then
+    table.sort(tbSVData, function(a, b)
+      return a.nAddTimestamp > b.nAddTimestamp
+    end)
+    self.pPanel:SetActive(tbControls.HelpList, true)
+    self.pPanel:SetActive(tbControls.txtEmpty, false)
+  else
+    self.pPanel:SetActive(tbControls.HelpList, false)
+    self.pPanel:SetActive(tbControls.txtEmpty, true)
+  end
+  if self.nTargetId then
+    local tbTemp = tbSVData
+    tbSVData = {}
+    for i = 1, #tbTemp do
+      if tbTemp[i].dwID == self.nTargetId then
+        table.insert(tbSVData, tbTemp[i])
+      end
+    end
+    for i = 1, #tbTemp do
+      if tbTemp[i].dwID ~= self.nTargetId then
+        table.insert(tbSVData, tbTemp[i])
+      end
+    end
+  end
+  
+  local function fnSetItem(tbData, tbElement)
+    local nId = tbData.nId
+    local pPanel = tbElement.pPanel
+    pPanel:Label_SetText("txtName", tbData.szName)
+    local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+    itemGrid:SetItemByTemplate(nId)
+    itemGrid:SetClickEnable(true)
+    local szName = KItem.GetItemShowInfo(nId, me.nFaction, me.nFactionSect, me.nSex)
+    pPanel:Label_SetText("txtItem", i18n.Parse(szName))
+    local nHadNum = me.GetItemCountByTypeInBag(nId)
+    local tbCfg = KinFreightTask.tbKinFreight[nId]
+    if not tbCfg then
+      LogErr("Error in UIFreightTaskHelp not cfg: " .. nId)
+      return
+    end
+    pPanel:Label_SetText("txtNum", i18n.EasyGet("{0}/{1}", nHadNum, tbCfg.nNum))
+    local szMoneyName = Currency:GetName(tbCfg.szCurrencyType)
+    pPanel:Label_SetText("btnGoldCommit/Text", i18n.EasyGet("{0}{1}\230\143\144\228\186\164", tbCfg.nCost, szMoneyName))
+    Ui:Button_BindEvent(pPanel, "btnGoldCommit", function()
+      local nAddKinContrib = KinFreightTask:GetKinContribCfg(tbCfg.nColor)
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\232\138\177\232\180\185{0}{1}\232\180\173\228\185\176\229\185\182\229\141\143\229\138\169\228\186\164\232\180\167\239\188\159\239\188\136\228\186\164\232\180\167\229\144\142\229\143\175\232\142\183\229\190\151{2}\232\180\161\231\140\174\239\188\137", tbCfg.nCost, szMoneyName, nAddKinContrib), {
+        {
+          function()
+            KinFreightTask:CSAssistTask(tbData.dwID, tbData.nSeekHelpId, nId, KinFreightTask.tbAssistType.Money)
+          end
+        },
+        {}
+      })
+    end)
+    Ui:Button_BindEvent(pPanel, "btnCommit", function()
+      KinFreightTask:CSAssistTask(tbData.dwID, tbData.nSeekHelpId, nId, KinFreightTask.tbAssistType.Item)
+    end)
+  end
+  
+  self.tbAssistScrollView:Reset()
+  for k, tbData in ipairs(tbSVData) do
+    self.tbAssistScrollView:SetElement(k, function(tbElement)
+      fnSetItem(tbData, tbElement)
+    end)
+  end
+end
+
+function tbWnd:UpdateAssistCount()
+  local nAssistCount = KinFreightTask:GetAssistTaskCout()
+  local nMaxAssist = KinFreightTask:GetFreightMaxAssist(me)
+  self.pPanel:Label_SetText(tbControls.txtHelpNum, i18n.EasyGet("{0}/{1}", nMaxAssist - nAssistCount, nMaxAssist))
+end

@@ -1,0 +1,975 @@
+Require("Script/Kin/KinClient.lua")
+local tbWnd = Ui:CreateWindow("UIKin")
+local nDefaultSlideLimit = 0.3
+local nSwitchBtnLimit = 0.1
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_KIN_DATA,
+      self.onKinSyncData
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_KIN_REDPACKET,
+      self.redBagRefresh,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.OnChangeMoney,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_UPDATE_KIN_GIFTBOX,
+      self.UpdateGiftBoxExchangeTime
+    },
+    {
+      EventNotify.emNOTIFY_UPDATE_FREIGHT_ASSIST_DATA,
+      self.UpdateMemberList
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_ROLE_STAY_INFO,
+      self.OnSyncRoleInfo,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_LEADER_QUIT,
+      self.OnUpdateQuitBtn,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnKinInfo = "node/imgBG/btnList/btnInfo",
+  btnKinMember = "node/imgBG/btnList/btnMember",
+  btnKinRedBag = "node/imgBG/btnList/btnRedBag",
+  btnKinSalary = "node/imgBG/btnList/btnSalary",
+  panelKinInfo = "node/imgBG/Content/KinInfoPanel",
+  panelKinMember = "node/imgBG/Content/KinMemberPanel",
+  panelKinRedBag = "node/imgBG/Content/KinRedBagPanel",
+  panelKinSalary = "node/imgBG/Content/KinSalaryPanel",
+  UIMoneyPanel = "node/UIMoneyPanel",
+  txtKinName = "node/imgBG/Content/KinInfoPanel/panelKinInfo/KinInfo/txtKinName",
+  txtKinLevel = "node/imgBG/Content/KinInfoPanel/panelKinInfo/KinInfo/txtKinLevelNum",
+  btnChangeKinName = "node/imgBG/Content/KinInfoPanel/panelKinInfo/KinInfo/btnEditKinName",
+  txtKinMasterName = "node/imgBG/Content/KinInfoPanel/panelKinInfo/KinInfo/InfoList/Master/txtMasterValue",
+  txtMoneyValue = "node/imgBG/Content/KinInfoPanel/panelKinInfo/KinInfo/InfoList/Money/txtMoneyValue",
+  txtMemberCount = "node/imgBG/Content/KinInfoPanel/panelKinInfo/KinInfo/InfoList/Member/txtMemberValue",
+  txtTraineeCount = "node/imgBG/Content/KinInfoPanel/panelKinInfo/KinInfo/InfoList/TempMember/txtTempMemberValue",
+  txtOnlineMemberCount = "node/imgBG/Content/KinInfoPanel/panelKinInfo/KinInfo/InfoList/OnlineMember/txtOnlineMemberValue",
+  txtKinFund = "node/imgBG/Content/KinInfoPanel/panelKinInfo/KinInfo/InfoList/Money/txtMoneyValue",
+  btnFreight = "node/imgBG/Content/KinInfoPanel/Building/Freight",
+  btnZhudian = "node/imgBG/Content/KinInfoPanel/Building/Zhudian",
+  btnFangshi = "node/imgBG/Content/KinInfoPanel/Building/Fangshi",
+  btnSkill = "node/imgBG/Content/KinInfoPanel/Building/Skill",
+  RedFreightGo = "node/imgBG/Content/KinInfoPanel/Building/Freight/imgTitleBg",
+  RedZhudianGo = "node/imgBG/Content/KinInfoPanel/Building/Zhudian/imgTitleBg",
+  RedFangshiGo = "node/imgBG/Content/KinInfoPanel/Building/Fangshi/imgTitleBg",
+  RedSkillGo = "node/imgBG/Content/KinInfoPanel/Building/Skill/imgTitleBg",
+  txtKinNotice = "node/imgBG/Content/KinInfoPanel/panelKinInfo/Notice/ScrollView/Content/txtKinNotice",
+  btnEditKinNotice = "node/imgBG/Content/KinInfoPanel/panelKinInfo/Notice/btnEditKinNotice",
+  btnKinAnnounce = "node/imgBG/Content/KinInfoPanel/panelKinInfo/Notice/btnKinAnnounce",
+  btnTranslate = "node/imgBG/Content/KinInfoPanel/panelKinInfo/Notice/btnTranslate",
+  btnDonate = "node/imgBG/Content/KinInfoPanel/VaultPanel/DonationNode/btnDonate",
+  txtDonationCount = "node/imgBG/Content/KinInfoPanel/VaultPanel/DonationNode/Count/txtDonationCount",
+  txtDonationCost = "node/imgBG/Content/KinInfoPanel/VaultPanel/DonationNode/CoinNumber/txtDonationCost",
+  AddAndSub = "node/imgBG/Content/KinInfoPanel/VaultPanel/DonationNode/UIAddAndSubGroup",
+  DonationItemGrid = "node/imgBG/Content/KinInfoPanel/VaultPanel/DonationNode/UIItemGrid",
+  btnDonateRecord = "node/imgBG/Content/KinInfoPanel/VaultPanel/DonationNode/btnDonateRecord",
+  wndDonateRecord = "wndDonateRecord",
+  btnShowDonateRecord = "wndDonateRecord/imgBg/tapList/btnDonateRecord",
+  btnShowMoneyRecord = "wndDonateRecord/imgBg/tapList/btnMoneyRecord",
+  txtTemplate = "wndDonateRecord/imgBg/DonateList/Viewport/Content/txtTemplate",
+  btnBuyGiftBox = "node/imgBG/Content/KinInfoPanel/VaultPanel/GiftBox/GiftBoxNode/btnBuyGiftBox",
+  GiftBoxItemGrid = "node/imgBG/Content/KinInfoPanel/VaultPanel/GiftBox/GiftBoxNode/UIItemGrid",
+  txtGiftBoxLeftCount = "node/imgBG/Content/KinInfoPanel/VaultPanel/GiftBox/GiftBoxNode/Count/txtGiftBoxLeftCount",
+  txtGiftBoxCost = "node/imgBG/Content/KinInfoPanel/VaultPanel/GiftBox/GiftBoxNode/SilverNumber/txtGiftBoxCost",
+  txtGiftCountDownTime = "node/imgBG/Content/KinInfoPanel/VaultPanel/GiftBox/GiftBoxNode/btnBuyGiftBox/Text",
+  KinMemberTemplate = "node/imgBG/Content/KinMemberPanel/imgList/Viewport/List/Template",
+  btnApplyerList = "node/imgBG/Content/KinMemberPanel/btnGroup/btnKinApplyList",
+  btnQuitKin = "node/imgBG/Content/KinMemberPanel/btnGroup/btnQuitKin",
+  btnKinMail = "node/imgBG/Content/KinMemberPanel/btnGroup/btnKinMail",
+  btnKinJob = "node/imgBG/Content/KinMemberPanel/btnGroup/btnKinJob",
+  btnKinList = "node/imgBG/Content/KinMemberPanel/btnGroup/btnKinList",
+  btnKinTitle = "node/imgBG/Content/KinMemberPanel/btnGroup/btnKinTitle",
+  btnGetSalary = "node/imgBG/Content/KinSalaryPanel/SalaryInfo/btnGet",
+  txtKinWeekActive = "node/imgBG/Content/KinSalaryPanel/SalaryInfo/txtWeekAct/txtDailyActValue",
+  txtKinWeekActiveFaction = "node/imgBG/Content/KinSalaryPanel/SalaryInfo/txtActAddition/txtActAdditionValue",
+  txtKinCareerFactionTitle = "node/imgBG/Content/KinSalaryPanel/SalaryInfo/txtJobAddition",
+  txtKinCareerFaction = "node/imgBG/Content/KinSalaryPanel/SalaryInfo/txtJobAddition/txtJobAdditionValue",
+  txtLastWeekSalary = "node/imgBG/Content/KinSalaryPanel/SalaryInfo/txtLastWeek/txtLastWeekValue",
+  txtCurWeekSalary = "node/imgBG/Content/KinSalaryPanel/SalaryInfo/txtThisWeek/txtThisWeekValue",
+  txtFinalWeekSalary = "node/imgBG/Content/KinSalaryPanel/SalaryInfo/txtForecast/txtForecastValue",
+  listActivityTemplate = "node/imgBG/Content/KinSalaryPanel/ActivityList/List/Content/Template",
+  btnFaction = "node/imgBG/Content/KinMemberPanel/MemberListTitle/btnFaction",
+  btnRank = "node/imgBG/Content/KinMemberPanel/MemberListTitle/btnRank",
+  btnMember = "node/imgBG/Content/KinMemberPanel/MemberListTitle/btnMember",
+  btnLevel = "node/imgBG/Content/KinMemberPanel/MemberListTitle/btnLevel",
+  btnPost = "node/imgBG/Content/KinMemberPanel/MemberListTitle/btnPost",
+  btnContribution = "node/imgBG/Content/KinMemberPanel/MemberListTitle/btnContribution",
+  btnActiveValue = "node/imgBG/Content/KinMemberPanel/MemberListTitle/btnActiveValue",
+  btnReqHelp = "node/imgBG/Content/KinMemberPanel/MemberListTitle/btnHelp",
+  btnChuanGong = "node/imgBG/Content/KinMemberPanel/MemberListTitle/btnChuanGong",
+  btnOffline = "node/imgBG/Content/KinMemberPanel/MemberListTitle/btnOffline",
+  BtnJinbi = "node/imgBG/Content/KinRedBagPanel/Tab/BtnJinbi",
+  BtnYuanbao = "node/imgBG/Content/KinRedBagPanel/Tab/BtnYuanbao",
+  YuanbaoPanel = "node/imgBG/Content/KinRedBagPanel/YuanbaoPanel",
+  JinbiPanel = "node/imgBG/Content/KinRedBagPanel/JinbiPanel",
+  ItemCell = "node/imgBG/Content/KinRedBagPanel/YuanbaoPanel/Send/ScrollView/Viewport/Content/ItemCell",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  KinMemberList = "node/imgBG/Content/KinMemberPanel/imgList",
+  btnGoTop = "node/imgBG/Content/KinMemberPanel/btnGoTop",
+  btnGoBottom = "node/imgBG/Content/KinMemberPanel/btnGoBottom",
+  btnPrestigeHelp = "node/imgBG/Content/KinInfoPanel/panelKinInfo/KinInfo/InfoList/KinPrestige/btnHelp",
+  txtKinPrestigeValue = "node/imgBG/Content/KinInfoPanel/panelKinInfo/KinInfo/InfoList/KinPrestige/txtKinPrestigeValue",
+  wndKinPrestigeDetails = "wndKinPrestigeDetails"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbBuilding2Txt = {
+  [Kin.Def.Building_Main] = "node/imgBG/Content/KinInfoPanel/Building/Zhudian/LevelNum",
+  [Kin.Def.Building_Shop] = "node/imgBG/Content/KinInfoPanel/Building/Fangshi/LevelNum",
+  [Kin.Def.Building_Skill] = "node/imgBG/Content/KinInfoPanel/Building/Skill/LevelNum"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnChangeKinName = function(self)
+    if not Kin:CheckMyAuthority(Kin.Def.Authority_ChangeName) then
+      me.CenterMsg(i18n.Get(Kin.Cfg.Msg.PermissionDenied))
+      return
+    end
+    RemoteServer.OnKinRequest("OpenKinModifyNameReq")
+    self:Close()
+  end,
+  btnEditKinNotice = function(self)
+    if not Kin:CheckMyAuthority(Kin.Def.Authority_EditPubilcDeclare) then
+      me.CenterMsg(i18n.Get(Kin.Cfg.Msg.PermissionDenied))
+      return
+    end
+    Ui:OpenWindow("UIKinSetAnnounce", i18n.EasyGet("\229\174\182\230\151\143\229\133\172\229\145\138"), "PublicDeclare")
+  end,
+  btnApplyerList = function(self)
+    if not Kin:CheckMyAuthority(Kin.Def.Authority_Recruit) then
+      me.CenterMsg(i18n.Get(Kin.Cfg.Msg.PermissionDenied))
+      return
+    end
+    Ui:OpenWindow("UIKinApplyList")
+  end,
+  btnQuitKin = function(self)
+    Kin:OnClickQuitKin()
+  end,
+  btnKinAnnounce = function(self)
+    if not Kin:CheckMyAuthority(Kin.Def.Authority_EditRecuitInfo) then
+      me.CenterMsg(i18n.Get(Kin.Cfg.Msg.PermissionDenied))
+      return
+    end
+    Ui:OpenWindow("UIKinSetAnnounce", i18n.EasyGet("\229\174\182\230\151\143\229\174\163\232\168\128"), "AddDeclare")
+  end,
+  btnKinMail = function(self)
+    if not Kin:CheckMyAuthority(Kin.Def.Authority_Mail) then
+      me.CenterMsg(i18n.Get(Kin.Cfg.Msg.PermissionDenied))
+      return
+    end
+    Ui:OpenWindow("UIKinMail")
+  end,
+  btnKinJob = function(self)
+    if not Kin:CheckMyAuthority(Kin.Def.Authority_GrantViceMaster) and not Kin:CheckMyAuthority(Kin.Def.Authority_GrantCommand) and not Kin:CheckMyAuthority(Kin.Def.Authorith_GrantMascot) then
+      me.CenterMsg(i18n.Get(Kin.Cfg.Msg.PermissionDenied))
+      return
+    end
+    Ui:OpenWindow("UIKinMgrPanel")
+  end,
+  btnKinList = function(self)
+    Ui:OpenWindow("UIKinList")
+    self:Close()
+  end,
+  btnKinTitle = function(self)
+    if not Kin:CheckMyAuthority(Kin.Def.Authority_EditKinTitle) then
+      me.CenterMsg(i18n.Get(Kin.Cfg.Msg.PermissionDenied))
+      return
+    end
+    Ui:OpenWindow("UIKinTitlePanel")
+  end,
+  btnFaction = function(self)
+    self:OnUpdateMemberList("SortByFaction")
+  end,
+  btnRank = function(self)
+    self:OnUpdateMemberList("SortByRank")
+  end,
+  btnMember = function(self)
+    self:OnUpdateMemberList("SortByName")
+  end,
+  btnLevel = function(self)
+    self:OnUpdateMemberList("SortByLevel")
+  end,
+  btnPost = function(self)
+    self:OnUpdateMemberList("SortByCareer")
+  end,
+  btnContribution = function(self)
+    self:OnUpdateMemberList("SortByContribution")
+  end,
+  btnActiveValue = function(self)
+    self:OnUpdateMemberList("SortByActivity")
+  end,
+  btnReqHelp = function(self)
+    self:OnUpdateMemberList("SortByHelp")
+  end,
+  btnChuanGong = function(self)
+    self:OnUpdateMemberList("SortByChuanGong")
+  end,
+  btnOffline = function(self)
+    self:OnUpdateMemberList("SortByOffline")
+  end,
+  btnDonate = function(self)
+    self:BtnDonate()
+  end,
+  btnDonateRecord = function(self)
+    self:ShowDonateRecord()
+  end,
+  btnBuyGiftBox = function(self)
+    Kin:BuyGiftBox()
+  end,
+  btnGetSalary = function(self)
+    Kin:GetKinSalary()
+  end,
+  btnFreight = function(self)
+    KinFreightTask:OpenKinFreightTaskWnd()
+  end,
+  btnZhudian = function(self)
+    Ui:OpenWindow("UIKinBuild")
+  end,
+  btnFangshi = function(self)
+    Ui:OpenWindow("UIStore", Shop.ShopTypeStr.DrugShop)
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("KinHelp")
+  end,
+  btnSkill = function(self)
+    Ui:OpenWindow("UISkill", 2, true)
+  end,
+  btnGoTop = function(self)
+    self.bButtonChange = true
+    self.tbKinMemberScrollView:GoTop()
+    self.pPanel:SetActive(tbControls.btnGoTop, false)
+  end,
+  btnGoBottom = function(self)
+    self.bButtonChange = true
+    self.tbKinMemberScrollView:GoButtom()
+    self.pPanel:SetActive(tbControls.btnGoBottom, false)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbPanelList = Ui:NewButtonGroup(self, {
+    [1] = self.btnKinInfo,
+    [2] = self.btnKinMember,
+    [3] = self.btnKinRedBag,
+    [4] = self.btnKinSalary
+  }, true, function(self, nIndex)
+    if 1 == nIndex then
+      self:onClickSelectKinInfoPanel()
+    elseif 2 == nIndex then
+      self:onClickSelectKinMemberPanel()
+    elseif 3 == nIndex then
+      self:onClickSelectKinRedBagPanel()
+    elseif 4 == nIndex then
+      self:onClickSelectKinSalaryPanel()
+    end
+  end)
+  self.tbRedBagPanel = Ui:CreatePanel("UIRedBagPanel", self.panelKinRedBag, self)
+  self.tbKinMemberScrollView = Ui:NewLoopScrollView(self, self.KinMemberTemplate)
+  self.tbActiviryListScrollView = Ui:NewScrollView(self, self.listActivityTemplate)
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, self.UIMoneyPanel)
+  self.itemContribute = Ui:NewExistItemGrid(self, self.DonationItemGrid)
+  self.itemGiftBoxReward = Ui:NewExistItemGrid(self, self.GiftBoxItemGrid)
+  self.AddAndSubGroup = Ui:NewExistAddAndSubGroup(self, self.AddAndSub)
+  self.AddAndSubGroup:BindEvent(function(nValue)
+    return self:UpdateNumberInput(nValue)
+  end)
+  self.AddAndSubGroup:SetNumPadPos(-200, -100)
+  self.AddAndSubGroup:SetInputValue(1)
+  self.tbKinMemberScrollRect = self.pPanel:GetScrollRect(tbControls.KinMemberList)
+  self.tbKinMemberScrollRect.onValueChanged:AddListener(function(vec2)
+    self:OnSliderList(vec2)
+  end)
+  self:DealDonateRecordWithOnCreate()
+end
+
+function tbWnd:DealDonateRecordWithOnCreate()
+  self:SetClickEmptyToClose(tbControls.wndDonateRecord)
+  self.pPanel:SetActive(tbControls.wndDonateRecord, false)
+  self.tbDonateRecordFuncList = {
+    [1] = "OnClickShowDonateRecord",
+    [2] = "OnClickShowMoneyCostRecord"
+  }
+  self.tbDonateRecordBtn = Ui:NewButtonGroup(self, {
+    [1] = tbControls.btnShowDonateRecord,
+    [2] = tbControls.btnShowMoneyRecord
+  }, true, function(this, nIndex)
+    this[this.tbDonateRecordFuncList[nIndex]](this)
+  end)
+  self.tbDonateRecordSV = Ui:NewScrollView(self, tbControls.txtTemplate)
+end
+
+tbWnd.PAGE_INDEX = {MEMBERLIST = 2, Salary = 4}
+
+function tbWnd:OnOpen(szPage, ...)
+  if 0 == me.dwKinId then
+    me.CenterMsg(i18n.EasyGet("\232\175\183\229\133\136\229\138\160\229\133\165\229\174\182\230\151\143"))
+    return 0
+  end
+  self.pPanel:SetActive(tbControls.btnPrestigeHelp, false)
+  self.pPanel:SetActive(tbControls.wndKinPrestigeDetails, false)
+  self.nDonateCount = 1
+  self.tbMoneyPanel:SetMoneyValue()
+  self.szSortType = "Default"
+  self.bIsDown = true
+  local nPage = self.PAGE_INDEX[szPage]
+  if not nPage then
+    self.tbPanelList:Select(1)
+  else
+    self.tbOpenParam = {
+      ...
+    }
+    self.tbPanelList:Select(nPage)
+  end
+  self:RegistRedPoint()
+  self.nCurY = 1
+  self.nSliderLimit = nDefaultSlideLimit
+  self:OnUpdateQuitBtn()
+  if self.nC2sTimer then
+    Timer:Close(self.nC2sTimer)
+    self.nC2sTimer = nil
+  end
+  self:SetMonitorUI(true)
+end
+
+function tbWnd:OnClose()
+  self:UnRegistRedPoint()
+  self.pPanel:SetActive(tbControls.btnGoBottom, false)
+  self.pPanel:SetActive(tbControls.btnGoTop, false)
+  self.pPanel:SetActive(tbControls.wndDonateRecord, false)
+  if self.nC2sTimer then
+    Timer:Close(self.nC2sTimer)
+    self.nC2sTimer = nil
+  end
+  self.nC2sTimer = Timer:Register(Env.GAME_FPS, function()
+    self:SetMonitorUI(false)
+  end, self)
+end
+
+function tbWnd:SetMonitorUI(bMonitor)
+  Kin:AskMonitorUI(bMonitor)
+  if self.nC2sTimer then
+    Timer:Close(self.nC2sTimer)
+    self.nC2sTimer = nil
+  end
+end
+
+function tbWnd:OnDestroyed()
+  self.tbKinMemberScrollRect.onValueChanged:RemoveAllListeners()
+end
+
+function tbWnd:onKinSyncData(szDataType, nRemainTime)
+  if "BaseInfo" == szDataType then
+    self:OnUpdateBaseKinInfo()
+  elseif "MemberList" == szDataType then
+    self:OnUpdateMemberList()
+  elseif "Declare" == szDataType then
+    local tbBaseInfo = Kin:GetBaseInfo() or {}
+    self.pPanel:Label_SetText(self.txtKinNotice, tbBaseInfo.szPublicDeclare or "")
+  elseif "GetKinSalary" == szDataType then
+    if nRemainTime > 0 then
+      self.pPanel:Button_SetEnable(self.btnGetSalary, false)
+      self.pPanel:Label_SetText(self.txtLastWeekSalary, 0)
+    end
+  elseif "Building" == szDataType then
+    self:OnUpdateBuildingInfo()
+  elseif "Quit" == szDataType then
+    self:Close()
+  else
+    self:UpdateCommData(szDataType)
+  end
+end
+
+function tbWnd:onClickSelectKinInfoPanel()
+  Kin:UpdateBaseInfo()
+  self:OnUpdateBaseKinInfo()
+  self.nDonateCount = 1
+  self:UpdateGiftBox()
+  self:UpdateDonation()
+  self.pPanel:SetActive(self.panelKinInfo, true)
+  self.pPanel:SetActive(self.panelKinMember, false)
+  self.pPanel:SetActive(self.panelKinRedBag, false)
+  self.tbRedBagPanel:OnDeactivate()
+  self.pPanel:SetActive(self.panelKinSalary, false)
+  self.pPanel:Button_SetEnable(self.btnKinInfo, false)
+  self.pPanel:Button_SetEnable(self.btnKinMember, true)
+  self.pPanel:Button_SetEnable(self.btnKinRedBag, true)
+  self.pPanel:Button_SetEnable(self.btnKinSalary, true)
+  local myKinData = Kin:GetBaseInfo()
+  if myKinData then
+    self.pPanel:Label_SetText(tbControls.txtKinPrestigeValue, myKinData.nWeekPrestige)
+  else
+    self.pPanel:Label_SetText(tbControls.txtKinPrestigeValue, 0)
+  end
+end
+
+function tbWnd:onClickSelectKinMemberPanel()
+  Kin:UpdateMemberList()
+  self:OnUpdateMemberList()
+  self.pPanel:SetActive(self.panelKinInfo, false)
+  self.pPanel:SetActive(self.panelKinMember, true)
+  self.pPanel:SetActive(self.panelKinRedBag, false)
+  self.tbRedBagPanel:OnDeactivate()
+  self.pPanel:SetActive(self.panelKinSalary, false)
+  self.pPanel:Button_SetEnable(self.btnKinInfo, true)
+  self.pPanel:Button_SetEnable(self.btnKinMember, false)
+  self.pPanel:Button_SetEnable(self.btnKinRedBag, true)
+  self.pPanel:Button_SetEnable(self.btnKinSalary, true)
+end
+
+function tbWnd:onClickSelectKinRedBagPanel()
+  self.pPanel:SetActive(self.panelKinInfo, false)
+  self.pPanel:SetActive(self.panelKinMember, false)
+  self.pPanel:SetActive(self.panelKinRedBag, true)
+  self.tbRedBagPanel:OnActivate()
+  self.pPanel:SetActive(self.panelKinSalary, false)
+  self.pPanel:Button_SetEnable(self.btnKinInfo, true)
+  self.pPanel:Button_SetEnable(self.btnKinMember, true)
+  self.pPanel:Button_SetEnable(self.btnKinRedBag, false)
+  self.pPanel:Button_SetEnable(self.btnKinSalary, true)
+end
+
+function tbWnd:onClickSelectKinSalaryPanel()
+  Kin:UpdateBaseInfo()
+  Kin:UpdateMemberList()
+  Kin:RefreshMaxSalaryCfg()
+  self.pPanel:SetActive(self.panelKinSalary, true)
+  self:OnUpdateActivityList()
+  self.pPanel:SetActive(self.panelKinInfo, false)
+  self.pPanel:SetActive(self.panelKinMember, false)
+  self.pPanel:SetActive(self.panelKinRedBag, false)
+  self.tbRedBagPanel:OnDeactivate()
+  self.pPanel:Button_SetEnable(self.btnKinInfo, true)
+  self.pPanel:Button_SetEnable(self.btnKinMember, true)
+  self.pPanel:Button_SetEnable(self.btnKinRedBag, true)
+  self.pPanel:Button_SetEnable(self.btnKinSalary, false)
+end
+
+function tbWnd:OnUpdateBaseKinInfo()
+  local tbBaseInfo = Kin:GetBaseInfo() or {}
+  self.pPanel:Label_SetText(self.txtKinName, tbBaseInfo.szName or "")
+  self.pPanel:Label_SetText(self.txtKinMasterName, tbBaseInfo.szMasterName or "")
+  local nKinLevel = tbBaseInfo.nLevel or 0
+  self.pPanel:Label_SetText(self.txtKinLevel, i18n.EasyGet("{0}\231\186\167", nKinLevel))
+  local szMemberDesc = ""
+  local szNewerDesc = ""
+  if tbBaseInfo.nMemberCount then
+    szMemberDesc = string.format("%d/%d", tbBaseInfo.nMemberCount, tbBaseInfo.nMaxMemberCount)
+    szNewerDesc = string.format("%d/%d", tbBaseInfo.nNewerCount, tbBaseInfo.nMaxNewerCount)
+  end
+  self.pPanel:Label_SetText(self.txtMemberCount, szMemberDesc)
+  self.pPanel:Label_SetText(self.txtTraineeCount, szNewerDesc)
+  self.pPanel:Label_SetText(self.txtKinNotice, tbBaseInfo.szPublicDeclare or "")
+  self.pPanel:Label_SetText(self.txtKinFund, tbBaseInfo.nFund)
+  self.pPanel:Label_SetText(self.txtOnlineMemberCount, Lib:GetTableLength(Kin:GetMemberState() or {}))
+  for nType, szPath in pairs(self.tbBuilding2Txt) do
+    self.pPanel:Label_SetText(szPath, i18n.EasyGet("{0}\231\186\167", tbBaseInfo.tbBuilding[nType].nLevel))
+  end
+  self.pPanel:SetActive(self.btnEditKinNotice, Kin:CheckMyAuthority(Kin.Def.Authority_EditPubilcDeclare))
+  self.pPanel:SetActive(self.btnKinAnnounce, Kin:CheckMyAuthority(Kin.Def.Authority_EditRecuitInfo))
+end
+
+function tbWnd:OnUpdateMemberList(szSortType)
+  if szSortType then
+    if self.szSortType == szSortType then
+      self.bIsDown = not self.bIsDown
+    else
+      self.szSortType = szSortType
+      self.bIsDown = true
+    end
+  end
+  local tbMemberList = Kin:GetMemberList() or {}
+  local tbOnlineMembers = Kin:GetMemberState() or {}
+  self.pPanel:Label_SetText(self.txtOnlineMemberCount, Lib:GetTableLength(tbOnlineMembers or {}))
+  local fSortFun = Kin:GetSortFunction(self.szSortType)
+  if not fSortFun then
+    error("UIKin MemberInfoList Sort Error, SortFun don't found!")
+    return
+  end
+  self.tbMemberList = fSortFun(tbMemberList, self.bIsDown)
+  
+  local function fnSetItem(tbLoopScroll, nIndex)
+    local tbMember = tbMemberList[nIndex]
+    if not tbMember then
+      return
+    end
+    local tbElem = tbLoopScroll:GetElement(nIndex)
+    tbElem.tbMember = tbMember
+    local pPanel = tbElem.pPanel
+    local bOnLine = tbOnlineMembers[tbMember.nMemberId]
+    if tbMember.nMemberId ~= me.dwID then
+      Ui:Button_BindEvent(pPanel, "", function()
+        Ui:OpenWindowWithCallback("UIRightPopUpMenu2", function(caller, tbWndMenu)
+          local pos = self.pPanel:GetTransform("node/imgBG/Content/KinMemberPanel/imgPopupPos").position
+          tbWndMenu:SetPos(pos.x, pos.y)
+        end, self, "kin", tbMember, self)
+      end)
+    else
+      Ui:Button_UnBindEvent(pPanel, "")
+    end
+    pPanel:Sprite_SetSprite("imgFaction", Faction:GetIcon(tbMember.nFaction))
+    pPanel:Label_SetText("txtName", tbMember.szName)
+    Ui:SetVipLevelEffect(pPanel, tbMember.nVipLevel, "txtName")
+    local szHonorName, szHonorColor = HonorLevel:GetHonorNameByStarLevel(tbMember.nHonorStarLevel, false)
+    local obj = pPanel:GetObject("HonorTitle")
+    local pHonorTitle = obj:GetComponent(Ui.UIHonorTitle)
+    pHonorTitle:SetHonorTitle(i18n.Parse(szHonorName), szHonorColor)
+    pPanel:Label_SetText("txtLevel", Lib:GetLevelShortText(tbMember.nTotalLevel))
+    pPanel:Label_SetText("txtJob", i18n.Get(Kin.Def.Career_Name[tbMember.nCareer]))
+    pPanel:Label_SetText("txtHistory", tbMember.nTotalContribution or 0)
+    pPanel:Label_SetText("txtHuoYueDu", tbMember.nWeekActive or 0)
+    if 1 == tbMember.nIsOnLine then
+      pPanel:Label_SetText("txtOffline", i18n.EasyGet("\229\156\168\231\186\191"))
+    else
+      pPanel:Label_SetText("txtOffline", i18n.EasyGet("<color=#352620>\231\166\187\231\186\191</color>"))
+    end
+    local tbChuanGong = tbMember.tbChuanGong
+    local bChuanGongButtonActive = false
+    if tbChuanGong and 1 == tbMember.nIsOnLine and me.dwID ~= tbMember.nMemberId then
+      local tbStatus, szGetErr, szSendErr = ChuanGong:CheckStatusFromOtherData(tbMember.nTotalLevel, tbMember.nVipLevel, tbChuanGong.nRecieveTimes > 0, tbChuanGong.nSendTimes > 0, tbChuanGong.nLastSendTime)
+      
+      local function fnChuanGong(emRelation)
+        if ChuanGong:IsCdSuffice(tbStatus, emRelation) then
+          ChuanGong:RequestChuanGongC_Kin(tbMember.nMemberId, tbMember.nTotalLevel, tbMember.nVipLevel, {"UIKin"}, emRelation)
+        else
+          local nNeedChuanGongAgainTime = ChuanGong:GetNeedJudgeCdLastSendTime(tbStatus, emRelation) + ChuanGong:GetSendCD(tbMember.nVipLevel) - GetTime()
+          me.CenterMsg(i18n.Get(ChuanGong.tbRelationTypeToText.tbNeedAfter_0_MinTips[emRelation], math.ceil(nNeedChuanGongAgainTime / 60)))
+        end
+      end
+      
+      if tbStatus.bLevelAndTimesSufficeGet then
+        Ui:Button_BindEvent(pPanel, "btnChuanGong", fnChuanGong, ChuanGong.tbRelationType.Recieve)
+        if ChuanGong:IsCdSuffice(tbStatus, ChuanGong.tbRelationType.Recieve) then
+          pPanel:Sprite_SetSprite("btnChuanGong", ChuanGong.Cfg.szRecieveIconPath)
+        else
+          pPanel:Sprite_SetSprite("btnChuanGong", ChuanGong.Cfg.szDisableRecieveIconPath)
+        end
+        bChuanGongButtonActive = true
+      else
+        if tbStatus.bLevelAndTimesSufficeSend then
+          Ui:Button_BindEvent(pPanel, "btnChuanGong", fnChuanGong, ChuanGong.tbRelationType.Send)
+          if ChuanGong:IsCdSuffice(tbStatus, ChuanGong.tbRelationType.Send) then
+            pPanel:Sprite_SetSprite("btnChuanGong", ChuanGong.Cfg.szSendIconPath)
+          else
+            pPanel:Sprite_SetSprite("btnChuanGong", ChuanGong.Cfg.szDisableSendIconPath)
+          end
+          bChuanGongButtonActive = true
+        else
+        end
+      end
+    end
+    pPanel:SetActive("btnChuanGong", bChuanGongButtonActive)
+    local nAssistCount = KinFreightTask:GetAssistTaskCout()
+    local nMaxAssist = KinFreightTask:GetFreightMaxAssist(me)
+    if nMaxAssist - nAssistCount > 0 and tbMember.nFreightTask == KinFreightTask.tbSeekHelpStatus.SHS_HELP and tbMember.nMemberId ~= me.dwID then
+      pPanel:SetActive("btnCommerceHelp", true)
+      Ui:Button_BindEvent(pPanel, "btnCommerceHelp", function()
+        Ui:OpenWindow("UIFreightTaskHelp", tbMember.nMemberId)
+      end)
+    else
+      pPanel:SetActive("btnCommerceHelp", false)
+    end
+  end
+  
+  local nCount = Lib:CountTB(tbMemberList)
+  self.tbKinMemberScrollView:SetElement(nCount, fnSetItem)
+  self.pPanel:SetActive(self.btnEditKinNotice, Kin:CheckMyAuthority(Kin.Def.Authority_EditPubilcDeclare))
+  self.pPanel:SetActive(self.btnKinAnnounce, Kin:CheckMyAuthority(Kin.Def.Authority_EditRecuitInfo))
+end
+
+function tbWnd:OnUpdateActivityList()
+  self.tbActiviryListScrollView:Clear()
+  for i = 1, #Kin.Cfg.Salary_Channel_Type do
+    self.tbActiviryListScrollView:SetElement(i, function(tbElement)
+      tbElement.pPanel:Label_SetText("ActType/txtTitle", i18n.Get(Kin.Cfg.Salary_Channel_Type[i].Desc))
+      tbElement.pPanel:SetActive("ActType/MarkFull", false)
+      local activityAllSalary = 0
+      for j = 1, #Kin.Cfg.Salary_Channel do
+        if Kin:CheckSalaryTimeFrameState(j) and i == Kin.Cfg.Salary_Channel[j].Channel_Type then
+          local key = string.format("ActDetail%d", j)
+          local item = tbElement.pPanel:CloneObject("ActDetail/item", key)
+          tbElement.pPanel:Label_SetText(item .. "/txtActName", i18n.Get(Kin.Cfg.Salary_Channel[j].Title))
+          tbElement.pPanel:Label_SetText(item .. "/txtActDesc", i18n.Get(Kin.Cfg.Salary_Channel[j].Desc))
+          local degreeName = Kin.Cfg.Salary_Channel[j].DegreeName
+          local maxTimes = Kin.Cfg.Salary_Channel[j].MaxTimes
+          local salaryOneTimes = Kin.Cfg.Salary_Channel[j].Salary
+          local curDegree = DegreeCtrl:GetDegree(me, degreeName)
+          local nMaxDegree = DegreeCtrl:GetMaxDegree(degreeName, me)
+          if curDegree < 0 then
+            curDegree = 0
+          end
+          local nChange = nMaxDegree - maxTimes
+          nChange = Lib:IIF(nChange > 0, nChange, 0)
+          local curTimes = maxTimes + nChange - curDegree
+          local times = string.format("(%d/%d)", curTimes, maxTimes)
+          tbElement.pPanel:Label_SetText(item .. "/txtActName/txtActCount", times)
+          local activitySalary = salaryOneTimes * curTimes
+          tbElement.pPanel:Label_SetText(item .. "/txtSalary", activitySalary)
+          activityAllSalary = activityAllSalary + activitySalary
+          if curTimes == maxTimes then
+            tbElement.pPanel:SetActive(item .. "/txtFull", true)
+          else
+            tbElement.pPanel:SetActive(item .. "/txtFull", false)
+          end
+        end
+      end
+      tbElement.pPanel:ContentSizeFitter_Refresh("ActDetail")
+      self.pPanel:ContentSizeFitter_Refresh(tbElement.szKey)
+      local nMaxSalary = Kin:GetMaxSalaryByChannelType(i)
+      if activityAllSalary > nMaxSalary then
+        activityAllSalary = nMaxSalary
+      end
+      local activitySalaryPer = math.floor(activityAllSalary * 100 / nMaxSalary)
+      tbElement.pPanel:Label_SetText("ActType/txtPercent/txtPercentValue", string.format("%d", activitySalaryPer) .. "%")
+      if 100 == activitySalaryPer then
+        activitySalaryPer = nMaxSalary
+        tbElement.pPanel:SetActive("ActType/MarkFull", true)
+        tbElement.pPanel:SetActive("ActType/txtFull", true)
+        tbElement.pPanel:SetActive("ActType/txtPercent", false)
+        tbElement.pPanel:Label_SetText("ActType/txtFull/txtFullValue", string.format("%d", activitySalaryPer))
+      else
+        tbElement.pPanel:SetActive("ActType/MarkFull", false)
+        tbElement.pPanel:SetActive("ActType/txtFull", false)
+        tbElement.pPanel:SetActive("ActType/txtPercent", true)
+      end
+    end)
+  end
+  self:ShowKinSalaryInfo()
+end
+
+function tbWnd:ShowKinSalaryInfo()
+  local myMemberData = Kin:GetMyMemberData()
+  local fCareerFaction = 0.0
+  local curSalary = 0
+  if myMemberData then
+    curSalary = myMemberData.nCurWeekSalary or 0
+    self.pPanel:Label_SetText(self.txtCurWeekSalary, curSalary)
+    local lastWeekSalary = myMemberData.nLastWeekSalary or 0
+    self.pPanel:Label_SetText(self.txtLastWeekSalary, lastWeekSalary)
+    if lastWeekSalary > 0 then
+      self.pPanel:SetActive(self.btnGetSalary, true)
+      self.pPanel:Button_SetEnable(self.btnGetSalary, true)
+    else
+      self.pPanel:SetActive(self.btnGetSalary, true)
+      self.pPanel:Button_SetEnable(self.btnGetSalary, false)
+    end
+    local nCareerTitle = i18n.EasyGet("{0}\229\183\165\232\181\132\229\138\160\230\136\144", i18n.Get(Kin.Def.Career_Name[myMemberData.nCareer]))
+    self.pPanel:Label_SetText(self.txtKinCareerFactionTitle, nCareerTitle)
+    fCareerFaction = Kin.tbActivityCareerSalary[myMemberData.nCareer] or 0
+    self.pPanel:Label_SetText(self.txtKinCareerFaction, string.format("%0.1f", fCareerFaction) .. i18n.EasyGet("\229\128\141"))
+  end
+  local myKinData = Kin:GetBaseInfo()
+  local fWeekActiveFaction = 0.0
+  if myKinData then
+    local nKinWeekActive = myKinData.nWeekActive
+    fWeekActiveFaction = Kin:GetKinActivitySalaryFaction(nKinWeekActive)
+    local szWeekActiveFaction = "0"
+    if fWeekActiveFaction > 0 then
+      szWeekActiveFaction = string.format("%0.1f", fWeekActiveFaction)
+    end
+    self.pPanel:Label_SetText(self.txtKinWeekActive, string.format("%d", nKinWeekActive))
+    self.pPanel:Label_SetText(self.txtKinWeekActiveFaction, szWeekActiveFaction .. i18n.EasyGet("\229\128\141"))
+  end
+  local finalSalary = curSalary * (fCareerFaction * 100 + fWeekActiveFaction * 100) / 100
+  self.pPanel:Label_SetText(self.txtFinalWeekSalary, finalSalary)
+end
+
+function tbWnd:OnChangeMoney()
+  self.tbMoneyPanel:SetMoneyValue()
+end
+
+function tbWnd:redBagRefresh()
+  self.tbRedBagPanel:Refresh_Helper()
+end
+
+function tbWnd:UpdateSelectInfo(selectMemberList)
+  self.tbRedBagPanel:UpdateSelectInfo(selectMemberList)
+end
+
+function tbWnd:GetSelectInfo()
+  return self.tbRedBagPanel:GetSelectInfo()
+end
+
+function tbWnd:SetYuanbaoMuitl(multi)
+  self.tbRedBagPanel:SetYuanbaoMuitl(multi)
+end
+
+function tbWnd:OnSyncRoleInfo(nSession, tbRoleInfoList)
+  self.tbRedBagPanel:OnSyncRoleInfo(nSession, tbRoleInfoList)
+end
+
+function tbWnd:BtnDonate()
+  if 0 == self.nDonateCount then
+    return
+  end
+  local nLeftDonateCount = Kin:GetDonationData()
+  if nLeftDonateCount <= 0 then
+    me.CenterMsg(i18n.EasyGet("\230\178\161\230\156\137\230\141\144\231\140\174\230\172\161\230\149\176\228\186\134"))
+    return
+  end
+  if nLeftDonateCount < self.nDonateCount then
+    me.CenterMsg(i18n.EasyGet("\230\141\144\231\140\174\230\172\161\230\149\176\228\184\141\232\182\179"))
+    return
+  end
+  if not self.nDonateCost then
+    return
+  end
+  if me.GetMoney(Kin.Def.szDonateCostMoneyType) < self.nDonateCost then
+    me.CenterMsg(i18n.EasyGet("\229\133\131\229\174\157\228\184\141\232\182\179"))
+    return
+  end
+  Kin:Donate(self.nDonateCount)
+end
+
+function tbWnd:ShowDonateRecord()
+  self.pPanel:SetActive(tbControls.wndDonateRecord, true)
+  Kin:UpdateDonationRecord()
+  self.tbDonateRecordBtn:Select(1)
+end
+
+local function SetDonateRecord(tbElement, tbInfo)
+  local szMsg = i18n.Get(Kin.Cfg.Msg.DonateRecordMsg, tbInfo[2], tbInfo[4], tbInfo[3])
+  tbElement.pPanel:Label_SetText("", szMsg)
+end
+
+function tbWnd:OnClickShowDonateRecord()
+  self.tbDonateRecordSV:Reset()
+  local tbRecord = Kin:GetDonationRecord() or {}
+  for nIndex, tbInfo in ipairs(tbRecord[1] or {}) do
+    self.tbDonateRecordSV:SetElement(nIndex, function(tbElement)
+      SetDonateRecord(tbElement, tbInfo)
+    end)
+  end
+end
+
+local function SetMoneyCostRecord(tbElement, tbInfo)
+  local szName = Kin.Def.BuildingName[tbInfo[4]]()
+  local szMsg = i18n.Get(Kin.Cfg.Msg.FundCostRecordMsg, tbInfo[2], tbInfo[3], szName, tbInfo[5])
+  tbElement.pPanel:Label_SetText("", szMsg)
+end
+
+function tbWnd:OnClickShowMoneyCostRecord()
+  self.tbDonateRecordSV:Reset()
+  local tbRecord = Kin:GetDonationRecord() or {}
+  for nIndex, tbInfo in ipairs(tbRecord[2] or {}) do
+    self.tbDonateRecordSV:SetElement(nIndex, function(tbElement)
+      SetMoneyCostRecord(tbElement, tbInfo)
+    end)
+  end
+end
+
+function tbWnd:UpdateDonationRecord()
+  local nKey = self.tbDonateRecordBtn:GetKey()
+  if not self.tbDonateRecordFuncList[nKey] then
+    return
+  end
+  self.tbDonateRecordBtn:ClearSelected()
+  self.tbDonateRecordBtn:Select(nKey)
+end
+
+function tbWnd:UpdateCommData(szType)
+  if "DonationRecord" == szType or "New" == szType then
+    self:UpdateDonation()
+    self:UpdateDonationRecord()
+  elseif "GiftBox" == szType or "Building" == szType then
+    self:UpdateGiftBox()
+  end
+end
+
+function tbWnd:UpdateDonation()
+  local nLeftDonateCount, nDonationTotalCount = Kin:GetDonationData()
+  self.pPanel:Label_SetText(self.txtDonationCount, string.format("%d/%d", nLeftDonateCount, nDonationTotalCount))
+  local nCurDonateCount = nDonationTotalCount - nLeftDonateCount
+  self.AddAndSubGroup:SetNumRange(1, nLeftDonateCount)
+  local nJewelryLevel = Kin:GetBuildingLevel(Kin.Def.Building_Jewelry)
+  local nContribut = Kin:GetDonationsContrib(nJewelryLevel, nCurDonateCount + 1, nCurDonateCount + self.nDonateCount)
+  local fVipInc = 0
+  nContribut = math.ceil(nContribut * (1 + fVipInc))
+  self.itemContribute:SetDigitalItem("KinContrib", nContribut)
+  local bHasLeftCount = nLeftDonateCount > 0
+  self.nDonateCount = bHasLeftCount and math.min(self.nDonateCount, nLeftDonateCount) or 0
+  self.AddAndSubGroup:SetInputValue(self.nDonateCount)
+  self.nDonateCost = Kin:GetDonationsCost(nJewelryLevel, nCurDonateCount + 1, nCurDonateCount + self.nDonateCount)
+  if bHasLeftCount then
+    self:UpdateNumberInput(self.nDonateCount)
+  end
+  self.pPanel:Label_SetText(self.txtDonationCost, self.nDonateCost)
+  self.itemContribute.fnClick = self.itemContribute.DefaultClick
+  self.pPanel:Button_SetEnable(self.btnDonate, bHasLeftCount)
+end
+
+function tbWnd:UpdateNumberInput(nNum)
+  if not self:UpdateDonationCount(nNum) then
+    local nLeftDonateCount = Kin:GetDonationData()
+    if nNum < 0 then
+      self:UpdateDonationCount(self.nDonateCount)
+      return self.nDonateCount
+    elseif nNum > nLeftDonateCount then
+      me.CenterMsg(i18n.EasyGet("\230\141\144\231\140\174\230\172\161\230\149\176\228\184\141\232\182\179"))
+      self.nDonateCount = nLeftDonateCount
+      self:UpdateDonationCount(nLeftDonateCount)
+      return nLeftDonateCount
+    end
+  end
+  return nNum
+end
+
+function tbWnd:UpdateGiftBox()
+  local nNow = GetTime()
+  local nLeftCount, nNextBuyTime = Kin:GetGiftBoxData()
+  nLeftCount = nLeftCount or 0
+  nNextBuyTime = nNextBuyTime or nNow
+  self.pPanel:Label_SetText(self.txtGiftBoxCost, Kin.Def.nGiftBoxCost)
+  self.pPanel:Label_SetText(self.txtGiftBoxLeftCount, string.format("%d/%d", nLeftCount, Kin.Def.nMaxGiftBoxPerDay + Vip.tbSetting[me.GetVipLevel()].nKinGiftNum))
+  self.pPanel:Button_SetEnable(self.btnBuyGiftBox, nLeftCount > 0 and nNow > nNextBuyTime)
+  local nJewelryLevel = Kin:GetBuildingLevel(Kin.Def.Building_Jewelry)
+  local nItemID = Kin:GetJewelryGiftBoxItemID(nJewelryLevel)
+  self.itemGiftBoxReward:SetItemByTemplate(nItemID, 1)
+  self.itemGiftBoxReward.fnClick = self.itemGiftBoxReward.DefaultClick
+  self.pPanel:Label_SetText(self.txtGiftCountDownTime, i18n.EasyGet("\229\133\145\230\141\162"))
+  if nLeftCount <= 0 or nNow >= nNextBuyTime then
+    return
+  end
+  local nLeftTime = nNextBuyTime - GetTime()
+  self:UpdateGiftBoxExchangeTime(nLeftTime, nLeftCount)
+end
+
+function tbWnd:UpdateGiftBoxExchangeTime(nLeftTime, nLeftCount)
+  if nLeftTime < 0 or nLeftCount <= 0 then
+    self.pPanel:Label_SetText(self.txtGiftCountDownTime, i18n.EasyGet("\229\133\145\230\141\162"))
+    self.pPanel:Button_SetEnable(self.btnBuyGiftBox, nLeftCount > 0)
+    return false
+  end
+  local szLeftTime = Lib:TimeDesc3(nLeftTime)
+  self.pPanel:Label_SetText(self.txtGiftCountDownTime, szLeftTime)
+end
+
+function tbWnd:UpdateDonationCount(nCount)
+  self.nDonateCount = nCount
+  local nLeftDonateCount, nDonationTotalCount = Kin:GetDonationData()
+  local nCurDonateCount = nDonationTotalCount - nLeftDonateCount
+  local nJewelryLevel = Kin:GetBuildingLevel(Kin.Def.Building_Jewelry)
+  self.nDonateCost = Kin:GetDonationsCost(nJewelryLevel, nCurDonateCount + 1, nCurDonateCount + nCount)
+  self.pPanel:Label_SetText(self.txtDonationCost, self.nDonateCost)
+  self:UpdateDonationAward(nCurDonateCount + 1, nCurDonateCount + nCount)
+end
+
+function tbWnd:UpdateDonationAward(nBeginTime, nEndTime)
+  local nJewelryLevel = Kin:GetBuildingLevel(Kin.Def.Building_Jewelry)
+  local nContribut = Kin:GetDonationsContrib(nJewelryLevel, nBeginTime, nEndTime)
+  local fVipInc = 0
+  nContribut = math.ceil(nContribut * (1 + fVipInc))
+  self.itemContribute:SetDigitalItem("KinContrib", nContribut)
+end
+
+function tbWnd:OnUpdateBuildingInfo()
+  local tbBuildingData = Kin:GetData("BuildingData")
+  for nType, szPath in pairs(self.tbBuilding2Txt) do
+    self.pPanel:Label_SetText(szPath, i18n.EasyGet("{0}\231\186\167", tbBuildingData[nType].nLevel))
+  end
+end
+
+function tbWnd:RegistRedPoint()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.RedFreightGo, {
+    RedPointMgr.EVENT.KinFreightTask
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnKinSalary, {
+    RedPointMgr.EVENT.KinSalary
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnGetSalary, {
+    RedPointMgr.EVENT.KinSalary
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnKinRedBag, {
+    RedPointMgr.EVENT.KinCostRedBag,
+    RedPointMgr.EVENT.KinYuanBaoRedBagRecv,
+    RedPointMgr.EVENT.KinYuanBaoRedBagSend
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnBuyGiftBox, {
+    RedPointMgr.EVENT.KinGiftGain
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnKinMember, {
+    RedPointMgr.EVENT.KinApply
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnApplyerList, {
+    RedPointMgr.EVENT.KinApply
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.RedFangshiGo, {
+    RedPointMgr.EVENT.KinShop
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnZhudian .. "/imgTitleBg", {
+    RedPointMgr.EVENT.KinBuilding
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.RedSkillGo, {
+    RedPointMgr.EVENT.KinSkill
+  })
+end
+
+function tbWnd:UnRegistRedPoint()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.RedFreightGo)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnKinSalary)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnGetSalary)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnKinRedBag)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnBuyGiftBox)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnKinMember)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnApplyerList)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.RedFangshiGo)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnZhudian .. "/imgTitleBg")
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.RedSkillGo)
+end
+
+function tbWnd:UpdateMemberList()
+  Kin:UpdateMemberList(true)
+end
+
+function tbWnd:OnSliderList(vec2)
+  if vec2.y <= 0 or vec2.y >= 1 then
+    return
+  end
+  if self.bButtonChange then
+    self.bButtonChange = false
+    self.nSliderLimit = nDefaultSlideLimit
+    return
+  end
+  local y = math.floor(vec2.y * 10) / 10
+  local nDiff = math.abs(y - self.nCurY)
+  if 0.9 == y or 0 == y then
+    self.pPanel:SetActive(tbControls.btnGoTop, false)
+    self.pPanel:SetActive(tbControls.btnGoBottom, false)
+    return
+  end
+  if nDiff < self.nSliderLimit then
+    return
+  end
+  if y < self.nCurY then
+    self.pPanel:SetActive(tbControls.btnGoTop, false)
+    self.pPanel:SetActive(tbControls.btnGoBottom, true)
+  elseif y > self.nCurY then
+    self.pPanel:SetActive(tbControls.btnGoBottom, false)
+    self.pPanel:SetActive(tbControls.btnGoTop, true)
+  end
+  self.nCurY = y
+  self.nSliderLimit = nSwitchBtnLimit
+end
+
+function tbWnd:OnUpdateQuitBtn()
+  if Kin.tbQuitTime and Kin.tbQuitTime[me.dwID] and Kin.tbQuitTime[me.dwID] > GetTime() then
+    self.pPanel:Button_SetText(tbControls.btnQuitKin, i18n.EasyGet("\229\143\150\230\182\136\233\128\128\229\135\186"), "Text")
+  else
+    self.pPanel:Button_SetText(tbControls.btnQuitKin, i18n.EasyGet("\233\128\128\229\135\186\229\174\182\230\151\143"), "Text")
+  end
+end

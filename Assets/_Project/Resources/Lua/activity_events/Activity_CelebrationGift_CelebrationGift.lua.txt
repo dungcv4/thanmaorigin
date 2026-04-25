@@ -1,0 +1,220 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+ActivityMgr.szCelebrationGift = "CelebrationGift"
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.szCelebrationGift)
+tbActivity.RefreshOffset = 14400
+tbActivity.tbSaveValueKey = {
+  nLastStartTimeKey = 1,
+  nLastBuyTime = 2,
+  GiftList = {
+    [1] = 3,
+    [2] = 4,
+    [3] = 5,
+    [4] = 6,
+    [5] = 7,
+    [6] = 8,
+    [7] = 9,
+    [8] = 10
+  }
+}
+tbActivity.tbC2SProtocol = {BuyReq = 1, RechargeSuccess = 2}
+tbActivity.tbS2CProtocol = {CreateOrderRsp = 1, OnRechargeSuccRsp = 2}
+
+function tbActivity:LoadConfig()
+  local szActivityPath = "Setting/Activity/XiongWangActivity/CelebrationGift/CelebrationGift.tab"
+  local tbField = {
+    "nConfigId",
+    "szSaveKey",
+    "szDesc",
+    "szName",
+    "szShowTime",
+    "szMContentWithCloseTimeFrame",
+    "szCloseTimeFrame",
+    "nLevel",
+    "nShowAwardId",
+    "nShowAwardKey",
+    "szMFrom",
+    "szMTitle",
+    "szMContent",
+    "szImgIcon",
+    "nAchieveActId",
+    "szOpenWindow",
+    "szParam1"
+  }
+  self.ACTIVITY_CONFIG = Lib:LoadTabFileEx(szActivityPath, "dssssssdddssssdss", "nConfigId", tbField)
+  local szAwardKeyPath = "Setting/Activity/XiongWangActivity/CelebrationGift/AwardKeyList.tab"
+  local tbAwardKeyList = Lib:LoadTabFileEx(szAwardKeyPath, "ddssddss", nil, {
+    "nConfigId",
+    "nAwardLinkKey",
+    "szTimeFrameStart",
+    "szTimeFrameEnd",
+    "nWorthCountText",
+    "nShowAwardKey",
+    "szExtParam1",
+    "szExtParam2"
+  })
+  for _, tbInfo in ipairs(tbAwardKeyList or {}) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("CelebrationGift:LoadConfig AwardKeyList nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbAwardKeyList = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbAwardKeyList or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbAwardKeyList[tbInfo.nAwardLinkKey] = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbAwardKeyList[tbInfo.nAwardLinkKey] or {}
+    if Lib:IsEmptyStr(self.ACTIVITY_CONFIG[tbInfo.nConfigId].szLogWay) then
+      self.ACTIVITY_CONFIG[tbInfo.nConfigId].szLogWay = "LogWay_CelebrationGift"
+    end
+    table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbAwardKeyList[tbInfo.nAwardLinkKey], tbInfo)
+  end
+  local nFirstTime, nSecondTime
+  for _, tbInfo in pairs(self.ACTIVITY_CONFIG) do
+    for _, tbList in pairs(tbInfo.tbAwardKeyList) do
+      table.sort(tbList, function(tbFirst, tbSecond)
+        nFirstTime = Lib:IsEmptyStr(tbFirst.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbFirst.szTimeFrameStart)
+        nSecondTime = Lib:IsEmptyStr(tbSecond.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbSecond.szTimeFrameStart)
+        return nFirstTime > nSecondTime
+      end)
+    end
+  end
+  local szAwardFilePath = "Setting/Activity/XiongWangActivity/CelebrationGift/CelebrationGiftAward.tab"
+  tbField = {
+    "nConfigId",
+    "nGiftId",
+    "nProductId",
+    "nAwardId",
+    "nAwardLinkKey",
+    "nAwardKey",
+    "nOpenLevel",
+    "nLimitBuyTimes",
+    "nRechargeLimitBuyKey",
+    "szBgPath",
+    "szCurrencyType",
+    "nPrice",
+    "szProductName"
+  }
+  local tbAwardList = Lib:LoadTabFileEx(szAwardFilePath, "dddddddddssds", nil, tbField)
+  for _, tbInfo in ipairs(tbAwardList or {}) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("CelebrationGift:LoadConfig GiftAward nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbGiftAward = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbGiftAward or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbGiftAward[tbInfo.nGiftId] = tbInfo
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbProductId2GiftId = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbProductId2GiftId or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbProductId2GiftId[tbInfo.nProductId] = tbInfo.nGiftId
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbAwardKeyList[tbInfo.nAwardLinkKey], string.format("CelebrationGift:LoadConfig GiftAward nAwardLinkKey=%d not exist", tbInfo.nAwardLinkKey))
+  end
+  Validator:Register(self.CheckCelebrationGiftAwardCfg, self)
+end
+
+function tbActivity:CheckCelebrationGiftAwardCfg()
+  for nConfigId, tbCfg in pairs(self.ACTIVITY_CONFIG) do
+    for k, tbInfo in pairs(tbCfg.tbGiftAward) do
+      if tbInfo.nProductId > 0 and not Recharge:GetProductSettingById(tbInfo.nProductId) then
+        LogErr(string.format("load CelebrationGiftAward.tab failed, nProductId %d not found in RechargeProducts.tab", tbInfo.nProductId))
+        return false
+      end
+    end
+  end
+  return true
+end
+
+function tbActivity:GetAlreadyBuyTimesByGiftId(pPlayer, nGiftId)
+  return pPlayer.GetUserValue(self.SaveKey, self.tbSaveValueKey.GiftList[nGiftId])
+end
+
+function tbActivity:GetLastBuyTime(pPlayer)
+  return pPlayer.GetUserValue(self.SaveKey, self.tbSaveValueKey.nLastBuyTime)
+end
+
+function tbActivity:SetLastBuyTime(pPlayer, nTime)
+  return pPlayer.SetUserValue(self.SaveKey, self.tbSaveValueKey.nLastBuyTime, nTime)
+end
+
+function tbActivity:CheckCanBuy(pPlayer, nGiftId)
+  local bCanBuy = false
+  local tbCfg = self.tbConfig.tbGiftAward[nGiftId]
+  if not tbCfg then
+    return bCanBuy
+  end
+  local nMaxLimitTimes = tbCfg.nLimitBuyTimes
+  local nLimitLevel = tbCfg.nOpenLevel
+  local nAlreadyBuyTimes = self:GetAlreadyBuyTimesByGiftId(pPlayer, nGiftId)
+  local bTodayIsBuy = self:CheckTodayIsBuy(pPlayer, nGiftId)
+  bTodayIsBuy = Lib:IIF(nil ~= bTodayIsBuy, bTodayIsBuy, true)
+  if nAlreadyBuyTimes < 0 or nMaxLimitTimes <= 0 then
+    return bCanBuy
+  end
+  bCanBuy = nLimitLevel and nLimitLevel <= pPlayer.nLevel
+  bCanBuy = bCanBuy and nMaxLimitTimes > nAlreadyBuyTimes and not bTodayIsBuy
+  return bCanBuy
+end
+
+function tbActivity:CheckTodayIsBuy(pPlayer, nGiftId)
+  local bIsBuy = true
+  if not pPlayer then
+    return
+  end
+  local tbCfg = self.tbConfig.tbGiftAward[nGiftId]
+  if not tbCfg then
+    Log("[CelebrationGift:CheckTodayIsBuy] can`t found config", nGiftId)
+    return
+  end
+  local nLastBuyTime = Recharge:GetProductLastBuy(pPlayer, tbCfg.nProductId)
+  local nTodayStart = GetTime()
+  bIsBuy = Lib:IsSameDay(self.RefreshOffset, nLastBuyTime, nTodayStart)
+  return bIsBuy
+end
+
+function tbActivity:CanJoin(nLevel)
+  return nLevel >= self.tbConfig.nLevel
+end
+
+function tbActivity:GetAchieveActId()
+  return self.tbConfig.nAchieveActId or 0
+end
+
+function tbActivity:IsRechargeGift(tbGiftAward)
+  local bResult = false
+  if Lib:IsEmptyStr(tbGiftAward.szCurrencyType) or tbGiftAward.nPrice <= 0 then
+    bResult = true
+  end
+  if tbGiftAward.nProductId > 0 and Recharge:GetProductSettingById(tbGiftAward.nProductId) then
+    bResult = true
+  end
+  return bResult
+end
+
+function tbActivity:GetLinkDataHelper(nAwardLinkKey, func)
+  for _, tbInfo in ipairs(self.tbConfig.tbAwardKeyList[nAwardLinkKey] or {}) do
+    if Lib:IsEmptyStr(tbInfo.szTimeFrameStart) then
+      if Lib:IsEmptyStr(tbInfo.szTimeFrameEnd) or Lib:CalcTimeFrameOpenTime(tbInfo.szTimeFrameEnd) > self.nStartTime then
+        return func(tbInfo)
+      end
+    elseif Lib:CalcTimeFrameOpenTime(tbInfo.szTimeFrameStart) <= self.nStartTime and (Lib:IsEmptyStr(tbInfo.szTimeFrameEnd) or Lib:CalcTimeFrameOpenTime(tbInfo.szTimeFrameEnd) > self.nStartTime) then
+      return func(tbInfo)
+    end
+  end
+  local nSize = #self.tbConfig.tbAwardKeyList[nAwardLinkKey]
+  return func(self.tbConfig.tbAwardKeyList[nAwardLinkKey][nSize])
+end
+
+function tbActivity:GetShowAwardKey(nAwardLinkKey)
+  return self:GetLinkDataHelper(nAwardLinkKey, function(tbInfo)
+    return tbInfo.nShowAwardKey
+  end)
+end
+
+function tbActivity:CanBuyCurGift(pPlayer, nGiftId)
+  local tbIdList = {}
+  for nGiftId in pairs(self.tbConfig.tbGiftAward) do
+    table.insert(tbIdList, nGiftId)
+  end
+  table.sort(tbIdList, function(nFirst, nSecond)
+    return nFirst < nSecond
+  end)
+  local nGiftIndex
+  for nIndex, nId in ipairs(tbIdList) do
+    if nId == nGiftId then
+      nGiftIndex = nIndex
+      break
+    end
+  end
+  if 1 == nGiftIndex then
+    return true
+  end
+  local nPreviousNum = self:GetAlreadyBuyTimesByGiftId(pPlayer, tbIdList[nGiftIndex - 1])
+  return nPreviousNum > 0
+end

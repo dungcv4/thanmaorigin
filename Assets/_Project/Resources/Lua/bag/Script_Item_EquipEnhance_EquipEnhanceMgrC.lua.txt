@@ -1,0 +1,200 @@
+Require("CommonScript/Item/EquipEnhance/EquipEnhanceCommon.lua")
+Require("Script/Ui/Common/RedPointMgr.lua")
+local EquipEnhance = Item.EquipEnhance
+EquipEnhance.tbEnhanceLevelData = EquipEnhance.tbEnhanceLevelData or {}
+EquipEnhance.EQUIPPOS_2_REDPOINT = {
+  [Item.EQUIPPOS_HELM] = RedPointMgr.EVENT.HelmEnhance,
+  [Item.EQUIPPOS_ARMOR] = RedPointMgr.EVENT.ArmorEnhance,
+  [Item.EQUIPPOS_BELT] = RedPointMgr.EVENT.BeltEnhance,
+  [Item.EQUIPPOS_CUFF] = RedPointMgr.EVENT.CuffEnhance,
+  [Item.EQUIPPOS_BOOTS] = RedPointMgr.EVENT.BootsEnhance,
+  [Item.EQUIPPOS_WEAPON] = RedPointMgr.EVENT.WeaponEnhance,
+  [Item.EQUIPPOS_NECKLACE] = RedPointMgr.EVENT.NecklaceEnhance,
+  [Item.EQUIPPOS_RING] = RedPointMgr.EVENT.RingEnhance,
+  [Item.EQUIPPOS_PENDANT] = RedPointMgr.EVENT.PendantEnhance,
+  [Item.EQUIPPOS_AMULET] = RedPointMgr.EVENT.AmuletEnhance
+}
+EquipEnhance.tbLevel2GridEffect = {
+  [8] = "UI/Effect/UIItemGrid/Enhance_08.prefab",
+  [10] = "UI/Effect/UIItemGrid/Enhance_10.prefab",
+  [12] = "UI/Effect/UIItemGrid/Enhance_12.prefab",
+  [14] = "UI/Effect/UIItemGrid/Enhance_14.prefab",
+  [16] = "UI/Effect/UIItemGrid/Enhance_16.prefab"
+}
+
+function EquipEnhance:SetNotShowValue(isOn)
+  RemoteServer.RequestEquipEnhance("SetNotShowValue", isOn)
+end
+
+function EquipEnhance:OnLoginC()
+  self:LoadFightPowerSetting()
+end
+
+function EquipEnhance:GetGridEffectPath(nLevel)
+  local szRet
+  for i, szPath in pairs(self.tbLevel2GridEffect) do
+    if i <= nLevel then
+      szRet = szPath
+    end
+  end
+  return szRet
+end
+
+function EquipEnhance:EnhanceReq(pPlayer, nPos, tbItemList)
+  local bRet, szErr = self:CanEnhanceWithReminderWindow(pPlayer, nPos, tbItemList)
+  if not bRet then
+    pPlayer.CenterMsg(szErr)
+    return
+  end
+  local nOrgLv = self:GetEquipEnhanceLevel(pPlayer, nPos)
+  
+  local function fnCallBack()
+    RemoteServer.RequestEquipEnhance("EnhanceReq", nPos, tbItemList)
+  end
+  
+  if self.tbLimitEnhancePercent[nOrgLv] then
+    local pEquip = pPlayer.GetEquipByPos(nPos)
+    local nUseVal, nReqVal, nNewLv, nPercent = self:CalcEnhanceRate(nPos, nOrgLv, tbItemList, pEquip, pPlayer)
+    local nSetTime = me.GetUserValue(Item.EquipEnhance.SAVE_ENHANCE_GROUP, Item.EquipEnhance.NOT_SHOW_TIP) or 0
+    if Lib:IsDiffDay(0, nSetTime, GetTime()) and nPercent < 100 then
+      local szText = i18n.EasyGet("\230\173\164\230\147\141\228\189\156\229\173\152\229\156\168\229\164\177\232\180\165\233\163\142\233\153\169\239\188\140\229\188\186\229\140\150\229\164\177\232\180\165\229\176\134\230\141\159\229\164\177\229\188\186\229\140\150\230\157\144\230\150\153\239\188\140\230\152\175\229\144\166\231\161\174\232\174\164\229\188\186\229\140\150\239\188\159")
+      Ui:OpenWindow("UIMessageBox", szText, {
+        {fnCallBack},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      }, "EquipEnhance", nil, i18n.EasyGet("\228\187\138\230\151\165\228\184\141\229\134\141\230\143\144\233\134\146"))
+    else
+      fnCallBack()
+    end
+  else
+    fnCallBack()
+  end
+end
+
+function EquipEnhance:EnhanceRsp(bSuccess, nPos, nOrgLv, nNewLv)
+  if bSuccess then
+    self:RefreshAttrib(me, nPos, nOrgLv, nNewLv)
+  end
+  if Ui:WindowVisible("UIEquipment") then
+    Ui:GetWindow("UIEquipment"):NotifyEquipEnhance("Enhance", bSuccess, nPos)
+  end
+  self:OnCheckRedPoint()
+end
+
+function EquipEnhance:ComposeReq(pPlayer, tbItemList)
+  local bRet, szErr = self:CanComposeWithReminderWindow(pPlayer, tbItemList)
+  if not bRet then
+    pPlayer.CenterMsg(szErr)
+    return false
+  end
+  RemoteServer.RequestEquipEnhance("ComposeReq", tbItemList)
+  return true
+end
+
+function EquipEnhance:ComposeRsp(tbCostItemList, nGetLv, nGetNum)
+  self.XuanJingCompose:OnSyncComposeResult(tbCostItemList, nGetLv, nGetNum)
+  if Ui:WindowVisible("UIEquipment") then
+    Ui:GetWindow("UIEquipment"):NotifyXuanJingCompose()
+  end
+end
+
+function EquipEnhance:SplitReq(pPlayer, nItemId, nNum)
+  local bRet, szErr = self:CanSplit(pPlayer, nItemId, nNum)
+  if not bRet then
+    pPlayer.CenterMsg(szErr)
+    return
+  end
+  RemoteServer.RequestEquipEnhance("SplitReq", nItemId, nNum)
+end
+
+function EquipEnhance:SCReturnXuanJing(tbItemList)
+  local tbMsgList = {}
+  for _, tbItem in ipairs(tbItemList) do
+    table.insert(tbMsgList, i18n.EasyGet("{0}\231\186\167\231\142\132\230\153\182{1}\228\184\170", tbItem[1], tbItem[2]))
+  end
+  me.CenterMsg(i18n.EasyGet("\229\183\178\229\133\168\233\162\157\232\191\148\232\191\152\232\182\133\229\135\186\233\131\168\229\136\134\231\142\132\230\153\182"), true)
+  me.Msg(i18n.EasyGet("\229\188\186\229\140\150\230\136\144\229\138\159\231\142\135\232\182\133\229\135\186100%\239\188\140\229\183\178\229\176\134\229\164\154\229\135\186\231\154\132\230\136\144\229\138\159\231\142\135\230\138\152\231\174\151\230\136\144\229\166\130\228\184\139\231\142\132\230\153\182\232\191\148\232\191\152\239\188\154{0}", table.concat(tbMsgList, "\239\188\140")))
+end
+
+function EquipEnhance:QuickCheckEnhance(pPlayer, pEquip)
+  local nHasVal = 0
+  for _, nItemTid in pairs(self.XUANJING_ITEM) do
+    local nNum = pPlayer.GetItemCountInBags(nItemTid)
+    if 0 ~= nNum then
+      nHasVal = nHasVal + KItem.GetBaseValue(nItemTid) * nNum
+    end
+  end
+  local nHasMoney = pPlayer.GetMoney(self.MONEY_TYPE)
+  local nReqVal, nReqMoney = self:CalcEnhanceCost(pPlayer, pEquip, self:GetEquipEnhanceLevel(pPlayer, pEquip.nEquipPos))
+  if nReqVal and nReqMoney and nHasVal >= nReqVal and nHasMoney >= nReqMoney then
+    return true
+  else
+    return false
+  end
+end
+
+function EquipEnhance:CanShowEnhanceButtonInUIEquipTips(nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return false
+  end
+  local nEquipPos = pItem.nEquipPos
+  if nEquipPos < Item.EQUIPPOS_HELM or nEquipPos > Item.EQUIPPOS_AMULET then
+    return false
+  end
+  return true
+end
+
+function EquipEnhance:OnCheckRedPoint()
+  local nHasVal = 0
+  for _, nItemTid in pairs(self.XUANJING_ITEM) do
+    local nNum = me.GetItemCountInBags(nItemTid)
+    if 0 ~= nNum then
+      nHasVal = nHasVal + KItem.GetBaseValue(nItemTid) * nNum
+    end
+  end
+  local nHasMoney = me.GetMoney(self.MONEY_TYPE)
+  for nPos, nRedPoint in pairs(self.EQUIPPOS_2_REDPOINT) do
+    local pEquip = me.GetEquipByPos(nPos)
+    if pEquip then
+      local nEnhanceLevel = self:GetEquipEnhanceLevel(me, pEquip.nEquipPos)
+      if not Item.EquipWuLian:IsWuLianOpenC(nEnhanceLevel, pEquip.nLevel) then
+        local nReqVal, nReqMoney = self:CalcEnhanceCost(me, pEquip, nEnhanceLevel)
+        local nDegree = DegreeCtrl:GetDegree(me, self.POS_2_DEGREE[nPos])
+        if nReqVal and nReqMoney and nHasVal >= nReqVal and nHasMoney >= nReqMoney and nDegree > 0 then
+          RedPointMgr:LightRedPoint(nRedPoint)
+        else
+          RedPointMgr:FadeRedPoint(nRedPoint)
+        end
+      else
+        local nReqVal, nReqMoney = Item.EquipWuLian:CalcWuLianCost(me, pEquip, Item.EquipWuLian:GetEquipWuLianLevel(me, pEquip.nEquipPos))
+        local nDegree = DegreeCtrl:GetDegree(me, self.POS_2_DEGREE[nPos])
+        if nReqVal and nReqMoney and nHasVal >= nReqVal and nHasMoney >= nReqMoney and nDegree > 0 then
+          RedPointMgr:LightRedPoint(nRedPoint)
+        else
+          RedPointMgr:FadeRedPoint(nRedPoint)
+        end
+      end
+    else
+      RedPointMgr:FadeRedPoint(nRedPoint)
+    end
+  end
+end
+
+function EquipEnhance:OnSyncItemLimitTime()
+  if not PlayerEvent.bLogin then
+    return
+  end
+  self:OnCheckRedPoint()
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, EquipEnhance)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM_TIME_LIMIT, EquipEnhance)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, EquipEnhance)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_EQUIP_LIANHUA_SUCCEED, EquipEnhance)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, EquipEnhance.OnCheckRedPoint, EquipEnhance)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM_TIME_LIMIT, EquipEnhance.OnSyncItemLimitTime, EquipEnhance)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, EquipEnhance.OnCheckRedPoint, EquipEnhance)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_EQUIP_LIANHUA_SUCCEED, EquipEnhance.OnCheckRedPoint, EquipEnhance)

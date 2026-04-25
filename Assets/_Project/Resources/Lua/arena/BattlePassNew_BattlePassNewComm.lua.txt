@@ -1,0 +1,306 @@
+BattlePassNew.GroupKey = GetGroupKey("BattlePassNew")
+BattlePassNew.TaskCountGroupKey = GetGroupKey("BattlePassNewTaskCount")
+BattlePassNew.TaskCompletedGroupKey = GetGroupKey("BattlePassNewTaskCompleted")
+BattlePassNew.NormalAwardGroupKey = GetGroupKey("BattlePassNewNormalAward")
+BattlePassNew.EliteAwardGroupKey = GetGroupKey("BattlePassNewEliteAward")
+BattlePassNew.LegendAwardGroupKey = GetGroupKey("BattlePassNewLegendAward")
+BattlePassNew.CurLv = 1
+BattlePassNew.CurExp = 2
+BattlePassNew.CanUseQuickCompleteCount = 3
+BattlePassNew.BattlePassType = 4
+BattlePassNew.Season = 5
+BattlePassNew.MaxTaskCountUserValueIndex = 50
+BattlePassNew.MaxTaskCompletedUserValueIndex = 4
+BattlePassNew.MaxAwardUserValueIndex = 2
+BattlePassNew.MaxBit = 31
+BattlePassNew.RandomTaskNum = 1
+BattlePassNew.RestCycle = 30
+BattlePassNew.REF_TIME = 14400
+BattlePassNew.nMaxQuickCompleteCount = 8
+BattlePassNew.AwardListId = 1112
+BattlePassNew.OpenFuncLv = 20
+BattlePassNew.emTagStrength = 1
+BattlePassNew.emTagSocialize = 2
+BattlePassNew.emTagFuben = 3
+BattlePassNew.emTagPvP = 4
+BattlePassNew.Recharge = {
+  Elite = 31,
+  Legend = 33,
+  PriceDifference = 32
+}
+BattlePassNew.AwardTag = {
+  Normal = 1,
+  Elite = 2,
+  Legend = 3
+}
+BattlePassNew.RechargeMapping = {
+  [BattlePassNew.AwardTag.Elite] = BattlePassNew.Recharge.Elite,
+  [BattlePassNew.AwardTag.Legend] = BattlePassNew.Recharge.Legend
+}
+BattlePassNew.CanBuyMapping = {
+  [BattlePassNew.Recharge.Elite] = BattlePassNew.AwardTag.Normal,
+  [BattlePassNew.Recharge.PriceDifference] = BattlePassNew.AwardTag.Elite,
+  [BattlePassNew.Recharge.Legend] = BattlePassNew.AwardTag.Normal
+}
+BattlePassNew.TaskTag = {
+  Primary = 1,
+  Middle = 2,
+  Advanced = 3,
+  Legend = 4
+}
+BattlePassNew.TaskClass = {
+  BattlePassNew.emTagStrength,
+  BattlePassNew.emTagSocialize,
+  BattlePassNew.emTagFuben,
+  BattlePassNew.emTagPvP
+}
+BattlePassNew.Protocol = {
+  C2SReqReceiveAllAward = 1,
+  C2SReqQuickCompleteTask = 2,
+  C2SReqBuyBattlePass = 3,
+  C2SReqBattlePassTaskMap = 4,
+  C2SReqBattlePassBeginDay = 5
+}
+BattlePassNew.tbTagNameFun = {
+  [BattlePassNew.emTagStrength] = function()
+    return i18n.EasyGet("\229\143\152\229\188\186")
+  end,
+  [BattlePassNew.emTagSocialize] = function()
+    return i18n.EasyGet("\231\164\190\228\186\164")
+  end,
+  [BattlePassNew.emTagFuben] = function()
+    return i18n.EasyGet("\229\137\175\230\156\172")
+  end,
+  [BattlePassNew.emTagPvP] = function()
+    return i18n.EasyGet("\231\171\158\230\138\128")
+  end
+}
+
+function BattlePassNew:LoadSetting()
+  self.tbBattlePassLvCfg = Lib:LoadTabFileEx("Setting/Activity/BattlePassNew/BattlePassExp.tab", "ddddddd", "nLevel", {
+    "nLevel",
+    "nExp",
+    "nAwardKeyN",
+    "nAwardKeyM",
+    "nAwardKeyH",
+    "nShow",
+    "nHard"
+  })
+  self.tbBattlePassTypeCfg = Lib:LoadTabFileEx("Setting/Activity/BattlePassNew/BattlePassType.tab", "sssssddd", "szTaskType", {
+    "szTaskType",
+    "szTaskDesc",
+    "szTaskName",
+    "szTimeFrameEvent",
+    "szTimeFrameEnd",
+    "nStartSeason",
+    "nEndSeason",
+    "nIsClose"
+  })
+  self.tbBattlePassTaskCfg = Lib:EasyLoadTabFile("Setting/Activity/BattlePassNew/BattlePassTask.tab", {"nTaskId", "nTag"}, {
+    "nTaskId",
+    "nTag",
+    "szTaskType",
+    "nFinishCount",
+    "nTaskClass",
+    "nAddExp",
+    "nCostGold",
+    "nExtraParam",
+    "szGuideFunc",
+    "szGuideParam",
+    "nNotExtraConcat"
+  })
+  self.tbBattlePassBuyAwardCfg = Lib:LoadTabFileEx("Setting/Activity/BattlePassNew/BattlePassBuyAward.tab", "ddd", "nProductId", {
+    "nProductId",
+    "nAwardId",
+    "nAwardKey"
+  })
+  self.tbPreviewbBattlePassAward = {}
+  for nLevel, battlePassLvCfgData in ipairs(self.tbBattlePassLvCfg) do
+    if 1 == battlePassLvCfgData.nShow then
+      table.insert(self.tbPreviewbBattlePassAward, battlePassLvCfgData)
+    end
+  end
+  
+  local function SortFunc(battlePassLvCfgDataA, battlePassLvCfgDataB)
+    local nLvA = battlePassLvCfgDataA.nLevel
+    local nLvB = battlePassLvCfgDataB.nLevel
+    return nLvA <= nLvB
+  end
+  
+  table.sort(self.tbPreviewbBattlePassAward, SortFunc)
+  self.tbBattlePassLvNeedTotalExp = {}
+  local nTotalExp = 0
+  for nLevel, battlePassLvCfgData in ipairs(self.tbBattlePassLvCfg) do
+    self.tbBattlePassLvNeedTotalExp[nLevel] = nTotalExp + battlePassLvCfgData.nExp
+    nTotalExp = self.tbBattlePassLvNeedTotalExp[nLevel]
+  end
+  Validator:Register(self.CheckBuyAwardCfg, self)
+end
+
+function BattlePassNew:CheckBuyAwardCfg()
+  for nProductId, _ in pairs(self.tbBattlePassBuyAwardCfg) do
+    if not Recharge:GetProductSettingById(nProductId) then
+      LogErr(string.format("load BattlePassBuyAward.tab failed, nProductId %d not found in RechargeProducts.tab", nProductId))
+      return false
+    end
+  end
+  return true
+end
+
+function BattlePassNew:IsOpen(pPlayer)
+  if pPlayer.nLevel < self.nMinLevel then
+    return
+  end
+end
+
+function BattlePassNew:GetSeason()
+  local nTimestamp = GetTime() - self.REF_TIME
+  local nTimeNum = Lib:GetTimeNum(nTimestamp)
+  return math.floor(nTimeNum / 100)
+end
+
+function BattlePassNew:GetBattlePassTypeCfgData(szTaskType)
+  return self.tbBattlePassTypeCfg[szTaskType]
+end
+
+function BattlePassNew:GetBattlePassLvCfgData(nLv)
+  if self.tbBattlePassLvCfg[nLv] == nil then
+    return
+  end
+  return self.tbBattlePassLvCfg[nLv]
+end
+
+function BattlePassNew:GetBattlePassMaxLv()
+  return #self.tbBattlePassLvCfg
+end
+
+function BattlePassNew:GetCurLvMaxExp(nLv)
+  if self.tbBattlePassLvCfg[nLv] == nil then
+    return 0
+  end
+  return self.tbBattlePassLvCfg[nLv].nExp
+end
+
+function BattlePassNew:GetBattlePassTaskCfgData(nTaskId, nTag)
+  if not self.tbBattlePassTaskCfg[nTaskId] then
+    return
+  elseif not self.tbBattlePassTaskCfg[nTaskId][nTag] then
+    return
+  end
+  return self.tbBattlePassTaskCfg[nTaskId][nTag]
+end
+
+function BattlePassNew:GetCurLvNeedExp(nLv)
+  if self.tbBattlePassLvCfg[nLv] == nil then
+    return 0
+  end
+  return self.tbBattlePassLvNeedTotalExp[nLv]
+end
+
+function BattlePassNew:GetBattlePassBuyAwardCfgData(nProductId)
+  return self.tbBattlePassBuyAwardCfg[nProductId]
+end
+
+function BattlePassNew:GenInitTaskData()
+  return {nCurCount = 0, bIsCompleted = false}
+end
+
+function BattlePassNew:CheckBattlePassTaskTypeIsValid(nTaskId, nTag, nServerOpenDay)
+  local battlePassTaskCfgData = self:GetBattlePassTaskCfgData(nTaskId, nTag)
+  if nil == battlePassTaskCfgData then
+    return false
+  end
+  local szTaskType = battlePassTaskCfgData.szTaskType
+  local battlePassTypeCfgData = self.tbBattlePassTypeCfg[szTaskType]
+  if nil == battlePassTypeCfgData then
+    return false
+  end
+  if 1 == battlePassTypeCfgData.nIsClose then
+    return false
+  end
+  local nSeason = math.ceil(nServerOpenDay / BattlePassNew.RestCycle)
+  if nSeason < battlePassTypeCfgData.nStartSeason or nSeason > battlePassTypeCfgData.nEndSeason then
+    return false
+  end
+  return true
+end
+
+function BattlePassNew:GetTaskAndTagMapIndex(nTaskId, nTag)
+  if self.tbBattlePassServerData ~= nil and nil ~= self.tbBattlePassServerData.tbTaskAndTagMap and nil ~= self.tbBattlePassServerData.tbTaskAndTagMap[nTaskId] and nil ~= self.tbBattlePassServerData.tbTaskAndTagMap[nTaskId][nTag] then
+    return self.tbBattlePassServerData.tbTaskAndTagMap[nTaskId][nTag]
+  else
+    return nil
+  end
+end
+
+function BattlePassNew:GetTaskMapIndex(nTaskId)
+  if self.tbBattlePassServerData ~= nil and nil ~= self.tbBattlePassServerData.tbTaskMap and nil ~= self.tbBattlePassServerData.tbTaskMap[nTaskId] then
+    return self.tbBattlePassServerData.tbTaskMap[nTaskId]
+  else
+    return nil
+  end
+end
+
+function BattlePassNew:GetTaskIsCompleted(pPlayer, nTaskId, nTag)
+  if nil == pPlayer then
+    return nil
+  end
+  local nCompletedIndex = self:GetTaskAndTagMapIndex(nTaskId, nTag)
+  if nil ~= nCompletedIndex then
+    local nGroupIndex = nCompletedIndex / BattlePassNew.MaxBit + 1
+    local nBitIndex = nCompletedIndex % BattlePassNew.MaxBit
+    if 0 == nBitIndex then
+      nBitIndex = BattlePassNew.MaxBit
+      nGroupIndex = nGroupIndex - 1
+    end
+    local nTaskCompletedValue = pPlayer.GetUserValue(BattlePassNew.TaskCompletedGroupKey, nGroupIndex)
+    local bIsCompleted = Lib:GetBit(nTaskCompletedValue, nBitIndex)
+    return bIsCompleted
+  else
+    return false
+  end
+end
+
+function BattlePassNew:GetTaskCount(pPlayer, nTaskId)
+  if nil == pPlayer then
+    return 0
+  end
+  local nCountIndex = self:GetTaskMapIndex(nTaskId)
+  if nil ~= nCountIndex then
+    local nCurCount = pPlayer.GetUserValue(BattlePassNew.TaskCountGroupKey, nCountIndex)
+    return nCurCount
+  else
+    LogErr("[BattlePassNew] nCountIndex is nill")
+    return 0
+  end
+end
+
+function BattlePassNew:GetAwardIsGet(pPlayer, nLv, nAwardTag)
+  if nil == pPlayer then
+    return nil
+  end
+  local nAwardGroupKey = self:GetAwardGroupKey(nAwardTag)
+  local nGroupIndex = nLv / BattlePassNew.MaxBit + 1
+  local nBitIndex = nLv % BattlePassNew.MaxBit
+  if 0 == nBitIndex then
+    nBitIndex = BattlePassNew.MaxBit
+    nGroupIndex = nGroupIndex - 1
+  end
+  local nAwardGetValue = pPlayer.GetUserValue(nAwardGroupKey, nGroupIndex)
+  local bIsGet = Lib:GetBit(nAwardGetValue, nBitIndex)
+  return bIsGet
+end
+
+function BattlePassNew:GetAwardGroupKey(nAwardTag)
+  if nAwardTag == BattlePassNew.AwardTag.Normal then
+    return BattlePassNew.NormalAwardGroupKey
+  elseif nAwardTag == BattlePassNew.AwardTag.Elite then
+    return BattlePassNew.EliteAwardGroupKey
+  elseif nAwardTag == BattlePassNew.AwardTag.Legend then
+    return BattlePassNew.LegendAwardGroupKey
+  else
+    return BattlePassNew.NormalAwardGroupKey
+  end
+end
+
+BattlePassNew:LoadSetting()

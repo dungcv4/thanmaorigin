@@ -1,0 +1,308 @@
+Require("CommonScript/PartnerEquip/PartnerEquipCommon.lua")
+local PartnerEquipC = Item.PartnerEquip
+PartnerEquipC.SERVER_CMD = {
+  [PartnerEquipC.Protocol.EnhanceEquip] = "OnPartnerEquipEnhanceResp",
+  [PartnerEquipC.Protocol.ReforgeEquip] = "OnPartnerEquipReforgeResp",
+  [PartnerEquipC.Protocol.DecomposeEquip] = "OnPartnerEquipDecomposeResp",
+  [PartnerEquipC.Protocol.SyncAttrib] = "OnPartnerEquipSyncAttribResp"
+}
+PartnerEquipC.tbClientCache = {}
+PartnerEquipC.tbClientCache.tbBetterRedPointData = {}
+PartnerEquipC.tbClientCache.tbEnhanceRedPointData = {}
+PartnerEquipC.tbClientCache.tbReforgeRedPointData = {}
+
+function PartnerEquipC:InitEventListener()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PARTNER_EQUIP_ENHANCE_SUCCESS, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PARTNER_EQUIP_REFORGE_SUCCESS, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_USE_UNUSE_EQUIP, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM_TIME_LIMIT, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_DEL_ITEM, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PARTNER_EQUIP_ENHANCE_SUCCESS, self.CheckBetterRedPoint, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PARTNER_EQUIP_REFORGE_SUCCESS, self.CheckBetterRedPoint, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, self.DoCheckLevelUpRedPoint, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_USE_UNUSE_EQUIP, self.OnUseUnUseEquip, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM_TIME_LIMIT, self.CheckEnhanceReforgeRedPoint_1, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_DEL_ITEM, self.CheckEnhanceReforgeRedPoint_Del, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, self.CheckEnhanceReforgeRedPoint_2, self)
+end
+
+function PartnerEquipC:DoCheckLevelUpRedPoint()
+  for i = Item.PartnerEquip.WEAPON, Item.PartnerEquip.BOOTS do
+    self:CheckBetterRedPoint(i)
+  end
+end
+
+function PartnerEquipC:DoCheckERRedPoint(nHasXuanShiNum, nHasCoinNum)
+  for i = Item.PartnerEquip.WEAPON, Item.PartnerEquip.BOOTS do
+    local pUsingEquip = Item.ExtEquip:GetEquipObj(me, i)
+    if pUsingEquip and self:CheckCanAddEquipLevel(pUsingEquip, 1) then
+      local nOrgLevel = self:GetEquipLevel(pUsingEquip)
+      local tbNeedCostItem = self:GetEnhanceCostItem(nOrgLevel, nOrgLevel + 1)
+      if nHasXuanShiNum >= tbNeedCostItem.XuanShi and nHasCoinNum >= tbNeedCostItem.Coin then
+        RedPointMgr:LightRedPoint(RedPointMgr.EVENT.PartnerEquipCanEnhance)
+        self.tbClientCache.tbEnhanceRedPointData[i] = pUsingEquip.dwId
+      else
+        self.tbClientCache.tbEnhanceRedPointData[i] = nil
+      end
+    else
+      self.tbClientCache.tbEnhanceRedPointData[i] = nil
+    end
+    if pUsingEquip and self:CheckCanReforgeEquip(pUsingEquip) then
+      local tbNeedCostItem = self:GetReforgeCostItem()
+      if nHasXuanShiNum >= tbNeedCostItem.XuanShi and nHasCoinNum >= tbNeedCostItem.Coin then
+        RedPointMgr:LightRedPoint(RedPointMgr.EVENT.PartnerEquipCanReforge)
+        self.tbClientCache.tbReforgeRedPointData[i] = pUsingEquip.dwId
+      else
+        self.tbClientCache.tbReforgeRedPointData[i] = nil
+      end
+    else
+      self.tbClientCache.tbReforgeRedPointData[i] = nil
+    end
+  end
+  if Lib:IsEmptyTB(self.tbClientCache.tbEnhanceRedPointData) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.PartnerEquipCanEnhance)
+  end
+  if Lib:IsEmptyTB(self.tbClientCache.tbReforgeRedPointData) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.PartnerEquipCanReforge)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_EQUIP_REFRESH_REDPOINT)
+end
+
+function PartnerEquipC:CheckEnhanceReforgeRedPoint_Del(nItemId, nTemplateId)
+  if nTemplateId == Item.PartnerEquip.CFG.nXuanShiTemplateId then
+    local nHasXuanShiNum = me.GetItemCountInBags(Item.PartnerEquip.CFG.nXuanShiTemplateId)
+    local nHasCoinNum = me.GetMoney(Currency.TYPE.Coin)
+    self:DoCheckERRedPoint(nHasXuanShiNum, nHasCoinNum)
+  end
+  local tbBaseInfo = KItem.GetItemBaseProp(nTemplateId)
+  if not tbBaseInfo or tbBaseInfo.nDetailType < Item.PartnerEquip.WEAPON or tbBaseInfo.nDetailType > Item.PartnerEquip.BOOTS then
+    return
+  end
+  self:CheckBetterRedPoint(tbBaseInfo.nDetailType)
+end
+
+function PartnerEquipC:CheckEnhanceReforgeRedPoint_1()
+  local nHasXuanShiNum = me.GetItemCountInBags(Item.PartnerEquip.CFG.nXuanShiTemplateId)
+  local nHasCoinNum = me.GetMoney(Currency.TYPE.Coin)
+  self:DoCheckERRedPoint(nHasXuanShiNum, nHasCoinNum)
+  for i = Item.PartnerEquip.WEAPON, Item.PartnerEquip.BOOTS do
+    self:CheckBetterRedPoint(i)
+  end
+end
+
+function PartnerEquipC:CheckEnhanceReforgeRedPoint_2(szMoneyType)
+  if szMoneyType == Currency.TYPE.Coin then
+    local nHasXuanShiNum = me.GetItemCountInBags(Item.PartnerEquip.CFG.nXuanShiTemplateId)
+    local nHasCoinNum = me.GetMoney(Currency.TYPE.Coin)
+    self:DoCheckERRedPoint(nHasXuanShiNum, nHasCoinNum)
+  end
+end
+
+function PartnerEquipC:OnUseUnUseEquip(bIsUse, nPos, nItemId)
+  local pModifyEquip = me.GetItemInAllSpace(nItemId)
+  if not pModifyEquip or not self:CheckIsPartnerEquip(pModifyEquip) then
+    return
+  end
+  local nEquipPos = Item:GetExtEquipSlot(pModifyEquip)
+  self:CheckBetterRedPoint(nEquipPos)
+end
+
+function PartnerEquipC:CheckBetterRedPoint(nEquipPos)
+  local tbEquips = PartnerEquipC:GetAllPartnerEquipInBagByPos(me, nEquipPos) or {}
+  self.tbClientCache.tbBetterRedPointData = self.tbClientCache.tbBetterRedPointData or {}
+  local nCurFightPower = 0
+  local pUsingEquip = Item.ExtEquip:GetEquipObj(me, nEquipPos)
+  if pUsingEquip then
+    nCurFightPower = self:GetEquipFightPower(pUsingEquip)
+  end
+  self.tbClientCache.tbBetterRedPointData[nEquipPos] = nil
+  for _, pEquip in ipairs(tbEquips) do
+    if pEquip.nUseLevel <= me.nTotalLevel then
+      local nOtherEquipFightPower = self:GetEquipFightPower(pEquip)
+      if nCurFightPower < nOtherEquipFightPower then
+        nCurFightPower = nOtherEquipFightPower
+        RedPointMgr:LightRedPoint(RedPointMgr.EVENT.PartnerEquipBetter)
+        self.tbClientCache.tbBetterRedPointData[nEquipPos] = pEquip.dwId
+      end
+    end
+  end
+  if Lib:IsEmptyTB(self.tbClientCache.tbBetterRedPointData) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.PartnerEquipBetter)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_EQUIP_REFRESH_REDPOINT)
+end
+
+function PartnerEquipC:GetBetterRedPointData(nEquipPos)
+  return self.tbClientCache.tbBetterRedPointData[nEquipPos]
+end
+
+function PartnerEquipC:GetEnhanceRedPointData(nEquipPos)
+  return self.tbClientCache.tbEnhanceRedPointData[nEquipPos]
+end
+
+function PartnerEquipC:GetReforgeRedPointData(nEquipPos)
+  return self.tbClientCache.tbReforgeRedPointData[nEquipPos]
+end
+
+function PartnerEquipC:ServerRequest(nProtocol, ...)
+  if not PartnerEquipC.SERVER_CMD[nProtocol] or not self[PartnerEquipC.SERVER_CMD[nProtocol]] then
+    Lib:LogFormat("PartnerEquipC: ServerRequest failed, invalid protocol = %s, nPlayerId = %d", nProtocol, me.dwID)
+    return
+  end
+  self[PartnerEquipC.SERVER_CMD[nProtocol]](self, ...)
+end
+
+function PartnerEquipC:ReqPartnerEquipEnhance(nItemId, nSymbol)
+  if not Lib:IsInteger(nItemId) then
+    return
+  end
+  local pEquip = me.GetItemInAllSpace(nItemId)
+  if not pEquip or not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  if not Lib:IsInteger(nSymbol) or not self.ServerProtocolSymbol[nSymbol] then
+    return
+  end
+  if self:IsEquipFullLevel(pEquip) then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\232\163\133\229\164\135\229\183\178\229\141\135\232\135\179\230\187\161\231\186\167\239\188\140\230\151\160\230\179\149\231\187\167\231\187\173\229\141\135\231\186\167"))
+    return
+  end
+  local nOrgLevel = self:GetEquipLevel(pEquip)
+  local nAddLevel = self.ServerProtocolSymbol[nSymbol]
+  local tbNeedCostItem = self:GetEnhanceCostItem(nOrgLevel, nOrgLevel + nAddLevel)
+  local bRet, szMsg = self:CheckHasEnoughCostItem(me, tbNeedCostItem)
+  if not bRet then
+    if szMsg then
+      me.CenterMsg(szMsg)
+    end
+    return
+  end
+  
+  local function fnOK(tbSelf, nId)
+    tbSelf:SaveCurEquipInfo(nItemId)
+    RemoteServer.RequestPartnerEquip(self.Protocol.EnhanceEquip, nItemId, nSymbol)
+  end
+  
+  if nOrgLevel <= 0 then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\141\135\231\186\167\229\144\142\232\163\133\229\164\135\229\176\134\231\187\145\229\174\154\230\151\160\230\179\149\228\186\164\230\152\147\239\188\140\230\152\175\229\144\166\231\161\174\232\174\164\229\141\135\231\186\167\239\188\159"), {
+      {
+        fnOK,
+        self,
+        nItemId
+      },
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  else
+    fnOK(self, nItemId)
+  end
+end
+
+function PartnerEquipC:ReqPartnerEquipReforge(nItemId)
+  if not Lib:IsInteger(nItemId) then
+    return
+  end
+  local pEquip = me.GetItemInAllSpace(nItemId)
+  if not pEquip or not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  local bRet, szMsg = self:CheckCanReforgeEquip(pEquip)
+  if not bRet then
+    if szMsg then
+      me.CenterMsg(szMsg)
+    end
+    return
+  end
+  local tbNeedCostItem = self:GetReforgeCostItem()
+  local bResult, szErr = self:CheckHasEnoughCostItem(me, tbNeedCostItem)
+  if not bResult then
+    if szErr then
+      me.CenterMsg(szErr)
+    end
+    return
+  end
+  self:SaveCurEquipInfo(nItemId)
+  RemoteServer.RequestPartnerEquip(self.Protocol.ReforgeEquip, nItemId)
+end
+
+function PartnerEquipC:ReqPartnerEquipDecomposeByBatch(tbItemId)
+  if type(tbItemId) ~= "table" or Lib:IsEmptyTB(tbItemId) then
+    return
+  end
+  local tbPassItemIdList = {}
+  for _, nItemId in pairs(tbItemId) do
+    local pEquip = me.GetItemInAllSpace(nItemId)
+    if self:CheckIsPartnerEquip(pEquip) then
+      table.insert(tbPassItemIdList, nItemId)
+      self:SaveCurEquipInfo(nItemId)
+    end
+  end
+  RemoteServer.RequestPartnerEquip(self.Protocol.DecomposeEquip, tbPassItemIdList)
+end
+
+function PartnerEquipC:ReqPartnerEquipDecompose(nItemId)
+  if not Lib:IsInteger(nItemId) then
+    return
+  end
+  local pEquip = me.GetItemInBag(nItemId)
+  if not self:CheckIsPartnerEquip(pEquip) then
+    return
+  end
+  RemoteServer.RequestPartnerEquip(self.Protocol.DecomposeEquip, {nItemId})
+end
+
+function PartnerEquipC:OnPartnerEquipEnhanceResp(nItemId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_EQUIP_ENHANCE_SUCCESS, nItemId)
+end
+
+function PartnerEquipC:OnPartnerEquipReforgeResp(nItemId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_EQUIP_REFORGE_SUCCESS, nItemId)
+end
+
+function PartnerEquipC:OnPartnerEquipDecomposeResp(tbItemId)
+  for _, nItemId in ipairs(tbItemId) do
+    self:RemoveEquipCache(nItemId)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PARTNER_EQUIP_DECOMPOSE_SUCCESS, tbItemId)
+end
+
+function PartnerEquipC:SaveCurEquipInfo(nItemId)
+  local pEquip = me.GetItemInAllSpace(nItemId)
+  if not pEquip then
+    return
+  end
+  self.tbClientCache[pEquip.dwId] = self.tbClientCache[pEquip.dwId] or {}
+  self.tbClientCache[pEquip.dwId].tbCurEquipAttrInfo = self.tbClientCache[pEquip.dwId].tbCurEquipAttrInfo or {}
+  self.tbClientCache[pEquip.dwId].tbCurEquipAttrInfo.tbBaseAttr = self:GetAllBaseAttr(pEquip)
+  self.tbClientCache[pEquip.dwId].tbCurEquipAttrInfo.tbRandomAttr = self:GetAllRandomAttr(pEquip)
+end
+
+function PartnerEquipC:RemoveEquipCache(nEquipId)
+  self.tbClientCache[nEquipId] = nil
+end
+
+function PartnerEquipC:GetEquipAttrInfoCache(nEquipId)
+  return self.tbClientCache[nEquipId] and self.tbClientCache[nEquipId].tbCurEquipAttrInfo or nil
+end
+
+function PartnerEquipC:OnPartnerEquipSyncAttribResp(tbAttrInfo, bIsApply)
+  if bIsApply then
+    self:OnPlayerApplyAttr(tbAttrInfo)
+  else
+    self:OnPlayerRemoveAttr(tbAttrInfo)
+  end
+end
+
+function PartnerEquipC:OnPlayerApplyAttr(tbAttrInfo)
+  me.ApplyMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+end
+
+function PartnerEquipC:OnPlayerRemoveAttr(tbAttrInfo)
+  me.RemoveMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+end
+
+PartnerEquipC:InitEventListener()

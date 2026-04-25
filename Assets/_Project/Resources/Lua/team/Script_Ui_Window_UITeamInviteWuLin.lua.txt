@@ -1,0 +1,398 @@
+local tbWnd = Ui:CreateWindow("UITeamInviteWuLin")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MULTIPVP_SYNC_TEAM,
+      self.OnTeamUpdate
+    },
+    {
+      EventNotify.emNOTIFY_MULTIPVP_LEAVE_TEAM,
+      self.OnTeamUpdate
+    },
+    {
+      EventNotify.emNOTIFY_WULINDAHUI_SYNC_TEAM,
+      self.OnTeamUpdate
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnKin = "node/imgBG/Content/btnKin",
+  btnTong = "node/imgBG/Content/btnTong",
+  btnFriend = "node/imgBG/Content/btnFriend",
+  btnNearBy = "node/imgBG/Content/btnNearBy",
+  ApplyTemplate = "node/imgBG/Content/imgApplyList/ApplyList/ApplyTemplate",
+  txtCurrentTeammateCount = "node/imgBG/Content/txtCurrentTeammateCount",
+  NotInfo = "node/imgBG/Content/NotInfo"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+tbWnd.tbButtonGroupIndex = {
+  kin = 1,
+  tong = 2,
+  friend = 3,
+  nearBy = 4
+}
+
+function tbWnd:OnCreate()
+  self.tbAllNoTeamPlayer = {}
+  self.tbKindGroup = Ui:NewButtonGroup(self, {
+    [self.tbButtonGroupIndex.kin] = self.btnKin,
+    [self.tbButtonGroupIndex.tong] = self.btnTong,
+    [self.tbButtonGroupIndex.friend] = self.btnFriend,
+    [self.tbButtonGroupIndex.nearBy] = self.btnNearBy
+  }, true, function(self, nIndex)
+    self:SwitchPanel(nIndex)
+  end)
+  self.tbScrollView = Ui:NewScrollView(self, self.ApplyTemplate, nil, false, true)
+end
+
+function tbWnd:OnOpen(szModule)
+  self.szModule = szModule
+  FriendShip:RequestUpdateFriendInfo()
+  self.tbScrollView:Reset()
+  self.tbKindGroup:Select(self.tbKindGroup:GetKey() or 1)
+  self:OnTeamUpdate()
+end
+
+function tbWnd:OnTeamUpdate()
+  self:RequestInviteInfo()
+  self:UpdateTeamNum()
+  self.pPanel:Label_SetText(self.txtCurrentTeammateCount, i18n.EasyGet("\230\136\152\233\152\159\228\186\186\230\149\176\239\188\154{0}/{1}", self.nMember, self.nTeamSize))
+end
+
+function tbWnd:SwitchPanel(nIndex)
+  local nShowCount = 0
+  if nIndex == self.tbButtonGroupIndex.kin then
+    nShowCount = self:UpdateKinPanel(true)
+  elseif nIndex == self.tbButtonGroupIndex.tong then
+    nShowCount = self:UpdateTongPanel(true)
+  elseif nIndex == self.tbButtonGroupIndex.friend then
+    Timer:Register(Env.GAME_FPS * 0.2, self.UpdateFriendPanel, self)
+  elseif nIndex == self.tbButtonGroupIndex.nearBy then
+    nShowCount = self:UpdateNearByPanel()
+  end
+  self.pPanel:SetActive(self.NotInfo, 0 == nShowCount)
+end
+
+function tbWnd:UpdateFriendPanel()
+  self.tbScrollView:Reset()
+  local tbAllFriend = FriendShip:GetAllFriendData()
+  local nShowCount = 0
+  for i = 1, #tbAllFriend do
+    local tbFriend = FriendShip:GetFriendDataInfo(tbAllFriend[i].dwRoleId)
+    if self.tbAllNoTeamPlayer[tbAllFriend[i].dwRoleId] then
+      self.tbScrollView:SetElement(nShowCount + 1, function(tbElement)
+        local pPanel = tbElement.pPanel
+        pPanel:Label_SetText("txtName", tbFriend.szName)
+        pPanel:Label_SetText("txtKin", "")
+        pPanel:Sprite_SetSprite("PortraitObj/Portrait/Image", PlayerPortrait:GetIcon(tbFriend.nPortrait))
+        PlayerPortraitFrame:SetPortraitFrame(pPanel, "PortraitObj/PortraitFrame", tbFriend.nPortraitFrame)
+        pPanel:Sprite_SetSprite("PortraitObj/imgFactionIcon", Faction:GetIcon(tbFriend.nFaction))
+        pPanel:Label_SetText("PortraitObj/Level/Text", tbFriend.nLevel)
+        Ui:Button_BindEvent(pPanel, "btnInvite", self.onClickInviteFriend, self, i)
+      end)
+      nShowCount = nShowCount + 1
+    end
+  end
+  self.pPanel:SetActive(self.NotInfo, 0 == nShowCount)
+end
+
+function tbWnd:onClickInviteFriend(nIndex)
+  local tbAllFriend = FriendShip:GetAllFriendData()
+  local tbFriend = tbAllFriend[nIndex]
+  if not tbFriend then
+    return
+  end
+  self:InvitePlayer(tbFriend.dwID)
+end
+
+function tbWnd:UpdateKinPanel(bApplyData)
+  self.tbScrollView:Reset()
+  self.tbOnlineKinMembers = {}
+  if 0 == me.dwKinId then
+    return 0
+  end
+  if bApplyData then
+    Kin:UpdateMemberList()
+  end
+  local tbAllMembers = Kin:GetMemberList()
+  if not tbAllMembers then
+    return 0
+  end
+  local tbOnlineState = Kin:GetMemberState()
+  for i, v in ipairs(tbAllMembers) do
+    if v.nMemberId ~= me.dwID and tbOnlineState[v.nMemberId] and self.tbAllNoTeamPlayer[v.nMemberId] then
+      table.insert(self.tbOnlineKinMembers, v)
+    end
+  end
+  
+  local function fnSort(a, b)
+    return a.nCareer < b.nCareer
+  end
+  
+  table.sort(self.tbOnlineKinMembers, fnSort)
+  for i = 1, #self.tbOnlineKinMembers do
+    local tbNpc = self.tbOnlineKinMembers[i]
+    self.tbScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtName", tbNpc.szName)
+      pPanel:Label_SetText("txtKin", "")
+      pPanel:Sprite_SetSprite("PortraitObj/Portrait/Image", PlayerPortrait:GetIcon(tbNpc.nPortrait))
+      PlayerPortraitFrame:SetPortraitFrame(pPanel, "PortraitObj/PortraitFrame", tbNpc.nPortraitFrame)
+      pPanel:Sprite_SetSprite("PortraitObj/imgFactionIcon", Faction:GetIcon(tbNpc.nFaction))
+      pPanel:Label_SetText("PortraitObj/Level/Text", tbNpc.nLevel)
+      Ui:Button_BindEvent(pPanel, "btnInvite", self.onClickInviteKinMember, self, i)
+    end)
+  end
+  return #self.tbOnlineKinMembers
+end
+
+function tbWnd:onClickInviteKinMember(nIndex)
+  local tbNpc = self.tbOnlineKinMembers[nIndex]
+  if not tbNpc then
+    return
+  end
+  self:InvitePlayer(tbNpc.nMemberId)
+end
+
+function tbWnd:UpdateTongPanel(bApplyData)
+  self.tbScrollView:Reset()
+  self.tbOnlineTongMembers = {}
+  if 0 == me.dwTongId then
+    return 0
+  end
+  if bApplyData then
+    Tong:UpdateMemberList()
+  end
+  local tbAllMembers = Tong:GetMemberList()
+  if not tbAllMembers then
+    return 0
+  end
+  local tbOnlineState = Tong:GetMemberState()
+  for i, v in ipairs(tbAllMembers) do
+    if v.nMemberId ~= me.dwID and tbOnlineState[v.nMemberId] and self.tbAllNoTeamPlayer[v.nMemberId] then
+      table.insert(self.tbOnlineTongMembers, v)
+    end
+  end
+  
+  local function fnSort(a, b)
+    return a.nCareer < b.nCareer
+  end
+  
+  table.sort(self.tbOnlineTongMembers, fnSort)
+  for i = 1, #self.tbOnlineTongMembers do
+    local tbMember = self.tbOnlineTongMembers[i]
+    self.tbScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtName", tbMember.szName)
+      pPanel:Label_SetText("txtKin", "")
+      pPanel:Sprite_SetSprite("PortraitObj/Portrait/Image", PlayerPortrait:GetIcon(tbMember.nPortrait))
+      PlayerPortraitFrame:SetPortraitFrame(pPanel, "PortraitObj/PortraitFrame", tbMember.nPortraitFrame)
+      pPanel:Sprite_SetSprite("PortraitObj/imgFactionIcon", Faction:GetIcon(tbMember.nFaction))
+      pPanel:Label_SetText("PortraitObj/Level/Text", tbMember.nLevel)
+      Ui:Button_BindEvent(pPanel, "btnInvite", self.onClickInviteTongMember, self, i)
+    end)
+  end
+  return #self.tbOnlineTongMembers
+end
+
+function tbWnd:onClickInviteTongMember(nIndex)
+  local tbMember = self.tbOnlineTongMembers[nIndex]
+  if not tbMember then
+    return
+  end
+  self:InvitePlayer(tbMember.nMemberId)
+end
+
+function tbWnd:UpdateNearByPanel()
+  self.tbScrollView:Reset()
+  local meNpc = me.GetNpc()
+  local meId = meNpc.nId
+  local tbNpcs = me.GetNpc().GetNearbyNpcByRelationChar("-enemy,+player")
+  self.tbAllNearby = {}
+  for _, tbNpc in pairs(tbNpcs) do
+    local pNpc = KNpc.GetById(tbNpc.nNpcId or 0)
+    if pNpc and 0 ~= pNpc.nPlayerID and self.tbAllNoTeamPlayer[pNpc.nPlayerID] then
+      table.insert(self.tbAllNearby, {
+        dwID = pNpc.nPlayerID,
+        szName = pNpc.szName,
+        nFaction = pNpc.nFaction,
+        nLevel = pNpc.nLevel,
+        nHonorLevel = pNpc.nHonorLevel or 0,
+        nKinId = pNpc.dwKinId,
+        nTongId = pNpc.dwTongId,
+        nPortrait = pNpc.nPortrait,
+        szKinTitle = pNpc.szKinTitle
+      })
+    end
+  end
+  for i, tbNpc in ipairs(self.tbAllNearby) do
+    local tbNpc = self.tbAllNearby[i]
+    self.tbScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtName", tbNpc.szName)
+      local szKinOrTongName = tbNpc.szKinTitle or ""
+      if tbNpc.nTongId > 0 then
+        szKinOrTongName = string.format("%s  %s", i18n.EasyGet("\229\184\174\228\188\154"), szKinOrTongName)
+      elseif tbNpc.nKinId > 0 then
+        szKinOrTongName = string.format("%s  %s", i18n.EasyGet("\229\174\182\230\151\143"), szKinOrTongName)
+      end
+      pPanel:Label_SetText("txtKin", szKinOrTongName)
+      pPanel:Sprite_SetSprite("PortraitObj/Portrait/Image", PlayerPortrait:GetIcon(tbNpc.nPortrait))
+      PlayerPortraitFrame:SetPortraitFrame(pPanel, "PortraitObj/PortraitFrame", tbNpc.nPortraitFrame)
+      pPanel:Sprite_SetSprite("PortraitObj/imgFactionIcon", Faction:GetIcon(tbNpc.nFaction))
+      pPanel:Label_SetText("PortraitObj/Level/Text", tbNpc.nLevel)
+      Ui:Button_BindEvent(pPanel, "btnInvite", self.onClickInviteNearBy, self, i)
+    end)
+  end
+  return #self.tbAllNearby
+end
+
+function tbWnd:onClickInviteNearBy(nIndex)
+  local tbNpc = self.tbAllNearby[nIndex]
+  if not tbNpc then
+    return
+  end
+  self:InvitePlayer(tbNpc.dwID)
+end
+
+function tbWnd:OnKinMemberUpdate()
+  if not Ui:WindowVisible(self.ClassName) then
+    return
+  end
+  if self.tbKindGroup:GetKey() ~= self.tbButtonGroupIndex.kin then
+    return
+  end
+  self:UpdateKinPanel(false)
+end
+
+function tbWnd:OnTongMemberUpdate()
+  if not Ui:WindowVisible(self.ClassName) then
+    return
+  end
+  if self.tbKindGroup:GetKey() ~= self.tbButtonGroupIndex.tong then
+    return
+  end
+  self:UpdateTongPanel(false)
+end
+
+function tbWnd:OnFriendUpdate()
+  if not Ui:WindowVisible(self.ClassName) then
+    return
+  end
+  if self.tbKindGroup:GetKey() ~= self.tbButtonGroupIndex.friend then
+    return
+  end
+  self:UpdateFriendPanel()
+end
+
+function tbWnd:OnNearByUpdate()
+  if not Ui:WindowVisible(self.ClassName) then
+    return
+  end
+  if self.tbKindGroup:GetKey() ~= self.tbButtonGroupIndex.nearBy then
+    return
+  end
+  self:UpdateNearByPanel()
+end
+
+function tbWnd:AddKinMemberID(tbAllPlayerID)
+  local tbAllMembers = Kin:GetMemberList()
+  if not tbAllMembers then
+    return
+  end
+  local tbOnlineState = Kin:GetMemberState()
+  for i, v in ipairs(tbAllMembers) do
+    if v.nMemberId ~= me.dwID and v.nLevel >= MultiPvP.Cfg.TEAM_LEVEL and tbOnlineState[v.nMemberId] then
+      tbAllPlayerID[v.nMemberId] = 1
+    end
+  end
+end
+
+function tbWnd:AddTongMemberID(tbAllPlayerID)
+  local tbAllMembers = Tong:GetMemberList()
+  if not tbAllMembers then
+    return
+  end
+  local tbOnlineState = Tong:GetMemberState()
+  for i, v in ipairs(tbAllMembers) do
+    if v.nMemberId ~= me.dwID and v.nLevel >= MultiPvP.Cfg.TEAM_LEVEL and tbOnlineState[v.nMemberId] then
+      tbAllPlayerID[v.nMemberId] = 1
+    end
+  end
+end
+
+function tbWnd:AddAllFriendDataID(tbAllPlayerID)
+  local tbAllFriend = FriendShip:GetAllFriendData()
+  for i = 1, #tbAllFriend do
+    if tbAllFriend[i] and tbAllFriend[i].nLevel >= MultiPvP.Cfg.TEAM_LEVEL then
+      tbAllPlayerID[tbAllFriend[i].dwRoleId] = 1
+    end
+  end
+end
+
+function tbWnd:AddAllNearbyID(tbAllPlayerID)
+  local tbNpcs = me.GetNpc().GetNearbyNpcByRelationChar("-enemy,+player")
+  for _, tbNpc in pairs(tbNpcs) do
+    local pNpc = KNpc.GetById(tbNpc.nNpcId or 0)
+    if pNpc and 0 ~= pNpc.nPlayerID and pNpc.nLevel >= MultiPvP.Cfg.TEAM_LEVEL then
+      tbAllPlayerID[pNpc.nPlayerID] = 1
+    end
+  end
+end
+
+function tbWnd:RequestInviteInfo()
+  local tbAllPlayerID = {}
+  self:AddKinMemberID(tbAllPlayerID)
+  self:AddTongMemberID(tbAllPlayerID)
+  self:AddAllFriendDataID(tbAllPlayerID)
+  self:AddAllNearbyID(tbAllPlayerID)
+  if self.szModule == "MultiPvP" then
+    MultiPvP:RequestInviteInfo(tbAllPlayerID)
+  elseif self.szModule == "WuLinDaHui" then
+    WuLinDaHui:RequestInviteInfo(tbAllPlayerID)
+  elseif self.szModule == "DingFengPK" then
+    DingFengPK:RequestInviteInfo(tbAllPlayerID)
+  end
+end
+
+function tbWnd:UpdateNoTeamPlayer(tbAllNoTeamPlayer)
+  self.tbAllNoTeamPlayer = tbAllNoTeamPlayer
+  self:OnKinMemberUpdate()
+  self:OnTongMemberUpdate()
+  self:OnFriendUpdate()
+  self:OnNearByUpdate()
+end
+
+function tbWnd:InvitePlayer(nPlayerId)
+  if self.szModule == "MultiPvP" then
+    MultiPvP:Invite(nPlayerId)
+  elseif self.szModule == "WuLinDaHui" then
+    WuLinDaHui:Invite(nPlayerId)
+  elseif self.szModule == "DingFengPK" then
+    DingFengPK:Invite(nPlayerId)
+  end
+end
+
+function tbWnd:UpdateTeamNum()
+  if self.szModule == "MultiPvP" then
+    self.nMember = #MultiPvP.m_tbMembers.tbMember
+    self.nTeamSize = MultiPvP:GetSeasonSettingValue("nMemberNeed", true)
+  elseif self.szModule == "WuLinDaHui" then
+    self.nMember = Lib:CountTB(WuLinDaHui.tbTeamInfo[WldhTeam.MEMBER])
+    self.nTeamSize = WuLinDaHui.TeamCfg.MAX_LEAGUE_MEMBER
+  elseif self.szModule == "DingFengPK" then
+    if DingFengPK.tbTeamInfo then
+      self.nMember = Lib:CountTB(DingFengPK.tbTeamInfo[DingFengPK.MEMBER])
+    else
+      self.nMember = 0
+    end
+    self.nTeamSize = DingFengPK.TeamCfg.MAX_LEAGUE_MEMBER
+  end
+end

@@ -1,0 +1,333 @@
+Achievement.nDisplayDelayTime = 3
+Achievement.WelfareChecker = Achievement.WelfareChecker or {}
+setmetatable(Achievement.WelfareChecker, {
+  __index = function(tb, szPanelType)
+    if "PANEL_TYPE_MONEY_TREE" == szPanelType then
+      tb[szPanelType] = function()
+        return MoneyTree:CheckIsOpen(me)
+      end
+    elseif "PANEL_TYPE_WEEK_MONTH_CARD" == szPanelType then
+      tb[szPanelType] = function()
+        return WeekMonthCard:CheckIsOpen()
+      end
+    else
+      tb[szPanelType] = function()
+        return true
+      end
+    end
+    return tb[szPanelType]
+  end
+})
+Achievement.tbButtonFuncs = {
+  OpenTaskUi = function(tbParams)
+    local szWndName = tbParams[1]
+    local nBigType = tbParams[2]
+    Ui:OpenWindow(szWndName, nil, tonumber(nBigType))
+  end,
+  OpenUi = function(tbParams)
+    local szWndName = tbParams[1]
+    Ui:OpenWindow(szWndName, table.unpack(tbParams, 2))
+  end,
+  OpenMultiPanelUi = function(tbParams)
+    local szWndName = tbParams[1]
+    local nIndex = tonumber(tbParams[2])
+    if not nIndex then
+      Ui:OpenWindow(szWndName)
+    else
+      Ui:OpenWindow(szWndName, nIndex)
+    end
+  end,
+  OpenKinUi = function(tbParams)
+    Kin:OpenKinWindow(tbParams)
+  end,
+  OpenTongUi = function(tbParams)
+    Tong:OpenTongWindow()
+  end,
+  OpenArenaUi = function(tbParams)
+    Arena:TryOpen()
+  end,
+  OpenLifeSkillUi = function(tbParams)
+    local szBtnName = "btnLifeSkill"
+    if HudRightBottom.tbBtnLevelCfg[szBtnName] and me.nLevel < HudRightBottom.tbBtnLevelCfg[szBtnName].nLevel then
+      me.CenterMsg(i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179{0}\231\186\167\239\188\140\229\176\154\230\156\170\232\167\163\233\148\129\230\137\147\233\128\160\229\138\159\232\131\189", HudRightBottom.tbBtnLevelCfg[szBtnName].nLevel))
+      return
+    end
+    Ui:OpenWindow("UILifeSkill")
+  end,
+  OpenWelfareUi = function(tbParams)
+    local szPanelType = tbParams[1]
+    local fnChecker = Achievement.WelfareChecker[szPanelType or ""]
+    if fnChecker and not fnChecker() then
+      me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\229\138\159\232\131\189\229\176\154\230\156\170\229\188\128\230\148\190"))
+      return
+    end
+    Ui:OpenWindow("UIWelfare", szPanelType)
+  end
+}
+
+function Achievement:GetAchievementUnlockLevel()
+  return HudRightBottom.tbBtnLevelCfg[self.szUiBtnName] and HudRightBottom.tbBtnLevelCfg[self.szUiBtnName].nLevel
+end
+
+function Achievement:OnAchievementComplete(nID)
+  Timer:Register(self.nDisplayDelayTime * Env.GAME_FPS, self.OnDisplayDelayTimerOut, self, nID)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ACHIEVEMENT_DATA_SYNC)
+  local nUnlockLevel = self:GetAchievementUnlockLevel()
+  if not nUnlockLevel or nUnlockLevel <= me.nLevel then
+    local cfg = self:GetCfgByID(nID)
+    local szMsg = i18n.EasyGet("\230\129\173\229\150\156\230\130\168\232\190\190\230\136\144\230\136\144\229\176\177\227\128\144{0}\227\128\145", cfg.szTitle)
+    me.CenterMsg(szMsg)
+    me.Msg(szMsg)
+  end
+end
+
+function Achievement:OnDisplayDelayTimerOut(nID)
+  self:DisplayAchievement(nID)
+end
+
+function Achievement:DisplayAchievement(nID)
+end
+
+function Achievement:OnCountChangeC()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ACHIEVEMENT_DATA_SYNC)
+end
+
+function Achievement:OnGainAwardRsp()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ACHIEVEMENT_DATA_SYNC)
+end
+
+function Achievement:OnGainAllAwardRsp(szMsg)
+  if szMsg then
+    me.CenterMsg(szMsg)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ACHIEVEMENT_DATA_SYNC)
+end
+
+function Achievement:IsOpening()
+  if not OnOffController:Check(OnOffController.KEY.Achievement) then
+    return false
+  end
+  return true
+end
+
+function Achievement:TryGainAwardC(nID)
+  if not self:IsOpening() then
+    me.CenterMsg(i18n.EasyGet("\230\136\144\229\176\177\229\138\159\232\131\189\231\187\180\230\138\164\228\184\173\239\188\140\232\175\183\231\168\141\229\144\142\229\134\141\232\175\149"))
+    return
+  end
+  RemoteServer.RequestAchievement(self.Protocol.TryGainAward, nID)
+end
+
+function Achievement:TryGainAllAwardC()
+  if not self:IsOpening() then
+    me.CenterMsg(i18n.EasyGet("\230\136\144\229\176\177\229\138\159\232\131\189\231\187\180\230\138\164\228\184\173\239\188\140\232\175\183\231\168\141\229\144\142\229\134\141\232\175\149"))
+    return
+  end
+  RemoteServer.RequestAchievement(self.Protocol.TryGainAllAward)
+end
+
+function Achievement:GetTreeShowData()
+  local tbBigData = {}
+  for nID, tbInfo in pairs(self.tbGroupCfg) do
+    table.insert(tbBigData, {
+      nType = nID,
+      szText = i18n.Parse(tbInfo.szName),
+      tbInfo = {nID = nID}
+    })
+  end
+  table.sort(tbBigData, function(tbFirst, tbSecond)
+    return tbFirst.nType < tbSecond.nType
+  end)
+  local tbSmallData = {}
+  for szKind, tbInfo in pairs(self.tbMainSetting) do
+    table.insert(tbSmallData, {
+      nType = tbInfo.nGroupID,
+      szText = i18n.Parse(tbInfo.szDesc),
+      tbInfo = {szKind = szKind}
+    })
+  end
+  table.sort(tbSmallData, function(tbFirst, tbSecond)
+    return self.tbMainSetting[tbFirst.tbInfo.szKind].nPriority < self.tbMainSetting[tbSecond.tbInfo.szKind].nPriority
+  end)
+  return tbBigData, tbSmallData
+end
+
+function Achievement:GetShowListByKind(szKind)
+  local tbList = {}
+  local tbCountList, tbCfg, nSubKindID = {}
+  for _, nPileID in ipairs(self.tbKindList[szKind] or {}) do
+    for nIndex, nID in ipairs(self.tbPileList[nPileID] or {}) do
+      tbCfg = self:GetCfgByID(nID)
+      nSubKindID = tbCfg.nSubKindID
+      tbCountList[nSubKindID] = tbCountList[nSubKindID] or self:GetSubKindCount(me, nSubKindID)
+      if tbCountList[nSubKindID] < tbCfg.nFinishCount or nIndex == #self.tbPileList[nPileID] or not self:HasAwardGained(me, nID) then
+        table.insert(tbList, {
+          nID = nID,
+          szName = i18n.Parse(tbCfg.szTitle),
+          szDesc = i18n.Parse(tbCfg.szDesc),
+          szParentKind = i18n.Parse(self.tbMainSetting[self.tbRelationCfg[nPileID].szParentKind].szDesc),
+          nCurCount = tbCountList[nSubKindID],
+          nFinishCount = tbCfg.nFinishCount,
+          nFinished = self:HasAwardGained(me, nID),
+          nScore = tbCfg.nScore,
+          szAward = tbCfg.szAward,
+          bShowBtnGo = tbCfg.szFuncName ~= "" and tbCfg.szFuncName ~= "NotJump"
+        })
+        break
+      end
+    end
+  end
+  local tbFinishedBool = {
+    [true] = 2,
+    [false] = 1
+  }
+  local bCurFirstFinished, bCurSecondFinished
+  table.sort(tbList, function(tbFirst, tbSecond)
+    if tbFirst.nFinished ~= tbSecond.nFinished then
+      return tbFinishedBool[tbFirst.nFinished] < tbFinishedBool[tbSecond.nFinished]
+    end
+    bCurFirstFinished = tbFirst.nCurCount >= tbFirst.nFinishCount
+    bCurSecondFinished = tbSecond.nCurCount >= tbSecond.nFinishCount
+    if bCurFirstFinished ~= bCurSecondFinished then
+      return tbFinishedBool[bCurFirstFinished] > tbFinishedBool[bCurSecondFinished]
+    end
+    return self.tbAchievementCfg[tbFirst.nID].nSortInUI < self.tbAchievementCfg[tbSecond.nID].nSortInUI
+  end)
+  return tbList
+end
+
+function Achievement:JumpAchievementDetail(tbLinkInfo)
+  local nUnlockLevel = self:GetAchievementUnlockLevel()
+  if nUnlockLevel and nUnlockLevel > me.nLevel then
+    me.CenterMsg(i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179{0}\231\186\167\239\188\140\230\136\144\229\176\177\230\156\170\232\167\163\233\148\129", nUnlockLevel))
+    return
+  end
+  if not tbLinkInfo or not tbLinkInfo.nID then
+    return
+  end
+  local tbCfg = self:GetCfgByID(tbLinkInfo.nID)
+  if not tbCfg then
+    return
+  end
+  Ui:OpenWindow("UIAchievement", tbLinkInfo.nID)
+end
+
+function Achievement:GetRedPointAchievementList()
+  local pPlayer = me
+  local tbKindList = {}
+  local tbCountList = {}
+  local tbCfg
+  for szKind, _ in pairs(self.tbMainSetting) do
+    for _, nPileID in ipairs(self.tbKindList[szKind] or {}) do
+      for _, nID in ipairs(self.tbPileList[nPileID] or {}) do
+        tbCfg = self:GetCfgByID(nID)
+        tbCountList[tbCfg.nSubKindID] = tbCountList[tbCfg.nSubKindID] or self:GetSubKindCount(pPlayer, tbCfg.nSubKindID)
+        if tbCountList[tbCfg.nSubKindID] < tbCfg.nFinishCount then
+          break
+        end
+        if not self:HasAwardGained(pPlayer, nID) then
+          tbKindList[szKind] = true
+          break
+        end
+      end
+      if tbKindList[szKind] then
+        break
+      end
+    end
+  end
+  local tbGroupIDList = {}
+  for szKind in pairs(tbKindList) do
+    tbGroupIDList[self.tbMainSetting[szKind].nGroupID] = true
+  end
+  return tbGroupIDList, tbKindList
+end
+
+function Achievement:CheckRedPoint()
+  local tbGroupIDList, tbKindList = self:GetRedPointAchievementList()
+  if next(tbGroupIDList) or next(tbKindList) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.Achievement)
+  end
+end
+
+function Achievement:OnClickBtnGo(nID)
+  local tbCfg = self:GetCfgByID(nID)
+  local tbParams = Lib:SplitStr(tbCfg.szParams, "|")
+  if not self.tbButtonFuncs[tbCfg.szFuncName] then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\231\177\187\229\158\139{0}\230\156\170\229\164\132\231\144\134", tbCfg.szFuncName))
+    return
+  end
+  self.tbButtonFuncs[tbCfg.szFuncName](tbParams)
+end
+
+function Achievement:OnLogin()
+  self:CheckRedPoint()
+end
+
+function Achievement:OnSendPrivateMsg()
+  self:DealAchievementEventC(self.ClientEventList.SendPrivateMsg)
+end
+
+function Achievement:OnSendEmojiMsg()
+  self:DealAchievementEventC(self.ClientEventList.SendEmojiMsg)
+end
+
+function Achievement:OnSendVoiceMsg()
+  self:DealAchievementEventC(self.ClientEventList.SendVoiceMsg)
+end
+
+function Achievement:OnSendWorldMsg()
+  self:DealAchievementEventC(self.ClientEventList.SendWorldMsg)
+end
+
+function Achievement:OnSendKinMsg()
+  self:DealAchievementEventC(self.ClientEventList.SendKinMsg)
+end
+
+function Achievement:OnSendTongMsg()
+  self:DealAchievementEventC(self.ClientEventList.SendTongMsg)
+end
+
+function Achievement:OnSendColorMsg()
+  self:DealAchievementEventC(self.ClientEventList.SendColorMsg)
+end
+
+function Achievement:OnOpenLifeSkillWindow()
+  if 1 == me.GetUserValue(self.RecordSaveKey, self.RecordKeyLifeSkill) then
+    return
+  end
+  self:DealAchievementEventC(self.ClientEventList.LifeSkill)
+end
+
+function Achievement:DealAchievementEventC(szEvent)
+  if not self.ClientEventLimitedList[szEvent] then
+    return
+  end
+  local nSubKindID = self:GetSubKindIDBySubKind(szEvent)
+  if not nSubKindID or nSubKindID <= 0 then
+    return
+  end
+  local nCurCount = self:GetSubKindCount(me, nSubKindID)
+  if nCurCount >= self.ClientEventLimitedList[szEvent] then
+    return
+  end
+  RemoteServer.RequestAchievement(self.Protocol.DealAchievementEvent, szEvent)
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_ACHIEVEMENT_DATA_SYNC, Achievement)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_ACHIEVEMENT_DATA_SYNC, Achievement.CheckRedPoint, Achievement)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHAT_PRIVATEMSG, Achievement)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHAT_PRIVATEMSG, Achievement.OnSendPrivateMsg, Achievement)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHAT_EMOJI, Achievement)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHAT_EMOJI, Achievement.OnSendEmojiMsg, Achievement)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHAT_VOICE, Achievement)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHAT_VOICE, Achievement.OnSendVoiceMsg, Achievement)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHAT_WORLD, Achievement)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHAT_WORLD, Achievement.OnSendWorldMsg, Achievement)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHAT_KIN, Achievement)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHAT_KIN, Achievement.OnSendKinMsg, Achievement)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHAT_TONG, Achievement)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHAT_TONG, Achievement.OnSendTongMsg, Achievement)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHAT_COLOR, Achievement)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHAT_COLOR, Achievement.OnSendColorMsg, Achievement)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_LIFESKILL_WINDOW_OPEN, Achievement)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_LIFESKILL_WINDOW_OPEN, Achievement.OnOpenLifeSkillWindow, Achievement)

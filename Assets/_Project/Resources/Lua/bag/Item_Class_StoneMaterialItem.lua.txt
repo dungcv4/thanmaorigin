@@ -1,0 +1,620 @@
+local tbStoneMaterial = Item:GetClass("StoneMaterialItem")
+tbStoneMaterial.EXT_PARAM_1 = 1
+
+function tbStoneMaterial:OnCreate()
+end
+
+function tbStoneMaterial:OnClientUse(pItem)
+  local nOptType = KItem.GetItemExtParam(pItem.dwTemplateId, 1)
+  if 1 == nOptType then
+    return 1
+  elseif 2 == nOptType then
+    local nConsumeId = KItem.GetItemExtParam(pItem.dwTemplateId, 2)
+    local nConsumeNum = KItem.GetItemExtParam(pItem.dwTemplateId, 3)
+    local nHadNum = me.GetItemCountByTypeInBag(nConsumeId)
+    if nConsumeNum > nHadNum then
+      local szName = Item:GetName(nConsumeId, me)
+      
+      local function fnOk()
+        Shop:OpenShopBuyWidDefault(nConsumeId)
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\190\128\229\165\135\231\143\141\233\152\129\232\191\155\232\161\140\232\180\173\228\185\176", szName), {
+        {fnOk},
+        {}
+      })
+      return 0
+    end
+    return 1
+  elseif 3 == nOptType then
+    Item.Stone:OpenForgeCompose(pItem.dwTemplateId)
+    return 0
+  elseif 4 == nOptType then
+    Ui:OpenWindow("UIStoneCompose", 0, pItem.dwTemplateId)
+    return 0
+  end
+  return 0
+end
+
+function tbStoneMaterial:GetClientDefaultUseCount(nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  local nOptType = KItem.GetItemExtParam(pItem.dwTemplateId, 1)
+  if 2 ~= nOptType then
+    return
+  end
+  local nRet = math.min(pItem.nCount, Item.UseManyLimit.RandItem)
+  local nConsumeId = KItem.GetItemExtParam(pItem.dwTemplateId, 2)
+  local nConsumeNum = KItem.GetItemExtParam(pItem.dwTemplateId, 3)
+  local nConsumeCount = me.GetItemCountByTypeInBag(nConsumeId)
+  local nConsumeTime = math.floor(nConsumeCount / nConsumeNum)
+  local nRet = math.min(nRet, nConsumeTime)
+  return nRet
+end
+
+function tbStoneMaterial:GeNeedCount(nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  local nOptType = KItem.GetItemExtParam(pItem.dwTemplateId, 1)
+  if 2 ~= nOptType then
+    return
+  end
+  local nConsumeNum = KItem.GetItemExtParam(pItem.dwTemplateId, 3)
+  local nRet = nConsumeNum * pItem.nCount
+  return nRet
+end
+
+function tbStoneMaterial:OnUseMany(it, nCount)
+  if not it.dwTemplateId or nCount <= 0 then
+    return 0
+  end
+  local nOptType = KItem.GetItemExtParam(it.dwTemplateId, 1)
+  if 1 == nOptType then
+    local bRet = self:OnMengChenUseMany(nCount)
+    if bRet then
+      return nCount
+    else
+      return 0
+    end
+  elseif 2 == nOptType then
+    local bRet, szTip = self:OnYuanKuangUseMany(it, nCount)
+    if bRet then
+      return bRet
+    end
+    if szTip then
+      me.CenterMsg(szTip)
+    end
+    return 0
+  elseif 3 == nOptType then
+    return 0
+  elseif 4 == nOptType then
+    return 0
+  end
+  return 0
+end
+
+function tbStoneMaterial:OnUse(pItem)
+  if not pItem.dwTemplateId then
+    return 0
+  end
+  local nOptType = KItem.GetItemExtParam(pItem.dwTemplateId, 1)
+  if 1 == nOptType then
+    if self:OnMengChenUse() then
+      return 1
+    end
+    return 0
+  elseif 2 == nOptType then
+    local bRet, szTip = self:OnYuanKuangUse(pItem)
+    if bRet then
+      return 1
+    end
+    me.CenterMsg(szTip)
+    return 0
+  elseif 3 == nOptType then
+    return 0
+  elseif 4 == nOptType then
+    return 0
+  end
+  return 0
+end
+
+function tbStoneMaterial:OnMengChenUseMany(nCount)
+  local nLeftBag = me.GetFreeBagCount()
+  if nCount > nLeftBag then
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\231\169\186\233\151\180\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\228\189\191\231\148\168\239\188\129"))
+    return false
+  end
+  local nAllCount = #Item.Stone.tbMengChenStoneList
+  if nAllCount <= 0 then
+    return false
+  end
+  local tbAward = {}
+  for i = 1, nCount do
+    local nRand = MathRandom(nAllCount)
+    local nTemplateId = Item.Stone.tbMengChenStoneList[nRand]
+    tbAward[nTemplateId] = tbAward[nTemplateId] or 0
+    tbAward[nTemplateId] = tbAward[nTemplateId] + 1
+  end
+  local tbAwardList = {}
+  for nTemplateId, nNum in pairs(tbAward) do
+    table.insert(tbAwardList, {
+      "Item",
+      nTemplateId,
+      nNum,
+      {
+        nBindType = Item.eBINDTYPE.UNBIND
+      }
+    })
+  end
+  me.SendAward(tbAwardList, true, true, Env.LogWay_StoneMaterial)
+  return true
+end
+
+function tbStoneMaterial:OnMengChenUse()
+  local nLeftBag = me.GetFreeBagCount()
+  if nLeftBag <= 0 then
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\231\169\186\233\151\180\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\228\189\191\231\148\168\239\188\129"))
+    return false
+  end
+  local nAllCount = #Item.Stone.tbMengChenStoneList
+  if nAllCount <= 0 then
+    return false
+  end
+  local nRand = MathRandom(nAllCount)
+  local nTemplateId = Item.Stone.tbMengChenStoneList[nRand]
+  local tbAward = {
+    {
+      "Item",
+      nTemplateId,
+      1,
+      {
+        nBindType = Item.eBINDTYPE.UNBIND
+      }
+    }
+  }
+  me.SendAward(tbAward, true, true, Env.LogWay_StoneMaterial)
+  return true
+end
+
+tbStoneMaterial.nYuanBaoOffSet = 5
+
+function tbStoneMaterial:OnYuanKuangUseMany(pItem, nCount)
+  local nTemplateId = pItem.dwTemplateId
+  local nLevel = pItem.nLevel
+  local nStudioValue = Studio:GetRoleStudioValue(me.dwID)
+  if not Item.Stone.tbStudio2RewardIndex[nStudioValue] then
+    return false, i18n.EasyGet("\233\133\141\231\189\174\233\148\153\232\175\175")
+  end
+  local nIndex = Item.Stone.tbStudio2RewardIndex[nStudioValue]
+  if not Item.Stone.tbYuanKuangPercent[nIndex] then
+    return false, i18n.EasyGet("\233\133\141\231\189\174\233\148\153\232\175\175")
+  end
+  local tbPercentCfgList = Item.Stone.tbYuanKuangPercent[nIndex][nTemplateId]
+  if not tbPercentCfgList then
+    return false, i18n.EasyGet("nTemplateId:{0} tbYuanKuangPercent\230\151\160\233\133\141\231\189\174", nTemplateId)
+  end
+  local tbPercentCfg
+  for i = 1, #tbPercentCfgList do
+    if 1 == GetTimeFrameState(tbPercentCfgList[i][1]) then
+      tbPercentCfg = tbPercentCfgList[i]
+    end
+  end
+  if not tbPercentCfg then
+    return false
+  end
+  local nAllCount = #tbPercentCfg - 1
+  if nAllCount <= 0 then
+    return false, i18n.EasyGet("nTemplateId:{0} tbYuanKuangStoneList\230\151\160\233\133\141\231\189\174", nTemplateId)
+  end
+  local nAllWeight = 0
+  local nUseCount = 0
+  for i = 2, #tbPercentCfg do
+    if tbPercentCfg[i] < 0 then
+      return false, i18n.EasyGet("nTemplateId:{0} \230\157\131\233\135\141\233\148\153\232\175\175 \229\176\143\228\186\1420", nTemplateId)
+    end
+    nAllWeight = nAllWeight + tbPercentCfg[i]
+  end
+  if nAllWeight <= 0 then
+    return false, i18n.EasyGet("\229\142\159\231\159\191\230\166\130\231\142\135\233\133\141\231\189\174\230\156\137\232\175\175")
+  end
+  if #Item.Stone.tbYuanKuangMoney ~= Lib:CountTB(tbPercentCfg) - self.nYuanBaoOffSet then
+    return false, i18n.EasyGet("\229\142\159\231\159\191\233\133\141\231\189\174\230\156\137\232\175\175")
+  end
+  local nConsumeId = KItem.GetItemExtParam(pItem.dwTemplateId, 2)
+  local nConsumeNum = KItem.GetItemExtParam(pItem.dwTemplateId, 3)
+  local tbAwardList = {}
+  for i = 1, nCount do
+    local tbWeight = {}
+    for j = 2, #tbPercentCfg do
+      table.insert(tbWeight, tbPercentCfg[j])
+    end
+    local nIndex = Lib:RandomWithWeights(tbWeight) + 1
+    local tbMoney
+    if nIndex > self.nYuanBaoOffSet then
+      tbMoney = Item.Stone.tbYuanKuangMoney[nIndex - self.nYuanBaoOffSet]
+      if not tbMoney then
+        return false, i18n.EasyGet("nTemplateId:{0} tbYuanKuangMoney\230\151\160\233\133\141\231\189\174", nTemplateId)
+      end
+    end
+    local nConsumeCount = me.ConsumeItemInBag(nConsumeId, nConsumeNum, Env.LogWay_StoneMaterial)
+    if nConsumeCount == nConsumeNum then
+      Event:OnEvent(Event.emEVENT_YUANKUANG_COSTITEM_COST, me.dwID, nConsumeId, nConsumeNum)
+      if nIndex > self.nYuanBaoOffSet then
+        table.insert(tbAwardList, {
+          tbMoney[1],
+          tbMoney[2]
+        })
+        nUseCount = nUseCount + 1
+      else
+        local tbItemPool
+        if 2 == nIndex then
+          tbItemPool = Item.Stone.tbYuanKuangStoneList[nLevel]
+          if not tbItemPool then
+            LogErr("tbStoneMaterial:OnYuanKuangUseMany tbYuanKuangStoneList error not tbItemPool " .. "dwId:" .. me.dwId .. "nLevel:" .. nLevel)
+          end
+        elseif 3 == nIndex then
+          tbItemPool = Item.Stone.tbYuanKuangStoneList[nLevel - 1]
+          if not tbItemPool then
+            LogErr("tbStoneMaterial:OnYuanKuangUseMany tbYuanKuangStoneList error not tbItemPool " .. "dwId:" .. me.dwId .. "nLevel:" .. nLevel - 1)
+          end
+        elseif 4 == nIndex then
+          tbItemPool = Item.Stone.tbYuanKuangYuanShiList[nLevel]
+          if not tbItemPool then
+            LogErr("tbStoneMaterial:OnYuanKuangUseMany tbYuanKuangYuanShiList error not tbItemPool " .. "dwId:" .. me.dwId .. "nLevel:" .. nLevel)
+          end
+        else
+          tbItemPool = Item.Stone.tbYuanKuangYuanShiList[nLevel - 1]
+          if not tbItemPool then
+            LogErr("tbStoneMaterial:OnYuanKuangUseMany tbYuanKuangYuanShiList error not tbItemPool " .. "dwId:" .. me.dwId .. "nLevel:" .. nLevel - 1)
+          end
+        end
+        if tbItemPool then
+          nAllCount = #tbItemPool
+          local nRand = MathRandom(1, nAllCount)
+          local nGetTemplateId = tbItemPool[nRand]
+          local tbStoneAward = {
+            "Item",
+            nGetTemplateId,
+            1,
+            {
+              nBindType = Item.eBINDTYPE.UNBIND
+            }
+          }
+          table.insert(tbAwardList, tbStoneAward)
+          nUseCount = nUseCount + 1
+        end
+      end
+    end
+  end
+  me.SendAward(tbAwardList, true, true, Env.LogWay_StoneMaterial)
+  local tbMoneyForTrack, tbItemForTrack = Award:GetAwardListForMBILog(Award:MergetSameTypeAward(tbAwardList), true, {
+    "Gold",
+    "YuanBao",
+    "Coin"
+  })
+  Lib:TrackEvent(me.dwID, Env.track_openbox_open, nTemplateId, nUseCount, nConsumeId, nUseCount * nConsumeNum, tbMoneyForTrack.Gold or 0, tbMoneyForTrack.YuanBao or 0, tbMoneyForTrack.Coin or 0, Lib:EncodeJson(tbItemForTrack) or "")
+  return nUseCount
+end
+
+function tbStoneMaterial:GetYuanKuangUseManyAward(pPlayer, nTemplateId, nLevel, nCount)
+  local nStudioValue = Studio:GetRoleStudioValue(pPlayer.dwID)
+  if not Item.Stone.tbStudio2RewardIndex[nStudioValue] then
+    return false, i18n.EasyGet("\233\133\141\231\189\174\233\148\153\232\175\175")
+  end
+  local nIndex = Item.Stone.tbStudio2RewardIndex[nStudioValue]
+  if not Item.Stone.tbYuanKuangPercent[nIndex] then
+    return false, i18n.EasyGet("\233\133\141\231\189\174\233\148\153\232\175\175")
+  end
+  local tbPercentCfgList = Item.Stone.tbYuanKuangPercent[nIndex][nTemplateId]
+  if not tbPercentCfgList then
+    return false, i18n.EasyGet("nTemplateId:{0} tbYuanKuangPercent\230\151\160\233\133\141\231\189\174", nTemplateId)
+  end
+  local tbPercentCfg
+  for i = 1, #tbPercentCfgList do
+    if 1 == GetTimeFrameState(tbPercentCfgList[i][1]) then
+      tbPercentCfg = tbPercentCfgList[i]
+    end
+  end
+  if not tbPercentCfg then
+    return false
+  end
+  local nAllCount = #tbPercentCfg - 1
+  if nAllCount <= 0 then
+    return false, i18n.EasyGet("nTemplateId:{0} tbYuanKuangStoneList\230\151\160\233\133\141\231\189\174", nTemplateId)
+  end
+  local nAllWeight = 0
+  local nUseCount = 0
+  for i = 2, #tbPercentCfg do
+    if tbPercentCfg[i] < 0 then
+      return false, i18n.EasyGet("nTemplateId:{0} \230\157\131\233\135\141\233\148\153\232\175\175 \229\176\143\228\186\1420", nTemplateId)
+    end
+    nAllWeight = nAllWeight + tbPercentCfg[i]
+  end
+  if nAllWeight <= 0 then
+    return false, i18n.EasyGet("\229\142\159\231\159\191\230\166\130\231\142\135\233\133\141\231\189\174\230\156\137\232\175\175")
+  end
+  if #Item.Stone.tbYuanKuangMoney ~= Lib:CountTB(tbPercentCfg) - self.nYuanBaoOffSet then
+    return false, i18n.EasyGet("\229\142\159\231\159\191\233\133\141\231\189\174\230\156\137\232\175\175")
+  end
+  local tbAwardList = {}
+  for i = 1, nCount do
+    local tbWeight = {}
+    for j = 2, #tbPercentCfg do
+      table.insert(tbWeight, tbPercentCfg[j])
+    end
+    local nIndex = Lib:RandomWithWeights(tbWeight) + 1
+    local tbMoney
+    if nIndex > self.nYuanBaoOffSet then
+      tbMoney = Item.Stone.tbYuanKuangMoney[nIndex - self.nYuanBaoOffSet]
+      if not tbMoney then
+        return false, i18n.EasyGet("nTemplateId:{0} tbYuanKuangMoney\230\151\160\233\133\141\231\189\174", nTemplateId)
+      end
+    end
+    if nIndex > self.nYuanBaoOffSet then
+      table.insert(tbAwardList, {
+        tbMoney[1],
+        tbMoney[2],
+        bAwardTips = 1,
+        bSysMsg = 1
+      })
+      nUseCount = nUseCount + 1
+    else
+      local tbItemPool
+      if 2 == nIndex then
+        tbItemPool = Item.Stone.tbYuanKuangStoneList[nLevel]
+        if not tbItemPool then
+          LogErr("tbStoneMaterial:OnYuanKuangUseMany tbYuanKuangStoneList error not tbItemPool " .. "dwId:" .. pPlayer.dwId .. "nLevel:" .. nLevel)
+        end
+      elseif 3 == nIndex then
+        tbItemPool = Item.Stone.tbYuanKuangStoneList[nLevel - 1]
+        if not tbItemPool then
+          LogErr("tbStoneMaterial:OnYuanKuangUseMany tbYuanKuangStoneList error not tbItemPool " .. "dwId:" .. pPlayer.dwId .. "nLevel:" .. nLevel - 1)
+        end
+      elseif 4 == nIndex then
+        tbItemPool = Item.Stone.tbYuanKuangYuanShiList[nLevel]
+        if not tbItemPool then
+          LogErr("tbStoneMaterial:OnYuanKuangUseMany tbYuanKuangYuanShiList error not tbItemPool " .. "dwId:" .. pPlayer.dwId .. "nLevel:" .. nLevel)
+        end
+      else
+        tbItemPool = Item.Stone.tbYuanKuangYuanShiList[nLevel - 1]
+        if not tbItemPool then
+          LogErr("tbStoneMaterial:OnYuanKuangUseMany tbYuanKuangYuanShiList error not tbItemPool " .. "dwId:" .. pPlayer.dwId .. "nLevel:" .. nLevel - 1)
+        end
+      end
+      if tbItemPool then
+        nAllCount = #tbItemPool
+        local nRand = MathRandom(1, nAllCount)
+        local nGetTemplateId = tbItemPool[nRand]
+        local tbStoneAward = {
+          "Item",
+          nGetTemplateId,
+          1,
+          {
+            nBindType = Item.eBINDTYPE.UNBIND
+          },
+          bAwardTips = 1,
+          bSysMsg = 1
+        }
+        table.insert(tbAwardList, tbStoneAward)
+        nUseCount = nUseCount + 1
+      end
+    end
+  end
+  return true, tbAwardList
+end
+
+function tbStoneMaterial:OnYuanKuangUse(pItem)
+  local nTemplateId = pItem.dwTemplateId
+  local nLevel = pItem.nLevel
+  local nStudioValue = Studio:GetRoleStudioValue(me.dwID)
+  if not Item.Stone.tbStudio2RewardIndex[nStudioValue] then
+    return false, i18n.EasyGet("\233\133\141\231\189\174\233\148\153\232\175\175")
+  end
+  local nIndex = Item.Stone.tbStudio2RewardIndex[nStudioValue]
+  if not Item.Stone.tbYuanKuangPercent[nIndex] then
+    return false, i18n.EasyGet("\233\133\141\231\189\174\233\148\153\232\175\175")
+  end
+  local tbPercentCfgList = Item.Stone.tbYuanKuangPercent[nIndex][nTemplateId]
+  if not tbPercentCfgList then
+    return false, i18n.EasyGet("nTemplateId:{0} tbYuanKuangPercent\230\151\160\233\133\141\231\189\174", nTemplateId)
+  end
+  local tbPercentCfg
+  for i = 1, #tbPercentCfgList do
+    if 1 == GetTimeFrameState(tbPercentCfgList[i][1]) then
+      tbPercentCfg = tbPercentCfgList[i]
+    end
+  end
+  if not tbPercentCfg then
+    return false, i18n.EasyGet("\230\151\182\233\151\180\232\189\180\230\156\170\229\188\128\229\144\175")
+  end
+  local nAllCount = #tbPercentCfg - 1
+  if nAllCount <= 0 then
+    return false, i18n.EasyGet("nTemplateId:{0} tbYuanKuangStoneList\230\151\160\233\133\141\231\189\174", nTemplateId)
+  end
+  local nAllWeight = 0
+  for i = 2, #tbPercentCfg do
+    if tbPercentCfg[i] < 0 then
+      return false, i18n.EasyGet("nTemplateId:{0} \230\157\131\233\135\141\233\148\153\232\175\175 \229\176\143\228\186\1420", nTemplateId)
+    end
+    nAllWeight = nAllWeight + tbPercentCfg[i]
+  end
+  if nAllWeight <= 0 then
+    return false, i18n.EasyGet("\229\142\159\231\159\191\230\166\130\231\142\135\233\133\141\231\189\174\230\156\137\232\175\175")
+  end
+  if #Item.Stone.tbYuanKuangMoney ~= Lib:CountTB(tbPercentCfg) - self.nYuanBaoOffSet then
+    return false, i18n.EasyGet("\229\142\159\231\159\191\233\133\141\231\189\174\230\156\137\232\175\175")
+  end
+  local nConsumeId = KItem.GetItemExtParam(pItem.dwTemplateId, 2)
+  local nConsumeNum = KItem.GetItemExtParam(pItem.dwTemplateId, 3)
+  local tbAwardList = {}
+  local tbWeight = {}
+  for j = 2, #tbPercentCfg do
+    table.insert(tbWeight, tbPercentCfg[j])
+  end
+  local nIndex = Lib:RandomWithWeights(tbWeight) + 1
+  local tbMoney
+  if nIndex > self.nYuanBaoOffSet then
+    tbMoney = Item.Stone.tbYuanKuangMoney[nIndex - self.nYuanBaoOffSet]
+    if not tbMoney then
+      return false, i18n.EasyGet("nTemplateId:{0} tbYuanKuangMoney\230\151\160\233\133\141\231\189\174", nTemplateId)
+    end
+  end
+  local nConsumeCount = me.ConsumeItemInBag(nConsumeId, nConsumeNum, Env.LogWay_StoneMaterial)
+  if nConsumeCount == nConsumeNum then
+    Event:OnEvent(Event.emEVENT_YUANKUANG_COSTITEM_COST, me.dwID, nConsumeId, nConsumeNum)
+    if nIndex > self.nYuanBaoOffSet then
+      table.insert(tbAwardList, {
+        tbMoney[1],
+        tbMoney[2]
+      })
+    else
+      local tbItemPool
+      if 2 == nIndex then
+        tbItemPool = Item.Stone.tbYuanKuangStoneList[nLevel]
+        if not tbItemPool then
+          LogErr("tbStoneMaterial:OnYuanKuangUse tbYuanKuangStoneList error not tbItemPool " .. "dwId:" .. me.dwId .. "nLevel:" .. nLevel)
+        end
+      elseif 3 == nIndex then
+        tbItemPool = Item.Stone.tbYuanKuangStoneList[nLevel - 1]
+        if not tbItemPool then
+          LogErr("tbStoneMaterial:OnYuanKuangUse tbYuanKuangStoneList error not tbItemPool " .. "dwId:" .. me.dwId .. "nLevel:" .. nLevel - 1)
+        end
+      elseif 4 == nIndex then
+        tbItemPool = Item.Stone.tbYuanKuangYuanShiList[nLevel]
+        if not tbItemPool then
+          LogErr("tbStoneMaterial:OnYuanKuangUse tbYuanKuangYuanShiList error not tbItemPool " .. "dwId:" .. me.dwId .. "nLevel:" .. nLevel)
+        end
+      else
+        tbItemPool = Item.Stone.tbYuanKuangYuanShiList[nLevel - 1]
+        if not tbItemPool then
+          LogErr("tbStoneMaterial:OnYuanKuangUse tbYuanKuangYuanShiList error not tbItemPool " .. "dwId:" .. me.dwId .. "nLevel:" .. nLevel - 1)
+        end
+      end
+      if tbItemPool then
+        nAllCount = #tbItemPool
+        local nRand = MathRandom(1, nAllCount)
+        local nGetTemplateId = tbItemPool[nRand]
+        local tbStoneAward = {
+          "Item",
+          nGetTemplateId,
+          1,
+          {
+            nBindType = Item.eBINDTYPE.UNBIND
+          }
+        }
+        table.insert(tbAwardList, tbStoneAward)
+      end
+    end
+    me.SendAward(tbAwardList, true, true, Env.LogWay_StoneMaterial)
+    local tbMoneyForTrack, tbItemForTrack = Award:GetAwardListForMBILog(Award:MergetSameTypeAward(tbAwardList), true, {
+      "Gold",
+      "YuanBao",
+      "Coin"
+    })
+    Lib:TrackEvent(me.dwID, Env.track_openbox_open, nTemplateId, 1, nConsumeId, nConsumeCount, tbMoneyForTrack.Gold or 0, tbMoneyForTrack.YuanBao or 0, tbMoneyForTrack.Coin or 0, Lib:EncodeJson(tbItemForTrack) or "")
+    return true
+  else
+    local szName = Item:GetName(nConsumeId, me)
+    me.CenterMsg(i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\232\175\183\229\137\141\229\190\128\229\165\135\231\143\141\233\152\129\232\191\155\232\161\140\232\180\173\228\185\176", szName))
+    return false
+  end
+end
+
+function tbStoneMaterial:HandleCanUseCallBack(nTemplateId, nItemId)
+  local function funcOK()
+    local nNeedNum = self:GeNeedCount(nItemId)
+    
+    Ui:CloseWindow("UIItemTips")
+    Shop:OpenShopBuyWidDefault(nTemplateId, nNeedNum)
+  end
+  
+  local function funcCancel()
+  end
+  
+  local tbInfo = Item:GetItemBaseProp(nTemplateId)
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\229\165\135\231\143\141\233\152\129\232\191\155\232\161\140\232\180\173\228\185\176\239\188\159", tbInfo.szName), {
+    {funcOK},
+    {funcCancel}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function tbStoneMaterial:GetUseNeedItemTemplateId(nTemplateId)
+  return KItem.GetItemExtParam(nTemplateId, 2)
+end
+
+function tbStoneMaterial:GetUseSetting(nTemplateId, nItemId, szOpt)
+  local tbRet
+  local nOptType = KItem.GetItemExtParam(nTemplateId, 1)
+  local szName = KItem.GetItemShowInfo(nTemplateId, me.nFaction, me.nFactionSect, me.nSex)
+  local szSplitItemName = KItem.GetItemShowInfo(Item.Stone.tbSplitYuanShiItem.nItemId, me.nFaction, me.nFactionSect, me.nSex)
+  if szOpt and "ItemBox" == szOpt and 3 == nOptType then
+    tbRet = {}
+    tbRet.szFirstName = i18n.EasyGet("\228\189\191\231\148\168")
+    
+    function tbRet.fnFirst()
+      Item.Stone:OpenForgeCompose(nTemplateId)
+    end
+    
+    tbRet.szSecondName = i18n.EasyGet("\230\139\134\232\167\163")
+    
+    function tbRet.fnSecond()
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\229\176\134{0}\230\139\134\232\167\163\228\184\186{1}\228\184\170{2}\239\188\159", szName, Item.Stone.tbSplitYuanShiItem.nCount, szSplitItemName), {
+        {
+          function()
+            RemoteServer.OnEquipStoneRequest("SplitYuanShi", nItemId)
+          end
+        },
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      })
+    end
+  elseif szOpt and "Warehouse_ItemBag" == szOpt then
+    tbRet = {}
+    tbRet.szFirstName = i18n.EasyGet("\229\173\152\229\133\165")
+    
+    function tbRet.fnFirst()
+      if Ui:WindowVisible("UIWarehouse") then
+        Ui:GetWindow("UIWarehouse"):MoveItemFromBagToBox(nItemId)
+        Ui:CloseWindow("UIStoneTipsYuanShi")
+      end
+    end
+    
+    tbRet.bHideShareButton = true
+    tbRet.bHideHawkButton = true
+    tbRet.bHideSellButton = true
+    tbRet.btnMarketSellButton = true
+  elseif szOpt and "Warehouse_ItemBox" == szOpt then
+    tbRet = {}
+    tbRet.szFirstName = i18n.EasyGet("\229\143\150\229\135\186")
+    
+    function tbRet.fnFirst()
+      if Ui:WindowVisible("UIWarehouse") then
+        Ui:GetWindow("UIWarehouse"):MoveItemFromBoxToBag(nItemId)
+        Ui:CloseWindow("UIStoneTipsYuanShi")
+      end
+    end
+    
+    tbRet.bHideShareButton = true
+    tbRet.bHideHawkButton = true
+    tbRet.bHideSellButton = true
+    tbRet.btnMarketSellButton = true
+  elseif szOpt and "ItemBox" == szOpt and 4 == nOptType then
+    tbRet = {}
+    tbRet.szFirstName = i18n.EasyGet("\228\189\191\231\148\168")
+    
+    function tbRet.fnFirst()
+      Ui:OpenWindow("UIStoneCompose", 0, nTemplateId)
+      Ui:CloseWindow("UIItemTips")
+    end
+  end
+  return tbRet
+end

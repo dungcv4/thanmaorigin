@@ -1,0 +1,107 @@
+local tbWnd = Ui:CreateWindow("UIByProductUse")
+local tbControls = {
+  ItemGrid = "node/imgBG/Content/ItemInfo/UIItemGrid",
+  txtGoodName = "node/imgBG/Content/ItemInfo/txtGoodName",
+  txtGoodNum = "node/imgBG/Content/ItemInfo/txtGoodNum",
+  txtCostNum = "node/imgBG/Content/ItemBuy/Num/txtNumValue",
+  txtDetail = "node/imgBG/Content/ItemInfo/panelDetail/txtDetail",
+  btnGet = "node/imgBG/Content/ItemBuy/btnGet",
+  btnClose = "node/imgBG/btnClose",
+  DropdownLevel = "node/imgBG/Content/ItemBuy/DropdownLevel"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnGet = function(self)
+    self:DoUse()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {}
+end
+
+function tbWnd:OnCreate()
+  self.pPanel:Dropdown_BindEvent(tbControls.DropdownLevel, function(value)
+    self.nCurSelectOtherLv = self.tbIndex2OtherLv[value]
+    self:OnSelectOtherLevel(self.tbIndex2OtherLv[value])
+  end)
+  self.ItemGrid = Ui:NewExistItemGrid(self, tbControls.ItemGrid)
+end
+
+function tbWnd:OnOpen(dwTemplateId)
+  self.tbIndex2OtherLv = {}
+  self.dwTemplateId = dwTemplateId
+  local nMaxLevel = #LifeSkill.tbOther
+  local tbOptions = {}
+  for i = nMaxLevel, 1, -1 do
+    local szOpenTimeframe = LifeSkill.tbOther[i].szOpenTime
+    if szOpenTimeframe and 1 == GetTimeFrameState(szOpenTimeframe) then
+      self.tbIndex2OtherLv[#tbOptions] = i
+      table.insert(tbOptions, i18n.EasyGet("{0}\231\186\167", i))
+    end
+  end
+  self.pPanel:Dropdown_ResetOptions(tbControls.DropdownLevel, tbOptions)
+  self.pPanel:Dropdown_SetValue(tbControls.DropdownLevel, 0)
+  self.nCurSelectOtherLv = self.tbIndex2OtherLv[0]
+  self:OnSelectOtherLevel(self.nCurSelectOtherLv)
+  self.ItemGrid:SetItemByTemplate(dwTemplateId)
+  self.ItemGrid:SetClickEnable(true)
+  local tbInfo = Item:GetItemBaseProp(dwTemplateId)
+  self.pPanel:Label_SetText(tbControls.txtGoodName, i18n.Parse(tbInfo.szName))
+  local nHave = me.GetItemCountByTypeInBag(dwTemplateId)
+  self.pPanel:Label_SetText(tbControls.txtGoodNum, i18n.EasyGet("\230\139\165\230\156\137\230\149\176\233\135\143\239\188\154{0}", nHave))
+end
+
+function tbWnd:DoUse()
+  if not self.nCurSelectOtherLv or self.nCurSelectOtherLv <= 0 then
+    return
+  end
+  local nCost = LifeSkill.tbOther[self.nCurSelectOtherLv].nCost
+  local tbInfo = Item:GetItemBaseProp(self.dwTemplateId)
+  local szName = i18n.Parse(tbInfo.szName)
+  
+  local function func(dwTemplateId, nCurSelectOtherLv)
+    if not LifeSkill.tbOther[nCurSelectOtherLv] then
+      LogErr("LifeSkillOther.Tab not include Level:", nCurSelectOtherLv)
+      return
+    end
+    local nHave = me.GetItemCountByTypeInBag(dwTemplateId)
+    local nCount = LifeSkill.tbOther[nCurSelectOtherLv].nCost
+    if nHave < nCount then
+      me.CenterMsg(i18n.EasyGet("\233\129\147\229\133\183\228\184\141\232\182\179"))
+      return
+    end
+    RemoteServer.UseManyItemByTemplated(dwTemplateId, nCount, nCurSelectOtherLv)
+    self:Close()
+  end
+  
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\228\189\160\231\161\174\229\174\154\230\182\136\232\128\151{0}\228\184\170{1}\232\142\183\229\190\151{2}\231\186\167\229\162\158\231\155\138\231\138\182\230\128\129\229\144\151\239\188\136\230\156\137\230\149\136\230\156\15930\229\136\134\233\146\159\239\188\137", nCost, szName, self.nCurSelectOtherLv), {
+    {
+      func,
+      self.dwTemplateId,
+      self.nCurSelectOtherLv
+    },
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function tbWnd:OnSelectOtherLevel(value)
+  if not value or 0 == value then
+    return
+  end
+  local nCost = LifeSkill.tbOther[value].nCost
+  self.pPanel:Label_SetText(tbControls.txtCostNum, nCost)
+  local nBuffId = KItem.GetItemExtParam(self.dwTemplateId, 1)
+  local szDesc = FightSkill:GetSkillMagicDesc(nBuffId, self.nCurSelectOtherLv)
+  self.pPanel:Label_SetText(tbControls.txtDetail, i18n.EasyGet("\231\138\182\230\128\129\229\177\158\230\128\167\239\188\154{0}", szDesc))
+end
+
+function tbWnd:OnClose()
+  self.nCurSelectOtherLv = nil
+end

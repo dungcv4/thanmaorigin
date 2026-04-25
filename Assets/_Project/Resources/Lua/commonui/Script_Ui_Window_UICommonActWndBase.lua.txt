@@ -1,0 +1,202 @@
+local tbWnd = Ui:CreateWindow("UICommonActWndBase")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_WND_CLOSED,
+      self.OnWndClose,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MAP_SWITCH,
+      self.CloseByDefault,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_LOGIN_ZONE,
+      self.CloseByDefault,
+      self
+    }
+  }
+end
+
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseByDefault()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbBtnScrollView = Ui:NewScrollView(self, self.btnTemplate, self.OnClickActivityHelper, nil, false)
+  self.tbShowAwardScrollView = Ui:NewItemGridScrollView(self, self.ItemTemplate, 1, 1)
+  self:SetClickEmptyCallback(self.wndActivityiTips)
+end
+
+function tbWnd:OnOpen(nEntranceIndex)
+  self.nEntranceIndex = nEntranceIndex
+  self.pPanel:Label_SetText(self.txtTitle, ActivityMgr.EntranceSchedule:GetTitle(self.nEntranceIndex))
+  self.pPanel:Label_SetText(self.txtSmallTitle, i18n.EasyGet("\230\180\187\229\138\168\230\151\182\233\151\180\239\188\154{0}", i18n.Parse(ActivityMgr.EntranceSchedule:GetSmallTitle(self.nEntranceIndex))))
+  self:UpdateActivityList()
+  self.pPanel:SetActive(self.wndActivityiTips, false)
+  self.tbEntranceRankData = ActivityMgr.EntranceSchedule:GetEntranceRankData(self.nEntranceIndex)
+end
+
+function tbWnd:OnClickActivityHelper(nId)
+  self:OnClickActivity(nId)
+end
+
+function tbWnd:OnClickActivity(nId)
+  local tbInfo
+  for _, tbTmpInfo in ipairs(self.tbActivityList) do
+    if tbTmpInfo.nId == nId then
+      tbInfo = tbTmpInfo
+      break
+    end
+  end
+  if not tbInfo then
+    return
+  end
+  if nId == self.nCurActivityId then
+    self.pPanel:SetActive(self.wndActivityiTips, false)
+    self:UpdateActivedStatus(self.nCurActivityId, false)
+    self.nCurActivityId = nil
+    return
+  end
+  self.nCurActivityId = nId
+  if tbInfo.bDirectJump and tbInfo.pFunc then
+    self.pPanel:SetActive(self.wndActivityiTips, true)
+    self.pPanel:SetActive(self.wndActivityiTips .. "/imgBg", false)
+    local pInstance = ActivityMgr:GetInstanceById(nId)
+    local bOpening = pInstance and pInstance:IsOpen()
+    if bOpening then
+      self:OnClickJoinBtn(tbInfo.pFunc, tbInfo.nId)
+    else
+      me.CenterMsg(i18n.EasyGet("\232\175\165\230\180\187\229\138\168\229\176\154\230\156\170\229\188\128\229\144\175"))
+    end
+    return
+  end
+  self:DealActivityDetail(tbInfo)
+  if nil ~= tbInfo.szExtraParam and not Lib:IsEmptyStr(tbInfo.szExtraParam) then
+    self:OnHandleExtraParam(table.unpack(Lib:SplitStrTry2Num(tbInfo.szExtraParam, "|")))
+  end
+  if tbInfo.bNeedCloseTopRedPoint and tbInfo.tbRedPointEventId then
+    for i, nRedPointEventId in ipairs(tbInfo.tbRedPointEventId) do
+      RedPointMgr:FadeRedPoint(nRedPointEventId)
+    end
+  end
+end
+
+function tbWnd:OnHandleExtraParam(...)
+end
+
+function tbWnd:CheckIsEnd(tbScheduleCfg)
+  local nNow = GetTime()
+  if tbScheduleCfg.nEndTime and nNow >= tbScheduleCfg.nEndTime then
+    return true
+  end
+  if not Lib:IsEmptyStr(tbScheduleCfg.szEndTimeFrame) and 1 == GetTimeFrameState(tbScheduleCfg.szEndTimeFrame) then
+    return true
+  end
+  return false
+end
+
+function tbWnd:UpdateActivedStatus(nActivityId, bStatus)
+  local tbElement = self.tbBtnScrollView:GetElement(nActivityId)
+  tbElement.pPanel:SetActive("txtNormal", not bStatus)
+  tbElement.pPanel:SetActive("txtSelected", bStatus)
+  local obj = tbElement.pPanel:GetObject("Main")
+  local trans = obj:GetComponent(Ui.BGroupTrans)
+  if trans then
+    if bStatus then
+      trans:OnSelected()
+    else
+      tbElement.pPanel:Button_SetEnable("Main", true)
+      trans:OnUnSelected()
+    end
+  end
+end
+
+function tbWnd:UpdateActivityList()
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(self.nEntranceIndex)
+  self.nCurActivityId = nil
+  self.tbBtnScrollView:Reset()
+  for _, tbInfo in ipairs(self.tbActivityList) do
+    self.tbBtnScrollView:SetElement(tbInfo.nId, function(tbElement)
+      self:UpdateBtnInfo(tbElement, tbInfo.nId, tbInfo)
+    end)
+  end
+end
+
+function tbWnd:CloseByDefault()
+  self.pPanel:SetActive(self.wndActivityiTips, false)
+  self:Close()
+end
+
+function tbWnd:UpdateBtnInfo(tbElement, nId, tbInfo)
+  local pInstance = ActivityMgr:GetInstanceById(nId)
+  local bOpening = pInstance and pInstance:IsOpen()
+  tbElement.pPanel:SetActive("txtNormal", bOpening)
+  tbElement.pPanel:SetActive("imgLock", false)
+  tbElement.pPanel:SetActive("txtSelected", false)
+  if me.nLevel < tbInfo.nLevel or not bOpening then
+    tbElement.pPanel:SetActive("txtLock", true)
+  else
+    tbElement.pPanel:SetActive("txtLock", false)
+  end
+  tbElement.pPanel:Label_SetText("txtNormal", tbInfo.szName)
+  tbElement.pPanel:Label_SetText("txtSelected/txtSelected", tbInfo.szName)
+  tbElement.pPanel:Label_SetText("txtLock", tbInfo.szName)
+  RedPointMgr:DynamicUnRegist(tbElement.pPanel, "imgRedPoint")
+  tbElement.pPanel:SetActive("imgRedPoint", false)
+  if tbInfo.tbRedPointEventId then
+    tbElement.pPanel:SetActive("imgRedPoint", true)
+    RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, "imgRedPoint", tbInfo.tbRedPointEventId)
+  end
+end
+
+function tbWnd:DealActivityDetail(tbInfo)
+  self.pPanel:SetActive(self.wndActivityiTips, true)
+  self.pPanel:SetActive(self.wndActivityiTips .. "/imgBg", true)
+  self.pPanel:SetActive(self.ActivityInfo .. "/txtActDegreeTip", true)
+  self.pPanel:SetActive(self.ActivityInfo .. "/txtActDegree", true)
+  self.pPanel:Label_SetText(self.ActivityInfo .. "/txtLevelLimit", tbInfo.nLevel)
+  self.pPanel:Label_SetText(self.ActivityInfo .. "/txtLevelLimit", tbInfo.nLevel)
+  self.pPanel:Label_SetText(self.wndActivityiTips .. "/imgBg/txtActivityName", tbInfo.szName)
+  self.pPanel:Label_SetText(self.ActivityInfo .. "/ActivityDescScroll/Viewport/Content/txtActivityDesc", tbInfo.szDesc)
+  self.pPanel:Label_SetText(self.ActivityInfo .. "/txtActDegreeTip", i18n.EasyGet("\230\180\187\229\138\168\230\151\182\233\151\180"))
+  self.pPanel:Label_SetText(self.ActivityInfo .. "/txtActDegree", tbInfo.szShowTime)
+  self.tbShowAwardScrollView:UpdateGenericItem(tbInfo.tbAward, true)
+  self.tbShowAwardScrollView:ResetParent()
+  if not tbInfo.pFunc then
+    self.pPanel:SetActive(self.btnJoin, false)
+  else
+    self.pPanel:SetActive(self.btnJoin, true)
+    Ui:Button_BindEvent(self.pPanel, self.btnJoin, self.OnClickJoinBtn, self, tbInfo.pFunc, tbInfo.nId, table.unpack(Lib:SplitStrTry2Num(tbInfo.szJumpParam, "|")))
+    RedPointMgr:DynamicUnRegist(self.pPanel, self.btnJoin)
+    if tbInfo.tbRedPointEventId then
+      RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnJoin, tbInfo.tbRedPointEventId)
+    end
+  end
+  self:SetGotoBtn(tbInfo.szClassName, tbInfo.szGotoText, tbInfo.bGotoEnable)
+end
+
+function tbWnd:SetGotoBtn(szClassName, szGotoText, bGotoEnable)
+  self.pPanel:Label_SetText(self.btnJoin .. "/Text", i18n.EasyGet("\229\137\141\229\190\128"))
+  self.pPanel:Button_SetEnable(self.btnJoin, Lib:IIF(nil ~= bGotoEnable, bGotoEnable, true))
+  self.pPanel:Label_SetText(self.btnJoin .. "/Text", Lib:IIF(nil ~= szGotoText, szGotoText, i18n.EasyGet("\229\137\141\229\190\128")))
+end
+
+function tbWnd:OnClickJoinBtn(func, ...)
+  self:OnClickEmptyClose()
+  func(...)
+end
+
+function tbWnd:OnClickEmptyClose()
+  if self.nCurActivityId then
+    self:OnClickActivity(self.nCurActivityId)
+  end
+  self.pPanel:SetActive(self.wndActivityiTips, false)
+end
+
+function tbWnd:OnWndClose(szUiName)
+end

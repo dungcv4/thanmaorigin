@@ -1,0 +1,107 @@
+function DailyGift:OnChargeDailyGiftReq(nGiftType)
+  local tbSetting = Recharge:GetDailyGiftSettings()
+  
+  if not tbSetting or not tbSetting[nGiftType] then
+    me.CenterMsg("not had DailyGift config!!!")
+    return
+  end
+  Recharge:RequestCreateRechargeOrder(tbSetting[nGiftType].nProductId)
+end
+
+function DailyGift:GetDailyGiftAwardReq(nGiftType)
+  local nState = self:GetDayGiftGetState(me, nGiftType)
+  if nState ~= self.nNotGet then
+    me.CenterMsg(i18n.EasyGet("\229\176\154\230\156\170\232\180\173\228\185\176\231\164\188\229\140\133\239\188\129"))
+    return
+  end
+  RemoteServer.RequestDailyGift("GetDailyGiftAward", nGiftType)
+end
+
+function DailyGift:BuyDailyGiftScucess(nGiftType)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DAILY_GIFT_BUY)
+  DailyGift:UpdateReddotState()
+end
+
+function DailyGift:OnTakeCardAwardScuess(nGiftType)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DAILY_GIFT_GET_AWARD)
+  DailyGift:UpdateReddotState()
+end
+
+function DailyGift:CheckIsOpen()
+  if not me or me.nLevel < DailyGift.nOpenLevel then
+    return false
+  end
+  return true
+end
+
+function DailyGift:_CheckEnableBuyDynReddot(nType)
+  self._tbReddotKey = self._tbReddotKey or {
+    [DailyGift.DailyGiftOne] = "BUY_V1",
+    [DailyGift.DailyGiftSix] = "BUY_V3",
+    [DailyGift.DailyGiftTwelve] = "BUY_V5",
+    [4] = "BUY_ALL"
+  }
+  local nProductId = DailyGift.tbIndex2ProductId[nType]
+  if not nProductId then
+    return false
+  end
+  local tbProductSetting = Recharge:GetProductSettingById(nProductId)
+  if not tbProductSetting then
+    return false
+  end
+  return DailyGift:GetDayGiftGetState(me, nType) == DailyGift.nNotBuy and not self._tbDisableTemporaryReddot[self._tbReddotKey[nType]] and me.GetVipLevel() >= tbProductSetting.nVipLevelLimit
+end
+
+function DailyGift:UpdateReddotState()
+  if not self:CheckIsOpen() then
+    return
+  end
+  self._tbDisableTemporaryReddot = self._tbDisableTemporaryReddot or {}
+  local bNeedRedPoint = false
+  if DailyGift:GetDayGiftGetState(me, DailyGift.DailyGiftOne) == DailyGift.nNotGet or DailyGift:GetDayGiftGetState(me, DailyGift.DailyGiftSix) == DailyGift.nNotGet or DailyGift:GetDayGiftGetState(me, DailyGift.DailyGiftTwelve) == DailyGift.nNotGet or DailyGift:GetDayGiftGetState(me, DailyGift.DailyGiftFree) == DailyGift.nNotGet and DailyGift:GetAccumulateCount(me) > 0 then
+    bNeedRedPoint = true
+  else
+    bNeedRedPoint = false
+  end
+  if not bNeedRedPoint and not self.bHaveClick and (DailyGift:GetDayGiftGetState(me, DailyGift.DailyGiftOne) == DailyGift.nNotBuy or DailyGift:GetDayGiftGetState(me, DailyGift.DailyGiftSix) == DailyGift.nNotBuy or DailyGift:GetDayGiftGetState(me, DailyGift.DailyGiftTwelve) == DailyGift.nNotBuy) then
+    bNeedRedPoint = true
+  end
+  if bNeedRedPoint then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.DailyGift)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.DailyGift)
+  end
+end
+
+function DailyGift:OnLogin()
+  DailyGift:UpdateReddotState()
+end
+
+function DailyGift:RefreshTemporaryReddot(szType)
+  self._tbKeyReddot = self._tbKeyReddot or {
+    BUY_V1 = DailyGift.DailyGiftOne,
+    BUY_V3 = DailyGift.DailyGiftSix,
+    BUY_V5 = DailyGift.DailyGiftTwelve,
+    BUY_ALL = 4
+  }
+  if not DailyGift:_CheckEnableBuyDynReddot(self._tbKeyReddot[szType]) then
+    return
+  end
+  self._tbDisableTemporaryReddot = self._tbDisableTemporaryReddot or {}
+  self._tbDisableTemporaryReddot[szType] = true
+  if "BUY_ALL" == szType then
+    for szKey, _ in pairs(self._tbKeyReddot) do
+      self._tbDisableTemporaryReddot[szKey] = true
+    end
+  end
+  self:UpdateReddotState()
+end
+
+function DailyGift:OnLogout()
+  self._tbDisableTemporaryReddot = nil
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, DailyGift)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, DailyGift.OnLogout, DailyGift)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, DailyGift)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, DailyGift.UpdateReddotState, DailyGift)

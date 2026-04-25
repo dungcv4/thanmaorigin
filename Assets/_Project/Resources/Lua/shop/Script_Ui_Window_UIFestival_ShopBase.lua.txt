@@ -1,0 +1,116 @@
+local tbWnd = Ui:CreateWindow("UIFestival_ShopBase")
+
+function tbWnd:RegistNotify()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_UPDATE_EXTRA_AWARD, self.UpdateButton, self)
+end
+
+function tbWnd:UnRegistNotify()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_UPDATE_EXTRA_AWARD, self)
+end
+
+function tbWnd:OnCreate()
+  self.tbShopScrollView = Ui:NewScrollView(self, self.ShopTemplate)
+  self.awardItemGrid1 = Ui:NewExistItemGrid(self, self.itemGrid1)
+  self.awardItemGrid2 = Ui:NewExistItemGrid(self, self.itemGrid2)
+end
+
+function tbWnd:OnOpen(nEntranceIndex, nIndex)
+  self:RegistNotify()
+  self.nEntranceIndex = nEntranceIndex or self.nEntranceIndex
+  if self.nEntranceIndex then
+    self:UpdateInfo(self.nEntranceIndex, nIndex)
+  end
+  self:UpdateButton()
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.btnGet)
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnGet, {
+    RedPointMgr.EVENT.ValentinesDayShop
+  })
+end
+
+tbWnd.tbOnClick = {
+  btnGet = function(self)
+    self:RequestAchievementAward()
+  end,
+  btnGo = function(self)
+    Ui:OpenWindow("UIShop", Shop.ShopType2ViewIndex.LimitBuy)
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.szHelpKey)
+  end
+}
+
+function tbWnd:UpdateButton()
+  self.pAchieveInstance = ActivityMgr:GetInstanceById(self.nAchieveActId)
+  if not self.pAchieveInstance then
+    return
+  end
+  self.tbAchieveData = self.pAchieveInstance:GetAchieveData()
+  local bAchieved = self.pAchieveInstance:CheckIsAwardById(self.nAchieveGroupId, me, self.tbAchieveData)
+  self.pPanel:SetActive(self.btnGet, not bAchieved)
+  self.pPanel:SetActive(self.imgFinished, bAchieved)
+end
+
+function tbWnd:UpdateInfo(nEntranceIndex, nIndex)
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(nEntranceIndex)
+  self.nId = self.nId or self.tbActivityList[nIndex].nId
+  self.tbSetting = self.tbSetting or ActivityMgr.CommonEntryLinkData[self.nId].tbSetting
+  self.tbShopList = self.tbShopList or ActivityMgr.CommonEntryLinkData[self.nId].tbShopList
+  local szShowTime = ActivityMgr.EntranceSchedule:GetSmallTitle(nEntranceIndex)
+  self.szTitle = self.szTitle or self.tbActivityList[nIndex].szName
+  self.pPanel:Label_SetText(self.txtPanelTitle, self.szTitle)
+  local nEndTime = Lib:GetConfigDate2Time(ActivityMgr.EntranceScheduleCfg[nEntranceIndex].szEndTime)
+  if nEndTime > GetTime() then
+    local nDiff = nEndTime - GetTime()
+    local szTime = i18n.EasyGet("<color=#1FFB24>{0}</color> {1}\229\144\142\231\187\147\230\157\159", szShowTime, Lib:TimeDesc2(nDiff))
+    self.pPanel:Label_SetText(self.txtTime, szTime)
+  end
+  self.pPanel:Label_SetText(self.txtPanelSubTitle, i18n.Get(self.tbSetting.szSubTitleInfo))
+  self.pPanel:Label_SetText(self.txtInfo1, i18n.Get(self.tbSetting.szInfo1))
+  self.pPanel:SetActive(self.txtInfo2, false)
+  self.awardItemGrid1:SetItemByTemplate(self.tbSetting.tbShowItemId[1], 0)
+  self.awardItemGrid1:SetClickEnable(true)
+  self.awardItemGrid2:SetItemByTemplate(self.tbSetting.tbShowItemId[2], 0)
+  self.awardItemGrid2:SetClickEnable(true)
+  self:UpdateScrollViewList()
+end
+
+function tbWnd:UpdateScrollViewList()
+  self.tbShopScrollView:Clear()
+  for nIndex, tbBoxInfo in ipairs(self.tbShopList) do
+    self.tbShopScrollView:SetElement(nIndex, function(tbElement)
+      tbElement.pPanel:Label_SetText(self.tbTemplateElement.txtTemplateName, i18n.Parse(Item:GetItemBaseProp(tbBoxInfo.nItemId).szName))
+      tbElement.pPanel:Label_SetText(self.tbTemplateElement.txtDiscounts, i18n.Get(tbBoxInfo.szDiscounts))
+      tbElement.tbSubScrollView = Ui:NewScrollView(tbElement, self.tbTemplateElement.SubTemplate)
+      tbElement.tbSubScrollView:Clear()
+      local tbItems = Award:GetAward(tbBoxInfo.nAwardId, tbBoxInfo.nAwardKey)
+      for nSubIndex, tbItemInfo in ipairs(tbItems) do
+        tbElement.tbSubScrollView:SetElement(nSubIndex, function(tbSubElement)
+          tbSubElement.itemGrid = Ui:NewExistItemGrid(tbSubElement, "UIItemGrid")
+          local nItemId = tbItemInfo[2]
+          tbSubElement.itemGrid:SetItemByTemplate(nItemId, 0)
+          tbSubElement.itemGrid:SetClickEnable(true)
+          tbSubElement.pPanel:Label_SetText("txtName", i18n.Parse(Item:GetItemBaseProp(nItemId).szName))
+        end)
+      end
+    end)
+  end
+  self.tbShopScrollView:PlayItemGridAnimation()
+end
+
+function tbWnd:OnClose()
+  self:UnRegistNotify()
+  self.tbShopScrollView:Clear()
+end
+
+function tbWnd:RequestAchievementAward()
+  self.pAchieveInstance = ActivityMgr:GetInstanceById(self.nAchieveActId)
+  if not self.pAchieveInstance or not self.pAchieveInstance:IsOpen() then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return
+  end
+  if not self.nAchieveGroupId then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return
+  end
+  self.pAchieveInstance:GetExtraAward(self.nAchieveGroupId)
+end

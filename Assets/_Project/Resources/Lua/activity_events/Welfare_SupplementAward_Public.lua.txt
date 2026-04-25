@@ -1,0 +1,142 @@
+Require("CommonScript/Validator.lua")
+SupplementAward = SupplementAward or {}
+SupplementAward.GROUP = GetGroupKey("SupplementAward")
+SupplementAward.SHOW_FLAG = 2
+SupplementAward.AWARD_ID = 1040
+SupplementAward.DAY_LOGIN_TIME = 1
+SupplementAward.tbDefType = {Normal = 1, Perfect = 2}
+SupplementAward.nOpenLevel = 25
+SupplementAward.szOpenTimeframe = "OpenLevel49R"
+SupplementAward.REF_TIME = 14400
+SupplementAward.DAY_TIME = 86400
+
+function SupplementAward:SortLinkKey()
+  local nFirstTime, nSecondTime
+  for _, tbList in pairs(self.tbLinkKey) do
+    table.sort(tbList, function(tbFirst, tbSecond)
+      nFirstTime = Lib:IsEmptyStr(tbFirst.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbFirst.szTimeFrameStart)
+      nSecondTime = Lib:IsEmptyStr(tbSecond.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbSecond.szTimeFrameStart)
+      return nFirstTime > nSecondTime
+    end)
+  end
+end
+
+function SupplementAward:LoadSetting()
+  self.tbCheckList = {}
+  self.tbDegreeList = {}
+  self.tbLinkKey = {}
+  local szLinkKeyPath = "Setting/Welfare/LinkKey.tab"
+  local tbLinkKey = Lib:LoadTabFileEx(szLinkKeyPath, "dssd", nil, {
+    "nLinkKey",
+    "szTimeFrameStart",
+    "szTimeFrameEnd",
+    "nAwardKey"
+  })
+  for _, tbInfo in ipairs(tbLinkKey or {}) do
+    self.tbLinkKey[tbInfo.nLinkKey] = self.tbLinkKey[tbInfo.nLinkKey] or {}
+    table.insert(self.tbLinkKey[tbInfo.nLinkKey], tbInfo)
+  end
+  self:SortLinkKey()
+  self.tbLinkKey = SetReadOnly(self.tbLinkKey)
+  local tbSetting = Lib:EasyLoadTabFile("Setting/Welfare/Supplement.tab")
+  self.tbSupplement = {}
+  for _, tbInfo in ipairs(tbSetting) do
+    assert(not self.tbSupplement[tbInfo.szKey], "[SupplementAward Error], Key Repeat", tbInfo.szKey)
+    assert(1 ~= tbInfo.nTimeSaveKey and 1 ~= tbInfo.nSupplementKey, "[SupplementAward Error], SaveKey Must Not Be 1", tbInfo.szKey)
+    assert(self.tbLinkKey[tbInfo.nAwardLinkKey_Normal], string.format("[SupplementAward] normal link key is not exist %d", tbInfo.nAwardLinkKey_Normal))
+    assert(self.tbLinkKey[tbInfo.nAwardLinkKey_Perfect], string.format("[SupplementAward] perfect link key is not exist %d", tbInfo.nAwardLinkKey_Perfect))
+    tbInfo.szLimitedTimeStart = tbInfo.LimitedTimeStart
+    tbInfo.szLimitedTimeEnd = tbInfo.LimitedTimeEnd
+    tbInfo.LimitedTimeStart = Lib:GetDate2Time(tonumber(tbInfo.LimitedTimeStart))
+    tbInfo.LimitedTimeEnd = Lib:GetDate2Time(tonumber(tbInfo.LimitedTimeEnd))
+    self.tbSupplement[tbInfo.szKey] = tbInfo
+    if tbInfo.szDegree and tbInfo.szDegree ~= "" then
+      self.tbDegreeList[tbInfo.szDegree] = true
+    else
+      self.tbCheckList[tbInfo.szKey] = true
+    end
+  end
+  self.tbSupplement = SetReadOnly(self.tbSupplement)
+  SupplementAward.tbCalender = Lib:EasyLoadTabFile("Setting/Welfare/SupplementCalender.tab", {
+    "szActivityName",
+    "WeekFlag"
+  })
+  self.tbCalender = SetReadOnly(self.tbCalender)
+end
+
+function SupplementAward:ConfigCheck()
+  for key, value in pairs(self.tbDegreeList) do
+    if not DegreeCtrl.tbSetting[key] then
+      LogErr(string.format("error DegreeCtrl.tbSetting[%s]", key))
+      return false
+    end
+  end
+  for key, value in pairs(self.tbCheckList) do
+    if MODULE_GAMESERVER and not Calendar.tbServerCalendarKeyToId[key] then
+      LogErr(string.format("error Calendar.tbServerCalendarKeyToId[%s]", key))
+      return false
+    end
+  end
+  return true
+end
+
+SupplementAward:LoadSetting()
+Validator:Register(SupplementAward.ConfigCheck, SupplementAward)
+
+function SupplementAward:GetSupplementList()
+  local tbSupplementList = {}
+  local nShowFlag = me.GetUserValue(self.GROUP, self.SHOW_FLAG)
+  for szKey, tbInfo in pairs(self.tbSupplement) do
+    local nFlag = KLib.GetBit(nShowFlag, tbInfo.nSupplementKey - self.SHOW_FLAG)
+    if 1 == nFlag then
+      local tbConfig = Calendar:GetActInfoByKey(szKey)
+      if tbConfig then
+        if me.nLevel <= tbConfig.nLevelMax then
+          table.insert(tbSupplementList, tbInfo)
+        end
+      else
+        table.insert(tbSupplementList, tbInfo)
+      end
+    end
+  end
+  return tbSupplementList
+end
+
+function SupplementAward:GetCfgByKey(szKey)
+  if not self.tbSupplement[szKey] then
+    return
+  end
+  return self.tbSupplement[szKey]
+end
+
+function SupplementAward:GetDisCount(szKey)
+  local tbInfo = self:GetCfgByKey(szKey)
+  if not tbInfo then
+    return 1
+  end
+  tbInfo.LimitedTimeStart = tbInfo.LimitedTimeStart or 0
+  tbInfo.LimitedTimeEnd = tbInfo.LimitedTimeEnd or 0
+  if tbInfo.LimitedTimeStart <= GetTime() and tbInfo.LimitedTimeEnd >= GetTime() then
+    return tbInfo.nDisCount
+  end
+  return 1
+end
+
+function SupplementAward:GetAwardKeyByLinkKey(nAwardLinkKey)
+  local nAwardKey
+  for _, tbInfo in ipairs(self.tbLinkKey[nAwardLinkKey] or {}) do
+    if (Lib:IsEmptyStr(tbInfo.szTimeFrameStart) or 1 == GetTimeFrameState(tbInfo.szTimeFrameStart)) and (Lib:IsEmptyStr(tbInfo.szTimeFrameEnd) or 0 == GetTimeFrameState(tbInfo.szTimeFrameEnd)) then
+      nAwardKey = tbInfo.nAwardKey
+      break
+    end
+  end
+  return nAwardKey
+end
+
+function SupplementAward:GetCanSupplementNum(szKey)
+  local tbInfo = self.tbSupplement[szKey]
+  if not tbInfo then
+    return 0
+  end
+  return me.GetUserValue(self.GROUP, tbInfo.nSupplementKey)
+end

@@ -1,0 +1,219 @@
+Require("Script/Item/EquipEnhance/XuanJingCompose.lua")
+local EquipEnhance = Item.EquipEnhance
+local XuanJingCompose = EquipEnhance.XuanJingCompose
+local tbWnd = Ui:CreateWindow("UIXuanJingCompose")
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnHelp = "node/imgBG/BG/Text/btnHelp",
+  goCompose = "node/imgBG/panelCompose/imgXuanjing",
+  goComposeItemGrid = "node/imgBG/panelCompose/imgXuanjing/UIItemGrid",
+  txtComposeItemName = "node/imgBG/panelCompose/imgXuanjing/txtName",
+  goComposePossibleLevel1 = "node/imgBG/panelCompose/imgXuanjing/ComposePossibleLevel1",
+  goComposePossibleLevel2 = "node/imgBG/panelCompose/imgXuanjing/ComposePossibleLevel2",
+  txtNoXuanJingTip = "node/imgBG/panelCompose/txtNoXuanJingTip",
+  goBagItemGrid = "node/imgBG/panelCompose/ComposeXuanjing/XuanjingBag/Item",
+  goSelectItemGrid = "node/imgBG/panelCompose/ComposeXuanjing/CostXuanjing/Item",
+  btnAutoCompose = "node/imgBG/panelCompose/btnAutoCompose",
+  btnAutoComposeText = "node/imgBG/panelCompose/btnAutoCompose/Text",
+  txtComposeCost = "node/imgBG/panelCompose/txtComposeCost",
+  btnCompose = "node/imgBG/panelCompose/btnCompose"
+}
+local tbControls = tbWnd.tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("XuanJingComposeHelp")
+  end,
+  btnCompose = function(self)
+    if not XuanJingCompose.bAutoCompose then
+      self:OnClickCompose()
+    end
+  end,
+  btnAutoCompose = function(self)
+    if XuanJingCompose.bAutoCompose then
+      XuanJingCompose:StopAutoCompose()
+    else
+      XuanJingCompose:StartAutoCompose()
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbBagItemList = {}
+  self.tbSelectItemList = {}
+  self.tbComposeItemGrid = Ui:NewExistItemGrid(self, tbControls.goComposeItemGrid)
+  self.tbComposeItemGrid:SetClickEnable(true)
+  self.tbBagItemGridView = Ui:NewItemGridView(self, tbControls.goBagItemGrid)
+  self.tbSelectItemGridView = Ui:NewItemGridView(self, tbControls.goSelectItemGrid)
+end
+
+function tbWnd:OnOpen()
+  XuanJingCompose:StopAutoCompose()
+  self:ClearSelectList()
+end
+
+function tbWnd:OnClose()
+  XuanJingCompose:StopAutoCompose()
+end
+
+function tbWnd:SetSelectXuanJingList(tbSelectItemMap)
+  self.tbBagItemList = {}
+  for nLv = 1, Item.EquipEnhance.COMPOSE_LV_LIMIT do
+    self.tbBagItemList[nLv] = EquipEnhance:GetXuanJingCountInBag(me, nLv)
+  end
+  self.tbSelectItemList = {}
+  for nLevel, nNum in pairs(tbSelectItemMap) do
+    for _ = 1, nNum do
+      table.insert(self.tbSelectItemList, nLevel)
+    end
+    self.tbBagItemList[nLevel] = self.tbBagItemList[nLevel] - nNum
+  end
+  self:UpdateData()
+end
+
+function tbWnd:ClearSelectList()
+  self:SetSelectXuanJingList({})
+end
+
+function tbWnd:GetSelectItemMap()
+  local tbItemMap = {}
+  for _, nLv in ipairs(self.tbSelectItemList) do
+    tbItemMap[nLv] = (tbItemMap[nLv] or 0) + 1
+  end
+  return tbItemMap
+end
+
+function tbWnd:UpdateData()
+  local nBagIndex = 0
+  for nLv = Item.EquipEnhance.COMPOSE_LV_LIMIT, 1, -1 do
+    local nNum = self.tbBagItemList[nLv]
+    if nNum > 0 then
+      nBagIndex = nBagIndex + 1
+      self.tbBagItemGridView:SetItem(nBagIndex, {
+        "Item",
+        Item.EquipEnhance.XUANJING_ITEM[nLv],
+        nNum
+      }, true, self.OnClickBagItem, self, nLv)
+    end
+  end
+  for nIndex = nBagIndex + 1, Item.EquipEnhance.ENHANCE_NUM_LIMIT do
+    self.tbBagItemGridView:SetEmpty(nIndex, true)
+  end
+  for nIndex, nLv in ipairs(self.tbSelectItemList) do
+    self.tbSelectItemGridView:SetItem(nIndex, {
+      "Item",
+      Item.EquipEnhance.XUANJING_ITEM[nLv],
+      1
+    }, true, self.OnClickSelectItem, self, nIndex)
+  end
+  for nIndex = #self.tbSelectItemList + 1, Item.EquipEnhance.ENHANCE_NUM_LIMIT do
+    self.tbSelectItemGridView:SetEmpty(nIndex, true)
+  end
+  local tbItemMap = self:GetSelectItemMap()
+  local nUseVal, varLv = Item.EquipEnhance:CalcComposeLv(tbItemMap)
+  local bCanCompose = nUseVal and varLv
+  self.pPanel:SetActive(tbControls.goCompose, bCanCompose)
+  self.pPanel:SetActive(tbControls.txtNoXuanJingTip, not bCanCompose)
+  self.pPanel:Button_SetEnable(tbControls.btnCompose, bCanCompose and not XuanJingCompose.bAutoCompose)
+  local nComposeCost
+  if bCanCompose then
+    if type(varLv) == "table" then
+      local nPrevLv, nNextLv = table.unpack(varLv.tbLv)
+      local nPrevPercent, nNextPercent = table.unpack(varLv.tbPercent)
+      local nPrevItemTid, nNextItemTid = Item.EquipEnhance.XUANJING_ITEM[nPrevLv], Item.EquipEnhance.XUANJING_ITEM[nNextLv]
+      self.tbComposeItemGrid:SetItemByTemplate(nPrevItemTid, 1)
+      self.pPanel:Label_SetText(tbControls.txtComposeItemName, i18n.Parse(Item:GetItemBaseProp(nPrevItemTid).szName))
+      self.pPanel:SetActive(tbControls.goComposePossibleLevel1, true)
+      self.pPanel:Label_SetText(tbControls.goComposePossibleLevel1 .. "/txtLevel", i18n.EasyGet("{0}\231\186\167", nPrevLv))
+      self.pPanel:Label_SetText(tbControls.goComposePossibleLevel1 .. "/txtNextLevel", i18n.EasyGet("{0}\231\186\167", nPrevLv))
+      self.pPanel:Label_SetText(tbControls.goComposePossibleLevel1 .. "/txtPossibility", string.format("%d%%", nPrevPercent))
+      self.pPanel:SetActive(tbControls.goComposePossibleLevel2, true)
+      self.pPanel:Label_SetText(tbControls.goComposePossibleLevel2 .. "/txtLevel", i18n.EasyGet("{0}\231\186\167", nPrevLv))
+      self.pPanel:Label_SetText(tbControls.goComposePossibleLevel2 .. "/txtNextLevel", i18n.EasyGet("{0}\231\186\167", nNextLv))
+      self.pPanel:Label_SetText(tbControls.goComposePossibleLevel2 .. "/txtPossibility", string.format("%d%%", nNextPercent))
+    else
+      local nLv = varLv
+      local nItemTid = Item.EquipEnhance.XUANJING_ITEM[nLv]
+      self.tbComposeItemGrid:SetItemByTemplate(nItemTid, 1)
+      self.pPanel:Label_SetText(tbControls.txtComposeItemName, i18n.Parse(Item:GetItemBaseProp(nItemTid).szName))
+      self.pPanel:SetActive(tbControls.goComposePossibleLevel1, true)
+      self.pPanel:Label_SetText(tbControls.goComposePossibleLevel1 .. "/txtLevel", i18n.EasyGet("{0}\231\186\167", nLv))
+      self.pPanel:Label_SetText(tbControls.goComposePossibleLevel1 .. "/txtNextLevel", i18n.EasyGet("{0}\231\186\167", nLv))
+      self.pPanel:Label_SetText(tbControls.goComposePossibleLevel1 .. "/txtPossibility", "100%")
+      self.pPanel:SetActive(tbControls.goComposePossibleLevel2, false)
+    end
+    nComposeCost = math.floor(nUseVal * Item.EquipEnhance.COMPOSE_COST_XUANJING_TO_COIN / Item.EquipEnhance.RATE_BASE)
+  else
+    nComposeCost = 0
+  end
+  self.pPanel:Label_SetText(tbControls.txtComposeCost, nComposeCost)
+end
+
+function tbWnd:OnClickBagItem(nLv)
+  if not XuanJingCompose.bAutoCompose and self.tbBagItemList[nLv] > 0 and #self.tbSelectItemList < Item.EquipEnhance.COMPOSE_NUM_LIMIT then
+    table.insert(self.tbSelectItemList, nLv)
+    self.tbBagItemList[nLv] = self.tbBagItemList[nLv] - 1
+    self:UpdateData()
+  end
+end
+
+function tbWnd:OnClickSelectItem(nIndex)
+  if not XuanJingCompose.bAutoCompose and nIndex <= #self.tbSelectItemList then
+    local nLv = self.tbSelectItemList[nIndex]
+    table.remove(self.tbSelectItemList, nIndex)
+    self.tbBagItemList[nLv] = self.tbBagItemList[nLv] + 1
+    self:UpdateData()
+  end
+end
+
+function tbWnd:OnClickAutoAdd()
+  self:ClearSelectList()
+  for _, nSameNum in ipairs(XuanJingCompose.AUTO_ADD_SAME_NUM) do
+    if self:TryAutoAddSameToSelect(nSameNum, XuanJingCompose.AUTO_ADD_LV_LIMIT) then
+      return
+    end
+  end
+  me.CenterMsg(i18n.Get(EquipEnhance.NO_CAN_AUTO_ADD_XUANJING_MSG))
+end
+
+function tbWnd:OnClickCompose()
+  self:CallServerCompose()
+end
+
+function tbWnd:OnSyncData()
+  self:ClearSelectList()
+end
+
+function tbWnd:TryAutoAddSameToSelect(nSameNum, nLimitLv)
+  self:ClearSelectList()
+  local nLevel = XuanJingCompose:GetTryAddSameXuanJingLevel(nSameNum, nLimitLv)
+  local bSuccess = nil ~= nLevel
+  if bSuccess then
+    self:SetSelectXuanJingList({
+      [nLevel] = nSameNum
+    })
+    self:UpdateData()
+  end
+  return bSuccess
+end
+
+function tbWnd:CallServerCompose()
+  local tbItemMap = self:GetSelectItemMap()
+  return EquipEnhance:ComposeReq(me, tbItemMap)
+end
+
+function tbWnd:UpdateUIByIsAutoCompose()
+  local szBtnText
+  if XuanJingCompose.bAutoCompose then
+    szBtnText = i18n.Get(EquipEnhance.STOP_AUTO_COMPOSE_TEXT)
+  else
+    szBtnText = i18n.Get(EquipEnhance.START_AUTO_COMPOSE_TEXT)
+  end
+  self.pPanel:Label_SetText(tbControls.btnAutoComposeText, szBtnText)
+  local tbItemMap = self:GetSelectItemMap()
+  local nUseVal, varLv = Item.EquipEnhance:CalcComposeLv(tbItemMap)
+  local bCanCompose = nUseVal and varLv
+  self.pPanel:Button_SetEnable(tbControls.btnCompose, bCanCompose and not XuanJingCompose.bAutoCompose)
+end

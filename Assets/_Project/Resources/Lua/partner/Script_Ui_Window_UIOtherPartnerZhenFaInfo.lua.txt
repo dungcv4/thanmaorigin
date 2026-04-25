@@ -1,0 +1,277 @@
+local tbWnd = Ui:CreateClass("UIOtherPartnerZhenFaInfo", "UIPanel")
+local tbControls = {
+  empty = "Right/empty",
+  panelInfo = "Right/panelInfo",
+  txtZhenFaName = "Right/panelInfo/txtZhenFaName",
+  txtFixAttrBase = "Right/panelInfo/Attribute/attributeCell%d/txtAttribute",
+  txtFixAttrEnhance = "Right/panelInfo/Attribute/attributeCell%d/txtAttribute/txtEnhance",
+  RandomAttrTemplate = "Right/panelInfo/RandomAttribute/attributeCell/txtAttributeTemplate",
+  FightPower = "Middle/FightPower",
+  txtFightPower = "Middle/FightPower/txtFightPower",
+  txtFightPowerValue = "Middle/FightPower/txtFightPowerValue",
+  imgModel = "Middle/OrderPanel/UIPartnerModel%d/imgModel",
+  ModelZhenYan = "Middle/OrderPanel/UIPartnerModel%d/ZhenYan",
+  ModelEffect_B = "Middle/OrderPanel/UIPartnerModel%d/Effect_B",
+  ModelEffect = "Middle/OrderPanel/UIPartnerModel%d/Effect",
+  txtModelName = "Middle/OrderPanel/UIPartnerModel%d/PartnerName/txtName",
+  ModelSelectCell = "Middle/OrderPanel/UIPartnerModel%d/SelectCell",
+  btnModelAdd = "Middle/OrderPanel/UIPartnerModel%d/PartnerName/btnAdd"
+}
+tbWnd.tbModelEffect = {
+  [1] = "Middle/OrderPanel/UIPartnerModel%d/Effect/Effect_SSS",
+  [2] = "Middle/OrderPanel/UIPartnerModel%d/Effect/Effect_SS",
+  [3] = "Middle/OrderPanel/UIPartnerModel%d/Effect/Effect_S",
+  [4] = "Middle/OrderPanel/UIPartnerModel%d/Effect/Effect_A"
+}
+tbWnd.tbControls = tbControls
+tbWnd.nMaxModelCount = 6
+
+function tbWnd:OnCreate()
+  self.tbRandomScrollView = Ui:NewScrollView(self, tbControls.RandomAttrTemplate)
+end
+
+function tbWnd:OnOpen()
+  self.pAsyncRole = self.tbOwner.pAsyncRole
+  self.tbPartnerInfo = self.tbOwner.tbPartners
+  self:InitOrderPartnerModel()
+  self:ShowPartnerZhenFa()
+  self:ShowPartnerModelOrder()
+end
+
+function tbWnd:OnClose()
+  self.tbRandomScrollView:Clear()
+  self:ReleaseOrderPartnerModel()
+end
+
+function tbWnd:InitOrderPartnerModel()
+  self.tbOrderModelList = {}
+  for nIndex = 1, self.nMaxModelCount do
+    local pOrderModelObj = self.pPanel:GetObject(string.format(tbControls.imgModel, nIndex))
+    local goOrderModel = pOrderModelObj:GetComponent(Ui.UINpcModel)
+    self.tbOrderModelList[nIndex] = goOrderModel
+  end
+end
+
+function tbWnd:ReleaseOrderPartnerModel()
+  for _, pModel in ipairs(self.tbOrderModelList) do
+    pModel:Release()
+  end
+end
+
+function tbWnd:ShowPartnerModelOrder()
+  local nEyeTemplateId = self.pAsyncRole.GetPartnerZFEye() or 0
+  for nIndex = 1, self.nMaxModelCount do
+    local nPartnerId = self.pAsyncRole.GetPartnerOrder(nIndex)
+    local pPartner = self:GetSyncPartnerById(nPartnerId)
+    if -1 == nPartnerId then
+      self:ShowPlayerModel(nIndex)
+      self.pPanel:Label_SetText(string.format(tbControls.txtModelName, nIndex), self.pAsyncRole.szName)
+      self.pPanel:SetActive(string.format(self.tbModelEffect[1], nIndex), true)
+      self.pPanel:SetActive(string.format(tbControls.ModelEffect, nIndex), true)
+      self.pPanel:SetActive(string.format(tbControls.ModelZhenYan, nIndex), false)
+    elseif nPartnerId > 0 and pPartner then
+      local nNpcTemplateId = Partner.tbAllPartnerInfo[pPartner.nTemplateId].nNpcTemplateId
+      local nQualityLevel = Partner.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+      if self.tbModelEffect[nQualityLevel] then
+        self.pPanel:SetActive(string.format(self.tbModelEffect[nQualityLevel], nIndex), true)
+      end
+      local nNpcResId = KNpc.GetNpcTemplateInfo(nNpcTemplateId).nNpcResID
+      self.tbOrderModelList[nIndex]:Release()
+      self.tbOrderModelList[nIndex]:ShowNpc(nNpcResId)
+      if Partner.tbPartnerScaleInfo[nNpcResId].Scale ~= "" then
+        self.tbOrderModelList[nIndex].fModelScale = 125 * Partner.tbPartnerScaleInfo[nNpcResId].Scale
+      else
+        self.tbOrderModelList[nIndex].fModelScale = 125
+      end
+      self.pPanel:Label_SetText(string.format(tbControls.txtModelName, nIndex), i18n.Parse(pPartner.szName))
+      self.pPanel:SetActive(string.format(tbControls.ModelEffect, nIndex), true)
+      self.pPanel:SetActive(string.format(tbControls.ModelZhenYan, nIndex), nEyeTemplateId == pPartner.nTemplateId)
+    else
+      self.tbOrderModelList[nIndex]:Release()
+      self.tbOrderModelList[nIndex]:ShowNpc(1)
+      self.pPanel:Label_SetText(string.format(tbControls.txtModelName, nIndex), "")
+      self.pPanel:SetActive(string.format(tbControls.ModelEffect, nIndex), false)
+      self.pPanel:SetActive(string.format(tbControls.ModelZhenYan, nIndex), false)
+    end
+    self.pPanel:SetActive(string.format(tbControls.btnModelAdd, nIndex), false)
+    self.pPanel:SetActive(string.format(tbControls.ModelEffect_B, nIndex), true)
+    self.pPanel:SetActive(string.format(tbControls.ModelSelectCell, nIndex), false)
+  end
+end
+
+function tbWnd:GetSyncPartnerById(nPartnerId)
+  for _, pPartner in pairs(self.tbPartnerInfo) do
+    if pPartner.dwId == nPartnerId then
+      return pPartner
+    end
+  end
+end
+
+function tbWnd:ShowPlayerModel(nModelIndex)
+  local tbFeature = {}
+  local pAsyncRole = self.pAsyncRole
+  for nEquipPos, nIndex in pairs(Item.EQUIPPOS_TO_NPC_RES_PART) do
+    local nResId
+    local nFashionId = pAsyncRole.GetFashion(nIndex + 1)
+    if nFashionId > 0 then
+      local tbFashionSetting = Fashion:GetFashionSettingNotPlayer(nFashionId, pAsyncRole.GetFaction(), pAsyncRole.GetFactionSect(), pAsyncRole.GetSex())
+      if nil ~= tbFashionSetting then
+        nResId = tbFashionSetting.nResId
+      end
+    end
+    if nil == nResId then
+      local nItemId = self.tbOwner.tbEquips[nEquipPos]
+      if nItemId and nItemId > 0 then
+        local pEquip = KItem.GetItemObj(nItemId)
+        local _, _, _, _, nInnerResId = KItem.GetItemShowInfo(pEquip.dwTemplateId, pAsyncRole.GetFaction(), pAsyncRole.GetFactionSect(), pAsyncRole.GetSex())
+        nResId = nInnerResId
+      end
+    end
+    if nil ~= nResId then
+      tbFeature[nIndex] = nResId
+    else
+      tbFeature[nIndex] = 0
+    end
+  end
+  if tbFeature[Npc.NpcResPartsDef.npc_part_body] <= 0 then
+    tbFeature[Npc.NpcResPartsDef.npc_part_body] = 1
+  end
+  if tbFeature[Npc.NpcResPartsDef.npc_part_head] <= 0 then
+    tbFeature[Npc.NpcResPartsDef.npc_part_head] = 1
+  end
+  local nWeaponEffectResId = 0
+  if tbFeature[Npc.NpcResPartsDef.npc_part_weapon] <= 0 then
+    tbFeature[Npc.NpcResPartsDef.npc_part_weapon] = 1
+  elseif tbFeature[Npc.NpcResPartsDef.npc_part_weapon] > 0 then
+    local nWeaponEffectFashionId = pAsyncRole.GetFashionEffect(Npc.NpcResPartsDef.npc_part_weapon + 1) or 0
+    if nWeaponEffectFashionId > 0 then
+      local tbSetting = Fashion:GetFashionSettingNotPlayer(nWeaponEffectFashionId, pAsyncRole.GetFaction(), pAsyncRole.GetFactionSect(), pAsyncRole.GetSex())
+      if tbSetting then
+        nWeaponEffectResId = tbSetting.nResId
+      end
+    end
+    if not nWeaponEffectResId or nWeaponEffectResId <= 0 then
+      local nWeaponId = self.tbOwner.tbEquips[Item.EQUIPPOS_WEAPON] or 0
+      if nWeaponId > 0 then
+        local tbPlayer = {
+          nFaction = self.pAsyncRole.GetFaction(),
+          nFactionSect = self.pAsyncRole.GetFactionSect(),
+          nSex = self.pAsyncRole.GetSex()
+        }
+        nWeaponEffectResId = Item.EquipEnhance:GetEffectResId(tbPlayer, self.pAsyncRole.GetEnhance(Item.EQUIPPOS_WEAPON + 1))
+      end
+    end
+  end
+  self.tbOrderModelList[nModelIndex]:Release()
+  self.tbOrderModelList[nModelIndex]:ShowModel(self.pAsyncRole.GetSex(), 1, tbFeature[Npc.NpcResPartsDef.npc_part_body], tbFeature[Npc.NpcResPartsDef.npc_part_weapon], tbFeature[Npc.NpcResPartsDef.npc_part_mantle], 0, tbFeature[Npc.NpcResPartsDef.npc_part_head], tbFeature[Npc.NpcResPartsDef.npc_part_wind], nWeaponEffectResId)
+  self.tbOrderModelList[nModelIndex].fModelScale = 125
+end
+
+function tbWnd:ShowPartnerZhenFa()
+  local nZFState = self.pAsyncRole.GetPartnerZFState() or 0
+  if 1 == nZFState then
+    self.pPanel:SetActive(tbControls.empty, false)
+    self.pPanel:SetActive(tbControls.panelInfo, true)
+    self.pPanel:SetActive(tbControls.FightPower, true)
+    local nFixFightPower = self:RefreshZFFixAttr()
+    local nZFLevelAndRandomAttrFightPower = self:RefreshZFRandomAttr()
+    local nFightPower = nFixFightPower + nZFLevelAndRandomAttrFightPower
+    self.pPanel:Label_SetText(tbControls.txtFightPowerValue, nFightPower)
+  else
+    self.pPanel:SetActive(tbControls.empty, true)
+    self.pPanel:SetActive(tbControls.panelInfo, false)
+    self.pPanel:SetActive(tbControls.FightPower, false)
+  end
+end
+
+function tbWnd:RefreshZFFixAttr()
+  local nFightPower = 0
+  local nZFPos = self.pAsyncRole.GetPartnerZFPos() or 0
+  local nEyeTemplateId = self.pAsyncRole.GetPartnerZFEye() or 0
+  local nQualityLevel = Partner.tbAllPartnerInfo[nEyeTemplateId].nQualityLevel or 0
+  local nEyeQuality = PartnerZhenFa.tbPartnerQuality[nQualityLevel] or 0
+  local tbZFGroup = PartnerZhenFa:GetPosGroupCfg(nil, nZFPos, nEyeQuality)
+  if not tbZFGroup then
+    Lib:LogErrFormat("UIOtherPartnerZhenFaInfo:ShowPartnerZhenFa Error. GetPosGroupCfg failed, nZFPos: %d, nQuality: %d, nQualityLevel: %d", nZFPos, nEyeQuality, nQualityLevel)
+    return
+  end
+  nFightPower = nFightPower + tbZFGroup.nFightPower
+  self.pPanel:Label_SetText(tbControls.txtZhenFaName, i18n.Parse(tbZFGroup.szName))
+  for nIndex = 1, PartnerZhenFa.nFixAttrCount do
+    local nGroup = tbZFGroup["nAttrGroup" .. nIndex]
+    local szColor = PartnerZhenFa.tbEyeAttrColor[nEyeQuality]
+    local tbAddVal = Lib:SplitStr2Num(tbZFGroup["szShowAddVal" .. nIndex])
+    local tbAttrVal = Lib:SplitStr2Num(tbZFGroup["szShowBaseVal" .. nIndex])
+    local szAttrType = PartnerZhenFa.tbFixGroup2AttrType[nGroup]
+    local szBaseDesc = FightSkill:GetMagicDesc(szAttrType, tbAttrVal)
+    local _, szAddDesc = FightSkill:GetMagicDescSplit(szAttrType, tbAddVal)
+    local szBaseAttr = i18n.EasyGet("{0}  <color=#{1}>{2}</color>", szBaseDesc, Ui.tbColor:GetColorHexByDefineName(szColor), szAddDesc)
+    self.pPanel:Label_SetText(string.format(tbControls.txtFixAttrBase, nIndex), szBaseAttr)
+    local nLevel = self.pAsyncRole.GetPartnerZFFixAttrLevel(nIndex) or 0
+    local tbEnhanceCfg = PartnerZhenFa.tbFixAttrPool[nGroup][nLevel]
+    if nLevel > 0 and tbEnhanceCfg then
+      nFightPower = nFightPower + tbEnhanceCfg.nFightPower
+      local tbEnhanceVal = {
+        tbEnhanceCfg.nAttrVal1,
+        tbEnhanceCfg.nAttrVal2,
+        tbEnhanceCfg.nAttrVal3
+      }
+      local _, szEnhanceAttr = FightSkill:GetMagicDescSplit(szAttrType, tbEnhanceVal)
+      self.pPanel:Label_SetText(string.format(tbControls.txtFixAttrEnhance, nIndex), i18n.EasyGet("(\229\188\186\229\140\150\239\188\154Lv.{0}  {1})", nLevel, szEnhanceAttr))
+    else
+      local _, szEnhanceAttr = FightSkill:GetMagicDescSplit(szAttrType, {
+        0,
+        0,
+        0
+      })
+      self.pPanel:Label_SetText(string.format(tbControls.txtFixAttrEnhance, nIndex), i18n.EasyGet("(\229\188\186\229\140\150\239\188\154Lv.{0}  {1})", nLevel, szEnhanceAttr))
+    end
+  end
+  return nFightPower
+end
+
+function tbWnd:RefreshZFRandomAttr()
+  local nFightPower = 0
+  local nZFLevel = self.pAsyncRole.GetPartnerZFLevel() or 0
+  local tbZFLevelCfg = PartnerZhenFa:GetZFLevelCfg(nZFLevel)
+  if not tbZFLevelCfg then
+    Lib:LogErrFormat("UIOtherPartnerZhenFaInfo:RefreshZFRandomAttr Error. GetZFLevelCfg failed, nZFLevel: %d", nZFLevel)
+    return
+  end
+  nFightPower = nFightPower + tbZFLevelCfg.nFightPower
+  self.tbRandomScrollView:Clear()
+  for nIndex = 1, PartnerZhenFa.nMaxRandomAttrCount do
+    local nGroup = self.pAsyncRole.GetPartnerZFRandomAttr(nIndex) or 0
+    local nLevel = self.pAsyncRole.GetPartnerZFRandomLevel(nIndex) or 0
+    if nGroup > 0 and nLevel > 0 then
+      local tbAttrCfg = PartnerZhenFa.tbRandomAttrPool[nGroup][nLevel]
+      if not tbAttrCfg then
+        Lib:LogErrFormat("UIOtherPartnerZhenFaInfo:RefreshZFRandomAttr Error. GetRandomAttrCfg failed, nGroup: %d, nLevel: %d", nGroup, nLevel)
+        break
+      end
+      local tbVal = {
+        tbAttrCfg.nAttrVal1,
+        tbAttrCfg.nAttrVal2,
+        tbAttrCfg.nAttrVal3
+      }
+      local szRandomAttr = FightSkill:GetMagicDesc(tbAttrCfg.szAttrType, tbVal)
+      nFightPower = nFightPower + tbAttrCfg.nFightPower
+      local szColor
+      for nQuality, tbLevel in ipairs(tbZFLevelCfg.tbRandomAttrQuality) do
+        if nLevel < tbLevel[1] or nLevel >= tbLevel[1] and nLevel <= tbLevel[2] then
+          szColor = PartnerZhenFa.tbAttrColor[nQuality]
+          break
+        end
+      end
+      self.tbRandomScrollView:SetElement(nIndex, function(pElement)
+        pElement.pPanel:Label_SetText("Main", szRandomAttr)
+        if szColor then
+          pElement.pPanel:Label_SetColorByName("Main", szColor)
+        end
+      end)
+    else
+      break
+    end
+  end
+  return nFightPower
+end

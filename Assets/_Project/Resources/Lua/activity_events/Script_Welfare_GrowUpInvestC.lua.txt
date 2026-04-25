@@ -1,0 +1,139 @@
+function GrowUpInvest:OnChargeGrowUpInvestReq(nIndex)
+  local tbSetting = Recharge:GetGrowupInvestSettings()
+  
+  if not tbSetting or not tbSetting[nIndex] then
+    me.CenterMsg("not had GrowUpInvest config!!!")
+    return
+  end
+  Recharge:RequestCreateRechargeOrder(tbSetting[nIndex].nProductId)
+end
+
+function GrowUpInvest:GetGrowUpInvestAwardReq(nAwardIndex)
+  local bRet, szErr = self:CheckIsCanGetAward(me, nAwardIndex)
+  if not bRet then
+    return me.CenterMsg(szErr)
+  end
+  RemoteServer.RequestGrowUpInvest("GetGrowUpInvestAward", nAwardIndex)
+end
+
+function GrowUpInvest:BuyGrowUpInvestScucess()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_GROWUP_INVEST_BUY)
+  GrowUpInvest:UpdateReddotState(false)
+end
+
+function GrowUpInvest:OnTakeCardAwardScuess()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_GROWUP_INVEST_GET_AWARD)
+  GrowUpInvest:UpdateReddotState(false)
+end
+
+function GrowUpInvest:CheckIsOpen()
+  if not me or me.nTotalLevel < GrowUpInvest.nOpenLevel then
+    return false
+  end
+  local nProductId = self:GetBuyProductId(me)
+  nProductId = nProductId > 0 and nProductId or self.tbIndex2ProductId[1]
+  local nSettingIndex = self.tbProductId2Index[nProductId]
+  if GrowUpInvest:CheckIsGetAllAward(me) then
+    local nNextSettingIndex = nSettingIndex + 1
+    if nNextSettingIndex > #self.tbIndex2ProductId then
+      return false
+    elseif me.nTotalLevel < self.Cfg[nNextSettingIndex].nOpenLevel then
+      return false
+    end
+  end
+  return true
+end
+
+function GrowUpInvest:GetGrowUpInvestSetting()
+  local nCurProductId = self:GetBuyProductId(me)
+  local nProductId = nCurProductId > 0 and nCurProductId or self.tbIndex2ProductId[1]
+  local nSettingIndex = self.tbProductId2Index[nProductId]
+  local nNextSettingIndex = nSettingIndex + 1
+  if GrowUpInvest:CheckIsGetAllAward(me) and nNextSettingIndex <= #self.tbIndex2ProductId and me.nTotalLevel >= self.Cfg[nNextSettingIndex].nOpenLevel then
+    nSettingIndex = nNextSettingIndex
+    nProductId = self.tbIndex2ProductId[nSettingIndex]
+  end
+  local tbGrowUpSetting = self.Cfg[nSettingIndex] or {}
+  local tbRewardSetting = {}
+  for nLevel, nWeight in pairs(tbGrowUpSetting) do
+    if type(nLevel) == "number" then
+      table.insert(tbRewardSetting, {nLevel, nWeight})
+    end
+  end
+  table.sort(tbRewardSetting, function(tbSettingA, tbSettingB)
+    return tbSettingA[1] < tbSettingB[1]
+  end)
+  for nAwardIndex, tbInfo in ipairs(tbRewardSetting) do
+    table.insert(tbInfo, 1, nAwardIndex)
+    table.insert(tbInfo, GrowUpInvest:HaveGetAward(me, nAwardIndex))
+  end
+  if nCurProductId == nProductId then
+    table.sort(tbRewardSetting, function(tbSettingA, tbSettingB)
+      if not (tbSettingA and tbSettingB) or tbSettingA == tbSettingB then
+        return false
+      end
+      local _, nFirstLevel, _, bFirstHaveGet = table.unpack(tbSettingA)
+      local _, nSecondLevel, _, bSecondHaveGet = table.unpack(tbSettingB)
+      if bFirstHaveGet and bSecondHaveGet then
+        return nFirstLevel < nSecondLevel
+      end
+      local nSortRes = bFirstHaveGet and -1 or bSecondHaveGet and 1 or nFirstLevel < nSecondLevel and 1 or -1
+      return nSortRes > 0
+    end)
+  end
+  return tbGrowUpSetting, tbRewardSetting, nProductId, nSettingIndex
+end
+
+function GrowUpInvest:OnLevelUp()
+  GrowUpInvest:UpdateReddotState(true)
+end
+
+function GrowUpInvest:UpdateReddotState(bIsLevelUpCall)
+  if not self:CheckIsOpen() then
+    if RedPointMgr:CheckEvent(RedPointMgr.EVENT.GrowUpInvest) then
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.GrowUpInvest)
+    end
+    return
+  end
+  local tbGrowUpSetting, tbRewardSetting, nProductId = GrowUpInvest:GetGrowUpInvestSetting()
+  self._tbDisableTemporaryReddot = self._tbDisableTemporaryReddot or {}
+  local bActiveReddot = false
+  local bIsBuy = nProductId == GrowUpInvest:GetBuyProductId(me)
+  if bIsBuy then
+    for _, tbInfo in ipairs(tbRewardSetting) do
+      local nAwardIndex, nLevel, nWeight, bGetAward = table.unpack(tbInfo)
+      if nLevel <= me.nTotalLevel and not bGetAward then
+        bActiveReddot = true
+        break
+      end
+    end
+  elseif not self.bHaveClick then
+    bActiveReddot = true
+  elseif bIsLevelUpCall and me.nTotalLevel == self.Cfg[self.tbProductId2Index[nProductId]].nOpenLevel then
+    bActiveReddot = true
+  end
+  if bActiveReddot then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.GrowUpInvest)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.GrowUpInvest)
+  end
+end
+
+function GrowUpInvest:OnLogin()
+  GrowUpInvest:UpdateReddotState(false)
+end
+
+function GrowUpInvest:RefreshTemporaryReddot(szType)
+  self._tbDisableTemporaryReddot = self._tbDisableTemporaryReddot or {}
+  self._tbDisableTemporaryReddot[szType] = true
+  self:UpdateReddotState(false)
+end
+
+function GrowUpInvest:OnLogout()
+  self._tbDisableTemporaryReddot = nil
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, GrowUpInvest)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, GrowUpInvest.OnLogout, GrowUpInvest)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, GrowUpInvest)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, GrowUpInvest.OnLevelUp, GrowUpInvest)

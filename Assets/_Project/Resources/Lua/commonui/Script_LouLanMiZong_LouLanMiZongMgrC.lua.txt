@@ -1,0 +1,202 @@
+local szPathIcon = "UI/atlas/hud/btn_teamfollow.png"
+
+function LouLanMiZong:Init()
+  local tbRegisterMapList = {}
+  table.insert(tbRegisterMapList, self.MAPSETTING.nMapId)
+  FubenUIController:RegisterChecker(tbRegisterMapList, self)
+end
+
+LouLanMiZong:Init()
+
+function LouLanMiZong:OnFubenMapLoaded()
+  FubenUIController:OpenFuBenUI()
+  Ui:OpenWindow("UIProgressLoulan")
+  Ui:CloseWindow("UIBattleEntranceHanWu")
+end
+
+function LouLanMiZong:IsNeedExitFubenButton()
+  return true
+end
+
+function LouLanMiZong:GetFubenBtnAImagePathAndText()
+  return szPathIcon, i18n.EasyGet("\229\175\187\232\183\175")
+end
+
+function LouLanMiZong:QuitFubenRsp()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_PK_MODE)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_PORTRAIT)
+  self:CloseFubenUI()
+end
+
+function LouLanMiZong:CloseFubenUI()
+  Ui:CloseWindow("UIProgressLoulan")
+  Ui:CloseWindow("UIHanWuSelectSeries")
+  Ui:CloseWindow("UILoulanSkillSelect")
+end
+
+function LouLanMiZong:TrySyncRegisterInfo()
+  local nRating = me.GetUserValue(self.nSaveGroupId, self.nRatingSaveGroupKey)
+  local szDesc = i18n.EasyGet("\230\156\170\229\143\130\229\138\160")
+  if 0 ~= nRating then
+    local nLevel = LouLanMiZong:RatingToLevel(nRating)
+    szDesc = Dungeon:GetLevelDesc(nLevel)
+  end
+  local tbInfo = {
+    bNotShowTime = true,
+    bNotShowSignUpNum = true,
+    bShowRank = true,
+    bNotShowTeamEnter = true,
+    szTitle = i18n.EasyGet("\230\165\188\229\133\176\232\191\183\232\184\170"),
+    szClass = "LouLanMiZong",
+    szEnrollTime = i18n.EasyGet("\230\175\143\229\145\168\229\143\130\228\184\142\230\172\161\230\149\176:{0}/{1}", DegreeCtrl:GetDegree(me, "LouLanMiZong"), DegreeCtrl:GetMaxDegree("LouLanMiZong", me)),
+    szEnrollNum = i18n.EasyGet("\229\189\147\229\137\141\233\128\154\229\133\179\232\175\132\231\186\167:{0}(\233\128\154\229\133\179\230\156\128\233\171\152\232\175\132\231\186\167{1})", i18n.Get(szDesc), i18n.Get(Dungeon:GetLevelDesc(LouLanMiZong.nMaxLevel))),
+    szTimes = i18n.EasyGet("\233\128\154\229\133\179\229\165\150\229\138\177:{0}", 0 == DegreeCtrl:GetDegree(me, "LouLanMiZongWeekAward") and i18n.EasyGet("\229\183\178\232\142\183\229\190\151") or i18n.EasyGet("\230\156\170\232\190\190\230\136\144"))
+  }
+  Ui:OpenWindow("UIBattleEntranceHanWu", self, tbInfo)
+end
+
+function LouLanMiZong:SyncSignupInfoReq()
+end
+
+function LouLanMiZong:AttendReq()
+  local bRet, szErr = self:CanAttendC()
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  RemoteServer.RequestLouLanMiZong("AttendReqW")
+end
+
+function LouLanMiZong:CanAttendC()
+  return true
+end
+
+function LouLanMiZong:SelEnhanceReq(nNpcId, nIndex)
+  RemoteServer.RequestLouLanMiZong("SelEnhanceReqZ", nNpcId, nIndex)
+end
+
+function LouLanMiZong:SelEnhanceRsp(tbEnhanceInfo, tbBuffList, nNpcId, bOpenUI)
+  self.tbEnhanceInfo = tbEnhanceInfo
+  self.tbBuffList = self.tbBuffList or {}
+  self.tbBuffList[nNpcId] = tbBuffList
+  if bOpenUI then
+    Ui:OpenWindow("UILoulanSkillSelect", nNpcId)
+  else
+    Ui:CloseWindow("UILoulanSkillSelect")
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_LOULANMIZONG_SYNC_SEL_ENHANCE, nNpcId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_HRS_SUBTYPE_MODIFICATION)
+end
+
+function LouLanMiZong:SyncInfo(bShowPathBtn, tbPos)
+  self:SetBtnPathShow(bShowPathBtn, tbPos)
+end
+
+function LouLanMiZong:SetBtnPathShow(bShowPathBtn, tbPos)
+  self.bShowPathBtn = bShowPathBtn
+  self.tbPos = tbPos
+  if Ui:WindowVisible("UIHudRightCenter") then
+    Ui:GetWindow("UIHudRightCenter"):SetFubenBtnImageAndText(self:GetFubenBtnAImagePathAndText())
+    Ui:GetWindow("UIHudRightCenter"):SetFubenBtnShowStatus(self:CanPath())
+  end
+end
+
+function LouLanMiZong:CanPath()
+  return self.bShowPathBtn or false
+end
+
+function LouLanMiZong:AutoPath()
+  if not self.tbPos then
+    return
+  end
+  local nTargetX = self.tbPos.nPosX
+  local nTargetY = self.tbPos.nPosY
+  AFK:Stop()
+  local bAutoFight
+  
+  local function fnCallback()
+    local function __timer_Callback()
+      AFK:Start()
+    end
+    
+    AFK:Stop()
+    Timer:Register(5, __timer_Callback)
+  end
+  
+  AutoPath:GotoAndCallEx(me.nMapId, nTargetX, nTargetY, fnCallback)
+end
+
+function LouLanMiZong:IsNeedFubenBtn()
+  return self:CanPath(), {
+    self.AutoPath,
+    self
+  }
+end
+
+function LouLanMiZong:SyncExplore(nExplore)
+  if Ui:WindowVisible("UIProgressLoulan") then
+    Ui:GetWindow("UIProgressLoulan"):Update(nExplore)
+  end
+end
+
+function LouLanMiZong:OpenEnhanceWindow(tbBuffList, nNpcId, bOpenUI)
+  self.tbEnhanceInfo = self.tbEnhanceInfo or {}
+  self.tbBuffList = self.tbBuffList or {}
+  self.tbBuffList[nNpcId] = tbBuffList
+  if bOpenUI then
+    Ui:OpenWindow("UILoulanSkillSelect", nNpcId)
+  end
+end
+
+function LouLanMiZong:OpenResultWindow(tbDungeonData, tbTeamData, tbAwards, tbScoreInfo)
+  Ui:OpenWindow("UIDungeonResult", tbDungeonData, tbTeamData, tbAwards, tbScoreInfo)
+end
+
+function LouLanMiZong:OnBossStart(nTime)
+  Ui:OpenWindow("UIReadyGo", nTime)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_LOULANMIZONG_SYNC_BOSSSTART, true)
+  self.nBossStartTimer = Timer:Register(nTime * Env.GAME_FPS, function()
+    EventNotify.OnNotify(EventNotify.emNOTIFY_LOULANMIZONG_SYNC_BOSSSTART, false)
+    if Ui:WindowVisible("UIProgressLoulan") then
+      Ui:CloseWindow("UIProgressLoulan")
+    end
+    Timer:Close(self.nBossStartTimer)
+    self.nBossStartTimer = nil
+  end)
+end
+
+function LouLanMiZong:SyncRefFlag(nFlag)
+  me.GetNpc().ChangeRefFlag(Npc.RefFlagType.npc_forbid_move, nFlag)
+end
+
+function LouLanMiZong:SyncAreaExploreStatus(tbAreaList)
+  self.tbAreaList = tbAreaList
+  if Ui:WindowVisible("UIMiniMap") then
+    Ui:GetWindow("UIMiniMap"):HideArea()
+  end
+end
+
+function LouLanMiZong:ShowResult(tbScoreInfo, tbPlayerAward)
+  Ui:OpenWindow("UILoulanResult", tbScoreInfo, tbPlayerAward)
+end
+
+function LouLanMiZong:OpenRankBoard()
+  local tbData = {
+    szTitle = i18n.EasyGet("\230\165\188\229\133\176\232\191\183\232\184\170"),
+    tbRankLayerIdList = {14}
+  }
+  local tbPermanantRankData = {
+    szRankType = "LouLanMiZong",
+    szScoreTitle = i18n.EasyGet("\233\128\154\229\133\179\230\151\182\233\151\180:"),
+    tbRankingAward = self.tbRankingAward,
+    nAwardId = 1231,
+    fnProcessHighValue = function(nHighValue)
+      nHighValue = LouLanMiZong.TIMESETTING.nTotalTime - nHighValue
+      local nMin = math.floor(nHighValue / 60)
+      local nSec = math.floor(nHighValue % 60)
+      local szHighValue = string.format("%02d:%02d", nMin, nSec)
+      return szHighValue
+    end
+  }
+  Ui:OpenWindow("UITemporaryActivityRank", tbData, 1, tbPermanantRankData)
+end

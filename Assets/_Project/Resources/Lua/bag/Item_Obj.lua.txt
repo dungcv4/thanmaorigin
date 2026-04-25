@@ -1,0 +1,194 @@
+Item.Obj = Item.Obj or {}
+local Obj = Item.Obj
+Obj.MAX_DROP_RANGE = 5
+Obj.CELL_LENGTH = 256
+Obj.TYPE_BUFF = 1
+Obj.TYPE_SKILL = 2
+Obj.TYPE_DROP = 3
+Obj.tbObj2ProgList = Obj.tbObj2ProgList or {}
+
+function Item:OnObjTrap(...)
+  Obj:OnTrap(...)
+end
+
+function Obj:LoadBuff()
+  self.tbBuffList = Lib:LoadTabFileEx("Setting/Item/DropBuffList.tab", "ddddddddd", "nBuffId", {
+    "nBuffId",
+    "nObjId",
+    "nDeathTime",
+    "nSkillId",
+    "nSkillLevel",
+    "nParam1",
+    "nParam2",
+    "nShowBuffId",
+    "nDistance"
+  })
+end
+
+Obj:LoadBuff()
+
+function Obj:GetPos(fnSelect, nStartPosX, nStartPosY, nWidth)
+  local nIdx = fnSelect()
+  return nStartPosX + nIdx % nWidth * self.CELL_LENGTH, nStartPosY + math.floor(nIdx / nWidth) * self.CELL_LENGTH
+end
+
+function Obj:PraseDropInfo(szParam)
+  local nCount = 0
+  local nTotalRate = 0
+  local tbInfo = {}
+  local tbParam = Lib:SplitStr(szParam, ";")
+  for nIdx, szInfo in ipairs(tbParam) do
+    if nIdx == #tbParam then
+      nCount = tonumber(szInfo)
+      if not nCount then
+        Lib:LogFormat("[Obj] DropBuffer Error 1 szParam = %s", szParam)
+        return
+      end
+    else
+      local nBuffId, nRate = string.match(szInfo, "^(%d+)|(%d+)$")
+      if not nBuffId then
+        Lib:LogFormat("[Obj] DropBuffer Error 2 szParam = %s szInfo = %s", szParam, szInfo)
+        return
+      end
+      nBuffId = tonumber(nBuffId)
+      nRate = tonumber(nRate)
+      if not (nBuffId and self.tbBuffList[nBuffId]) or not nRate then
+        Lib:LogFormat("[Obj] DropBuffer Error 3 szParam = %s szInfo = %s nBuffId = %s nRate = %s", szParam, szInfo, nBuffId or "nil", nRate or "nil")
+        return
+      end
+      nTotalRate = nTotalRate + nRate
+      table.insert(tbInfo, {nBuffId = nBuffId, nRate = nRate})
+    end
+  end
+  return nCount, nTotalRate, tbInfo
+end
+
+function Obj:GetDropPos(nCount, nMapId, nX, nY)
+  local nMaxRange = self.MAX_DROP_RANGE
+  if nCount <= 5 then
+    nMaxRange = 2
+  end
+  local nStartPosX, nStartPosY = nX - nMaxRange * self.CELL_LENGTH, nY - nMaxRange * self.CELL_LENGTH
+  local nWidth = nMaxRange * 2 + 1
+  local nCellCount = nWidth * nWidth
+  local fnSelect = Lib:GetRandomSelect(nCellCount)
+  local tbResult = {}
+  for i = 1, nCellCount do
+    local nPosX, nPosY = self:GetPos(fnSelect, nStartPosX, nStartPosY, nWidth)
+    local bCanUse = CheckBarrier(nMapId, nPosX, nPosY)
+    if bCanUse and 1 == bCanUse then
+      table.insert(tbResult, {nPosX, nPosY})
+    end
+  end
+  local nLastCount = nCount - #tbResult
+  for i = 1, nLastCount do
+    local nPosX, nPosY
+    for i = 1, nCellCount do
+      nPosX, nPosY = self:GetPos(fnSelect, nStartPosX, nStartPosY, nWidth)
+      local bCanUse = CheckBarrier(nMapId, nPosX, nPosY)
+      if bCanUse and 1 == bCanUse then
+        break
+      end
+    end
+    table.insert(tbResult, {nPosX, nPosY})
+  end
+  return tbResult
+end
+
+function Obj:DropBuffer(nMapId, nX, nY, szParam)
+  local nCount, nTotalRate, tbInfo = self:PraseDropInfo(szParam)
+  if not nCount then
+    return
+  end
+  local tbPos = self:GetDropPos(nCount, nMapId, nX, nY)
+  local fnPosSelect = Lib:GetRandomSelect(#tbPos)
+  for i = 1, nCount do
+    local nRandom = MathRandom(nTotalRate)
+    for _, tbInfo in ipairs(tbInfo) do
+      if nRandom > tbInfo.nRate then
+        nRandom = nRandom - tbInfo.nRate
+      else
+        local nPosIdx = fnPosSelect()
+        AddObj(self.TYPE_BUFF, tbInfo.nBuffId, nMapId, tbPos[nPosIdx][1], tbPos[nPosIdx][2], 0, self.tbBuffList[tbInfo.nBuffId].nDeathTime, self.tbBuffList[tbInfo.nBuffId].nDistance)
+        break
+      end
+    end
+  end
+end
+
+function Obj:CallBuffer(nBuffId, nRate, nMapId, nX, nY)
+  if not self.tbBuffList[nBuffId] then
+    Log("[ERROR] Obj:CallBuffer error: nBuffId not configure", nBuffId)
+    return
+  end
+  local nRandom = MathRandom(100)
+  if nRate > nRandom then
+    return AddObj(self.TYPE_BUFF, nBuffId, nMapId, nX, nY, 0, self.tbBuffList[nBuffId].nDeathTime, self.tbBuffList[nBuffId].nDistance)
+  end
+end
+
+function Obj:CallBufferItem(nBuffId, nMapId, nPosX, nPosY, nProgTime, szProgText)
+  if not self.tbBuffList[nBuffId] then
+    LogErr("Obj:CallBufferItem error: nBuffId not exist", nBuffId)
+    return
+  end
+  local dwObjId = AddObj(self.TYPE_BUFF, nBuffId, nMapId, nPosX, nPosY, 0, self.tbBuffList[nBuffId].nDeathTime, self.tbBuffList[nBuffId].nDistance)
+  if 0 ~= dwObjId and nProgTime and szProgText then
+    self.tbObj2ProgList[dwObjId] = {nProgTime = nProgTime, szProgText = szProgText}
+  end
+  return dwObjId
+end
+
+function Obj:CallSkillItem(nBuffId, nMapId, nPosX, nPosY, nProgTime, szProgText)
+  if not self.tbBuffList[nBuffId] then
+    LogErr("Obj:CallSkillItem error: nBuffId not exist", nBuffId)
+    return
+  end
+  local dwObjId = AddObj(self.TYPE_SKILL, nBuffId, nMapId, nPosX, nPosY, 0, self.tbBuffList[nBuffId].nDeathTime, self.tbBuffList[nBuffId].nDistance)
+  if 0 ~= dwObjId and nProgTime and szProgText then
+    self.tbObj2ProgList[dwObjId] = {nProgTime = nProgTime, szProgText = szProgText}
+  end
+  return dwObjId
+end
+
+function Obj:CallDropItem(nBuffId, nMapId, nPosX, nPosY)
+  if not self.tbBuffList[nBuffId] then
+    LogErr("Obj:CallDropItem error: nBuffId not exist", nBuffId)
+    return
+  end
+  return AddObj(self.TYPE_DROP, nBuffId, nMapId, nPosX, nPosY, 0, self.tbBuffList[nBuffId].nDeathTime, self.tbBuffList[nBuffId].nDistance)
+end
+
+function Obj:OnTrap(pPlayer, dwObjId, nType, nTemplateId)
+  self:OnTrapDirect(pPlayer, dwObjId, nType, nTemplateId)
+  DelObj(dwObjId)
+end
+
+function Obj:OnTrapDirect(pPlayer, dwObjId, nType, nTemplateId)
+  local tbBuff = self.tbBuffList[nTemplateId]
+  if not tbBuff then
+    LogErr("[Item.Obj] ERR ?? Unknow obj ", pPlayer.szName, dwObjId, nType, nTemplateId)
+    return
+  end
+  if nType == self.TYPE_BUFF then
+    local pNpc = pPlayer.GetNpc()
+    if pNpc then
+      pNpc.CastSkill(tbBuff.nSkillId, tbBuff.nSkillLevel, tbBuff.nParam1, tbBuff.nParam2)
+      Event:OnEvent(Event.emEVENT_PLAYER_TRAP_BUFF, pPlayer.dwID, dwObjId, nTemplateId, tbBuff.nSkillId, tbBuff.nSkillLevel)
+    end
+  elseif nType == self.TYPE_SKILL then
+    local pNpc = pPlayer.GetNpc()
+    if pNpc then
+      Event:OnEvent(Event.emEVENT_PLAYER_TRAP_SKILL, pPlayer.dwID, dwObjId, nTemplateId, tbBuff.nSkillId, tbBuff.nSkillLevel)
+      pNpc.AddSkill(tbBuff.nSkillId, tbBuff.nSkillLevel)
+    end
+  elseif nType == self.TYPE_DROP then
+    local pNpc = pPlayer.GetNpc()
+    if pNpc then
+      Event:OnEvent(Event.emEVENT_PLAYER_TRAP_DROP, pPlayer.dwID, dwObjId, nTemplateId)
+    end
+  else
+    LogErr("[Item.Obj] ERR ?? Unknow obj type ", pPlayer.szName, dwObjId, nType, nTemplateId)
+  end
+  self.tbObj2ProgList[dwObjId] = nil
+end

@@ -1,0 +1,128 @@
+function JianXiaCiDian:Choose(nChoiceIndex)
+  RemoteServer.JianXiaCiDian(self.nQuestionIdx, nChoiceIndex)
+end
+
+function JianXiaCiDian:SyncTaskInfo(nQuestionIdx, nAnsweredQustionNum, nCorrectNum)
+  JianXiaCiDian:SetTaskData({
+    nQuestionIdx = nQuestionIdx,
+    nAnsweredQustionNum = nAnsweredQustionNum,
+    nCorrectNum = nCorrectNum
+  })
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_JIANXIACIDIAN_DATA)
+end
+
+function JianXiaCiDian:Response(nQuestionIdx, nAnsweredQustionNum, nCorrectNum, nRightAnswerIndex)
+  self.nQuestionIdx = nQuestionIdx
+  self:SyncTaskInfo(nQuestionIdx, nAnsweredQustionNum, nCorrectNum)
+  if 0 == nRightAnswerIndex then
+    local tbCorretAward = table.unpack(Award:GetAward(self.nAwardId, self.nCorrectKey)) or {}
+    local tbWrongAward = table.unpack(Award:GetAward(self.nAwardId, self.nWrongKey)) or {}
+    local tbFinishAward = table.unpack(Award:GetAward(self.nAwardId, self.nFinishKey)) or {}
+    Ui:OpenWindow("UIActivityQuestion", {
+      nAnsweredQustionNum = nAnsweredQustionNum,
+      nTotalNum = JianXiaCiDian.nTotalQuestionNum,
+      nCorrectNum = nCorrectNum,
+      nTimeOutSec = JianXiaCiDian.nTimeOutSec
+    }, {
+      tbCorretAward,
+      tbWrongAward,
+      tbFinishAward
+    }, JianXiaCiDian.tbQuestions[self.nQuestionIdx], {
+      pCallBack = JianXiaCiDian.Choose,
+      tbParams = {
+        JianXiaCiDian
+      }
+    })
+  else
+    local tbWnd = Ui:GetWindow("UIActivityQuestion")
+    if tbWnd then
+      local tbQuestion = nAnsweredQustionNum < JianXiaCiDian.nTotalQuestionNum and JianXiaCiDian.tbQuestions[self.nQuestionIdx] or {}
+      tbWnd:ShowAnswer(nRightAnswerIndex, tbQuestion)
+    end
+  end
+end
+
+function JianXiaCiDian:SetTaskData(tbTaskData)
+  self.tbTaskData = tbTaskData
+end
+
+function JianXiaCiDian:IsTimeFrameOpen()
+  return true
+end
+
+function JianXiaCiDian:GetTitle()
+  return i18n.EasyGet("\229\137\145\228\190\160\232\190\158\229\133\184")
+end
+
+function JianXiaCiDian:GetTitleWithPrefix()
+  return i18n.EasyGet("[\229\184\184] \229\137\145\228\190\160\232\190\158\229\133\184")
+end
+
+function JianXiaCiDian:GetStepText()
+  if not self.tbTaskData then
+    return ""
+  end
+  local nCurNum = self.tbTaskData.nAnsweredQustionNum + 1
+  nCurNum = nCurNum > JianXiaCiDian.nTotalQuestionNum and JianXiaCiDian.nTotalQuestionNum or nCurNum
+  return string.format("(%s/%s)", nCurNum, JianXiaCiDian.nTotalQuestionNum)
+end
+
+function JianXiaCiDian:GetTarget()
+  if not self.tbTaskData then
+    return ""
+  end
+  local szTargetNpcName = Npc:GetNameByTemplateId(self.nTaskNpcTemplate)
+  return i18n.EasyGet("\229\137\141\229\190\128<color=#ffb431>{0}</color>\229\164\132\231\173\148\233\162\152", szTargetNpcName)
+end
+
+function JianXiaCiDian:IsDoingTask()
+  if self:CheckIsClose() then
+    return
+  end
+  if not self:IsTimeFrameOpen() then
+    return
+  end
+  if me.nLevel < JianXiaCiDian.nLevelLimit then
+    return
+  end
+  if not self.tbTaskData then
+    return false
+  end
+  if self.tbTaskData.nAnsweredQustionNum >= JianXiaCiDian.nTotalQuestionNum then
+    return false
+  end
+  return true
+end
+
+function JianXiaCiDian:DoAction_Client()
+  TeamMgr:StopFollowMember()
+  AFK:Stop()
+  local nPosX, nPosY, nWalkNearLength = Npc:GetNpcPos(self.nTaskNpcTemplate, self.nTaskNpcMapTemplate, true)
+  
+  local function fnCallback()
+    local function __timer_Callback()
+      local nNpcId = KNpc.GetNpcIdByTemplateId(self.nTaskNpcTemplate)
+      
+      if nNpcId then
+        Operation:SimpleTap(nNpcId)
+      end
+    end
+    
+    Timer:Register(5, __timer_Callback)
+  end
+  
+  AutoPath:GotoAndCallEx(self.nTaskNpcMapTemplate, nPosX, nPosY, fnCallback, nWalkNearLength, nil, self.nTaskNpcTemplate)
+end
+
+function JianXiaCiDian:GetShowTarget()
+  if not self.tbTaskData then
+    return {}
+  end
+  return {
+    {
+      "Exp",
+      0,
+      {bShowCount = true}
+    }
+  }
+end

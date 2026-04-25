@@ -1,0 +1,319 @@
+PreloadResource.nTotalNeedRes = PreloadResource.nTotalNeedRes or 0
+PreloadResource.nTotalCurLoad = PreloadResource.nTotalCurLoad or 0
+PreloadResource.tbAllLoadPreloadRes = PreloadResource.tbAllLoadPreloadRes or {}
+
+function PreloadResource:LoadSetting()
+  local tbFileData = Lib:LoadTabFile("Setting/PreloadMapRes.tab", {MapTID = 1})
+  self.tbMapPreloadSetting = {}
+  for _, tbData in pairs(tbFileData) do
+    self.tbMapPreloadSetting[tbData.MapTID] = self.tbMapPreloadSetting[tbData.MapTID] or {}
+    local tbMapPreload = self.tbMapPreloadSetting[tbData.MapTID]
+    tbMapPreload[tbData.ResPath] = tonumber(tbData.NeedInstantiate)
+  end
+  local tbFileData = Lib:LoadTabFile("Setting/PreloadMapNpc.tab", {
+    MapTID = 1,
+    NpcTID = 1,
+    NeedInstantiate = 1
+  })
+  self.tbMapNpcPreloadSetting = {}
+  for _, tbData in pairs(tbFileData) do
+    self.tbMapNpcPreloadSetting[tbData.MapTID] = self.tbMapNpcPreloadSetting[tbData.MapTID] or {}
+    local tbMapNpcPreload = self.tbMapNpcPreloadSetting[tbData.MapTID]
+    tbMapNpcPreload[tbData.NpcTID] = tbData.NeedInstantiate
+  end
+  self.tbMapPreloadSetting = SetReadOnly(self.tbMapPreloadSetting)
+  self.tbMapNpcPreloadSetting = SetReadOnly(self.tbMapNpcPreloadSetting)
+end
+
+PreloadResource:LoadSetting()
+
+function PreloadResource:GetMapPreload(nMapTId)
+  return self.tbMapPreloadSetting[nMapTId]
+end
+
+function PreloadResource:GetMapNpcPreload(nMapTId)
+  return self.tbMapNpcPreloadSetting[nMapTId]
+end
+
+function PreloadResource:OnFirstEnter()
+  if self.bFirstEnter then
+    return
+  end
+  self.bFirstEnter = true
+  local tbPreloadUI = Ui.UISetting:GetPreloadTable()
+  for _, szUiName in pairs(tbPreloadUI) do
+    if Ui:GetWindow(szUiName) == nil then
+      Ui:OpenWindowQuiet(szUiName)
+      Ui:CloseWindowQuiet(szUiName)
+    end
+  end
+end
+
+function PreloadResource:PreloadLoadMapSetting(nMapTId)
+  local tbMapRes = self:GetMapPreload(nMapTId)
+  if not tbMapRes then
+    return
+  end
+  for szRes, needInstantiate in pairs(tbMapRes) do
+    self:PushPreloadRes(szRes, needInstantiate)
+  end
+end
+
+function PreloadResource:PreloadLoadMapNpcSetting(nMapTId)
+  local tbMapNpc = self:GetMapNpcPreload(nMapTId)
+  if not tbMapNpc then
+    return
+  end
+  for nNpcTID, needInstantiate in pairs(tbMapNpc) do
+    self:PreloadNpc(nNpcTID)
+  end
+end
+
+PreloadResource.nPreloadFaction = PreloadResource.nPreloadFaction or -1
+
+function PreloadResource:PreloadMeFaction()
+  if not me then
+    return
+  end
+  local nFaction = me.nFaction
+  if self.nPreloadFaction == nFaction then
+    return
+  end
+  self.nPreloadMapTID = -1
+  local tbFactionSkill = FightSkill:GetFactionSkill(nFaction, me.nFactionSect)
+  if tbFactionSkill then
+    for _, tbSkillInfo in pairs(tbFactionSkill) do
+      self:PreloadSkill(tbSkillInfo.SkillId)
+    end
+  end
+  self.nPreloadMapTID = nil
+  self.nPreloadFaction = nFaction
+end
+
+function PreloadResource:OnChangeMap(nMapTId)
+  self.tbAllLoadPreloadRes = {}
+  self:OnFirstEnter()
+  self.tbAllLoadPreloadRes = {}
+end
+
+function PreloadResource:OnLogin()
+  self:PreloadRes(nMapTId, self.tbAllLoadPreloadRes)
+  self.tbAllLoadPreloadRes = {}
+end
+
+function PreloadResource:PushPreloadRes(szPath, needInstantiate)
+  if not szPath or Lib:IsEmptyStr(szPath) then
+    return
+  end
+  local nMapTId = 0
+  if self.nPreloadMapTID then
+    nMapTId = self.nPreloadMapTID
+  end
+  local needInst = true
+  if not needInstantiate then
+    needInst = false
+  else
+    local n = tonumber(needInstantiate)
+    if not n or 0 == n then
+      needInst = false
+    end
+  end
+  self.tbAllLoadPreloadRes[szPath] = {nMapTId = nMapTId, needInstantiate = needInst}
+end
+
+function PreloadResource:PushPreloadEffecRes(nEffectID, needInstantiate)
+  if not nEffectID or nEffectID <= 0 then
+    return
+  end
+  local szPath = Client.RepresentSetting.GetEffectRes(nEffectID)
+  PreloadResource:PushPreloadRes(szPath, needInstantiate)
+end
+
+function PreloadResource:PreloadRes(nMapTId, tbAllLoadRes)
+  self.nTotalNeedRes = Lib:CountTB(tbAllLoadRes)
+  self.nTotalCurLoad = 0
+  for szRes, tbInfo in pairs(tbAllLoadRes) do
+    local nPreloadMapTID = nMapTId
+    if 0 ~= tbInfo.nMapTId then
+      nPreloadMapTID = tbInfo.nMapTId
+    end
+    self:AddPreloadRes(nPreloadMapTID, szRes, tbInfo.needInstantiate)
+  end
+end
+
+function PreloadResource:PreloadFunben(nMapTId)
+  local tbFubenSetting = Fuben:GetFubenSettingByMapTID(tonumber(nMapTId))
+  if not tbFubenSetting then
+    return
+  end
+  if tbFubenSetting.NPC then
+    for _, tbNpcInfo in pairs(tbFubenSetting.NPC) do
+      local tbAllNpc = {}
+      if type(tbNpcInfo.nTemplate) == "number" then
+        table.insert(tbAllNpc, tbNpcInfo.nTemplate)
+      elseif Fuben.tbNpcTemplateIdx[tbNpcInfo.nTemplate] then
+        table.insert(tbAllNpc, Fuben.tbNpcTemplateIdx[tbNpcInfo.nTemplate][1])
+        table.insert(tbAllNpc, Fuben.tbNpcTemplateIdx[tbNpcInfo.nTemplate][2])
+      end
+      for _, nNpcTemplate in pairs(tbAllNpc or {}) do
+        self:PreloadNpc(nNpcTemplate)
+      end
+    end
+  end
+  if tbFubenSetting.LOCK then
+    for _, tbLockInfo in pairs(tbFubenSetting.LOCK) do
+      self:PreloadFubenLockEvent(tbLockInfo.tbStartEvent)
+      self:PreloadFubenLockEvent(tbLockInfo.tbUnLockEvent)
+    end
+  end
+  if tbFubenSetting.ANIMATION then
+    for _, szPath in pairs(tbFubenSetting.ANIMATION) do
+      self:PushPreloadRes(szPath)
+    end
+  end
+  return tbPreloadRes
+end
+
+function PreloadResource:PreloadOtherMap(nMapTId)
+end
+
+function PreloadResource:PreloadFubenLockEvent(tbLockEvent)
+  if not tbLockEvent then
+    return
+  end
+  for _, tbEvent in pairs(tbLockEvent) do
+    if "PlayEffect" == tbEvent[1] or "PlayCameraEffect" == tbEvent[1] then
+      self:PushPreloadEffecRes(tbEvent[2])
+    end
+    if "RaiseEvent" == tbEvent[1] and "AddNpcWithAward" == tbEvent[2] then
+      self:PushPreloadEffecRes(tbEvent[11])
+    end
+    if "PlayFactionEffect" == tbEvent[1] and tbEvent[2] then
+      for _, nResID in pairs(tbEvent[2]) do
+        self:PushPreloadEffecRes(nResID)
+      end
+    end
+  end
+end
+
+function PreloadResource:PreloadNpc(nNpcTID)
+  local tbNpcTemplate = KNpc.GetNpcTemplateInfo(nNpcTID)
+  if not tbNpcTemplate then
+    return
+  end
+  if tbNpcTemplate.nNpcResID > 0 then
+    local NpcTemplateRes = Client.RepresentSetting.GetNpcRes(tbNpcTemplate.nNpcResID)
+    if NpcTemplateRes then
+      self:PushPreloadRes(NpcTemplateRes.m_szResFile)
+    end
+  end
+  for _, nSkillId in pairs(tbNpcTemplate.tbNormallSkill) do
+    self:PreloadSkill(nSkillId)
+  end
+  local tbAI = tbNpcTemplate.tbAi
+  if tbAI and tbAI.tbSkill then
+    for _, nSkillId in pairs(tbAI.tbSkill) do
+      self:PreloadSkill(nSkillId)
+    end
+  end
+end
+
+function PreloadResource:PreloadSkill(nSkillId, bSubSkill)
+  if nSkillId <= 0 then
+    return
+  end
+  local tbSkillInfo = FightSkill:GetSkillSetting(nSkillId)
+  if not tbSkillInfo then
+    return
+  end
+  if not bSubSkill then
+    local nActEvent = tbSkillInfo.ActionEventID
+    if nActEvent > 0 then
+      self:PreloadActEvent(nActEvent)
+    end
+  end
+  if tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_inst_missile or tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_missile then
+    local nMissileTID = tbSkillInfo.ChildID
+    if nMissileTID > 0 then
+      local tbMissile = KFightSkill.GetMissileTemplateInfo(nMissileTID)
+      if tbMissile then
+        self:PushPreloadEffecRes(tbMissile.nMissileResID)
+        self:PushPreloadEffecRes(tbMissile.nEnemyResID)
+        self:PushPreloadEffecRes(tbMissile.nCollResID)
+      end
+      local nMissileEffectId = KFightSkill.GetMissileEffectId(nMissileTID)
+      if nMissileEffectId > 0 then
+        self:PushPreloadEffecRes(nMissileEffectId)
+      end
+    end
+  end
+  self:PushPreloadEffecRes(tbSkillInfo.CastEffectRestId)
+  PreloadResource:PreloadSkill(tbSkillInfo.StartSkillID, true)
+  PreloadResource:PreloadSkill(tbSkillInfo.FlySkillID, true)
+  PreloadResource:PreloadSkill(tbSkillInfo.HitSkillID, true)
+end
+
+function PreloadResource:PreloadActEvent(nActEvent)
+  local tbActEvent = KNpc.GetNpcActionEvent(nActEvent)
+  if not tbActEvent then
+    return
+  end
+  self:PreloadActEvetList(tbActEvent.tbStartEvent)
+  self:PreloadActEvetList(tbActEvent.tbEndEvent)
+  for _, tbEventList in pairs(tbActEvent.tbFrameEvent) do
+    self:PreloadActEvetList(tbEventList)
+  end
+end
+
+function PreloadResource:PreloadActEvetList(tbEventList)
+  if not tbEventList then
+    return
+  end
+  for _, tbInfo in pairs(tbEventList) do
+    if tbInfo.nEventName == Npc.ActEventNameType.act_cast_skill then
+      if tbInfo.tbEventParam[1] > 0 then
+        self:PreloadSkill(tbInfo.tbEventParam[1], true)
+      end
+    elseif tbInfo.nEventName == Npc.ActEventNameType.act_play_effect or tbInfo.nEventName == Npc.ActEventNameType.act_play_scene_effect then
+      self:PushPreloadEffecRes(tbInfo.tbEventParam[1])
+    end
+  end
+end
+
+function PreloadResource:AddPreloadResByNpcId(nNpcId, nMapTId, needInstantiate)
+  local tbNpcTemplate = KNpc.GetNpcTemplateInfo(nNpcId)
+  if not tbNpcTemplate then
+    return
+  end
+  if tbNpcTemplate.nNpcResID and tbNpcTemplate.nNpcResID > 0 then
+    local NpcTemplateRes = Client.RepresentSetting.GetNpcRes(tbNpcTemplate.nNpcResID)
+    if NpcTemplateRes then
+      Client.RepresentModule.AddPreloadRes(nMapTId, NpcTemplateRes.m_szResFile, needInstantiate)
+    end
+  end
+end
+
+function PreloadResource:AddPreloadRes(nMapTId, szResPath, needInstantiate)
+  Client.RepresentModule.AddPreloadRes(nMapTId, szResPath, needInstantiate)
+end
+
+function PreloadResource:AddPreloadEffectRes(nMapTId, nEffectID, needInstantiate)
+  Client.RepresentModule.AddPreloadEffectRes(nMapTId, nEffectID, needInstantiate)
+end
+
+function PreloadResource:OnLoadResFinish(nMapTId, szResPath)
+  self.nTotalCurLoad = self.nTotalCurLoad + 1
+  if self.nTotalCurLoad == self.nTotalNeedRes then
+    self:OnFinishAllResLoad()
+  end
+end
+
+function PreloadResource:GetLoadPercent()
+  if self.nTotalNeedRes <= 0 then
+    return 1.0
+  end
+  return self.nTotalCurLoad / self.nTotalNeedRes
+end
+
+function PreloadResource:OnFinishAllResLoad()
+end

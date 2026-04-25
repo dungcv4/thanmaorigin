@@ -1,0 +1,491 @@
+Require("Script/EventSystem/EventNotify.lua")
+Login.szSceneMapName = "loginbg"
+Login.szSceneCameraName = "Main Camera"
+Login.LOGIN_TYPE = {
+  JinShan = 1,
+  VNG = 2,
+  Account = 3,
+  Guest = 4
+}
+Login.ServerName = ""
+Login.SERVER_TYPE_NORMAL = 0
+Login.SERVER_TYPE_OFFLINE = 1
+Login.SERVER_TYPE_RECOMMEND = 2
+Login.SERVER_TYPE_NEW = 3
+Login.SERVER_TYPE_FULL = 4
+Login.CreateRoleRespose = {
+  eCreatePlayerNameAlreadyExist = 1,
+  eCreatePlayerInvalidRoleName = 2,
+  eCreatePlayerNameTooLong = 3,
+  eCreatePlayerNameTooShort = 4,
+  eCreatePlayerOverload = 5,
+  eCreatePlayerUnableToCreate = 6,
+  eCreatePlayerTurnOff = 7,
+  eFactionNotOpen = 8,
+  eCreatePlayerOverMuch = 9,
+  eCreatePlayerAccReplace = 10
+}
+Login.nLastConnectGatewayIndex = 0
+Login.nConnectGatewayTryCounter = 0
+
+function Login:SetLoginType(nType)
+  self.nLoginType = nType
+end
+
+function Login:GetLoginType()
+  return self.nLoginType
+end
+
+function Login:IsSdkLogin()
+  return self.nLoginType ~= Login.LOGIN_TYPE.Account
+end
+
+function Login:CheckGPU()
+  local MaterialGearRenderBackEnd = CS.Reaktion.MaterialGearRenderBackEnd
+  local SystemInfo = CS.UnityEngine.SystemInfo
+  local DeviceType = CS.UnityEngine.DeviceType
+  local supportSM3 = MaterialGearRenderBackEnd.supportSM3
+  local deviceType = SystemInfo.deviceType == DeviceType.Handheld
+  local isEm = not SystemInfo.supportsGyroscope and not SystemInfo.supportsVibration
+  return supportSM3, isEm
+end
+
+function Login:OpenLoginScene(bShowLoading)
+  Ui:PreloadWindows()
+  self.CurrentSelectZoneID = Ui.PlayerPrefs.GetInt("LastZoneID", 1)
+  local tbZoneList = Login:GetZoneList()
+  if self.CurrentSelectZoneID > #tbZoneList then
+    Ui.PlayerPrefs.SetInt("LastZoneID", 1)
+    self.CurrentSelectZoneID = 1
+  end
+  self.tbSelRoleInfo = {}
+  self.bMapLoaded = false
+  self.bRoleListDone = false
+  self:_OpenLoginScene_Real()
+end
+
+function Login:_OpenLoginScene_Real()
+  if 0 == Client.SceneModule.s_nMapTemplateID then
+    self:BackToRoleList(true)
+    self:OnMapLoaded()
+  else
+    Ui.ToolFunction.LoadMap(self.szSceneMapName, 0)
+    PreloadResource:OnLogin()
+  end
+end
+
+function Login:OnSyncRoleListDone()
+  Log(">>> role list done !!")
+  print("Login:OnSyncRoleListDone()")
+  self.bRoleListDone = true
+  local tbRole = GetRoleList()
+  self.tbSelRoleInfo = tbRole
+  local tbReportRoleList = {}
+  for i, v in ipairs(tbRole) do
+    table.insert(tbReportRoleList, {
+      role_id = v.nRoleID,
+      role_name = v.szName
+    })
+  end
+  self:SelRoleInfoSort()
+  self.szReportRoleList = Lib:EncodeJson(tbReportRoleList)
+  self:OnRoleListDoneAndMapLoaded()
+end
+
+function Login:SelRoleInfoSort()
+  local function sortFun(a, b)
+    local nAZongShiLevel = a.nZongShiLevel or 0
+    
+    local nBZoneShieLevel = b.nZongShiLevel or 0
+    if nAZongShiLevel ~= nBZoneShieLevel then
+      return nAZongShiLevel > nBZoneShieLevel
+    end
+    return a.nLevel > b.nLevel
+  end
+  
+  table.sort(self.tbSelRoleInfo, sortFun)
+end
+
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ROLE_LIST_DONE, Login.OnSyncRoleListDone, Login)
+
+function Login:OnRoleListDoneAndMapLoaded()
+  if not self.bMapLoaded or not self.bRoleListDone then
+    return
+  end
+  local nCurTime = GetTime()
+  self.bMapLoaded = nil
+  self.bRoleListDone = nil
+  Ui:DestroyWindow("UILoginServer")
+  Ui:CloseWindow("UIQueueNotice")
+  if #self.tbSelRoleInfo > 0 then
+    Ui:OpenWindow("UISelectRoleExist", self.tbSelRoleInfo)
+  else
+    Ui:OpenWindow("UICreateRole", nil)
+  end
+end
+
+function Login:OnMapLoaded()
+  if not Ui:WindowVisible("UILoginBG") then
+    Ui:OpenWindow("UILoginBG")
+    Ui:OpenWindow("UITopEffect")
+  end
+  if EDITOR then
+    Ui:OpenWindow("UIGMICON")
+  end
+  self.bMapLoaded = true
+  if Ui.GameEnv.EnableSDK then
+    Ui:OpenWindow("UILoginChannelSDK")
+  else
+    Ui:OpenWindow("UILoginChannelInner")
+  end
+  self:OnRoleListDoneAndMapLoaded()
+end
+
+function Login:BackToRoleList(bHideWindow)
+  if not bHideWindow then
+    Ui:DestroyWindow("UIMapLoading")
+    Ui:ReturnToLogin()
+  end
+end
+
+local tbFileList = {
+  default = {
+    "Setting/RandomName/Xing.tab",
+    "Setting/RandomName/Ming.tab",
+    "Setting/RandomName/Female.tab"
+  }
+}
+
+function Login:Init()
+  self:LoadRandomName()
+  if not self.tbRandomName1 or not self.tbRandomName2 then
+    Log("error Login:Init , load RandomName ")
+  end
+  Login.tbAccSerInfo = {}
+end
+
+function Login:LoadRandomName()
+  local code = i18n.CurrentLanguageCode()
+  local tbFiles = tbFileList[code] or tbFileList.default
+  self.tbRandomName1 = Lib:LoadTabFileEx(tbFiles[1], "s", nil, {"Name"}, 0)
+  self.tbRandomName2 = Lib:LoadTabFileEx(tbFiles[2], "s", nil, {"Name"}, 0)
+  self.tbRandomName3 = Lib:LoadTabFileEx(tbFiles[3], "s", nil, {"Name"}, 0)
+end
+
+if not Login.tbRandomName1 then
+  Login:Init()
+end
+if Lib:GetTableLength(tbFileList) > 1 then
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_LOCALIZE_CHANGE, Login.LoadRandomName, Login)
+end
+
+function Login:GetRandomName(nSex)
+  local nPreIndx = MathRandom(#self.tbRandomName1)
+  local tbRandomMing = self.tbRandomName2
+  if nSex and 1 == nSex then
+    tbRandomMing = self.tbRandomName3
+  end
+  local nSuffiIndx = MathRandom(#tbRandomMing)
+  local szName = tbRandomMing[nSuffiIndx].Name
+  szName = self.tbRandomName1[nPreIndx].Name .. tbRandomMing[nSuffiIndx].Name
+  return szName
+end
+
+function Login:CheckNameinValid(szName)
+  if not szName or "" == szName then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\232\175\183\232\190\147\229\133\165\230\130\168\231\154\132\232\167\146\232\137\178\229\144\141"))
+    return
+  end
+  local bOk, nLen4TipMin, nLen4TipMax = Lib:CheckLength(szName, i18n.CurrentLanguageCode(), Player.PLAYER_NAME_MIN_LENGTH, Player.PLAYER_NAME_MAX_LENGTH)
+  if not bOk then
+    local szMsg = i18n.EasyGet("\229\144\141\229\173\151\233\149\191\229\186\166\233\156\128\232\166\129\229\156\168{0}~{1}\228\184\170\229\173\151\229\134\133", nLen4TipMin, nLen4TipMax)
+    Ui:OpenWindow("UIMessageBox", szMsg)
+    return
+  end
+  if not CheckNameAvailable(szName) then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\173\164\229\144\141\229\173\151\228\184\141\229\143\175\229\136\155\229\187\186"))
+    return
+  end
+  if tonumber(szName) ~= nil then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\144\141\229\173\151\228\184\141\232\131\189\228\189\191\231\148\168\231\186\175\230\149\176\229\173\151"))
+    return
+  end
+  return true
+end
+
+function Login:OnSynAccSerInfo(...)
+  local tbData = {}
+  for i, v in ipairs({
+    ...
+  }) do
+    local nLevel = tbData[v[1]]
+    if not nLevel or nLevel < v[2] then
+      tbData[v[1]] = v[2]
+    end
+  end
+  Login.tbAccSerInfo[GetAccountName()] = tbData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_ACC_SER_INFO)
+end
+
+function Login:GetAccSerInfo()
+  return Login.tbAccSerInfo[GetAccountName()] or {}
+end
+
+function Login:OnCreateRoleRespond(nCode, nRoleID)
+  local tbMsg = {
+    i18n.EasyGet("\229\144\141\229\173\151\229\183\178\232\162\171\229\141\160\231\148\168\239\188\129"),
+    i18n.EasyGet("\229\140\133\229\144\171\230\173\164\229\144\141\229\173\151\228\184\141\229\143\175\229\136\155\229\187\186\239\188\140\232\175\183\233\135\141\230\150\176\232\190\147\229\133\165"),
+    i18n.EasyGet("\232\167\146\232\137\178\229\144\141\229\191\133\233\161\187\230\152\1752-7\228\184\170\229\173\151\239\188\140\232\175\183\233\135\141\230\150\176\232\190\147\229\133\165"),
+    i18n.EasyGet("\232\167\146\232\137\178\229\144\141\229\191\133\233\161\187\230\152\1752-7\228\184\170\229\173\151\239\188\140\232\175\183\233\135\141\230\150\176\232\190\147\229\133\165"),
+    i18n.EasyGet("\230\156\141\229\138\161\229\153\168\228\186\186\230\149\176\232\191\135\229\164\154\239\188\140\230\151\160\230\179\149\229\136\155\229\187\186\230\150\176\232\167\146\232\137\178"),
+    i18n.EasyGet("\230\151\160\230\179\149\229\136\155\229\187\186\232\167\146\232\137\178"),
+    i18n.EasyGet("\230\156\141\229\138\161\229\153\168\229\133\179\233\151\173\229\136\155\229\187\186\232\167\146\232\137\178\229\138\159\232\131\189"),
+    i18n.EasyGet("\229\189\147\229\137\141\233\151\168\230\180\190\230\156\170\229\188\128\230\148\190\239\188\140\230\149\172\232\175\183\230\156\159\229\190\133"),
+    i18n.EasyGet("\232\167\146\232\137\178\230\149\176\233\135\143\232\191\135\229\164\154"),
+    i18n.EasyGet("\230\130\168\229\183\178\229\156\168\229\136\171\229\164\132\231\153\187\229\189\149")
+  }
+  if 0 ~= nCode then
+    if nCode == Login.CreateRoleRespose.eCreatePlayerAccReplace then
+      Ui:ShowDXCLBox(tbMsg[nCode] or i18n.EasyGet("\230\156\170\231\159\165\233\148\153\232\175\175\239\188\129\229\136\155\229\187\186\232\167\146\232\137\178\229\164\177\232\180\165\239\188\129"))
+    else
+      Ui:OpenWindow("UIMessageBox", tbMsg[nCode] or i18n.EasyGet("\230\156\170\231\159\165\233\148\153\232\175\175\239\188\129\229\136\155\229\187\186\232\167\146\232\137\178\229\164\177\232\180\165\239\188\129"), {
+        {}
+      }, {
+        i18n.szOk
+      })
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CREATE_ROLE_RESPOND, nCode, nRoleID)
+  Log("OnCreateRoleRespond", nCode, nRoleID)
+end
+
+function Login:AllowLogin()
+  if IOS then
+    return true
+  end
+  local nNextLoginTime = LocalData:GetGlobalNumber("NextLoginTime", 0)
+  local nLeftWaitingTime = nNextLoginTime - os.time()
+  
+  local function fnWait()
+  end
+  
+  local function fnTimeUp()
+    Ui:CloseWindow("UIMessageBox")
+  end
+  
+  if nLeftWaitingTime > 0 then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\231\148\177\228\186\142\232\191\158\231\187\173\231\153\187\229\189\149\229\164\177\232\180\165\229\164\154\230\172\161\n\232\175\183\228\186\142<color=#ffff00>%d</color>\231\167\146\229\144\142\232\191\155\232\161\140\229\176\157\232\175\149"), {
+      {fnWait},
+      nil,
+      {fnTimeUp}
+    }, {
+      i18n.szOk
+    }, nil, nLeftWaitingTime)
+  end
+  return nLeftWaitingTime <= 0
+end
+
+function Login:SetNextLoginTime()
+  local nFailCount = LocalData:GetGlobalNumber("LoginFailCount", 0)
+  nFailCount = nFailCount + 1
+  LocalData:SetGlobalNumber("LoginFailCount", nFailCount)
+  local nNextLoginTime = os.time()
+  if nFailCount >= 6 then
+    nNextLoginTime = nNextLoginTime + 300
+  elseif nFailCount >= 3 then
+    nNextLoginTime = nNextLoginTime + 10
+  end
+  LocalData:SetGlobalNumber("NextLoginTime", nNextLoginTime)
+end
+
+function Login:ResetNextLoginTime()
+  LocalData:SetGlobalNumber("NextLoginTime", 0)
+  LocalData:SetGlobalNumber("LoginFailCount", 0)
+end
+
+function Login:ResetTryConnectGatewayCounter()
+  self.nConnectGatewayTryCounter = 0
+end
+
+function Login:RandomLastConnectGatewayIndex()
+  local tbList = self:GetZoneList()
+  local szAddrs = tbList[self.CurrentSelectZoneID].Addrs
+  local tbAddrs = Lib:SplitStr(szAddrs)
+  local nTbLen = #tbAddrs
+  if nTbLen <= 0 then
+    return false
+  end
+  self.nLastConnectGatewayIndex = math.random(1, nTbLen)
+end
+
+function Login:IsNeedRetryConnectGateway()
+  local tbList = self:GetZoneList()
+  local szAddrs = tbList[self.CurrentSelectZoneID].Addrs
+  local tbAddrs = Lib:SplitStr(szAddrs)
+  local nTbLen = #tbAddrs
+  if nTbLen <= 0 then
+    return false
+  end
+  return self.nConnectGatewayTryCounter <= 2 * nTbLen
+end
+
+function Login:GetGatewayAddr()
+  self.nLastConnectGatewayIndex = self.nLastConnectGatewayIndex + 1
+  local tbList = self:GetZoneList()
+  local szAddrs = tbList[self.CurrentSelectZoneID].Addrs
+  local tbAddrs = Lib:SplitStr(szAddrs)
+  local nTbLen = #tbAddrs
+  if nTbLen <= 0 then
+    LogErr(string.format("Login:GetGatewayAddr nTbLen <= 0!  self.CurrentSelectZoneID:%d, szAddrs:%s", self.CurrentSelectZoneID, szAddrs))
+    return
+  end
+  if nTbLen < self.nLastConnectGatewayIndex then
+    self.nLastConnectGatewayIndex = 1
+  end
+  local szGatewayAddr = tbAddrs[self.nLastConnectGatewayIndex]
+  local tbGatewayAddr = Lib:SplitStr(szGatewayAddr, ":")
+  local nTbLen = #tbGatewayAddr
+  if 2 ~= nTbLen then
+    LogErr(string.format("Login:GetGatewayAddr nTbLen ~= 2!  self.CurrentSelectZoneID:%d, szAddrs:%s, self.nLastConnectGatewayIndex:%d, szGatewayAddr:%s", self.CurrentSelectZoneID, szAddrs, self.nLastConnectGatewayIndex, szGatewayAddr))
+    return
+  end
+  local szGatewayIP = tbGatewayAddr[1]
+  local nGatewayPort = tonumber(tbGatewayAddr[2])
+  return szGatewayIP, nGatewayPort
+end
+
+function Login:RetryOtherGateWayAddr()
+  self:ConnectGateWay(self.szAccount, self.szAuthInfo)
+end
+
+function Login:ConnectGateWay(szAccount, szAuthInfo)
+  local nTestCounter = 0
+  local szGatewayIP, nGatewayPort = self:GetGatewayAddr()
+  while not (szGatewayIP and nGatewayPort) or "" == szGatewayIP or nGatewayPort <= 0 do
+    szGatewayIP, nGatewayPort = self:GetGatewayAddr()
+    nTestCounter = nTestCounter + 1
+    if nTestCounter >= 100 then
+      break
+    end
+  end
+  Log("ConnectGateWay", szGatewayIP, nGatewayPort, szAccount)
+  self.nConnectGatewayTryCounter = self.nConnectGatewayTryCounter + 1
+  self.szAccount = szAccount
+  self.szAuthInfo = szAuthInfo
+  ConnectGateway(szGatewayIP, nGatewayPort, szAccount, szAuthInfo)
+  Ui:OpenWindow("UILoadingTips", i18n.Get("Connecting2Server"))
+end
+
+function Login:GetPhoneBasicInfo()
+  local szModel = Client.QualityModule.DeviceModel or ""
+  local nGameVersion = GAME_VERSION
+  local szUnityDeviceId = Client.QualityModule.UniqueIdentifier or ""
+  local szMacAddr = Client.QualityModule.MacAddress or ""
+  local nLoginChannelId = 0
+  if Ui.GameEnv.EnableSDK then
+    nLoginChannelId = Sdk.tbChannelStr2ID[Client.ChannelModule._ChannelID]
+  end
+  szModel = tostring(szModel) or "unkown"
+  local nMaxLength = 31
+  if nMaxLength < string.len(szModel) then
+    szModel = string.sub(szModel, 1, nMaxLength)
+  end
+  return szMacAddr, szUnityDeviceId, szModel, nLoginChannelId, nGameVersion
+end
+
+function Login:GetIDFA()
+  if IOS then
+    return GetAppleIdfa() or ""
+  end
+  return ""
+end
+
+function Login:IsAutoLogin()
+  return not self.bIgnoreAutoLogin
+end
+
+function Login:SetAutoLogin(bAuto)
+  self.bIgnoreAutoLogin = not bAuto
+end
+
+function Login:LoginServerRsp(szAddr, nPort)
+  Log("Login:LoginServerRsp", szAddr, nPort)
+  ConnectWorldServer(szAddr, nPort)
+  SetWorldServerConnectTimeout(100)
+end
+
+function Login:OnNotifyForbidReg(szErrMsg, bCloseGateWayConnect)
+  if 1 == bCloseGateWayConnect then
+    CloseGateWayConnect()
+  else
+    EventNotify.OnNotify(EventNotify.emNoTIFY_LOGINTIME_CLOSE)
+  end
+  Ui:CloseWindow("UILoadingTips")
+  Ui:CloseWindow("UIMessageBox")
+  Ui:OpenWindow("UIMessageBox", szErrMsg)
+end
+
+function Login:GetVersionDesc(nVersion)
+  nVersion = nVersion or GAME_VERSION
+  local nMajor = math.floor(nVersion / 2.68435456E8)
+  local nMinor = math.floor(nVersion % 2.68435456E8 / 4194304.0)
+  local nPatch = math.floor(nVersion % 4194304.0 / 65536.0)
+  local nBuild = nVersion % 65536.0
+  local szDesc = string.format("%d.%d.%d.%d", nMajor, nMinor, nPatch, nBuild)
+  return szDesc
+end
+
+function Login:InitAndConnectGateWay(szAccount, szAuthInfo)
+  Log("Login:InitAndConnectGateWay " .. szAuthInfo)
+  Login.CurrentSelectZoneID = 1
+  Login:ResetTryConnectGatewayCounter()
+  Login:RandomLastConnectGatewayIndex()
+  Login:ConnectGateWay(szAccount, szAuthInfo)
+end
+
+function Login:GetAgreementAccountKey()
+  local szAccount = GetAccountName()
+  return string.format("ShowAgreement_%s", szAccount or "")
+end
+
+function Login:IsShowAgreementRequired()
+  return 1 == self.nShowAgreement
+end
+
+function Login:UpdateAgreementSyncStatus(bStatus)
+  self.bAgreementSyncStatus = self.bAgreementSyncStatus or bStatus
+end
+
+function Login:NeedSyncAgreement()
+  return self.bAgreementSyncStatus
+end
+
+function Login:GetOpenAgreement()
+  local szKey = Login:GetAgreementAccountKey()
+  local nOpenAgreement = Ui.PlayerPrefs.GetInt(szKey, 0)
+  if self.bLastOpenAgreement == nil then
+    self.bLastOpenAgreement = 1 == nOpenAgreement
+  end
+  return nOpenAgreement
+end
+
+function Login:RecordAgreementLog()
+  Log("Login:RecordAgreementLog", Login:NeedSyncAgreement())
+  if self:NeedSyncAgreement() then
+    RemoteServer.RequestAgreement()
+    self.bLastOpenAgreement = true
+    self.bAgreementSyncStatus = false
+  end
+end
+
+function Login:GetPrefix(nServerId)
+  local szPrefix = ""
+  if not (SelectServerPrefix and SelectServerPrefix.PREFIX and SelectServerPrefix.CONSTANTS) or not SelectServerPrefix.CONSTANTS.PREFIX_COUNT then
+    return szPrefix
+  end
+  local nServerIdPrefix = tonumber(string.sub(tostring(nServerId), 1, SelectServerPrefix.CONSTANTS.PREFIX_COUNT))
+  if SelectServerPrefix.PREFIX[nServerIdPrefix] then
+    szPrefix = i18n.Get(SelectServerPrefix.PREFIX[nServerIdPrefix])
+  end
+  return szPrefix
+end

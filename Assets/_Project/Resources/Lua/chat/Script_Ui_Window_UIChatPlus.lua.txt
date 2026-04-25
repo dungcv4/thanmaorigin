@@ -1,0 +1,129 @@
+local tbWnd = Ui:CreateWindow("UIChatPlus")
+tbWnd.tbControls = {
+  closeBG = "imgBG/closeBG",
+  toggleEmoji = "imgBG/Tabs/Viewport/Grid/toggleEmoji",
+  toggleHistory = "imgBG/Tabs/Viewport/Grid/toggleHistory",
+  toggleEmoticon = "imgBG/Tabs/Viewport/Grid/togglePosition",
+  EmojiTemplate = "imgBG/EmojiPanel/Viewport/Grid/Item",
+  HistoryTemplate = "imgBG/InputHistoryPanel/Viewport/Grid/Item",
+  EmoticonTemplate = "imgBG/EmoticonPanel/Viewport/Grid/Item",
+  EmojiPanel = "imgBG/EmojiPanel",
+  HistoryPanel = "imgBG/InputHistoryPanel",
+  EmoticonPanel = "imgBG/EmoticonPanel"
+}
+tbWnd.tbOnClick = {
+  closeBG = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_LEAVE,
+      self.Close
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.tbTab2Panel = {
+    Emoji = self.EmojiPanel,
+    History = self.HistoryPanel,
+    Emoticon = self.EmoticonPanel
+  }
+  for szKey, _ in pairs(self.tbTab2Panel) do
+    Ui:Toggle_BindEvent(self.pPanel, self["toggle" .. szKey], function(self, isOn)
+      if isOn then
+        self:SwitchPanel(szKey)
+      end
+    end, self)
+  end
+  self.tbEmojiScroll = Ui:NewScrollView(self, self.EmojiTemplate, function(self, nIndex, tbElement)
+    if self.InputCallback then
+      self.InputCallback(self.szCurTab, tbElement.id)
+    end
+  end, true, true)
+  self.tbHistoryScroll = Ui:NewScrollView(self, self.HistoryTemplate, function(self, nIndex, tbElement)
+    if self.InputCallback then
+      self.InputCallback(self.szCurTab, tbElement.szContent, tbElement.tbChatLink)
+    end
+  end)
+  self.tbEmoticonScroll = Ui:NewScrollView(self, self.EmoticonTemplate, function(self, nIndex, tbElement)
+    if self.InputCallback then
+      self.InputCallback(self.szCurTab, tbElement.szContent)
+    end
+  end)
+end
+
+function tbWnd:OnOpen(InputCallback, szTab)
+  self.InputCallback = InputCallback
+  self.szCurTab = szTab or "Emoji"
+end
+
+function tbWnd:OnOpenEnd()
+  self.pPanel:Toggle_SetChecked(self["toggle" .. self.szCurTab], true)
+end
+
+function tbWnd:SwitchPanel(szTab)
+  local tbPanel = self.tbTab2Panel[szTab]
+  if tbPanel then
+    if self.pCurPanel then
+      self.pPanel:SetActive(self.pCurPanel, false)
+    end
+    self.pPanel:SetActive(tbPanel, true)
+    self.pCurPanel = tbPanel
+  end
+  self.szCurTab = szTab
+  self[self.szCurTab .. "PanelUpdate"](self)
+end
+
+function tbWnd:EmojiPanelUpdate()
+  self.tbEmojiScroll:Reset()
+  local nIndex = 1
+  local emojiConfig = CS.EmojiText:GetConfig()
+  local iter = emojiConfig:GetEnumerator()
+  while iter:MoveNext() do
+    if iter.Current.Key ~= "#v7u2ic5e" then
+      self.tbEmojiScroll:SetElement(nIndex, function(tbElement)
+        tbElement.id = iter.Current.Key
+        tbElement.pPanel:Label_SetText("Emoji", tbElement.id)
+      end)
+      nIndex = nIndex + 1
+    end
+  end
+end
+
+function tbWnd:HistoryPanelUpdate()
+  self.tbHistoryScroll:Reset()
+  local tbItems = ChatMgr:GetRecentMsgs()
+  local tbShowItems = {}
+  for _, v in pairs(tbItems) do
+    if not string.match(v[1], "%<.+%>") then
+      table.insert(tbShowItems, v)
+    elseif v[2] and v[2].nLinkType == ChatMgr.LinkType.Team then
+      table.insert(tbShowItems, v)
+    end
+  end
+  local szMsg
+  for i = 1, #tbShowItems do
+    self.tbHistoryScroll:SetElement(i, function(tbElement)
+      szMsg = tbShowItems[i][1]
+      szMsg = ChatMgr:CutMsg(szMsg, 11)
+      tbElement.pPanel:Label_SetText("txtContent", szMsg)
+      tbElement.szContent = tbShowItems[i][1]
+      tbElement.tbChatLink = tbShowItems[i][2]
+    end)
+  end
+end
+
+function tbWnd:EmoticonPanelUpdate()
+  self.tbEmoticonScroll:Reset()
+  for nIndex, tbInfo in ipairs(ChatMgr.Emoticon) do
+    self.tbEmoticonScroll:SetElement(nIndex, function(tbElement)
+      tbElement.pPanel:Label_SetText("txtContent", i18n.Get(tbInfo.Tips))
+      tbElement.szContent = i18n.Get(tbInfo.Detail, me.szName)
+    end)
+  end
+end

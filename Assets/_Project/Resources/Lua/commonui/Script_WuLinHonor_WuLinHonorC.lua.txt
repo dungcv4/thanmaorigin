@@ -1,0 +1,314 @@
+Require("CommonScript/WuLinHonor/WuLinHonorCommon.lua")
+WuLinHonor.RedPointList = {
+  [WuLinHonor.tbActivityGroup.SongJingBattle] = RedPointMgr.EVENT.WuLinHonorSongJing,
+  [WuLinHonor.tbActivityGroup.Arena] = RedPointMgr.EVENT.WuLinHonorArena,
+  [WuLinHonor.tbActivityGroup.FactionBattle] = RedPointMgr.EVENT.WuLinHonorFactionBattle,
+  [WuLinHonor.tbActivityGroup.ZhaiXingLou] = RedPointMgr.EVENT.WuLinHonorZhaiXingLou,
+  [WuLinHonor.tbActivityGroup.HanWuYiJi] = RedPointMgr.EVENT.WuLinHonorHanWuYiJi,
+  [WuLinHonor.tbActivityGroup.MultiPvP] = RedPointMgr.EVENT.WuLinHonorMultiPvP
+}
+
+function WuLinHonor:OnLogin()
+  self:InitRankInfo()
+  self:GetRankData()
+  self:CheckRedPoint()
+end
+
+function WuLinHonor:InitRankInfo()
+  self.tbRankDataCache = nil
+  self.nNowSeasonMonth = self:GetNowSeasonMonth()
+  self.nVersion = 0
+end
+
+function WuLinHonor:GetRankData(bOnSync)
+  if self.nNowSeasonMonth ~= self:GetNowSeasonMonth() then
+    self:InitRankInfo()
+  end
+  if not bOnSync then
+    self:C2SRequestRankData()
+  end
+  return self.tbRankDataCache
+end
+
+function WuLinHonor:C2SRequestRankData()
+  if self.nRequestTimer then
+    Timer:Close(self.nRequestTimer)
+    self.nRequestTimer = nil
+  end
+  
+  local function fnCall()
+    self.nRequestTimer = nil
+    RemoteServer.RequestWuLinHonor(self.Protocol.RequestRankData, self.nVersion)
+  end
+  
+  self.nRequestTimer = Timer:Register(Env.GAME_FPS * 1, fnCall)
+end
+
+function WuLinHonor:OnS2CSyncRankData(nDataSeasonMonth, tbData, nVersion)
+  if self.nNowSeasonMonth ~= self:GetNowSeasonMonth() then
+    self:InitRankInfo()
+  end
+  if self.nNowSeasonMonth == nDataSeasonMonth then
+    self.tbRankDataCache = tbData
+    self.nVersion = nVersion
+    EventNotify.OnNotify(EventNotify.emNOTIFY_WULINHONOR_RANKDATA_SYNC)
+  end
+end
+
+function WuLinHonor:GetHonorActivityData()
+  local tbActivityData = {}
+  for nActivityId, tbInfo in pairs(self.tbActivityCfg) do
+    table.insert(tbActivityData, {
+      nActivityId = nActivityId,
+      szText = i18n.Get(self.tbText.tbActivityText[nActivityId]),
+      szIcon = tbInfo.szIcon
+    })
+  end
+  return tbActivityData
+end
+
+function WuLinHonor:GetNameByActivityType(nType)
+  return i18n.Get(self.tbText.tbActivityText[nType])
+end
+
+function WuLinHonor:GetConditionDesc(nActivityId, nGrade, nTriggerType, nTriggerId, nCurGrade)
+  local nMaxNum = self:GetConditionMaxNum(nActivityId, nGrade, nTriggerType, nTriggerId)
+  local nCurNum = self:GetConditionCurNum(nActivityId, nGrade, nTriggerType, nTriggerId, nCurGrade)
+  local szDesc = ""
+  if nTriggerType == self.tbTriggerType.RecordTimes then
+    szDesc = i18n.Parse(self.tbRecordTimesTriggerCfg[nTriggerId][nActivityId][nGrade].szDesc)
+  elseif nTriggerType == self.tbTriggerType.Once then
+    szDesc = i18n.Parse(self.tbOnceTriggerCfg[nTriggerId][nActivityId][nGrade].szDesc)
+  end
+  nCurNum = nMaxNum <= nCurNum and nMaxNum or nCurNum
+  if nMaxNum <= nCurNum then
+    return string.format("<color=#%s>%s (%d/%d)</color>", self.szFinishedColorRGB, szDesc, nCurNum, nMaxNum)
+  end
+  return string.format("%s (%d/%d)", szDesc, nCurNum, nMaxNum)
+end
+
+function WuLinHonor:GetConditionMaxNum(nActivityId, nGrade, nTriggerType, nTriggerId)
+  if nTriggerType == self.tbTriggerType.RecordTimes then
+    return self.tbRecordTimesTriggerCfg[nTriggerId][nActivityId][nGrade].nTriggerTimes
+  elseif nTriggerType == self.tbTriggerType.Once then
+    return 1
+  end
+  return 0
+end
+
+function WuLinHonor:GetConditionCurNum(nActivityId, nGrade, nTriggerType, nTriggerId, nCurGrade)
+  if nTriggerType == self.tbTriggerType.RecordTimes then
+    return self:GetRecordTimes(me, nTriggerId)
+  elseif nTriggerType == self.tbTriggerType.Once then
+    local nSaveId = self.tbOnceTriggerCfg[nTriggerId][nActivityId][nGrade].nSaveId
+    return self:GetRecordTimes(me, nSaveId)
+  end
+  return 0
+end
+
+function WuLinHonor:HasActOpened(nActivityId, func)
+  if not self.tbQualification[nActivityId] or 0 == #self.tbQualification[nActivityId] then
+    return false
+  end
+  for _, tbInfo in ipairs(self.tbQualification[nActivityId] or {}) do
+    if func(tbInfo) then
+      return true
+    end
+  end
+  return false
+end
+
+function WuLinHonor:HasMonthActOpened(nActivityId)
+  return self:HasActOpened(nActivityId, function(tbInfo)
+    if not tbInfo.nMonth then
+      return false
+    else
+      return true
+    end
+  end)
+end
+
+function WuLinHonor:HasQuarterActOpened(nActivityId)
+  return self:HasActOpened(nActivityId, function(tbInfo)
+    if not tbInfo.nMonth then
+      return false
+    else
+      return true
+    end
+  end)
+end
+
+function WuLinHonor:HasActQualification(nActivityId, func)
+  if not self.tbQualification[nActivityId] or 0 == #self.tbQualification[nActivityId] then
+    return false
+  end
+  for _, tbInfo in ipairs(self.tbQualification[nActivityId] or {}) do
+    if func(tbInfo) then
+      return true
+    end
+  end
+  return false
+end
+
+function WuLinHonor:HasMonthQualificationGotten(nActivityId)
+  return self:HasActQualification(nActivityId, function(tbInfo)
+    return self:HasMonthActOpened(nActivityId) and self:HaveQualification(me, tbInfo.nQualificationId)
+  end)
+end
+
+function WuLinHonor:HasQuarterQualificationGotten(nActivityId)
+  return self:HasActQualification(nActivityId, function(tbInfo)
+    return not self:HasMonthActOpened(nActivityId) and self:HaveQualification(me, tbInfo.nQualificationId)
+  end)
+end
+
+function WuLinHonor:GetQualificationMaxNum(nOnceTriggerItem, nQualificationId)
+  return 1
+end
+
+function WuLinHonor:GetQualificationCurNum(nOnceTriggerItem, nQualificationId)
+  local nSaveId = self.tbQualificationTriggerCfg[nOnceTriggerItem][nQualificationId].nSaveId
+  return self:GetRecordTimes(me, nSaveId)
+end
+
+function WuLinHonor:GetMonthDesc(nActivityId)
+  local tbDesc = {}
+  local szTmpDesc, nMaxNum, nCurNum
+  for _, tbInfo in ipairs(self.tbQualification[nActivityId] or {}) do
+    if tbInfo.nMonth then
+      nMaxNum = self:GetQualificationMaxNum(tbInfo.nOnceTriggerItem, tbInfo.nQualificationId)
+      nCurNum = self:GetQualificationCurNum(tbInfo.nOnceTriggerItem, tbInfo.nQualificationId)
+      szTmpDesc = i18n.Parse(self.tbQualificationTriggerCfg[tbInfo.nOnceTriggerItem][tbInfo.nQualificationId].szDesc)
+      nCurNum = nMaxNum <= nCurNum and nMaxNum or nCurNum
+      if nMaxNum <= nCurNum then
+        table.insert(tbDesc, string.format("<color=#%s>%s (%d/%d)</color>\n", self.szFinishedColorRGB, szTmpDesc, nCurNum, nMaxNum))
+      else
+        table.insert(tbDesc, string.format("%s (%d/%d)\n", szTmpDesc, nCurNum, nMaxNum))
+      end
+    end
+  end
+  return table.concat(tbDesc)
+end
+
+function WuLinHonor:GetMonthId(nActivityId)
+  for _, tbInfo in ipairs(self.tbQualification[nActivityId] or {}) do
+    if tbInfo.nMonth then
+      return tbInfo.nMonth
+    end
+  end
+  return nil
+end
+
+function WuLinHonor:GetQuarterDesc(nActivityId)
+  return nil
+end
+
+function WuLinHonor:GetAwardShowList(nActivityId)
+  local tbList = {}
+  for nGrade, tbInfo in pairs(self.tbEachGradeCfg) do
+    table.insert(tbList, {
+      nGrade = nGrade,
+      tbAward = Award:GetAward(self.nSeasonAwardId, tbInfo.nSeasonAwardKey),
+      szText = i18n.Get(tbInfo.szText),
+      szTextColor = tbInfo.szTextColor,
+      szOutlineColor = tbInfo.szOutlineColor,
+      szIconPath = tbInfo.szIconPath
+    })
+  end
+  table.sort(tbList, function(tbFirst, tbSecond)
+    return tbFirst.nGrade > tbSecond.nGrade
+  end)
+  return tbList
+end
+
+function WuLinHonor:GetRiseGradeAward(nAwardGrade)
+  local tbInfo = self.tbEachGradeCfg[nAwardGrade]
+  local tbAward = Award:GetAward(self.nSeasonAwardId, tbInfo.nRiseGradeAwardKey)
+  return tbAward
+end
+
+function WuLinHonor:TryGainRiseGradeAwardC(nActivityId)
+  RemoteServer.RequestWuLinHonor(self.Protocol.RequestRiseGradeAward, nActivityId)
+end
+
+function WuLinHonor:GetRankList(bOnSync)
+  return self:GetRankData(bOnSync) or {}
+end
+
+function WuLinHonor:GetRedPointKey(nActivityId)
+  return table.concat({
+    "WuLinHonor_",
+    nActivityId,
+    "_",
+    self:GetNowSeasonMonth(),
+    "_",
+    me.dwID
+  })
+end
+
+function WuLinHonor:GetRedPointGrade(szKey)
+  return Ui.PlayerPrefs.GetInt(szKey, 0)
+end
+
+function WuLinHonor:SetRedPointGrade(szKey, nGrade)
+  Ui.PlayerPrefs.SetInt(szKey, nGrade)
+end
+
+function WuLinHonor:GetRedPointList()
+  local tbActivityIdList = {}
+  local nCurGrade, nAwaradGrade
+  local pPlayer = me
+  for nActivityId, _ in pairs(self.tbActivityCfg) do
+    nCurGrade = self:GetGrade(pPlayer, nActivityId)
+    nAwaradGrade = self:GetAwardGrade(pPlayer, nActivityId)
+    if nCurGrade > nAwaradGrade then
+      tbActivityIdList[nActivityId] = self.RedPointList[nActivityId]
+    end
+  end
+  return tbActivityIdList
+end
+
+function WuLinHonor:CheckRedPoint()
+  local tbActivityIdList = self:GetRedPointList()
+  for _, nRedPointEventId in pairs(tbActivityIdList) do
+    if not RedPointMgr:CheckEvent(nRedPointEventId) then
+      RedPointMgr:LightRedPoint(nRedPointEventId)
+    end
+  end
+end
+
+function WuLinHonor:OnResetSaveData()
+  for _, nRedPointEventId in pairs(self.RedPointList) do
+    if RedPointMgr:CheckEvent(nRedPointEventId) then
+      RedPointMgr:FadeRedPoint(nRedPointEventId)
+    end
+  end
+end
+
+function WuLinHonor:OnRiseGrade(nActivityId, nGrade)
+  Ui:OpenWindow("UIRankPromotion", nActivityId, nGrade)
+  self:CheckRedPoint()
+end
+
+function WuLinHonor:OnGainRiseGradeAward(nActivityId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_WULINHONO_RISEGRADEAWARD_SYNC)
+  local nCurGrade = self:GetGrade(me, nActivityId)
+  local nCurAwardGrade = self:GetAwardGrade(me, nActivityId)
+  if nCurGrade == nCurAwardGrade then
+    RedPointMgr:FadeRedPoint(self.RedPointList[nActivityId])
+  end
+end
+
+function WuLinHonor:OnCrossDay()
+  self:InitRankInfo()
+end
+
+function WuLinHonor:Init()
+  if self.bHasInitialized then
+    return
+  end
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, WuLinHonor.OnCrossDay, WuLinHonor)
+  self.bHasInitialized = true
+end
+
+WuLinHonor:Init()

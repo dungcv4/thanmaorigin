@@ -1,0 +1,288 @@
+local tbWnd = {}
+Ui:SetClass("UILoopScrollViewController", tbWnd)
+
+function Ui:NewLoopScrollView(tbOwner, ...)
+  local tbClass = Ui:NewClass(Ui:GetClass("UILoopScrollViewController"))
+  tbClass.tbOwner = tbOwner
+  tbClass:OnCreate(tbOwner, ...)
+  return tbClass
+end
+
+function tbWnd:OnCreate(tbOwner, szTemplateKey, szElementName)
+  self.tbOwner = tbOwner
+  self.szTemplateKey = szTemplateKey
+  self.tbElementList = {}
+  self.tbIndex2Cell = {}
+  self.tbCellId2CellInfo = {}
+  local obj = self:FindLoopScroll(self.szTemplateKey)
+  self.UILoopScroll = obj:GetComponent(Ui.UILoopScrollViewController)
+  self.UILoopScroll.onCellUpdate:RemoveAllListeners()
+  self.UILoopScroll.onCellUpdate:AddListener(function(nIndex, nCellId)
+    self.tbIndex2Cell[nIndex] = nCellId
+    self.tbCellId2CellInfo[nCellId] = self.tbCellId2CellInfo[nCellId] or {}
+    self.tbCellId2CellInfo[nCellId].nIndex = nIndex
+    if nIndex > 0 and nIndex <= self.nTotal then
+      self:funcUpdateCell(tonumber(nIndex), self.tbOwner)
+    end
+  end)
+  local objTemplate = self.tbOwner.pPanel:GetObject(szTemplateKey)
+  self.UILoopScrollCell = objTemplate:GetComponent(Ui.UILoopScrollViewCell)
+  if not self.UILoopScrollCell then
+    self.UILoopScrollCell = objTemplate:AddComponent(Ui.UILoopScrollViewCell)
+  end
+  self.UILoopScroll:InitLoopScrollView(szTemplateKey)
+  if szElementName then
+    self.szElementName = szElementName
+  end
+  if not self.tbOwner._tbScrollViewList then
+    self.tbOwner._tbScrollViewList = {}
+  end
+  self.tbOwner._tbScrollViewList[self] = 1
+end
+
+function tbWnd:OnDestroy()
+  self:Clear()
+  self.tbOwner._tbScrollViewList[self] = nil
+  self.UILoopScroll.onCellUpdate:RemoveAllListeners()
+  self.UILoopScroll = nil
+end
+
+function tbWnd:SetElement(nTotalCount, funcSet)
+  self.nTotal = nTotalCount
+  self.nMaxCount = self.nMaxCount and nTotalCount < self.nMaxCount and self.nMaxCount or nTotalCount
+  if funcSet then
+    self.funcUpdateCell = funcSet
+  else
+    self.funcUpdateCell = nil
+  end
+  self.UILoopScroll:UpdateContents(self.nTotal)
+end
+
+function tbWnd:SetGridElement(nTotalCount, nRow, funcSet)
+  self.nGridCount = nTotalCount
+  self.nRow = nRow
+  self.nTotal = math.ceil(nTotalCount / self.nRow)
+  self.nMaxCount = self.nMaxCount and self.nMaxCount > self.nTotal and self.nMaxCount or self.nTotal
+  if funcSet then
+    self.funcUpdateCell = funcSet
+  else
+    self.funcUpdateCell = nil
+  end
+  self.UILoopScroll:UpdateContents(self.nTotal)
+end
+
+function tbWnd:UpdateElement(nIndex, funcSet)
+  local tbElement = self:GetElement(nIndex)
+  if not tbElement then
+    return
+  end
+  funcSet(self, nIndex, self.tbOwner)
+end
+
+function tbWnd:GetCount()
+  return self.nMaxCount or 0
+end
+
+function tbWnd:GetCellList()
+  return self.tbCellId2CellInfo or {}
+end
+
+function tbWnd:GoTop()
+  self.UILoopScroll:GoTop()
+end
+
+function tbWnd:GoButtom()
+  self.UILoopScroll:GoButtom()
+end
+
+function tbWnd:GetElement(nIndex)
+  local nCellId = self.tbIndex2Cell[nIndex]
+  if not nCellId then
+    return
+  end
+  if not self.tbCellId2CellInfo[nCellId] or self.tbCellId2CellInfo[nCellId].nIndex ~= nIndex then
+    return
+  end
+  local szKey = string.format("%s%s%d", self:GetKeyPath(self.szTemplateKey), "/Element", nIndex)
+  if self.tbElementList[szKey] then
+    return self.tbElementList[szKey]
+  end
+  local tbElement = Ui:CreateSimplePanel(self.tbOwner, szKey)
+  tbElement.tbCellInfo = self.tbCellId2CellInfo[nCellId]
+  self.tbElementList[szKey] = tbElement
+  return tbElement
+end
+
+function tbWnd:GetGridElement(nIndex, nCol)
+  local nCellId = self.tbIndex2Cell[nIndex]
+  if not nCellId then
+    return
+  end
+  if not self.tbCellId2CellInfo[nCellId] or self.tbCellId2CellInfo[nCellId].nIndex ~= nIndex then
+    return
+  end
+  local szKey = string.format("%s%s%d%s%s%d", self:GetKeyPath(self.szTemplateKey), "/Element", nIndex, "/", self.szElementName, nCol)
+  if self.tbElementList[szKey] then
+    return self.tbElementList[szKey]
+  end
+  local tbElement = Ui:CreateSimplePanel(self.tbOwner, szKey)
+  self.tbElementList[szKey] = tbElement
+  return tbElement
+end
+
+function tbWnd:GetElementCount()
+  return self.UILoopScroll:GetCellsCount()
+end
+
+function tbWnd:GetElementListIndex()
+  local nMax = self.UILoopScroll:GetMaxIndex()
+  local nMin = self.UILoopScroll:GetMinIndex()
+  if 0 == nMax or 0 == nMin then
+    return
+  end
+  local tbListIndex = {}
+  for i = nMin, nMax do
+    table.insert(tbListIndex, i)
+  end
+  return tbListIndex
+end
+
+function tbWnd:FindLoopScroll(szTemplateKey)
+  szTemplateKey = self:GetKeyPath(szTemplateKey)
+  local scrollView = self.tbOwner.pPanel:GetObject(szTemplateKey):GetComponent("UILoopScrollViewController")
+  if scrollView then
+    return scrollView
+  else
+    return self:FindLoopScroll(szTemplateKey)
+  end
+end
+
+function tbWnd:GetKeyPath(szTemplateKey)
+  local szReverse = string.reverse(szTemplateKey)
+  local i = string.find(szReverse, "/")
+  local m = string.len(szReverse) - i
+  local szKey = string.sub(szTemplateKey, 1, m)
+  return szKey
+end
+
+function tbWnd:Clear()
+  for szKey, tbElement in pairs(self.tbElementList) do
+    Ui.ClearUIPanel(tbElement)
+  end
+  self.tbElementList = {}
+  for _, tbCellInfo in pairs(self.tbCellId2CellInfo) do
+    if tbCellInfo and tbCellInfo.nTimer then
+      Timer:Close(tbCellInfo.nTimer)
+      tbCellInfo.nTimer = nil
+    end
+  end
+  self.tbCellId2CellInfo = {}
+  if self.nMaxCount then
+    for i = 1, self.nMaxCount do
+      local szPath = string.format("%s%s%d", self:GetKeyPath(self.szTemplateKey), "/Element", i)
+      self.tbOwner.pPanel:DeleteObjectListPath(szPath)
+    end
+  end
+  self.UILoopScroll:ClearCells()
+  self.UILoopScroll:ResetScrollContentPosition()
+  self.nTotal = 0
+  self.nMaxCount = 0
+  self.tbIndex2Cell = {}
+end
+
+function tbWnd:GridClear()
+  if self.nGridCount then
+    for i = 1, self.nGridCount do
+      for j = 1, self.nRow do
+        local szPath = string.format("%s%s%d%s%s%d", self:GetKeyPath(self.szTemplateKey), "/Element", i, "/", self.szElementName, j)
+        self.tbOwner.pPanel:DeleteObjectListPath(szPath)
+      end
+    end
+  end
+  self.UILoopScroll:ClearCells()
+  self.UILoopScroll:ResetScrollContentPosition()
+  self.nTotal = 0
+  self.nGridCount = 0
+end
+
+function tbWnd:PlayItemGridAnimation()
+  local elemTemplateGo = self.tbOwner.pPanel:GetObject(self.szTemplateKey)
+  local parent = elemTemplateGo.transform.parent
+  local animator = parent:GetComponent(Ui.ItemGridTweenAnimation)
+  if not animator then
+    return
+  end
+  local tbTempCell = {}
+  local tbCellList = self:GetCellList()
+  for _, tbCell in pairs(tbCellList) do
+    table.insert(tbTempCell, tbCell)
+  end
+  table.sort(tbTempCell, function(a, b)
+    return a.nIndex < b.nIndex
+  end)
+  if self.nGridCount and self.nRow then
+    local nCount = Lib:CountTB(tbTempCell) * self.nRow
+    if nCount > self.nGridCount then
+      nCount = self.nGridCount
+    end
+    animator:InitArray(nCount)
+    for _, tbCell in ipairs(tbTempCell) do
+      for i = 1, self.nRow do
+        local curIndex = (tbCell.nIndex - 1) * self.nRow + i
+        if curIndex <= self.nGridCount then
+          local tbElement = self:GetGridElement(tbCell.nIndex, i)
+          if tbElement then
+            local elemGo = self.tbOwner.pPanel:GetObject(tbElement.szKey)
+            animator:OnSetElement(elemGo)
+          end
+        end
+      end
+    end
+  else
+    local nCount = Lib:CountTB(tbTempCell)
+    animator:InitArray(nCount)
+    for _, tbCell in ipairs(tbTempCell) do
+      local tbElement = self:GetElement(tbCell.nIndex)
+      if tbElement then
+        local elemGo = self.tbOwner.pPanel:GetObject(tbElement.szKey)
+        animator:OnSetElement(elemGo)
+      end
+    end
+  end
+end
+
+function tbWnd:GetScrollViewRect(szTemplateKey)
+  szTemplateKey = self:GetKeyPath(szTemplateKey)
+  local scrollView = self.tbOwner.pPanel:GetObject(szTemplateKey):GetComponent("ScrollRect")
+  if scrollView then
+    return scrollView, szTemplateKey
+  else
+    return self:GetScrollViewRect(szTemplateKey)
+  end
+end
+
+function tbWnd:GridScrollToIndex(nIndex)
+  nIndex = math.ceil(nIndex / self.nRow)
+  self:ScrollToIndex(nIndex)
+end
+
+function tbWnd:ScrollToIndex(nIndex)
+  local scrollRect, _ = self:GetScrollViewRect(self.szTemplateKey)
+  local scrollRectTransForm = scrollRect:GetComponent("RectTransform")
+  local itemRect = self.tbOwner.pPanel:GetRectTransform(self.szTemplateKey)
+  local nItemRectHeight = itemRect.rect.height
+  local nViewportHeight
+  local contentRect = scrollRect.content:GetComponent("RectTransform")
+  local nContentHeight = contentRect.rect.height
+  if Lib:IsUnityObjNil(scrollRect.viewport) == false then
+    nViewportHeight = scrollRect.viewport.rect.size.y
+  else
+    nViewportHeight = scrollRectTransForm.rect.size.y
+  end
+  local spacingHeight = self.UILoopScroll.spacingHeight
+  local nElementHeight = nItemRectHeight + spacingHeight
+  local nTargetHeight = nElementHeight * (nIndex - 1)
+  local diff = nContentHeight - nViewportHeight
+  local nPos = Lib.Clamp01(1 - nTargetHeight / diff)
+  self.UILoopScroll:OnScrollToIndex(nPos)
+end

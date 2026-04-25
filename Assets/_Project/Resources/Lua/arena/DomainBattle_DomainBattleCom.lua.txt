@@ -1,0 +1,193 @@
+Require("CommonScript/DomainBattle/DomainBattleDef.lua")
+
+function DomainBattle:CanClaim(pPlayer, nMapTid, bFromSys)
+  if not self.IS_SYS_OPEN then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  local nTongId = pPlayer.dwTongId
+  if 0 == nTongId then
+    return false, i18n.EasyGet("\230\178\161\230\156\137\229\138\160\229\133\165\229\184\174\228\188\154")
+  end
+  if MODULE_GAMESERVER then
+    local tbMember = Tong:GetMemberData(pPlayer.dwID)
+    if not tbMember or not tbMember:CheckAuthority(Tong.Def.Authority_ClaimDomain) then
+      return false, i18n.EasyGet("\228\187\133\229\184\174\228\184\187/\229\137\175\229\184\174\228\184\187\229\143\175\228\187\165\229\174\163\230\136\152")
+    end
+  elseif not Tong:CheckMyAuthority(Tong.Def.Authority_ClaimDomain) then
+    return false, i18n.EasyGet("\228\187\133\229\184\174\228\184\187/\229\137\175\229\184\174\228\184\187\229\143\175\228\187\165\229\174\163\230\136\152")
+  end
+  local nNowTime = Lib:GetTodaySec()
+  if not bFromSys and (nNowTime < Lib:ParseTodayTime(self.CLAIM_COND.START_TIME) or nNowTime > Lib:ParseTodayTime(self.CLAIM_COND.END_TIME)) then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\228\184\141\229\156\168\229\174\163\230\136\152\233\152\182\230\174\181")
+  end
+  if not self.MAP_FIGHT[nMapTid] then
+    return false, i18n.EasyGet("\232\175\165\229\140\186\229\159\159\228\184\141\229\143\175\229\174\163\230\136\152")
+  end
+  if 1 ~= self.MAP_FIGHT[nMapTid].OPEN_CLAIM then
+    return false, i18n.EasyGet("\232\175\165\229\140\186\229\159\159\230\154\130\230\156\170\229\188\128\230\148\190")
+  end
+  if 0 ~= #self:GetDomain(nTongId) then
+    return false, i18n.EasyGet("\229\183\178\230\156\137\233\162\134\229\156\159\239\188\140\230\151\160\233\156\128\229\174\163\230\136\152")
+  end
+  if nMapTid == self:GetTarget(nTongId) then
+    return false, i18n.EasyGet("\229\183\178\229\175\185\229\133\182\229\174\163\230\136\152")
+  end
+  local bAvailable = false
+  if self.MAP_FIGHT[nMapTid].STAR_LV <= self.CLAIM_COND.STAR_LV_LIMIT then
+    bAvailable = true
+  end
+  if not bAvailable then
+    return false, i18n.EasyGet("\229\143\170\232\131\189\229\174\163\230\136\152{0}\230\152\159\233\162\134\229\156\159", self.CLAIM_COND.STAR_LV_LIMIT)
+  end
+  return true
+end
+
+function DomainBattle:CanAttend(pPlayer, nMapTid)
+  if not self.IS_SYS_OPEN then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  if self.nGameState ~= self.GAME_STATE.START then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\228\184\141\229\156\168\228\186\137\229\164\186\233\152\182\230\174\181")
+  end
+  if not self.MAP_FIGHT[nMapTid] then
+    return false, i18n.EasyGet("\232\175\165\229\140\186\229\159\159\232\183\157\231\166\187\232\191\135\232\191\156\239\188\140\230\151\160\230\179\149\229\136\176\232\190\190")
+  end
+  if pPlayer.nMapTemplateId == nMapTid then
+    return false, i18n.EasyGet("\228\189\160\229\183\178\231\187\143\229\156\168\232\175\165\229\140\186\229\159\159")
+  end
+  local nTongId = pPlayer.dwTongId
+  if 0 == nTongId then
+    return false, i18n.EasyGet("\233\156\128\232\166\129\229\138\160\229\133\165\229\184\174\228\188\154")
+  end
+  return self:CanTongReachMap(nTongId, nMapTid)
+end
+
+function DomainBattle:CanTongReachMap(nTongId, nMapTid)
+  local tbDomainList = self:GetDomain(nTongId)
+  if 0 == #tbDomainList then
+    local nTarget = self:GetTarget(nTongId)
+    if not nTarget then
+      return false, i18n.EasyGet("\229\184\174\228\188\154\230\178\161\230\156\137\233\162\134\229\156\159\239\188\140\228\184\148\230\156\170\229\174\163\230\136\152\239\188\140\230\151\160\230\179\149\232\191\155\229\133\165")
+    end
+    local bLink = false
+    if nTarget == nMapTid then
+      bLink = true
+    end
+    if not bLink and self.MAP_FIGHT_EXT_LINK[nTarget] and Lib:Is_include(nMapTid, self.MAP_FIGHT_EXT_LINK[nTarget].LINK) then
+      local tbLastDomainList = self:GetLastDomain(nTongId)
+      for _, nLastMapTid in pairs(tbLastDomainList) do
+        if self.MAP_FIGHT[nLastMapTid].STAR_LV >= self.MAP_FIGHT_EXT_LINK[nTarget].MERCY_STAR_LV_REQ then
+          bLink = true
+          break
+        end
+      end
+    end
+    if not bLink and self.MAP_FIGHT[nTarget] and Lib:Is_include(nMapTid, self.MAP_FIGHT[nTarget].LINK) then
+      bLink = true
+    end
+    if not bLink then
+      return false, i18n.EasyGet("\229\184\174\228\188\154\230\178\161\230\156\137\233\162\134\229\156\159\239\188\140\229\143\170\232\131\189\232\191\155\229\133\165\229\174\163\230\136\152\229\143\138\229\133\182\231\155\184\233\130\187\229\156\176\229\155\190")
+    end
+  elseif self:GetOccupier(nMapTid) ~= nTongId then
+    local bLink = false
+    for _, nSomeMapTid in pairs(tbDomainList) do
+      if Lib:Is_include(nMapTid, self.MAP_FIGHT[nSomeMapTid].LINK) then
+        bLink = true
+        break
+      end
+    end
+    if not bLink then
+      for _, nSomeMapTid in pairs(tbDomainList) do
+        if self.MAP_FIGHT_EXT_LINK[nSomeMapTid] and Lib:Is_include(nMapTid, self.MAP_FIGHT_EXT_LINK[nSomeMapTid].LINK) and 1 == GetTimeFrameState(self.MAP_FIGHT_EXT_LINK[nSomeMapTid].TIMEFRAME_REQ) then
+          bLink = true
+          break
+        end
+      end
+    end
+    if not bLink then
+      return false, i18n.EasyGet("\232\175\165\229\140\186\229\159\159\232\183\157\231\166\187\232\191\135\232\191\156\239\188\140\230\151\160\230\179\149\229\136\176\232\190\190")
+    end
+    if 1 == self.MAP_FIGHT[nMapTid].STAR_LV then
+      return false, i18n.EasyGet("\230\151\160\230\179\149\232\191\155\230\148\187{0}\230\152\159\229\156\176\229\155\190", self.MAP_FIGHT[nMapTid].STAR_LV)
+    end
+  end
+  return true
+end
+
+function DomainBattle:CanSendToFront(pPlayer, nFrontIdx)
+  if not self.IS_SYS_OPEN then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  if self.nGameState ~= self.GAME_STATE.START then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\228\184\141\229\156\168\228\186\137\229\164\186\233\152\182\230\174\181")
+  end
+  local nMapTid = pPlayer.nMapTemplateId
+  if not self.MAP_FIGHT[nMapTid] then
+    return false, i18n.EasyGet("\232\175\165\229\140\186\229\159\159\232\183\157\231\166\187\232\191\135\232\191\156\239\188\140\230\151\160\230\179\149\229\136\176\232\190\190")
+  end
+  if not self.MAP_FIGHT[nMapTid].POS.FRONT or not self.MAP_FIGHT[nMapTid].POS.FRONT[nFrontIdx] then
+    return false, i18n.EasyGet("\232\175\165\229\140\186\229\159\159\232\183\157\231\166\187\232\191\135\232\191\156\239\188\140\230\151\160\230\179\149\229\136\176\232\190\190")
+  end
+  return true
+end
+
+function DomainBattle:GetLastDomain(nTongId)
+  local tbMapList = {}
+  for nSomeMapTid, nSomeTongId in pairs(self.tbLastOccupyList) do
+    if nSomeTongId == nTongId then
+      table.insert(tbMapList, nSomeMapTid)
+    end
+  end
+  return tbMapList
+end
+
+function DomainBattle:GetDomain(nTongId)
+  local tbMapList = {}
+  for nSomeMapTid, nSomeTongId in pairs(self.tbOccupyList) do
+    if nSomeTongId == nTongId then
+      table.insert(tbMapList, nSomeMapTid)
+    end
+  end
+  return tbMapList
+end
+
+function DomainBattle:GetOccupier(nMapTid)
+  return self.tbOccupyList[nMapTid]
+end
+
+function DomainBattle:GetTarget(nTongId)
+  return self.tbClaimList[nTongId]
+end
+
+function DomainBattle:GetClaimer(nMapTid)
+  local tbTongList = {}
+  for nSomeTongId, nSomeMapTid in pairs(self.tbClaimList) do
+    if nSomeMapTid == nMapTid then
+      table.insert(tbTongList, nSomeTongId)
+    end
+  end
+  return tbTongList
+end
+
+function DomainBattle:HasMonsterFlag(nMapTid)
+  return self.tbMonsterFlagList[nMapTid]
+end
+
+function DomainBattle:IsClaimPhase()
+  local nNowTime = Lib:GetTodaySec()
+  if nNowTime < Lib:ParseTodayTime(self.CLAIM_COND.START_TIME) then
+    return false, -1
+  end
+  if nNowTime > Lib:ParseTodayTime(self.CLAIM_COND.END_TIME) then
+    return false, 1
+  end
+  return true
+end
+
+function DomainBattle:IsGamePhase()
+  return self.nGameState == self.GAME_STATE.START
+end
+
+function DomainBattle:IsGameMap(nMapTid)
+  return nil ~= self.MAP_FIGHT[nMapTid]
+end

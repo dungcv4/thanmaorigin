@@ -1,0 +1,135 @@
+local tbWnd = Ui:CreateWindow("UITongList")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_TONG_LIST,
+      self.OnUpdateScrollView
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnCreateTong = "node/imgBG/Content/btnCreateTong",
+  btnJoinTong = "node/imgBG/Content/btnJoinTong",
+  Template = "node/imgBG/Content/imgList/List/Template",
+  NotInfo = "node/imgBG/Content/imgList/NotInfo",
+  txtTongNotice = "node/imgBG/Content/Right/TongNotice/txtContent",
+  txtTongInfo = "node/imgBG/Content/Right/TongInfo/txtContent",
+  txtTongActivityValue = "node/imgBG/Content/Right/TongInfo/InfoList/TongActivity/txtTongActivityValue",
+  btnPrevious = "node/imgBG/Content/PagePanel/btnPrePage",
+  btnNext = "node/imgBG/Content/PagePanel/btnNextPage",
+  txtPage = "node/imgBG/Content/PagePanel/txtPage"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnCreateTong = function(self)
+    if Tong:HasTong() then
+      me.CenterMsg(i18n.Get(Tong.Cfg.Msg.AlreadyJoinTong))
+      return
+    end
+    if not TeamMgr:IsCaptain() then
+      me.CenterMsg(i18n.Get(Tong.Cfg.Msg.NeedCaptain))
+      return
+    end
+    Ui:OpenWindow("UICreateTong")
+    self:Close()
+  end,
+  btnJoinTong = function(self)
+    self:ApplyJoinTong()
+  end,
+  btnPrevious = function(self)
+    self:OnClickPrevious()
+  end,
+  btnNext = function(self)
+    self:OnClickNext()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbTongListScrollView = Ui:NewScrollView(self, tbControls.Template, function(self, nIndex, tbElement)
+    self:OnClickOneTong(nIndex)
+  end)
+  self.tbApplyTongMap = {}
+end
+
+function tbWnd:OnOpen()
+  self:ClearChooseInfo()
+  Tong:UpdateJoinTongsData(1)
+end
+
+function tbWnd:OnUpdateScrollView(tbJoinTongsData, nPage, nMaxPage)
+  self.nCurrentPage = nPage
+  self.nMaxPage = nMaxPage > 0 and nMaxPage or 1
+  self.pPanel:Label_SetText(tbControls.txtPage, string.format("%d/%d", self.nCurrentPage, self.nMaxPage))
+  self.tbTongListScrollView:Clear()
+  self.tbCurrentPageList = tbJoinTongsData or {}
+  local tbTongList = self.tbCurrentPageList
+  self.pPanel:SetActive(tbControls.NotInfo, 0 == #tbTongList)
+  for i = 1, #tbTongList do
+    self.tbTongListScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtTongName", tbTongList[i].szName or "")
+      pPanel:Label_SetText("txtTongNum", tbTongList[i].nKinCount)
+      pPanel:Label_SetText("txtMemberCount", tbTongList[i].nMemberCount)
+      pPanel:Label_SetText("txtMasterName", tbTongList[i].szLeaderName)
+      local bShowTips = self.tbApplyTongMap[tbTongList[i].nTongId] and true or false
+      pPanel:SetActive("imgApplied", bShowTips)
+      Ui:SetVipLevelEffect(pPanel, tbTongList[i].nLeaderVipLevel, "txtMasterName")
+    end)
+  end
+  if #tbTongList > 0 then
+    self.tbTongListScrollView:SelectElement(1)
+  end
+end
+
+function tbWnd:OnClickOneTong(nIndex)
+  self.nChooseIndex = nIndex
+  local tbInfo = self.tbCurrentPageList[nIndex]
+  self.pPanel:Label_SetText(tbControls.txtTongNotice, tbInfo.szDeclaration or "")
+  self.pPanel:Label_SetText(tbControls.txtTongInfo, "")
+  self.pPanel:Label_SetText(tbControls.txtTongActivityValue, tbInfo.nWeekActive or 0)
+end
+
+function tbWnd:ClearChooseInfo()
+  self.nChooseIndex = nil
+  self.pPanel:Label_SetText(tbControls.txtTongNotice, "")
+  self.pPanel:Label_SetText(tbControls.txtTongInfo, "")
+end
+
+function tbWnd:ApplyJoinTong()
+  if not self.nChooseIndex or not self.tbCurrentPageList then
+    return
+  end
+  local nTongId = self.tbCurrentPageList[self.nChooseIndex].nTongId
+  Tong:ApplyTong(nTongId)
+  self.tbApplyTongMap[nTongId] = 1
+  local tbElement = self.tbTongListScrollView:GetElement(self.nChooseIndex)
+  if tbElement then
+    tbElement.pPanel:SetActive("imgApplied", true)
+  end
+end
+
+function tbWnd:OnClickPrevious()
+  if not self.nCurrentPage or not self.nMaxPage then
+    return
+  end
+  if self.nCurrentPage <= 1 then
+    return
+  end
+  Tong:UpdateJoinTongsData(self.nCurrentPage - 1)
+end
+
+function tbWnd:OnClickNext()
+  if not self.nCurrentPage or not self.nMaxPage then
+    return
+  end
+  if self.nCurrentPage >= self.nMaxPage then
+    return
+  end
+  Tong:UpdateJoinTongsData(self.nCurrentPage + 1)
+end

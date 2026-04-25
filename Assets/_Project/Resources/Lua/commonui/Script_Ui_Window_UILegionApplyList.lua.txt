@@ -1,0 +1,178 @@
+local tbWnd = Ui:CreateWindow("UILegionApplyList")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_LEGION_BASEINFO,
+      self.onLegionSyncData
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_LEGION_NEW_APPLYER,
+      self.onLegionNewApplyer
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  Template = "node/imgBG/Content/imgList/List/Template",
+  btnClearList = "node/imgBG/Content/btnClearList",
+  btnRefreshList = "node/imgBG/Content/btnRefreshList",
+  toggleAutoApply = "node/imgBG/Content/toggleAutoApply",
+  inputFightValue = "node/imgBG/Content/toggleAutoApply/inputFightValue"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnToggleClick = {
+  toggleAutoApply = function(self, isOn)
+    local bHasAuthor = Legion:CheckMyAuthority(Legion.Def.Authority_Recruit)
+    if not bHasAuthor then
+      return
+    end
+    local tbRecruitSetting = Legion:GetRecruitSetting() or {}
+    local bAutoJoin = tbRecruitSetting.bAutoJoin or false
+    if bAutoJoin ~= isOn then
+      self:autoJoinSet(true)
+    end
+  end
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseByDefault()
+  end,
+  btnRefreshList = function(self)
+    Legion:UpdateApplyInfo(true)
+  end,
+  btnClearList = function(self)
+    Legion:CleanApplyList()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbApplyListScrollView = Ui:NewScrollView(self, self.Template, function(self, nIndex, tbElement)
+    print("click")
+  end)
+  self.pPanel:Input_OnEndEdit(self.inputFightValue, function(text)
+    if not Legion:CheckMyAuthority(Legion.Def.Authority_Recruit) then
+      return
+    end
+    local nFightValue = tonumber(text)
+    if not nFightValue or nFightValue < 0 then
+      nFightValue = self.nAutoJoinFightValue
+      me.CenterMsg(i18n.EasyGet("\230\136\152\229\138\155\232\190\147\229\133\165\233\148\153\232\175\175\239\188\129"))
+    end
+    self.bAutoFightValueChange = true
+    if nFightValue > Legion.Def.nMaxAutoJoinFightValue then
+      nFightValue = Legion.Def.nMaxAutoJoinFightValue
+      me.CenterMsg(i18n.EasyGet("\232\190\147\229\133\165\232\182\133\232\191\135\230\156\128\229\164\167\229\128\188\239\188\129"))
+    end
+    self:updateAutoJoinFightValue(nFightValue)
+  end)
+end
+
+function tbWnd:OnOpen()
+  self:updateAutoJoinSetting()
+  self:GenerateApplyList()
+  Legion:UpdateApplyInfo()
+  Legion:UpdateRecruitSetting()
+end
+
+function tbWnd:CloseByDefault()
+  if self.bAutoFightValueChange then
+    self:autoJoinSet(false)
+    self.bAutoFightValueChange = nil
+  end
+  self:Close()
+end
+
+function tbWnd:onLegionSyncData(szDataType)
+  if "ApplyList" == szDataType then
+    self:GenerateApplyList()
+  elseif "RecruitSetting" == szDataType then
+    self:updateAutoJoinSetting()
+  end
+end
+
+function tbWnd:GenerateApplyList()
+  self.tbApplyListScrollView:Clear()
+  local tbApplyerList = Legion:GetApplyerList()
+  for i = 1, #tbApplyerList do
+    self.tbApplyListScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Sprite_SetSprite("imgFaction", Faction:GetIcon(tbApplyerList[i].nFaction))
+      pPanel:Label_SetText("txtName", tbApplyerList[i].szName)
+      pPanel:Label_SetText("txtLevel", Lib:GetLevelText(tbApplyerList[i].nLevel))
+      local szHonorName, szHonorColor = HonorLevel:GetHonorNameByStarLevel(tbApplyerList[i].nHonorStarLevel, false)
+      local obj = pPanel:GetObject("HonorTitle")
+      local pHonorTitle = obj:GetComponent(Ui.UIHonorTitle)
+      pHonorTitle:SetHonorTitle(i18n.Parse(szHonorName), szHonorColor)
+      Ui:Button_BindEvent(pPanel, "btnOK", self.AgreeApply, self, tbApplyerList[i].nMemberId)
+      Ui:Button_BindEvent(pPanel, "btnCancel", self.IgnoreApply, self, tbApplyerList[i].nMemberId)
+    end)
+  end
+end
+
+function tbWnd:AgreeApply(dwPlayerId)
+  if not Legion:CheckMyAuthority(Legion.Def.Authority_Recruit) then
+    me.CenterMsg(i18n.EasyGet("\228\189\160\230\178\161\230\156\137\230\157\131\233\153\144\232\191\155\232\161\140\230\147\141\228\189\156"))
+    return
+  end
+  Legion:AgreeApply(dwPlayerId)
+  self:changeApplyList(dwPlayerId)
+end
+
+function tbWnd:IgnoreApply(dwPlayerId)
+  if not Legion:CheckMyAuthority(Legion.Def.Authority_Recruit) then
+    me.CenterMsg(i18n.EasyGet("\228\189\160\230\178\161\230\156\137\230\157\131\233\153\144\232\191\155\232\161\140\230\147\141\228\189\156"))
+    return
+  end
+  Legion:DisAgreeApply(dwPlayerId)
+  self:changeApplyList(dwPlayerId)
+end
+
+function tbWnd:changeApplyList(nPlayerId)
+  local tbApplyList = Legion:GetApplyerList()
+  local nIndex
+  for nIdx, tbData in ipairs(tbApplyList) do
+    if tbData.nPlayerId == nPlayerId then
+      nIndex = nIdx
+      break
+    end
+  end
+  if nIndex then
+    table.remove(tbApplyList, nIndex)
+    Legion:NotifyApplyRefresh()
+  end
+end
+
+function tbWnd:autoJoinSet(bChangeState)
+  local tbRecruitSetting = Legion:GetRecruitSetting() or {}
+  local bAutoJoin = tbRecruitSetting.bAutoJoin
+  if bChangeState then
+    bAutoJoin = not tbRecruitSetting.bAutoJoin
+  end
+  Legion:SetRecruitSetting(bAutoJoin, self.nAutoJoinFightValue)
+end
+
+function tbWnd:updateAutoJoinSetting()
+  local tbRecruitSetting = Legion:GetRecruitSetting() or {}
+  local nFightValue = tbRecruitSetting.nFightValue or Legion.Def.nInitAutoJoinFightValue
+  self:updateAutoJoinFightValue(nFightValue)
+  local bAutoJoin = tbRecruitSetting.bAutoJoin or false
+  if bAutoJoin ~= self.pPanel:Toggle_GetChecked(self.toggleAutoApply) then
+    self.pPanel:Toggle_SetChecked(self.toggleAutoApply, bAutoJoin)
+  end
+  local bHasAuthor = Legion:CheckMyAuthority(Legion.Def.Authority_Recruit)
+  self.pPanel:Button_SetEnable(self.btnRefreshList, bHasAuthor)
+  self.pPanel:Button_SetEnable(self.btnClearList, bHasAuthor)
+  self.pPanel:Toggle_SetEnable(self.toggleAutoApply, bHasAuthor)
+  self.pPanel:Input_SetEnable(self.inputFightValue, bHasAuthor)
+end
+
+function tbWnd:updateAutoJoinFightValue(nFightValue)
+  self.nAutoJoinFightValue = nFightValue
+  self.pPanel:Input_SetText(self.inputFightValue, string.format("%d", nFightValue))
+end
+
+function tbWnd:onLegionNewApplyer()
+  Legion:UpdateApplyInfo()
+end

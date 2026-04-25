@@ -1,0 +1,133 @@
+local tbWnd = Ui:CreateClass("UIKinSkill", "UIPanel")
+local tbControls = {
+  KinSkillTemplate = "KinSkill/maskLayer/paneBG/KinSkillTemplate",
+  Title = "Descs/Title",
+  DescStr = "Descs/DescStr",
+  SkillBG = "Descs/SkillIcon/SkillBG",
+  btnSkill = "Descs/SkillIcon/btnSkill",
+  txtMax = "Descs/txtMax",
+  txtCurText = "Descs/SkillDesc/Viewport/Content/CurrentLevel/Text",
+  txtNextText = "Descs/SkillDesc/Viewport/Content/NextLevel/Text",
+  txtCostValueOne = "Descs/Cost1/txtCostValue",
+  txtCostValueTwo = "Descs/Cost2/txtCostValue",
+  btnLearn = "Descs/btnLearn",
+  NextLevel = "Descs/SkillDesc/Viewport/Content/NextLevel",
+  Cost1 = "Descs/Cost1",
+  Cost2 = "Descs/Cost2"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnLearn = function(self)
+    KinSkill:UpGradeC(self.nSkillID)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.pKinSkillView = Ui:NewScrollView(self, tbControls.KinSkillTemplate, function(_, nIndex, tbElement)
+    return self:OnSelectKinSkill(nIndex, tbElement)
+  end, false, false)
+end
+
+function tbWnd:OnOpen(bEnteringWithKin)
+  self.bEnteringWithKin = bEnteringWithKin
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_KINSKILL_SYNC_DATA, self.OnSyncPlayerData, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_KINSKILL_SYNC_UPGRADE, self.OnUpGrade, self)
+  KinSkill:UpdateRedPointInitStatus(true)
+  self:UpdateSkillInfo()
+end
+
+function tbWnd:OnClose()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_KINSKILL_SYNC_DATA, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_KINSKILL_SYNC_UPGRADE, self)
+end
+
+function tbWnd:OnSyncPlayerData()
+  self:UpdateSkillInfo()
+end
+
+function tbWnd:OnUpGrade(nSkillID, nLevel)
+  if self.nSkillID ~= nSkillID then
+    return
+  end
+  self:UpdateSkillInfo()
+  self.pKinSkillView:SelectElement(self.nSelectIndex or 1)
+end
+
+function tbWnd:OnSelectKinSkill(nIndex, tbElement)
+  local nSkillID = tbElement.nSkillID
+  self.nSkillID = nSkillID
+  local tbInfo = KinSkill:GetPlayerOneSkillInfo(KinSkill:GetKinSkillCfg()[nSkillID])
+  local nMaxLevel = Kin:GetKinSkillLimitedValue()
+  if me.dwKinId > 0 then
+    self.pPanel:Label_SetText(self.Title, string.format("%s: %d/%d", i18n.Parse(tbInfo.szName), tbInfo.nLevel, nMaxLevel))
+  else
+    self.pPanel:Label_SetText(self.Title, string.format("%s: %d", i18n.Parse(tbInfo.szName), tbInfo.nLevel))
+  end
+  self.pPanel:Label_SetText(self.DescStr, i18n.Parse(tbInfo.szDesc))
+  self.pPanel:Sprite_SetSprite(self.SkillBG, tbInfo.szIconAltlas)
+  self.pPanel:Label_SetText(self.txtCurText, i18n.Parse(tbInfo.szCurMagicDesc))
+  self.pPanel:Label_SetText(self.txtNextText, i18n.Parse(tbInfo.szNextMagicDesc))
+  self.pPanel:Label_SetText(self.txtCostValueOne, tbInfo.szCostValueOne)
+  self.pPanel:Label_SetText(self.txtCostValueTwo, tbInfo.szCostValueTwo)
+  self.pPanel:SetActive(self.btnSkill, false)
+  self:UpdateMaxStatus(tbInfo.bMax)
+  if self.nSelectIndex then
+    self.pKinSkillView:GetElement(self.nSelectIndex).pPanel:SetActive("imgSelected", false)
+  end
+  self.nSelectIndex = nIndex
+  tbElement.pPanel:SetActive("imgSelected", true)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnLearn)
+  if KinSkill:CanLightRedPoint(nSkillID, nil, nil, nil) then
+    RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnLearn, {
+      RedPointMgr.EVENT.KinSkill
+    })
+    if not KinSkill:GetRedPointInitStatus() then
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.KinSkill)
+      KinSkill:MarkLight()
+    end
+  end
+  KinSkill:UpdateRedPointInitStatus(false)
+end
+
+function tbWnd:UpdateMaxStatus(bMax)
+  self.pPanel:SetActive(self.txtMax, bMax)
+  self.pPanel:SetActive(self.Cost1, not bMax)
+  self.pPanel:SetActive(self.Cost2, not bMax)
+  self.pPanel:SetActive(self.btnLearn, not bMax)
+  self.pPanel:Label_SetText(self.txtMax, i18n.EasyGet("\229\183\178\230\187\161\231\186\167"))
+  self.pPanel:SetActive(self.NextLevel, not bMax)
+end
+
+function tbWnd:UpdateSkillInfo()
+  self.pKinSkillView:Clear()
+  local nKinContrib = me.GetMoney("KinContrib")
+  local nCoin = me.GetMoney("Coin")
+  local nLimitedValue = KinSkill:GetBuildingLimitedValue()
+  for nIndex, tbInfo in ipairs(KinSkill:GetSortedSkillInfoList()) do
+    self.pKinSkillView:SetElement(nIndex, function(tbElement)
+      self:SetSkillElementInfo(nIndex, tbElement, tbInfo, nKinContrib, nCoin, nLimitedValue)
+    end)
+  end
+  self.nSelectIndex = self.nSelectIndex or 1
+  self.pKinSkillView:SelectElement(self.nSelectIndex)
+end
+
+function tbWnd:SetSkillElementInfo(nIndex, tbElement, tbInfo, nKinContrib, nCoin, nLimitedValue)
+  local tbBaseInfo = KinSkill:GetSkillBaseInfo(tbInfo.nSkillID)
+  tbElement.nSkillID = tbInfo.nSkillID
+  tbElement.pPanel:Label_SetText("txtSkillName", i18n.Parse(tbBaseInfo.szName))
+  if me.dwKinId > 0 then
+    tbElement.pPanel:Label_SetText("SkillLevel/txtSkillLevel", string.format("%d/%d", tbBaseInfo.nLevel, Kin:GetKinSkillLimitedValue()))
+  else
+    tbElement.pPanel:Label_SetText("SkillLevel/txtSkillLevel", string.format("%d", tbBaseInfo.nLevel))
+  end
+  tbElement.pPanel:Sprite_SetSprite("SkillBG", tbBaseInfo.szIconAltlas)
+  tbElement.pPanel:SetActive("SkillBG", true)
+  tbElement.pPanel:SetActive("SkillLevel/txtSkillLevel", true)
+  RedPointMgr:DynamicUnRegist(tbElement.pPanel, "SkillBG")
+  if KinSkill:CanLightRedPoint(tbInfo.nSkillID, nKinContrib, nCoin, nLimitedValue) then
+    RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, "SkillBG", {
+      RedPointMgr.EVENT.KinSkill
+    })
+  end
+end

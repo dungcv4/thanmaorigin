@@ -1,0 +1,92 @@
+LevelUpAwards.SAVE_GROUP = GetGroupKey("LevelUpAwards")
+LevelUpAwards.SAVE_BUY_LEVEL = 1
+LevelUpAwards.BUY_MIN_LEVEL = 25
+LevelUpAwards.SERVER_MAX_LEVEL = 59
+LevelUpAwards.EXP_ADD_BUFF = 409
+
+function LevelUpAwards:CanBuyAwards(pPlayer)
+  if pPlayer.nTotalLevel < self.BUY_MIN_LEVEL then
+    return false, i18n.EasyGet("\231\173\137\231\186\167\230\156\170\232\190\190\229\136\176{0}\239\188\140\230\151\160\230\179\149\232\180\173\228\185\176", self.BUY_MIN_LEVEL)
+  end
+  local tbSettings = self:GetAwardSetting()
+  if not tbSettings then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\230\151\182\233\151\180\232\189\180\230\178\161\230\156\137\231\155\180\229\141\135\231\164\188\229\140\133")
+  end
+  local nBuyLevel = pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_BUY_LEVEL)
+  if nBuyLevel >= tbSettings.nOpenLevel then
+    return false, i18n.EasyGet("\228\189\160\229\183\178\232\180\173\228\185\176\229\189\147\229\137\141\230\161\163\230\172\161\231\154\132\231\173\137\231\186\167\231\155\180\229\141\135\231\164\188\229\140\133")
+  end
+  if pPlayer.nTotalLevel >= tbSettings.nDirectLevel then
+    return false, i18n.EasyGet("\228\189\160\231\154\132\231\173\137\231\186\167\229\183\178\232\190\190\229\136\176\231\155\180\229\141\135\231\173\137\231\186\167\239\188\140\230\151\160\230\179\149\232\180\173\228\185\176")
+  end
+  return true
+end
+
+function LevelUpAwards:GetProductId()
+  local tbSetting = self:GetAwardSetting()
+  if not tbSetting or not tbSetting.nProductId then
+    LogErr("LevelUpAwards:GetProductId error, no tbSetting")
+    return
+  end
+  local tbRechargeSetting = Recharge:GetLevelUpAwardsSetting()
+  if not tbRechargeSetting then
+    LogErr("LevelUpAwards:GetProductId error,  no RechargeSetting")
+    return
+  end
+  local bHave = false
+  for _, tbData in ipairs(tbRechargeSetting) do
+    if tbData.nProductId == tbSetting.nProductId then
+      bHave = true
+      break
+    end
+  end
+  if not bHave then
+    LogErr("LevelUpAwards:GetProductId error, Recharge no nProductId = ", tbSetting.nProductId)
+    return
+  end
+  return tbSetting.nProductId
+end
+
+function LevelUpAwards:GetAwardSetting()
+  local nMaxLevel
+  if MODULE_GAMESERVER then
+    nMaxLevel = GetMaxLevel()
+  else
+    nMaxLevel = Client.nServerMaxLevel
+  end
+  local nMaxZongShiLevel = ZongShiSkill:GetServerMaxZongShiLevel()
+  nMaxLevel = nMaxLevel + nMaxZongShiLevel
+  if nMaxLevel < self.SERVER_MAX_LEVEL then
+    return nil
+  end
+  return self.tbSettings[nMaxLevel]
+end
+
+function LevelUpAwards:LoadSetting()
+  local szTabPath = "Setting/LevelUpAwards/LevelUpAwards.tab"
+  local szParamType = "dddddd"
+  local szKey = "nOpenLevel"
+  local tbParams = {
+    "nId",
+    "nOpenLevel",
+    "nDirectLevel",
+    "nAwardId",
+    "nAwardKey",
+    "nProductId"
+  }
+  self.tbSettings = Lib:LoadTabFileEx(szTabPath, szParamType, szKey, tbParams)
+  assert(self.tbSettings)
+  Validator:Register(self.CheckLevelUpAwardsCfg, self)
+end
+
+function LevelUpAwards:CheckLevelUpAwardsCfg()
+  for _, tbInfo in pairs(self.tbSettings) do
+    if not Recharge:GetProductSettingById(tbInfo.nProductId) then
+      LogErr(string.format("load LevelUpAwards.tab failed, nProductId %d not found in RechargeProducts.tab", tbInfo.nProductId))
+      return false
+    end
+  end
+  return true
+end
+
+LevelUpAwards:LoadSetting()

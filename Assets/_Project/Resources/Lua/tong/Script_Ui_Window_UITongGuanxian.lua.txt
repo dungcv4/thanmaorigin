@@ -1,0 +1,174 @@
+local tbWnd = Ui:CreateWindow("UITongGuanxian")
+
+function tbWnd:NotifyEvents()
+  local tbRegEvent = {
+    {
+      EventNotify.emNOTIFY_SYNC_TONG_OFFICIALMAINTAIN_RESULT,
+      self.OnOfficialMaintain
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_TONG_MEMBERLIST,
+      self.OnUpdateGuanXianInfo
+    }
+  }
+  return tbRegEvent
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  txtTongMoney = "node/imgBG/Content/txtTongMoney",
+  btnMaintain = "node/imgBG/Content/btnMaintain",
+  btnBuy = "node/imgBG/Content/btnBuy",
+  wndGuanxianTips = "wndGuanxianTips",
+  txtTitle = "wndGuanxianTips/imgBg/txtTitle",
+  txtCost = "wndGuanxianTips/imgBg/txtCost",
+  Empty4Raycast = "wndGuanxianTips/Empty4Raycast",
+  imgBg = "wndGuanxianTips/imgBg"
+}
+tbWnd.tbOnClick = {
+  btnHelp = function(self)
+    Ui:OnHelpClicked("GuanXian")
+  end,
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnMaintain = function(self)
+    RemoteServer.OnTongRequest("OfficialMaintain", me.dwID)
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.OfficialMaintain)
+  end,
+  btnBuy = function(self)
+    Ui:OpenWindow("UINpcShop", Tong.Def.OfficialNpcId)
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.OfficialBuy)
+  end,
+  Empty4Raycast = function(self)
+    self.pPanel:SetActive(self.wndGuanxianTips, false)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.zhishi = "node/imgBG/Content/Row/zhishi"
+  self.tbGuanXianTitle = {}
+  self.tbGuanXianCost = {}
+  self.tbGuangXianAll = {}
+  self.tbGuangXianName = {}
+  self.tbMemberName = {}
+  self.tbGuangXianIcon = {}
+  for i = 1, Tong.Def.MaxTongOfficialNum + 1 do
+    self.tbGuangXianName[i] = string.format("%s%d/%s", self.zhishi, i, "txtGuanxian")
+    self.tbMemberName[i] = string.format("%s%d/%s", self.zhishi, i, "txtName")
+    self.tbGuangXianIcon[i] = string.format("%s%d/%s", self.zhishi, i, "imgIcon")
+    self.tbGuangXianAll[i] = string.format("%s%d", self.zhishi, i)
+    Ui:Button_BindEvent(self.pPanel, self.tbGuangXianAll[i], function()
+      self.pPanel:Label_SetText(self.txtTitle, self.tbGuanXianTitle[i])
+      self.pPanel:Label_SetText(self.txtCost, self.tbGuanXianCost[i])
+      local pos = self.pPanel:Object_GetPosition(self.tbGuangXianAll[i])
+      pos.x = pos.x + 2.5
+      self.pPanel:Object_SetPosition(self.imgBg, pos)
+      self.pPanel:SetActive(self.wndGuanxianTips, true)
+    end)
+  end
+  self.szBtnLevel = "node/imgBG/Content/btnLevelList/btnLevel"
+  self.tbGuanXianPageButton = {}
+  local maxlevel = Tong:GetMaxTongOfficialLevel()
+  for i = 1, Tong.Def.OfficialMaxLevel do
+    self.tbGuanXianPageButton[i] = string.format("%s%d", self.szBtnLevel, i)
+    if i <= maxlevel then
+      self.pPanel:SetActive(self.tbGuanXianPageButton[i], true)
+    else
+      self.pPanel:SetActive(self.tbGuanXianPageButton[i], false)
+    end
+  end
+  self.tbGuanXianPanelList = Ui:NewButtonGroup(self, self.tbGuanXianPageButton, true, self.OnGuanXianSwitchPage)
+end
+
+function tbWnd:OnOpen()
+  Tong:UpdateBaseInfo()
+  Tong:UpdateMemberList()
+  local tbBaseInfo = Tong:GetBaseInfo() or {}
+  self.nTongOfficialLevel = tbBaseInfo.nOfficialLevel
+  if self.nTongOfficialLevel > 0 then
+    self.tbGuanXianPanelList:Select(self.nTongOfficialLevel)
+  else
+    self.tbGuanXianPanelList:Select(1)
+  end
+  self:OnUpdateGuanXianInfo()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnMaintain, {
+    RedPointMgr.EVENT.OfficialMaintain
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnBuy, {
+    RedPointMgr.EVENT.OfficialBuy
+  })
+end
+
+function tbWnd:OnClose()
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.btnMaintain)
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.btnBuy)
+end
+
+function tbWnd:OnGuanXianSwitchPage(nPage)
+  self.nTongOfficialLevel = nPage
+  self:OnUpdateGuanXianInfo()
+end
+
+function tbWnd:OnUpdateGuanXianInfo()
+  local tbBaseInfo = Tong:GetBaseInfo() or {}
+  local tbMemberOfficialList = Tong.Def.OfficialTable[self.nTongOfficialLevel]
+  if tbMemberOfficialList then
+    local nOfficialId = Tong.Def.OfficialTitleCommont
+    local szOfficialName = ""
+    local tbOfficialNameList = tbBaseInfo.tbOfficialNameList or {}
+    local nOfficialCount = #tbOfficialNameList
+    local szOfficialPlayerName = ""
+    local nCost = 0
+    for i = 1, Tong.Def.MaxTongOfficialNum + 1 do
+      nOfficialId = tbMemberOfficialList[i]
+      if Tong.Cfg.OfficialInfo[nOfficialId] then
+        szOfficialName = i18n.Get(Tong.Cfg.OfficialInfo[nOfficialId].Title)
+        nCost = Tong.Cfg.OfficialInfo[nOfficialId].Charge
+      end
+      self.pPanel:Label_SetText(self.tbGuangXianName[i], szOfficialName)
+      self.tbGuanXianTitle[i] = szOfficialName
+      self.tbGuanXianCost[i] = nCost
+      local _, itemIcon = Item:GetIcon(Tong.Cfg.OfficialInfo[nOfficialId].ItemId)
+      self.pPanel:Sprite_SetSprite(self.tbGuangXianIcon[i], itemIcon)
+      szOfficialPlayerName = i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133")
+      if i <= nOfficialCount and self.nTongOfficialLevel == tbBaseInfo.nOfficialLevel and "" ~= tbOfficialNameList[i] then
+        szOfficialPlayerName = tbOfficialNameList[i]
+      end
+      if i < Tong.Def.MaxTongOfficialNum + 1 then
+        self.pPanel:Label_SetText(self.tbMemberName[i], szOfficialPlayerName)
+      end
+    end
+  end
+  local myTongFun = Tong:GetPersonalStock_client(me.dwID)
+  self.pPanel:Label_SetText(self.txtTongMoney, myTongFun)
+  if Tong:NeedActiveOfficial() then
+    self.pPanel:Button_SetEnable(self.btnMaintain, true)
+  else
+    self.pPanel:Button_SetEnable(self.btnMaintain, false)
+  end
+end
+
+function tbWnd:OnOfficialMaintain(nRet, nMyFun, nCostFun)
+  local szTip = ""
+  if nRet > 0 then
+    Tong:UpdateMemberList()
+    self.pPanel:Button_SetEnable(self.btnMaintain, false)
+    szTip = i18n.Get(Tong.Cfg.Msg.OfficialMaintainSucc, nCostFun)
+    Tong:NotifyOfficialRedPoint(true, true)
+    Timer:Register(Env.GAME_FPS * 3, self.OnUpdateGuanXianInfo, self)
+  else
+    szTip = i18n.Get(Tong.Cfg.Msg.OfficialMaintainFailed, nMyFun, nCostFun)
+    local tbWare = Shop:GetAWare2(Currency.TYPE.Gold, 813)
+    local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+    if nRemainCount > 0 or -1 == nRemainCount then
+      Ui:OpenWindow("UIShopBuy", tbWare, true)
+    end
+  end
+  me.CenterMsg(szTip)
+end
+
+function tbWnd:CloseByDefault()
+  self:Close()
+end

@@ -1,0 +1,95 @@
+Require("CommonScript/lib.lua")
+Require("CommonScript/Welfare/SupplementAward_Public.lua")
+SupplementAward = SupplementAward or {}
+
+function SupplementAward:UpdateSupplement()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SUPPLEMENT_UPDATE)
+end
+
+function SupplementAward:TrySupplement(szKey, nCount, bNormal, nTotalPrice)
+  local szMoneyType = bNormal and "Coin" or "YuanBao"
+  if nTotalPrice > me.GetMoney(szMoneyType) then
+    local szMoneyName = Currency:GetName(szMoneyType)
+    local szMsg = i18n.EasyGet("{0}\228\184\141\232\182\179", szMoneyName)
+    me.CenterMsg(szMsg)
+    return
+  end
+  RemoteServer.OnSupplementResquest("TryGetAward", szKey, nCount, bNormal)
+end
+
+function SupplementAward:SupplementAll()
+  local tbSuppleList = SupplementAward:GetSupplementList()
+  local bCansSupplement = false
+  local nAllCost = 0
+  local tbCansSupplement = {}
+  for nIndex = 1, #tbSuppleList do
+    local tbInfo = tbSuppleList[nIndex]
+    local szKey = tbInfo.szKey
+    local nPrice = tbInfo.nPrice_Perfect * SupplementAward:GetDisCount(szKey)
+    local nNum = SupplementAward:GetCanSupplementNum(szKey)
+    if nNum > 0 then
+      bCansSupplement = true
+      nAllCost = nAllCost + nPrice * nNum
+      table.insert(tbCansSupplement, {
+        szKey = szKey,
+        nNum = nNum,
+        nPrice = nPrice
+      })
+    end
+  end
+  if not bCansSupplement then
+    me.CenterMsg(i18n.EasyGet("\230\178\161\230\156\137\229\143\175\230\137\190\229\155\158\231\154\132\229\165\150\229\138\177"))
+    return
+  end
+  if nAllCost > me.GetMoney("YuanBao") then
+    me.CenterMsg(i18n.EasyGet("\229\133\131\229\174\157\228\184\141\232\182\179"))
+    return
+  end
+  if nAllCost > 0 then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\231\161\174\232\174\164\232\138\177\232\180\185<color=#ffff0e>{0}</color>\229\133\131\229\174\157\230\137\190\229\155\158\229\133\168\233\131\168\229\165\150\229\138\177\239\188\159", nAllCost), {
+      {
+        function()
+          RemoteServer.OnSupplementResquest("TryGetAll")
+        end
+      },
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    }, nil, nil, true)
+  end
+end
+
+function SupplementAward:OnCheckRedPoint()
+  local tbSuppleList = SupplementAward:GetSupplementList()
+  if #tbSuppleList > 0 then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.SupplementAward)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.SupplementAward)
+  end
+end
+
+function SupplementAward:CheckIsOpen(pPlayer)
+  if pPlayer.nLevel < self.nOpenLevel then
+    return false, i18n.EasyGet("\229\165\150\229\138\177\230\137\190\229\155\158{0}\231\186\167\229\188\128\230\148\190\239\188\129", self.nOpenLevel)
+  end
+  if 1 ~= GetTimeFrameState(self.szOpenTimeframe) then
+    return false, i18n.EasyGet("\229\165\150\229\138\177\230\137\190\229\155\158\229\189\147\229\137\141\230\156\170\229\188\128\230\148\190\239\188\129")
+  end
+  return true
+end
+
+function SupplementAward:ReLoadDate()
+  for _, tbInfo in pairs(self.tbSupplement) do
+    print(tbInfo.szLimitedTimeStart)
+    tbInfo.LimitedTimeStart = Lib:GetConfigDate2Time(tonumber(tbInfo.szLimitedTimeStart))
+    tbInfo.LimitedTimeEnd = Lib:GetConfigDate2Time(tonumber(tbInfo.szLimitedTimeEnd))
+  end
+end
+
+function SupplementAward:OnServerZoneTimeUpdate()
+  self:ReLoadDate()
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SERVER_TIME_ZONE_UPDATE, SupplementAward)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SERVER_TIME_ZONE_UPDATE, SupplementAward.OnServerZoneTimeUpdate, SupplementAward)

@@ -1,0 +1,214 @@
+local tbWnd = Ui:CreateClass("UIAddAndSubGroup", "UIPanel")
+local MAX_INPUT_VALUE = 999999
+local MIN_INPUT_VALUE = 0
+
+function Ui:NewExistAddAndSubGroup(tbOwner, szGroupKey)
+  return Ui:CreatePanel("UIAddAndSubGroup", szGroupKey, tbOwner)
+end
+
+tbWnd.tbControls = {
+  btnReduce = "btnReduce",
+  btnInput = "btnInput",
+  btnPlus = "btnPlus",
+  btnMax = "btnMax",
+  txtInput = "btnInput/txtInput"
+}
+tbWnd.tbOnClick = {
+  btnPlus = function(self)
+    self:OnPlusClick()
+  end,
+  btnReduce = function(self)
+    self:OnReduceClick()
+  end,
+  btnMax = function(self)
+    self:OnMaxClick()
+  end,
+  btnInput = function(self)
+    self:OnInputClick()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.nValue = 1
+end
+
+function tbWnd:BindEvent(fnCallback, fnAddFunc, fnSubFunc, fnInputFunc, tbMsg)
+  self.fnCallback = fnCallback
+  self.fnAddFunc = fnAddFunc
+  self.fnSubFunc = fnSubFunc
+  self.fnInputFunc = fnInputFunc
+  self.nMinNum = self.nMinNum or MIN_INPUT_VALUE
+  self.nMaxNum = self.nMaxNum or MAX_INPUT_VALUE
+  local tbDefaultMsg = {
+    szPlus = i18n.EasyGet("\228\184\141\232\131\189\229\134\141\229\162\158\229\138\160\228\186\134"),
+    szReduce = i18n.EasyGet("\228\184\141\232\131\189\229\134\141\229\135\143\229\176\145\228\186\134"),
+    szMax = i18n.EasyGet("\228\184\141\232\131\189\229\134\141\229\162\158\229\138\160\228\186\134")
+  }
+  self.tbMsg = tbMsg or tbDefaultMsg
+end
+
+function tbWnd:SetNumPadOpen()
+  self.bNotOpenNumPad = false
+end
+
+function tbWnd:SetNumPadNotOpen()
+  self.bNotOpenNumPad = true
+end
+
+function tbWnd:SetNumRange(nMinNum, nMaxNum, szCanNotBuyTip)
+  if nMaxNum and nMaxNum < nMinNum then
+    nMinNum = nMaxNum
+  end
+  self.nMinNum = nMinNum
+  self.nMaxNum = nMaxNum
+  self.plusTip = szCanNotBuyTip
+end
+
+function tbWnd:SetLongPressLoop(bPlusLongPress, bSubLongPress, bLoop)
+  if bPlusLongPress then
+    if bLoop then
+      self.pPanel:Button_BindLongPressLoop(self.btnPlus, function()
+        self:OnPlusClick()
+      end)
+    else
+      self.pPanel:Button_BindLongPressEnd(self.btnPlus, function()
+        self:OnPlusClick()
+      end)
+    end
+  end
+  if bSubLongPress then
+    if bLoop then
+      self.pPanel:Button_BindLongPressLoop(self.btnReduce, function()
+        self:OnReduceClick()
+      end)
+    else
+      self.pPanel:Button_BindLongPressEnd(self.btnReduce, function()
+        self:OnReduceClick()
+      end)
+    end
+  end
+end
+
+function tbWnd:SetInputValue(nValue)
+  if nValue > self.nMaxNum and self.tbMsg then
+    me.CenterMsg(self.plusTip or self.tbMsg.szPlus)
+  end
+  if nValue < MIN_INPUT_VALUE and self.tbMsg then
+    me.CenterMsg(self.tbMsg.szReduce)
+  end
+  nValue = nValue > self.nMaxNum and self.nMaxNum or nValue
+  nValue = nValue < MIN_INPUT_VALUE and MIN_INPUT_VALUE or nValue
+  self.nValue = nValue
+  self.pPanel:Label_SetText(self.txtInput, tostring(nValue))
+  return nValue
+end
+
+function tbWnd:SetNumPadPos(posX, posY, nCurNum)
+  self.tbPos = {x = posX, y = posY}
+  self.nCurNum = nCurNum or 0
+end
+
+function tbWnd:SetOnlyAddAndReduceCallState(bOnlyCallAddFunc, bOnlyCallReduceFunc)
+  self.bOnlyCallAddFunc = bOnlyCallAddFunc
+  self.bOnlyCallReduceFunc = bOnlyCallReduceFunc
+end
+
+function tbWnd:OnPlusClick()
+  if self.bDisable then
+    return
+  end
+  local nCurNum = self.nValue
+  local nNextNum = tonumber(nCurNum) + 1
+  if nNextNum > self.nMaxNum then
+    nNextNum = self.nMaxNum
+    if self.tbMsg then
+      me.CenterMsg(self.plusTip or self.tbMsg.szPlus)
+    end
+  end
+  if not self.bOnlyCallAddFunc then
+    self:InputValueChanged(nNextNum)
+  end
+  if self.fnAddFunc then
+    self.fnAddFunc()
+  end
+end
+
+function tbWnd:SetEnable(bEnable)
+  self.bDisable = not bEnable
+end
+
+function tbWnd:OnReduceClick()
+  if self.bDisable then
+    return
+  end
+  local nCurNum = self.nValue
+  local nNextNum = tonumber(nCurNum) - 1
+  if nNextNum < self.nMinNum then
+    nNextNum = self.nMinNum
+    if self.tbMsg then
+      me.CenterMsg(self.tbMsg.szReduce)
+    end
+  end
+  if not self.bOnlyCallReduceFunc then
+    self:InputValueChanged(nNextNum)
+  end
+  if self.fnSubFunc then
+    self.fnSubFunc()
+  end
+end
+
+function tbWnd:OnMaxClick()
+  if self.bDisable then
+    return
+  end
+  local nCurNum = self.nValue
+  if nCurNum == self.nMaxNum then
+    if self.tbMsg then
+      me.CenterMsg(self.tbMsg.szMax)
+    end
+    return
+  end
+  self:InputValueChanged(self.nMaxNum)
+end
+
+function tbWnd:OnInputClick()
+  if self.bDisable then
+    return
+  end
+  if self.fnInputFunc then
+    self.fnInputFunc()
+  end
+  if not self.bNotOpenNumPad then
+    Ui:OpenWindow("UINumKeyboard", function(nValue)
+      local nResult = self:InputValueChanged(nValue)
+      return nResult
+    end, function(nValue)
+      return self:SetInputValue(nValue)
+    end, self.tbPos, self.nCurNum)
+  end
+end
+
+function tbWnd:InputValueChanged(nValue)
+  if nValue < self.nMinNum then
+    nValue = self.nMinNum
+  end
+  local nFnValue, szValue
+  if self.fnCallback then
+    nFnValue, szValue = self.fnCallback(nValue)
+    nValue = nFnValue or nValue
+    szValue = szValue or nValue
+  end
+  self.nValue = nValue
+  self.pPanel:Label_SetText(self.txtInput, tostring(szValue or nValue))
+  return nValue
+end
+
+function tbWnd:GetObject()
+  return self.transform.gameObject
+end
+
+function tbWnd:SetButtonActive(bShowReduce, bShowPlus, bShowMax)
+  self.pPanel:SetActive(self.btnReduce, bShowReduce)
+  self.pPanel:SetActive(self.btnPlus, bShowPlus)
+  self.pPanel:SetActive(self.btnMax, bShowMax)
+end

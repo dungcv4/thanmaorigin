@@ -1,0 +1,251 @@
+Require("CommonScript/HonorLevel/HonorLevelDef.lua")
+
+function HonorLevel:CanActivate(pPlayer, nStarLevel)
+  if not self.IS_SYS_OPEN then
+    return false, i18n.Get(self.tbText.szSystemNotOpen)
+  end
+  local tbSetting = self.LEVEL_CFG[nStarLevel]
+  if not tbSetting then
+    return false, i18n.Get(self.tbText.szHonorWrong)
+  end
+  if "" ~= tbSetting.TIMEFRAME_REQ and 1 ~= GetTimeFrameState(tbSetting.TIMEFRAME_REQ) then
+    return false, i18n.Get(self.tbText.szThisHonorNotOpen)
+  end
+  local nFightPower = MODULE_GAMESERVER and pPlayer.GetFightPower() or pPlayer.GetNpc().GetFightPower()
+  if 0 ~= tbSetting.FIGHTPOWER_REQ and nFightPower < tbSetting.FIGHTPOWER_REQ then
+    return false, i18n.Get(self.tbText.szFightPowerNotEnough, tbSetting.FIGHTPOWER_REQ)
+  end
+  if 0 ~= tbSetting.ITEM_ID and 0 ~= tbSetting.ITEM_NUM and tbSetting.ITEM_NUM > pPlayer.GetItemCountInBags(tbSetting.ITEM_ID) then
+    return false, i18n.Get(self.tbText.szItemLack, KItem.GetItemShowInfo(tbSetting.ITEM_ID, pPlayer.nFaction, pPlayer.nFactionSect, pPlayer.nSex), tbSetting.ITEM_NUM)
+  end
+  if nStarLevel <= pPlayer.GetUserValue(self.nSaveGroup, self.nSaveKeyLevel) then
+    return false, i18n.Get(self.tbText.szNeedNotRepeatActive)
+  end
+  if nStarLevel ~= pPlayer.GetUserValue(self.nSaveGroup, self.nSaveKeyLevel) + 1 then
+    return false, i18n.Get(self.tbText.szThisHonorNotOpen)
+  end
+  return true
+end
+
+function HonorLevel:CanSell(pPlayer, nItemId)
+  if not self.IS_SYS_OPEN then
+    return false, i18n.Get(self.tbText.szSystemNotOpen)
+  end
+  local pItem = pPlayer.GetItemInBag(nItemId)
+  if not pItem then
+    return false, i18n.Get(self.tbText.szItemNotExsit)
+  end
+  if pItem.nEquipPos ~= Item.EQUIPPOS_MANTLE and pItem.nEquipPos ~= Item.EQUIPPOS_GUANYIN then
+    return false, i18n.Get(self.tbText.szItemCanNotRecover)
+  end
+  if pItem.nEquipPos == pItem.nPos then
+    return false, i18n.Get(self.tbText.szItemInEquipCanNotRecover)
+  end
+  if not self:CalcSellPrice(pPlayer, pItem) then
+    return false, i18n.Get(self.tbText.szRecoverPriceWrong)
+  end
+  return true
+end
+
+function HonorLevel:CalcSellPrice(pPlayer, pItem)
+  local bHas, _, nTimeout = Item:GetTimeOut(pItem)
+  if not bHas then
+    return
+  end
+  if Item:CheckIsTimeOut(pItem) then
+    return
+  end
+  local nWareId = 0
+  if pItem.nEquipPos == Item.EQUIPPOS_MANTLE then
+    local tbWareList = Shop:GetMantleWaresByItemTemplateId(pPlayer, pItem.dwTemplateId)
+    if 0 == #tbWareList then
+      return
+    end
+    table.sort(tbWareList, function(tbWareA, tbWareB)
+      return Shop:GetAWare(tbWareA.nWareId).nTimeOut > Shop:GetAWare(tbWareB.nWareId).nTimeOut
+    end)
+    nWareId = tbWareList[1].nWareId
+  elseif pItem.nEquipPos == Item.EQUIPPOS_GUANYIN then
+    nWareId = Shop:GetWareIDByItemID(pItem.dwTemplateId)
+  end
+  local tbWare = Shop:GetAWare(nWareId)
+  if not tbWare then
+    return
+  end
+  local nDaySec = 86400
+  local nLeftDay = math.floor((nTimeout - GetTime()) / nDaySec)
+  if nLeftDay <= 0 then
+    return
+  end
+  local nCfgDay = math.floor(tbWare.nTimeOut / nDaySec)
+  if nCfgDay <= 0 then
+    return
+  end
+  local nPrice = math.floor(tbWare.nPrice * nLeftDay / nCfgDay)
+  if nPrice <= 0 then
+    return
+  end
+  return nPrice * pItem.nCount
+end
+
+function HonorLevel:CanExchange(pPlayer, nItemId, nCount)
+  if not self.IS_SYS_OPEN then
+    return false, i18n.Get(self.tbText.szSystemNotOpen)
+  end
+  if type(nItemId) ~= "number" then
+    return false, i18n.Get(self.tbText.szItemNotExsit)
+  end
+  local pItem = pPlayer.GetItemInBag(nItemId)
+  if not pItem then
+    return false, i18n.Get(self.tbText.szItemNotExsit)
+  end
+  if nCount > pItem.nCount then
+    return false, i18n.Get(self.tbText.szItemLack, pItem.szName, nCount)
+  end
+  local tbSetting = self.EXCHANGE_CFG[pItem.dwTemplateId]
+  if not tbSetting then
+    return false, i18n.Get(self.tbText.szMaterialCanNotExchange)
+  end
+  return true
+end
+
+function HonorLevel:RefreshAttrib(pPlayer, nOldStarLevel, nNewStarLevel)
+  if pPlayer.IsMaskPlayerAttr() then
+    return
+  end
+  self:RemoveAttrib(pPlayer, nOldStarLevel)
+  self:ApplyAttrib(pPlayer, nNewStarLevel)
+end
+
+function HonorLevel:ApplyAttrib(pPlayer, nStarLevel)
+  local tbSetting = self.LEVEL_CFG[nStarLevel]
+  if not tbSetting or 0 == tbSetting.ATTRIB_GROUP or 0 == tbSetting.ATTRIB_LEVEL then
+    return
+  end
+  pPlayer.ApplyExternAttrib(tbSetting.ATTRIB_GROUP, tbSetting.ATTRIB_LEVEL)
+end
+
+function HonorLevel:RemoveAttrib(pPlayer, nStarLevel)
+  local tbSetting = self.LEVEL_CFG[nStarLevel]
+  if not tbSetting or 0 == tbSetting.ATTRIB_GROUP then
+    return
+  end
+  pPlayer.RemoveExternAttrib(tbSetting.ATTRIB_GROUP)
+end
+
+function HonorLevel:GetStarLevel(pPlayer)
+  return pPlayer.GetUserValue(self.nSaveGroup, self.nSaveKeyLevel)
+end
+
+function HonorLevel:GetHonorName(nHonorLevel, bNotFmtColor)
+  local szName = ""
+  local tbColor = {
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  }
+  local tbSetting = self.AWARD_CFG[nHonorLevel]
+  if tbSetting then
+    szName = tbSetting.HONOR_NAME
+    tbColor[1] = tbSetting.FONT_COLOR
+    tbColor[2] = tbSetting.FONT_OUTLINE_COLOR
+    tbColor[3] = tbSetting.GLOW_COLOR
+    tbColor[4] = 0
+    tbColor[5] = tbSetting.STAR_COLOR
+    tbColor[6] = tbSetting.STAR_GLOW_COLOR
+  end
+  if bNotFmtColor then
+    return szName, table.unpack(tbColor)
+  end
+  return szName, table.concat(tbColor, ",")
+end
+
+function HonorLevel:GetHonorNameByStarLevel(nStarLevel, bNotFmtColor)
+  local nHonor, nStar = self:SplitStarLevel(nStarLevel)
+  local szName = ""
+  local tbColor = {
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  }
+  local tbSetting = self.AWARD_CFG[nHonor]
+  if tbSetting then
+    szName = tbSetting.HONOR_NAME
+    tbColor[1] = tbSetting.FONT_COLOR
+    tbColor[2] = tbSetting.FONT_OUTLINE_COLOR
+    tbColor[3] = tbSetting.GLOW_COLOR
+    tbColor[4] = nStar
+    tbColor[5] = tbSetting.STAR_COLOR
+    tbColor[6] = tbSetting.STAR_GLOW_COLOR
+    tbColor[7] = tbSetting.GRADIENT1
+    tbColor[8] = tbSetting.GRADIENT2
+    tbColor[9] = tbSetting.STAR_GRADIENT1
+    tbColor[10] = tbSetting.STAR_GRADIENT2
+    tbColor[11] = tbSetting.STAR_OUTLINE_COLOR
+  end
+  if bNotFmtColor then
+    return szName, table.unpack(tbColor)
+  end
+  return szName, table.concat(tbColor, ",")
+end
+
+function HonorLevel:SplitStarLevel(nStarLevel)
+  local tbLevelSetting = self.LEVEL_CFG[nStarLevel]
+  if not tbLevelSetting then
+    return 0, 0
+  end
+  local nHonor = tbLevelSetting.HONOR_LEVEL
+  local nStar = 0
+  local tbLevelGroupSetting = self.LEVEL_GROUP_CFG[nHonor]
+  if #tbLevelGroupSetting > 1 then
+    for nIndex, nValue in pairs(tbLevelGroupSetting) do
+      if nValue == nStarLevel then
+        nStar = nIndex
+        break
+      end
+    end
+  end
+  return nHonor, nStar
+end
+
+function HonorLevel:GetFightPower(pPlayer)
+  local tbSetting = self.LEVEL_CFG[pPlayer.GetUserValue(self.nSaveGroup, self.nSaveKeyLevel)]
+  if not tbSetting then
+    return 0
+  end
+  local tbExternAttrSetting = FightSkill:GetExternAttrib(tbSetting.ATTRIB_GROUP, tbSetting.ATTRIB_LEVEL)
+  if not tbExternAttrSetting then
+    return 0
+  end
+  return tbExternAttrSetting.nFightPower
+end
+
+function HonorLevel:OnEquip(pPlayer)
+  self:ApplyAttrib(pPlayer, pPlayer.GetUserValue(self.nSaveGroup, self.nSaveKeyLevel))
+end
+
+function HonorLevel:OnUnEquip(pPlayer)
+  self:RemoveAttrib(pPlayer, pPlayer.GetUserValue(self.nSaveGroup, self.nSaveKeyLevel))
+end
+
+function HonorLevel:GetCurTimeframeMaxLevel()
+  local nMaxLevel = 0
+  for _, tbInfo in ipairs(self.LEVEL_CFG) do
+    if nMaxLevel < tbInfo.HONOR_LEVEL and 1 == GetTimeFrameState(tbInfo.TIMEFRAME_REQ) then
+      nMaxLevel = tbInfo.HONOR_LEVEL
+    end
+  end
+  return nMaxLevel
+end
+
+AttributeModule:Register("HonorLevel", HonorLevel)
+
+function HonorLevel:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  HonorLevel:ApplyAttrib(pNpc, pPlayerAsync.GetHonorStarLevel())
+end

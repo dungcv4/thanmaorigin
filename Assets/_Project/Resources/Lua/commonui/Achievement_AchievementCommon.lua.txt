@@ -1,0 +1,432 @@
+Achievement.tbMainSetting = Achievement.tbMainSetting or {}
+Achievement.tbGroup = Achievement.tbGroup or {}
+Achievement.SaveKey = GetGroupKey("Achievement")
+Achievement.DataSaveKey = GetGroupKey("AchievementData")
+Achievement.ScoreSaveKey = GetGroupKey("AchievementScore")
+Achievement.ScoreKey = 1
+Achievement.ScoreCalKey = 2
+Achievement.ScoreCalVal = 1
+Achievement.RecordSaveKey = GetGroupKey("AchievementRecord")
+Achievement.RecordKeyLifeSkill = 1
+Achievement.RecordKeyRecoverVer = 2
+Achievement.COMPLETION_RATIO = 0.7
+Achievement.Name = ""
+Achievement.szUiBtnName = "btnAchievement"
+Achievement.Protocol = {
+  TryGainAward = 1,
+  TryGainAllAward = 2,
+  DealAchievementEvent = 3
+}
+Achievement.ClientEventList = {
+  SendPrivateMsg = "SendPrivateMsg",
+  SendEmojiMsg = "SendEmojiMsg",
+  SendVoiceMsg = "SendVoiceMsg",
+  SendWorldMsg = "SendWorldMsg",
+  SendKinMsg = "SendKinMsg",
+  SendTongMsg = "SendTongMsg",
+  SendColorMsg = "SendColorMsg",
+  LifeSkill = "LifeSkill"
+}
+Achievement.ClientEventLimitedList = {}
+for _, szEvent in pairs(Achievement.ClientEventList) do
+  Achievement.ClientEventLimitedList[szEvent] = 1
+end
+Achievement.SpecialSubKindList = {
+  FriendShipImitityLevel = {
+    {
+      5,
+      "Friendship_Imity5Num"
+    },
+    {
+      20,
+      "Friendship_Imity20Num"
+    }
+  },
+  TongChallengeRank = {
+    {
+      1000,
+      "KinChallenge_Top1000"
+    },
+    {
+      500,
+      "KinChallenge_Top500"
+    }
+  }
+}
+
+function Achievement:LoadUICfg()
+  local szFilePath = "Setting/Achievement/AchievementGroup.tab"
+  self.tbGroupCfg = Lib:LoadTabFileEx(szFilePath, "ds", "nID", {"nID", "szName"})
+end
+
+function Achievement:LoadAchievementSubKindCfg()
+  local szFilePath = "Setting/Achievement/AchievementSubKind.tab"
+  local tbSubKind = Lib:LoadTabFileEx(szFilePath, "dsd", nil, {
+    "nID",
+    "szSubKind",
+    "nParamOne"
+  })
+  self.tbSubKindSave = {}
+  self.tbSubKindList = {}
+  for _, tbInfo in ipairs(tbSubKind or {}) do
+    self.tbSubKindList[tbInfo.szSubKind] = self.tbSubKindList[tbInfo.szSubKind] or {
+      bIsMulti = false,
+      tbList = {}
+    }
+    if -1 ~= tbInfo.nParamOne then
+      self.tbSubKindList[tbInfo.szSubKind].bIsMulti = true
+    end
+    table.insert(self.tbSubKindList[tbInfo.szSubKind].tbList, {
+      nParamOne = tbInfo.nParamOne,
+      nID = tbInfo.nID
+    })
+    if #self.tbSubKindList[tbInfo.szSubKind].tbList > 1 then
+      self.tbSubKindList[tbInfo.szSubKind].bIsMulti = true
+    end
+    assert(not self.tbSubKindSave[tbInfo.nID], "Achievement:LoadAchievementSubKindCfg fail, nID is repetition")
+    self.tbSubKindSave[tbInfo.nID] = tbInfo.szSubKind
+  end
+  self.tbSubKindSave = SetReadOnly(self.tbSubKindSave)
+end
+
+function Achievement:LoadRelationCfg()
+  local szFilePath = "Setting/Achievement/AchievementRelation.tab"
+  local tbField = {
+    "nPileID",
+    "szParentKind"
+  }
+  self.tbRelationCfg = Lib:LoadTabFileEx(szFilePath, "ds", "nPileID", tbField)
+  self.tbKindList = {}
+  for _, tbInfo in pairs(self.tbRelationCfg) do
+    self.tbKindList[tbInfo.szParentKind] = self.tbKindList[tbInfo.szParentKind] or {}
+    table.insert(self.tbKindList[tbInfo.szParentKind], tbInfo.nPileID)
+  end
+end
+
+function Achievement:LoadAchievementCfg()
+  self.tbMainSetting = {}
+  local szFilePath = "Setting/Achievement/Achievement.tab"
+  local tbField = {
+    "Kind",
+    "GroupID",
+    "Desc",
+    "Priority",
+    "Show"
+  }
+  local tbSetting = Lib:LoadTabFileEx(szFilePath, "sdsdd", nil, tbField)
+  for _, tbInfo in ipairs(tbSetting or {}) do
+    self.tbMainSetting[tbInfo.Kind] = {
+      nGroupID = tbInfo.GroupID,
+      szDesc = tbInfo.Desc,
+      nPriority = tbInfo.Priority,
+      nShow = tbInfo.Show,
+      tbLevelInfo = {}
+    }
+  end
+end
+
+function Achievement:LoadAchievementLevelCfg()
+  self.tbAchievementCfg = {}
+  self.tbSubKind = {}
+  self.tbPileList = {}
+  local szFilePath = "Setting/Achievement/AchievementLevel.tab"
+  local tbField = {
+    "ID",
+    "nSubKindID",
+    "FinishCount",
+    "NeedPush",
+    "Title",
+    "Desc",
+    "nSortInUI",
+    "RecommandFightPower",
+    "nLevel",
+    "szFuncName",
+    "szParams",
+    "Award",
+    "nScore",
+    "nPileID"
+  }
+  local tbLevelSetting = Lib:LoadTabFileEx(szFilePath, "ddddssdddsssdd", nil, tbField)
+  local tbMain
+  for _, tbInfo in ipairs(tbLevelSetting or {}) do
+    self.tbAchievementCfg[tbInfo.ID] = {
+      nID = tbInfo.ID,
+      nSubKindID = tbInfo.nSubKindID,
+      nFinishCount = tbInfo.FinishCount,
+      nNeedPush = tbInfo.NeedPush,
+      szTitle = tbInfo.Title,
+      szDesc = tbInfo.Desc,
+      nSortInUI = tbInfo.nSortInUI,
+      nFightPower = tbInfo.RecommandFightPower,
+      nLevel = tbInfo.nLevel,
+      szFuncName = tbInfo.szFuncName,
+      szParams = tbInfo.szParams,
+      szAward = tbInfo.Award,
+      nScore = tbInfo.nScore or 1,
+      nPileID = tbInfo.nPileID
+    }
+    self.tbSubKind[tbInfo.nSubKindID] = self.tbSubKind[tbInfo.nSubKindID] or {}
+    table.insert(self.tbSubKind[tbInfo.nSubKindID], tbInfo.ID)
+    self.tbPileList[tbInfo.nPileID] = self.tbPileList[tbInfo.nPileID] or {}
+    table.insert(self.tbPileList[tbInfo.nPileID], tbInfo.ID)
+    assert(self.tbRelationCfg[tbInfo.nPileID], string.format("Achievement:LoadAchievementLevelCfg nPileID %d is invalid", tbInfo.nPileID))
+    tbMain = self.tbMainSetting[self.tbRelationCfg[tbInfo.nPileID].szParentKind]
+    if tbMain then
+      table.insert(tbMain.tbLevelInfo, {
+        nID = tbInfo.ID
+      })
+      tbMain.nMaxLevel = #tbMain.tbLevelInfo
+    end
+  end
+  for _, tbIDList in pairs(self.tbPileList) do
+    table.sort(tbIDList, function(nFirst, nSecond)
+      return self.tbAchievementCfg[nFirst].nSortInUI < self.tbAchievementCfg[nSecond].nSortInUI
+    end)
+  end
+end
+
+function Achievement:DealSaveKey()
+  local tbDumplicate = {}
+  local nSubKindID
+  for _, tbInfo in pairs(self.tbMainSetting) do
+    for _, tbLevelInfo in ipairs(tbInfo.tbLevelInfo) do
+      nSubKindID = self.tbAchievementCfg[tbLevelInfo.nID].nSubKindID
+      if not tbDumplicate[nSubKindID] then
+        tbDumplicate[nSubKindID] = true
+      end
+    end
+    table.sort(tbInfo.tbLevelInfo, function(tbFirst, tbSecond)
+      return self.tbAchievementCfg[tbFirst.nID].nSortInUI < self.tbAchievementCfg[tbSecond.nID].nSortInUI
+    end)
+  end
+end
+
+function Achievement:LoadSetting()
+  self.Name = i18n.EasyGet("\230\136\144\229\176\177")
+  self:LoadUICfg()
+  self:LoadAchievementSubKindCfg()
+  self:LoadRelationCfg()
+  self:LoadAchievementCfg()
+  self:LoadAchievementLevelCfg()
+  self:DealSaveKey()
+  self.tbMainSetting = SetReadOnly(self.tbMainSetting)
+  self.tbAchievementCfg = SetReadOnly(self.tbAchievementCfg)
+  self.tbPileList = SetReadOnly(self.tbPileList)
+end
+
+function Achievement:InitGroup()
+  for szMainKind, tbInfo in pairs(self.tbMainSetting) do
+    if tbInfo.nShow > 0 then
+      self.tbGroup[tbInfo.nGroupID] = self.tbGroup[tbInfo.nGroupID] or {
+        szName = self.tbGroupCfg[tbInfo.nGroupID].szName,
+        tbKind = {}
+      }
+      table.insert(self.tbGroup[tbInfo.nGroupID].tbKind, {
+        szKind = szMainKind,
+        szDesc = tbInfo.szDesc
+      })
+    end
+  end
+  for _, tbGroupInfo in pairs(self.tbGroup) do
+    table.sort(tbGroupInfo.tbKind, function(tbFirst, tbSecond)
+      return self.tbMainSetting[tbFirst.szKind].nPriority < self.tbMainSetting[tbSecond.szKind].nPriority
+    end)
+  end
+end
+
+Achievement:LoadSetting()
+Achievement:InitGroup()
+
+function Achievement:IsExist(szSubKind)
+  return self.tbSubKindSave[szSubKind]
+end
+
+function Achievement:IsAchievementFinished(pPlayer, nID)
+  if not pPlayer or not nID then
+    return false
+  end
+  if not self.tbAchievementCfg[nID] then
+    return false
+  end
+  local nSubKindID = self.tbAchievementCfg[nID].nSubKindID
+  local nGroupKey, nValueKey = self:GetSubKindGroupKey(nSubKindID)
+  local nCurCount = pPlayer.GetUserValue(nGroupKey, nValueKey)
+  return nCurCount >= self.tbAchievementCfg[nID].nFinishCount
+end
+
+function Achievement:GetSubKindGroupKey(nSubKindID)
+  assert(self.tbSubKindSave[nSubKindID], "Achievement:GetSubKindGroupKey nSubKindID is invalid", nSubKindID)
+  return self.DataSaveKey, nSubKindID
+end
+
+function Achievement:GetKindBySubKind(szSubKind)
+  return self.tbRelationCfg[szSubKind].szParentKind
+end
+
+function Achievement:GetKindByID(nID)
+  return self.tbRelationCfg[self.tbAchievementCfg[nID].nPileID].szParentKind
+end
+
+function Achievement:GetLevelByID(nID)
+  local szKind = self:GetKindByID(nID)
+  for nLevel, tbInfo in ipairs(self.tbMainSetting[szKind].tbLevelInfo) do
+    if tbInfo.nID == nID then
+      return nLevel
+    end
+  end
+  return 0
+end
+
+function Achievement:GetCfgByID(nID)
+  return self.tbAchievementCfg[nID]
+end
+
+function Achievement:IsShow(szMainKind)
+  return self.tbMainSetting[szMainKind] and self.tbMainSetting[szMainKind].nShow > 0
+end
+
+function Achievement:IsSubKindIDExist(nSubKindID)
+  return self.tbSubKindSave[nSubKindID]
+end
+
+function Achievement:IsAchievementExist(nID)
+  return self.tbAchievementCfg[nID]
+end
+
+function Achievement:GetSubKindID(nID)
+  return self.tbAchievementCfg[nID].nSubKindID
+end
+
+function Achievement:GetFinishCount(nID)
+  return self.tbAchievementCfg[nID].nFinishCount
+end
+
+function Achievement:HasAwardGained(pPlayer, nID)
+  return 1 == pPlayer.GetUserValue(self.SaveKey, nID)
+end
+
+function Achievement:GetAwardInfo(nID)
+  local tbAward = {}
+  local tbInfo = self.tbAchievementCfg[nID]
+  if tbInfo.szAwardType and tbInfo.szAwardType ~= "" then
+    tbAward.szType = tbInfo.szAwardType
+    tbAward.nAwardTemplateId = tbInfo.nAwardTemplateId
+    tbAward.nCount = tbInfo.nAwardCount
+  end
+  if tbInfo.nAwardTitle > 0 then
+    tbAward.nTitle = tbInfo.nAwardTitle
+  end
+  return tbAward
+end
+
+function Achievement:GetSubKindCount(pPlayer, nSubKindID)
+  if type(nSubKindID) ~= "number" then
+    LogErr("Achievement:GetSubKindCount", debug.traceback())
+    return 0
+  end
+  if not (pPlayer and nSubKindID) or not self:IsSubKindIDExist(nSubKindID) then
+    return 0
+  end
+  local nGroupKey, nValueKey = self.DataSaveKey, nSubKindID
+  return pPlayer.GetUserValue(nGroupKey, nValueKey)
+end
+
+function Achievement:GetGroupIDByKind(szKind)
+  return self.tbMainSetting[szKind].nGroupID
+end
+
+function Achievement:GetSubKindBySubKindID(nSubKindID)
+  local szSubKind = self.tbSubKindSave[nSubKindID]
+  if not self.tbSubKindList[szSubKind].bIsMulti then
+    return self.tbSubKindSave[nSubKindID]
+  end
+  if self.SpecialSubKindList[szSubKind] then
+    for _, tbInfo in ipairs(self.tbSubKindList[szSubKind].tbList) do
+      if tbInfo.nID == nSubKindID then
+        for _, tbSpecialInfo in ipairs(self.SpecialSubKindList[szSubKind] or {}) do
+          if tbInfo.nParamOne == tbSpecialInfo[1] then
+            return tbSpecialInfo[2]
+          end
+        end
+      end
+    end
+  end
+  for _, tbInfo in ipairs(self.tbSubKindList[szSubKind].tbList) do
+    if tbInfo.nID == nSubKindID then
+      return szSubKind .. tbInfo.nParamOne
+    end
+  end
+  return szSubKind
+end
+
+function Achievement:GetSubKindIDBySubKind(szSubKind)
+  if self.tbSubKindList[szSubKind] and not self.tbSubKindList[szSubKind].bIsMulti then
+    for _, tbInfo in ipairs(self.tbSubKindList[szSubKind].tbList) do
+      return tbInfo.nID
+    end
+  end
+  local tbSpecialList = {}
+  for szSK, tbList in pairs(self.SpecialSubKindList) do
+    for _, tbSInfo in ipairs(tbList) do
+      tbSpecialList[tbSInfo[2]] = {
+        nParamOne = tbSInfo[1],
+        szSubKind = szSK
+      }
+    end
+  end
+  if tbSpecialList[szSubKind] then
+    if not self.tbSubKindList[tbSpecialList[szSubKind].szSubKind] then
+      LogErr("Achievement:GetSubKindIDBySubKind maybe have some wrong", szSubKind, tbSpecialList[szSubKind].szSubKind)
+      return 0
+    end
+    for _, tbInfo in ipairs(self.tbSubKindList[tbSpecialList[szSubKind].szSubKind].tbList) do
+      if tbInfo.nParamOne == tbSpecialList[szSubKind].nParamOne then
+        return tbInfo.nID
+      end
+    end
+  end
+  LogErr("Achievement:GetSubKindIDBySubKind subKind is not exist", szSubKind)
+  return 0
+end
+
+function Achievement:GetSubKindCountByLevel(pPlayer, szMainKind, nLevel)
+  if not (pPlayer and szMainKind) or not nLevel then
+    return
+  end
+  local tbMainInfo = self.tbMainSetting[szMainKind]
+  local nSubKindID = tbMainInfo.tbLevelInfo[nLevel].nID
+  local nGroupKey, nValueKey = self:GetSubKindGroupKey(nSubKindID)
+  if not nGroupKey or not nValueKey then
+    Log("Achievement ERR: GetSaveKey Fail ", nGroupKey)
+    return
+  end
+  local nLevelCurCount = pPlayer.GetUserValue(nGroupKey, nValueKey)
+  return nLevelCurCount
+end
+
+function Achievement:GetCurrentSubKind(pPlayer, szMainKind)
+  local tbMainInfo = self.tbMainSetting[szMainKind]
+  if not tbMainInfo then
+    Log("Achievement:GetCurrentSubKind >>>>", szMainKind)
+    return
+  end
+  local nCurLevel = self:GetCompletedLevel(pPlayer, szMainKind) + 1
+  local nMaxLevel = self:GetMaxLevel(szMainKind)
+  nCurLevel = math.min(nMaxLevel, nCurLevel)
+  local tbInfo = tbMainInfo.tbLevelInfo[nCurLevel]
+  return tbInfo.SubKind
+end
+
+function Achievement:GetMaxLevel(szMainKind)
+  local tbMainInfo = self.tbMainSetting[szMainKind] or {}
+  return tbMainInfo.nMaxLevel or 999
+end
+
+function Achievement:GetLevelInfo(szMainKind, nLevel)
+  local tbMainInfo = self.tbMainSetting[szMainKind]
+  if not tbMainInfo then
+    return
+  end
+  local tbLevelInfo = tbMainInfo.tbLevelInfo
+  return tbLevelInfo[nLevel]
+end

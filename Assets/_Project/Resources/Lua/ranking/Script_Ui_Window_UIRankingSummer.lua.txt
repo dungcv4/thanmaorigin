@@ -1,0 +1,300 @@
+local tbWnd = Ui:CreateWindow("UIRankingSummer")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  TreeRoot = "node/imgBG/Content/Left/TypeList/UITree",
+  Ranking = "node/imgBG/Content/Ranking",
+  TitlePlayer = "node/imgBG/Content/Ranking/Right/titles/TitlePlayer",
+  RankNotInfo = "node/imgBG/Content/Ranking/Right/RankList/NotInfo",
+  RankContent = "node/imgBG/Content/Ranking/Right/RankList/Content",
+  RankTemplatePlayer = "node/imgBG/Content/Ranking/Right/RankList/Content/TemplatePlayer",
+  txtPage = "node/imgBG/Content/Ranking/Right/txtPage",
+  btnPrePage = "node/imgBG/Content/Ranking/Right/btnPrePage",
+  btnNextPage = "node/imgBG/Content/Ranking/Right/btnNextPage",
+  btnFirstPage = "node/imgBG/Content/Ranking/Right/btnFirstPage",
+  btnLastPage = "node/imgBG/Content/Ranking/Right/btnLastPage",
+  txtRank = "node/imgBG/Content/Ranking/Bottom/txtRank",
+  txtRankValue = "node/imgBG/Content/Ranking/Bottom/txtRankValue",
+  txtScore = "node/imgBG/Content/Ranking/Bottom/txtScore",
+  txtScoreValue = "node/imgBG/Content/Ranking/Bottom/txtScoreValue",
+  txtMyInfoLabelNoData = "node/imgBG/Content/Ranking/Bottom/txtMyInfoLabelNoData",
+  Awards = "node/imgBG/Content/Awards",
+  AwardsListPlayer = "node/imgBG/Content/Awards/AwardsListPlayer",
+  AwardTemplatePlayer = "node/imgBG/Content/Awards/AwardsListPlayer/Content/TemplatePlayer"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnPrePage = function(self)
+    self:OnClickBtnPrePage()
+  end,
+  btnNextPage = function(self)
+    self:OnClickBtnNextPage()
+  end,
+  btnFirstPage = function(self)
+    self:OnClickBtnFirstPage()
+  end,
+  btnLastPage = function(self)
+    self:OnClickBtnLastPage()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_ENTER,
+      self.OnEnterMap
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_RANKBOARD_DATA,
+      self.OnSyncAllRank
+    }
+  }
+end
+
+local tbFnUiTreeText = {
+  fnAllRank = function()
+    return i18n.EasyGet("\230\142\146\229\144\141")
+  end,
+  fnAwardPreview = function()
+    return i18n.EasyGet("\229\165\150\229\138\177\233\162\132\232\167\136")
+  end
+}
+local tbUiTreeBigIndex = {nRank = 1, nAwardPreview = 2}
+local tbPanelIndex = {nAllRank = 1, nRankAward = 2}
+local RANKING_AWARD_ACTIVITY_ID = 42
+local RANKBOARD_TYPE = "SummerFishing"
+
+function tbWnd:OnCreate()
+  self.uiTree = Ui:NewTree(self, tbControls.TreeRoot, self.OnClickTreeButton, self.OnClickTreeButton)
+  local tbUITreeBigData = {
+    {
+      nType = tbUiTreeBigIndex.nAllRank,
+      szText = tbFnUiTreeText.fnAllRank(),
+      tbInfo = {
+        nOnClickIndex = tbPanelIndex.nAllRank
+      }
+    },
+    {
+      nType = tbUiTreeBigIndex.nAwardPreview,
+      szText = tbFnUiTreeText.fnAwardPreview(),
+      tbInfo = {
+        nOnClickIndex = tbPanelIndex.nRankAward
+      }
+    }
+  }
+  self.uiTree:SetData(tbUITreeBigData, {})
+  self.tbAllRankScrollView = Ui:NewScrollView(self, tbControls.RankTemplatePlayer)
+  self.tbRankAwardScrollView = Ui:NewScrollView(self, tbControls.AwardTemplatePlayer)
+end
+
+function tbWnd:OnOpen(RANKING_AWARD_ACTIVITY_ID)
+  self.pInstance = ActivityMgr:GetInstanceById(RANKING_AWARD_ACTIVITY_ID)
+  self.uiTree:AutoSelect()
+  self:UpdatePanel(tbPanelIndex.nAllRank)
+end
+
+function tbWnd:OnClickTreeButton(tbInfo)
+  local nOnClickIndex = tbInfo.nOnClickIndex
+  if nil ~= nOnClickIndex and self.nPanelIndex ~= nOnClickIndex then
+    self:UpdatePanel(nOnClickIndex)
+  end
+end
+
+function tbWnd:UpdatePanel(nPanelIndex)
+  self.nPanelIndex = nPanelIndex
+  local bShowRankPanel = nPanelIndex == tbPanelIndex.nAllRank
+  local bShowAwardPanel = nPanelIndex == tbPanelIndex.nRankAward
+  self.pPanel:SetActive(tbControls.Ranking, bShowRankPanel)
+  self.pPanel:SetActive(tbControls.Awards, bShowAwardPanel)
+  if bShowRankPanel then
+    self.pPanel:SetActive(tbControls.TitlePlayer, nPanelIndex == tbPanelIndex.nAllRank)
+  end
+  if bShowAwardPanel then
+    self.pPanel:SetActive(tbControls.AwardsListPlayer, nPanelIndex == tbPanelIndex.nRankAward)
+  end
+  if nPanelIndex == tbPanelIndex.nAllRank then
+    self:ShowAllRankPanel()
+  elseif nPanelIndex == tbPanelIndex.nRankAward then
+    self:ShowRankAwardPanel()
+  end
+end
+
+function tbWnd:ShowRankAwardPanel()
+  if not self.pInstance then
+    return
+  end
+  local tbRankingAward = self.pInstance.tbConfig.tbRankingAward
+  for nIndex, tbAwardCfg in ipairs(tbRankingAward) do
+    self.tbRankAwardScrollView:SetElement(nIndex, function(tbElement)
+      if tbAwardCfg.nRankStart == tbAwardCfg.nRankEnd then
+        tbElement.pPanel:Label_SetText("txtRank", i18n.EasyGet("\231\172\172{0}\229\144\141", tbAwardCfg.nRankEnd))
+      else
+        tbElement.pPanel:Label_SetText("txtRank", i18n.EasyGet("\231\172\172{0}-{1}\229\144\141", tbAwardCfg.nRankStart, tbAwardCfg.nRankEnd))
+      end
+      if tbElement.tbLevelAwardShowScrollView == nil then
+        tbElement.tbLevelAwardShowScrollView = Ui:NewItemGridScrollView(tbElement, "Awards/ItemTemplate", 1, 1)
+      end
+      local tbAward = Award:GetAward(self.pInstance.tbConfig.nAwardId, tbAwardCfg.nAwardKey)
+      tbElement.tbLevelAwardShowScrollView:UpdateGenericItem(tbAward, true)
+    end)
+  end
+end
+
+function tbWnd:ShowAllRankPanel()
+  self:AllRankSwitchPage(1)
+end
+
+function tbWnd:AllRankSwitchPage(nPageIndex)
+  self.nPageIndex = nPageIndex
+  self.tbAllRankScrollView:Clear()
+  self:SetAllBottomRankAndScoreText()
+  self:SetAllNowPageAndSumPageText()
+  self:RequestAllRankDataByPage(nPageIndex)
+end
+
+function tbWnd:SetAllNowPageAndSumPageText()
+  self:SetNowPageAndSumPage(self.nPageIndex, self.nAllSumPage or 0)
+end
+
+function tbWnd:SetAllBottomRankAndScoreText()
+  if self.nMyPersonalRank ~= nil and nil ~= self.nMyPersonalScore then
+    self:SetMyRankAndScoreShow(i18n.EasyGet("\230\136\145\231\154\132\230\142\146\229\144\141\239\188\154"), self.nMyPersonalRank, i18n.EasyGet("\230\128\187\231\167\175\229\136\134\239\188\154"), self.nMyPersonalScore)
+  else
+    self:SetNotOnRank()
+  end
+end
+
+function tbWnd:RequestAllRankDataByPage(nPageIndex)
+  RankBoard:RequestOpenRankBoard(RANKBOARD_TYPE, nPageIndex, true)
+end
+
+function tbWnd:OnSyncAllRank()
+  local tbData = RankBoard.tbAllData[RANKBOARD_TYPE][self.nPageIndex]
+  local tbMyData = RankBoard.tbMyRankInfo[RANKBOARD_TYPE]
+  self.nMyPersonalRank = tbMyData.nPosition
+  self.nMyPersonalScore = tbMyData.nValue
+  self.nAllSumPage = math.ceil(tbMyData.nLength / RankBoard.PAGE_NUM)
+  if self.nPanelIndex == tbPanelIndex.nAllRank then
+    self:SetAllBottomRankAndScoreText()
+    self:SetAllNowPageAndSumPageText()
+    local bRankDataNotEmpty = #tbData > 0
+    self.pPanel:SetActive(tbControls.RankContent, bRankDataNotEmpty)
+    self.pPanel:SetActive(tbControls.RankNotInfo, not bRankDataNotEmpty)
+    if bRankDataNotEmpty then
+      for nIndex, tbPlayerData in ipairs(tbData) do
+        self.tbAllRankScrollView:SetElement(nIndex, function(tbElement)
+          local pPanel = tbElement.pPanel
+          local nRank = (self.nPageIndex - 1) * RankBoard.PAGE_NUM + nIndex
+          self:RankElement_SetRank(tbElement, "UIRankNo", "txtRank", nRank)
+          pPanel:Label_SetText("txtPlayerName", tbPlayerData.szName)
+          Ui:SetVipLevelEffect(pPanel, tbPlayerData.nVipLevel, "txtPlayerName")
+          self:RankElement_SetHonor(tbElement, "txtPlayerName/HonorTitle", tbPlayerData.nHonorLevel)
+          pPanel:Label_SetText("txtKinName", tbPlayerData.szKinName)
+          pPanel:Label_SetText("txtScore", tbPlayerData.nHighValue)
+          self:RankElement_SetBackGroundColor(tbElement, me.dwID == tbPlayerData.nPlayerId)
+        end)
+      end
+    end
+  end
+end
+
+function tbWnd:SetMyRankAndScoreShow(szRankName, nRank, szScoreName, nScore)
+  self:SetBottomActive(true)
+  self.pPanel:Label_SetText(tbControls.txtRank, szRankName)
+  self.pPanel:Label_SetText(tbControls.txtRankValue, nRank)
+  self.pPanel:Label_SetText(tbControls.txtScore, szScoreName)
+  self.pPanel:Label_SetText(tbControls.txtScoreValue, nScore)
+end
+
+function tbWnd:SetNotOnRank()
+  self:SetBottomActive(false)
+end
+
+function tbWnd:SetBottomActive(bIsOnRank)
+  self.pPanel:SetActive(tbControls.txtRank, bIsOnRank)
+  self.pPanel:SetActive(tbControls.txtRankValue, bIsOnRank)
+  self.pPanel:SetActive(tbControls.txtScore, bIsOnRank)
+  self.pPanel:SetActive(tbControls.txtScoreValue, bIsOnRank)
+  self.pPanel:SetActive(tbControls.txtMyInfoLabelNoData, not bIsOnRank)
+end
+
+function tbWnd:SetNowPageAndSumPage(nNowPage, nSumPage)
+  self.pPanel:Label_SetText(tbControls.txtPage, string.format("%d/%d", nNowPage, nSumPage))
+end
+
+function tbWnd:RankElement_SetRank(tbElement, szTop3RankNoKey, szTxtRankKey, nRank)
+  local pPanel = tbElement.pPanel
+  local bTop3 = nRank <= 3
+  pPanel:SetActive(szTxtRankKey, not bTop3)
+  pPanel:SetActive(szTop3RankNoKey, bTop3)
+  if bTop3 then
+    pPanel:SetActive(szTop3RankNoKey .. "/imgNO1", 1 == nRank)
+    pPanel:SetActive(szTop3RankNoKey .. "/imgNO2", 2 == nRank)
+    pPanel:SetActive(szTop3RankNoKey .. "/imgNO3", 3 == nRank)
+  else
+    pPanel:Label_SetText(szTxtRankKey, nRank)
+  end
+end
+
+function tbWnd:RankElement_SetHonor(tbElement, szHonorKey, nHonorLevel)
+  local szHonorName, szHonorColor = HonorLevel:GetHonorName(nHonorLevel, false)
+  local obj = tbElement.pPanel:GetObject(szHonorKey)
+  local pHonorTitle = obj:GetComponent(Ui.UIHonorTitle)
+  pHonorTitle:SetHonorTitle(i18n.Parse(szHonorName), szHonorColor)
+end
+
+function tbWnd:RankElement_SetBackGroundColor(tbElement, bIsSelf)
+  if bIsSelf then
+    tbElement.pPanel:Sprite_SetColor("Main", 255, 255, 255, 255)
+  else
+    tbElement.pPanel:Sprite_SetColor("Main", 0, 0, 0, 20)
+  end
+end
+
+function tbWnd:GetNowShowRankSumPage()
+  if self.nPanelIndex == tbPanelIndex.nAllRank then
+    return self.nAllSumPage
+  else
+    return nil
+  end
+end
+
+function tbWnd:OnClickBtnPrePage()
+  local nSumPage = self:GetNowShowRankSumPage()
+  if nil ~= nSumPage and nSumPage > 0 and nil ~= self.nPageIndex and self.nPageIndex - 1 >= 1 then
+    self:OnClickSwitchRankPage(self.nPageIndex - 1)
+  end
+end
+
+function tbWnd:OnClickBtnNextPage()
+  local nSumPage = self:GetNowShowRankSumPage()
+  if nil ~= nSumPage and nSumPage > 0 and nil ~= self.nPageIndex and nSumPage >= self.nPageIndex + 1 then
+    self:OnClickSwitchRankPage(self.nPageIndex + 1)
+  end
+end
+
+function tbWnd:OnClickBtnFirstPage()
+  local nSumPage = self:GetNowShowRankSumPage()
+  if nil ~= nSumPage and nSumPage > 0 then
+    self:OnClickSwitchRankPage(1)
+  end
+end
+
+function tbWnd:OnClickBtnLastPage()
+  local nSumPage = self:GetNowShowRankSumPage()
+  if nil ~= nSumPage and nSumPage > 0 then
+    self:OnClickSwitchRankPage(nSumPage)
+  end
+end
+
+function tbWnd:OnClickSwitchRankPage(nPageIndex)
+  if self.nPageIndex ~= nPageIndex and self.nPanelIndex == tbPanelIndex.nAllRank then
+    self:AllRankSwitchPage(nPageIndex)
+  end
+end
+
+function tbWnd:OnEnterMap()
+  self:Close()
+end

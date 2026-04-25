@@ -1,0 +1,279 @@
+local tbWnd = Ui:CreateWindow("UIBattleEntranceHanWu")
+local tbControls = {
+  btnClose = "imgBG/btnClose",
+  txtEnrolling = "imgBG/panelInfo/txtEnrolling",
+  txtInfo = "imgBG/panelInfo/Info/Viewport/Content/txtInfo",
+  txtEnrollTimeValue = "imgBG/panelInfo/EnrollTime/txtEnrollTimeValue",
+  txtEnrollTimeTips = "imgBG/panelInfo/EnrollTime/txtEnrollTimeTip",
+  txtEnrollNumValue = "imgBG/panelInfo/EnrollNum/txtEnrollNumValue",
+  txtEnrollNumTips = "imgBG/panelInfo/EnrollNum/txtEnrollNumTip",
+  txtLeftCount = "imgBG/panelInfo/Times/txtLeftCount",
+  txtLeftCountTip = "imgBG/panelInfo/Times/txtLeftCountTip",
+  btnEnterSingle = "imgBG/panelInfo/btnEnterSingle",
+  btnEnterTeam = "imgBG/panelInfo/btnEnterTeam",
+  btnEnterSingleCenter = "imgBG/panelInfo/btnEnterSingleCenter",
+  btnPlus = "imgBG/panelInfo/Times/btnPlus",
+  txtTitle = "imgBG/txtTitle",
+  btnRank = "imgBG/panelInfo/btnRank"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnEnterSingle = function(self)
+    self:OnClickAttend(false)
+  end,
+  btnEnterTeam = function(self)
+    self:OnClickAttend(true)
+  end,
+  btnPlus = function(self)
+    self:OnClickBtnPlus()
+  end,
+  btnRank = function(self)
+    self:OpenRankBoard()
+  end,
+  btnEnterSingleCenter = function(self)
+    self:OnClickAttend(false)
+  end
+}
+tbWnd.CLICK_INTERVAL = 3
+tbWnd.SYNC_INTERVAL = 5
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_HANWUYIJI_SYNC_SIGNUP_INFO,
+      self.OnSyncSignupInfo
+    },
+    {
+      EventNotify.emNOTIFY_LOULANMIZONG_SYNC_SIGNUP_INFO,
+      self.OnSyncSignupInfo
+    }
+  }
+end
+
+function tbWnd:OnOpen(tbClass, tbInfo)
+  self.tbClass = tbClass or HanWuYiJi
+  self.tbInfo = tbInfo or {}
+  self.szClass = "HanWuYiJi"
+  if tbInfo then
+    self.szClass = tbInfo.szClass or "HanWuYiJi"
+  end
+  self.nEndTimer = self.nEndTimer or nil
+  self.nSyncTimer = self.nSyncTimer or nil
+  self.nClickTime = 0
+  self:ShowDesc()
+  self:ShowGameTime()
+  if self.tbInfo.szEnrollTime then
+    self.pPanel:Label_SetText(tbControls.txtEnrollTimeValue, i18n.Get(self.tbInfo.szEnrollTime))
+    self.pPanel:SetActive(tbControls.txtEnrollTimeTips, false)
+  else
+    self.pPanel:SetActive(tbControls.txtEnrollTimeTips, true)
+  end
+  if self.tbInfo.szEnrollNum then
+    self.pPanel:Label_SetText(tbControls.txtEnrollNumValue, i18n.Get(self.tbInfo.szEnrollNum))
+    self.pPanel:SetActive(tbControls.txtEnrollNumTips, false)
+  else
+    self.pPanel:SetActive(tbControls.txtEnrollNumTips, true)
+  end
+  if self.tbInfo.szTimes then
+    self.pPanel:Label_SetText(tbControls.txtLeftCountTip, i18n.Get(self.tbInfo.szTimes))
+    self.pPanel:SetActive(tbControls.txtLeftCount, false)
+    self.pPanel:SetActive(tbControls.btnPlus, false)
+  else
+    self.pPanel:SetActive(tbControls.txtLeftCount, true)
+    self.pPanel:SetActive(tbControls.btnPlus, true)
+  end
+  self.pPanel:SetActive(tbControls.btnRank, self.tbInfo.bShowRank)
+  self.pPanel:SetActive(tbControls.btnEnterTeam, not self.tbInfo.bNotShowTeamEnter)
+  self.pPanel:SetActive(tbControls.btnEnterSingle, not self.tbInfo.bNotShowTeamEnter)
+  self.pPanel:SetActive(tbControls.btnEnterSingleCenter, self.tbInfo.bNotShowTeamEnter)
+  if not self.tbInfo.bNotShowSignUpNum then
+    self:ShowSignupNum()
+  end
+  if not self.tbInfo.bNotShowTime then
+    self:StartEndTimer()
+    self:StartSyncTimer()
+  end
+  self.tbClass:SyncSignupInfoReq()
+end
+
+function tbWnd:OnClose()
+  self:StopEndTimer()
+  self:StopSyncTimer()
+end
+
+function tbWnd:ShowDesc()
+  if self.tbInfo.szTitle then
+    self.pPanel:Label_SetText(tbControls.txtTitle, i18n.Get(self.tbInfo.szTitle))
+  end
+  if "" ~= self.tbClass.TEXT.UI_ENTRANCE_DESC then
+    self.pPanel:Label_SetText(tbControls.txtInfo, i18n.Get(self.tbClass.TEXT.UI_ENTRANCE_DESC))
+  end
+  local nCurNum = DegreeCtrl:GetDegree(me, self.szClass)
+  local nTotalNum = DegreeCtrl:GetMaxDegree(self.szClass, me)
+  self.pPanel:Label_SetText(tbControls.txtLeftCount, string.format("%d/%d", nCurNum, nTotalNum))
+end
+
+function tbWnd:GetHanWuTimeDifference()
+  local nTimeDifference = 0
+  local tbEventCfg = self.tbClass.MISSION_READY.EVENT
+  for nEvent = 1, #tbEventCfg do
+    if tbEventCfg[nEvent].EVENT ~= "OnEndSignup" then
+      nTimeDifference = nTimeDifference + tbEventCfg[nEvent].TIME
+    end
+  end
+  return nTimeDifference
+end
+
+function tbWnd:ShowGameTime()
+  if self.tbInfo.bNotShowTime then
+    self.pPanel:SetActive(tbControls.txtEnrolling, false)
+    return
+  end
+  self.pPanel:SetActive(tbControls.txtEnrolling, true)
+  local nLeftTime = self:CalcGameTime() - self:GetHanWuTimeDifference()
+  if nLeftTime > 0 then
+    self.pPanel:Label_SetText(tbControls.txtEnrolling, i18n.EasyGet("\230\138\165\229\144\141\228\184\173"))
+    self.pPanel:Label_SetText(tbControls.txtEnrollTimeValue, Lib:TimeDesc3(nLeftTime))
+    self.pPanel:Button_SetEnable(tbControls.btnEnterSingle, true)
+    self.pPanel:Button_SetEnable(tbControls.btnEnterTeam, true)
+  else
+    self.pPanel:Label_SetText(tbControls.txtEnrolling, i18n.EasyGet("\230\180\187\229\138\168\229\183\178\231\187\147\230\157\159"))
+    self.pPanel:Label_SetText(tbControls.txtEnrollTimeValue, "00:00")
+    self.pPanel:Button_SetEnable(tbControls.btnEnterSingle, false)
+    self.pPanel:Button_SetEnable(tbControls.btnEnterTeam, false)
+  end
+end
+
+function tbWnd:CalcGameTime()
+  if 0 == self.tbClass.nGameEndTime then
+    return 0
+  else
+    return self.tbClass.nGameEndTime - GetTime()
+  end
+end
+
+function tbWnd:ShowSignupNum()
+  self.pPanel:Label_SetText(tbControls.txtEnrollNumValue, math.max(self.tbClass.nGameSignupNum, 0))
+end
+
+function tbWnd:OnSyncSignupInfo()
+  if not self.tbInfo.bNotShowSignUpNum then
+    self:ShowSignupNum()
+  end
+  if not self.tbInfo.bNotShowTime then
+    if not self.nEndTimer then
+      self:StartEndTimer()
+    end
+    if not self.nSyncTimer then
+      self:StartSyncTimer()
+    end
+  end
+end
+
+function tbWnd:OnClickAttend(bHasTeam)
+  local nNow = GetTime()
+  if nNow - self.nClickTime <= self.CLICK_INTERVAL then
+    me.CenterMsg(i18n.EasyGet("\230\147\141\228\189\156\229\164\170\233\162\145\231\185\129\228\186\134\239\188\140\232\175\183\231\168\141\229\144\142\229\134\141\232\175\149"))
+    return
+  end
+  if not self.tbClass:AttendReq(bHasTeam) then
+    return
+  end
+  self.nClickTime = nNow
+end
+
+function tbWnd:StopEndTimer()
+  if not self.nEndTimer then
+    return
+  end
+  Timer:Close(self.nEndTimer)
+  self.nEndTimer = nil
+end
+
+function tbWnd:StartEndTimer()
+  self:StopEndTimer()
+  if self:CalcGameTime() > 0 then
+    self.nEndTimer = Timer:Register(Env.GAME_FPS, self.OnEndTimer, self)
+  end
+end
+
+function tbWnd:OnEndTimer()
+  self:ShowGameTime()
+  if self:CalcGameTime() > 0 then
+    return true
+  end
+  self.nEndTimer = nil
+end
+
+function tbWnd:StopSyncTimer()
+  if not self.nSyncTimer then
+    return
+  end
+  Timer:Close(self.nSyncTimer)
+  self.nSyncTimer = nil
+end
+
+function tbWnd:StartSyncTimer()
+  self:StopSyncTimer()
+  if self:CalcGameTime() > 0 then
+    self.nSyncTimer = Timer:Register(Env.GAME_FPS * self.SYNC_INTERVAL, self.OnSyncTimer, self)
+  end
+end
+
+function tbWnd:OnSyncTimer()
+  if self:CalcGameTime() > 0 then
+    self.tbClass:SyncSignupInfoReq()
+    return true
+  end
+  self.nSyncTimer = nil
+end
+
+function tbWnd:OnClickBtnPlus()
+  local bAdd, szErrMsg = self:CheckAddTimes()
+  if not bAdd and szErrMsg then
+    me.CenterMsg(szErrMsg)
+  end
+end
+
+function tbWnd:CheckAddTimes()
+  local tbInfo = Item:GetClass("CountAddProp"):GetAddDegreeInfo(self.szClass)
+  if not tbInfo then
+    return false, i18n.EasyGet("\231\188\186\229\176\145\229\175\146\230\173\166\233\173\130\231\143\160\233\133\141\231\189\174")
+  end
+  local nCurNum = DegreeCtrl:GetDegree(me, self.szClass)
+  local nTotalNum = DegreeCtrl:GetMaxDegree(self.szClass, me)
+  if nCurNum >= nTotalNum then
+    return false, i18n.EasyGet("\230\180\187\229\138\168\229\143\130\228\184\142\230\172\161\230\149\176\229\183\178\232\190\190\228\184\138\233\153\144")
+  end
+  if DegreeCtrl:GetDegree(me, tbInfo.CostDegree) <= 0 then
+    return false, i18n.EasyGet("\230\130\168\228\187\138\230\151\165\229\183\178\231\187\143\228\189\191\231\148\168\232\191\135\229\175\146\230\173\166\233\173\130\231\143\160\228\186\134")
+  end
+  local nCount, tbItemList = me.GetItemCountByTypeInBag(tbInfo.TemplateId)
+  if nCount <= 0 then
+    return false, i18n.EasyGet("\230\130\168\231\154\132\232\131\140\229\140\133\229\134\133\230\178\161\230\156\137\229\175\146\230\173\166\233\173\130\231\143\160")
+  end
+  
+  local function agreeFunc()
+    local _, pItem = next(tbItemList)
+    if pItem then
+      RemoteServer.UseItem(pItem.dwId)
+    end
+  end
+  
+  local function cancelFunc()
+  end
+  
+  local tbItemInfo = Item:GetItemBaseProp(tbInfo.TemplateId)
+  Ui:OpenWindow("UIMessageBoxBig", i18n.EasyGet("\228\189\191\231\148\168{0}\229\162\158\229\138\160\229\175\146\230\173\166\233\129\151\232\191\185\229\143\130\228\184\142\230\172\161\230\149\176", i18n.Parse(tbItemInfo.szName)), {agreeFunc, cancelFunc}, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+  return true, nil
+end
+
+function tbWnd:OpenRankBoard()
+  self.tbClass:OpenRankBoard()
+end

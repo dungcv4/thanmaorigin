@@ -1,0 +1,445 @@
+local tbWnd = Ui:CreateClass("UIEquipStone", "UIPanel")
+local tbControls = {
+  equipTemplate = "panelEquipList/imgList/List/Template",
+  StoneList = "panelInset/StoneList",
+  StonePath = "panelInset/StoneList/List/Stone",
+  StoneTemplate = "panelStoneBag/imgList/List/Template",
+  txtHoleEmpty = "panelInset/txtEmpty",
+  txtStoneEmpty = "panelStoneBag/txtEmpty"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {}
+
+function tbWnd:CheckCurHoleIsHadStone()
+  if not self.nStoneIndex then
+    return false
+  end
+  local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+  local nTemplateId = Item.Stone:GetStoneHoleTemplateId(me, nEquipPos, self.nStoneIndex)
+  if nTemplateId > 0 then
+    return true
+  else
+    return false
+  end
+end
+
+function tbWnd:PutOnStone(dwId)
+  if not self.nStoneIndex then
+    return me.CenterMsg(i18n.EasyGet("\230\156\170\233\128\137\230\139\169\229\173\148\228\189\141"))
+  end
+  local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+  local nCostCoin = Item.Stone:GetPutOnCostCoinById(dwId)
+  
+  local function fnPutOn()
+    local bRet, szErr = Item.Stone:CanPutOnWithReminderWindow(me, nEquipPos, self.nStoneIndex, dwId)
+    if not bRet then
+      return me.CenterMsg(szErr)
+    end
+    RemoteServer.OnEquipStoneRequest("PutOn", nEquipPos, self.nStoneIndex, dwId)
+  end
+  
+  me.MsgBox(i18n.EasyGet("\230\152\175\229\144\166\230\182\136\232\128\151{0}\233\147\182\228\184\164\232\191\155\232\161\140\233\149\182\229\181\140\239\188\159", nCostCoin), {
+    {
+      i18n.szOk,
+      fnPutOn
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function tbWnd:OnCreate()
+  self.tbEquipScrollView = Ui:NewScrollView(self, self.equipTemplate, self.OnEquipClick, false, true)
+  self.tbStoneScrollView = Ui:NewScrollView(self, self.StoneTemplate, self.OnBagStoneClick, false, true)
+end
+
+function tbWnd:OnOpen(nEquipPos, nStoneId)
+  self.tbSVData = {}
+  local tbEquip = me.GetEquips()
+  for k, v in pairs(tbEquip) do
+    if k <= Item.EQUIPPOS_AMULET then
+      local pEquip = KItem.GetItemObj(v)
+      table.insert(self.tbSVData, {
+        k,
+        v,
+        Item.tbEquipSort[pEquip.nEquipPos]
+      })
+    end
+  end
+  
+  local function fnDamageCmp(a, b)
+    return a[3] < b[3]
+  end
+  
+  table.sort(self.tbSVData, fnDamageCmp)
+  self.nEquipIndex = 1
+  self.nStoneIndex = 1
+  if nEquipPos then
+    for k, v in ipairs(self.tbSVData) do
+      if v[1] == nEquipPos then
+        self.nEquipIndex = k
+        break
+      end
+    end
+  elseif nStoneId then
+    local nNeedPos = Item.Stone:GetStoneEquipPos(nStoneId)
+    if nNeedPos > -1 then
+      for nIndex, tbV in ipairs(self.tbSVData) do
+        if nNeedPos == tbV[1] then
+          self.nEquipIndex = nIndex
+          nEquipPos = nNeedPos
+          break
+        end
+      end
+    end
+  end
+  self:UpdateEquipSV()
+  self:UpdateStoneDetailInfo()
+  self.tbEquipScrollView:ScrollToIndex(self.nEquipIndex)
+  self:UpdateStoneBagSV()
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:NotifyStone(szParam, nParam)
+  self.tbEquipScrollView:SetElement(self.nEquipIndex, function(tbElement)
+    self:fnSetItem(self.nEquipIndex, tbElement)
+  end)
+  self:UpdateStoneDetailInfo(szParam, nParam)
+  self:UpdateStoneBagSV()
+end
+
+function tbWnd:UpdateEmptyStoneIndex()
+  local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+  local pEquip = me.GetEquipByPos(nEquipPos)
+  if pEquip then
+    local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, pEquip.nEquipPos)
+    local nMaxHole, nMaxStoneLevel = Item.Stone:GetMaxHoleAndLevel(nLianHuaLevel, pEquip.nLevel, nEquipPos)
+    for i = 1, Item.Stone.INSET_COUNT_MAX do
+      if i <= nMaxHole then
+        local nTemplateId = Item.Stone:GetStoneHoleTemplateId(me, nEquipPos, i)
+        if nTemplateId <= 0 then
+          self.nStoneIndex = i
+          break
+        end
+      end
+    end
+  end
+end
+
+function tbWnd:OnEquipClick(nIndex)
+  if self.nEquipIndex == nIndex then
+    return
+  end
+  local tbOldElement = self.tbEquipScrollView:GetElement(self.nEquipIndex)
+  if tbOldElement then
+    tbOldElement.pPanel:SetActive("imgSelected", false)
+  end
+  self.nEquipIndex = nIndex
+  local tbCurElement = self.tbEquipScrollView:GetElement(self.nEquipIndex)
+  tbCurElement.pPanel:SetActive("imgSelected", true)
+  self:UpdateStoneDetailInfo()
+  self:UpdateStoneBagSV()
+end
+
+function tbWnd:fnSetItem(i, tbElement)
+  local nEquipPos, nEquipId = self.tbSVData[i][1], self.tbSVData[i][2]
+  local pEquip = KItem.GetItemObj(nEquipId)
+  local pPanel = tbElement.pPanel
+  local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  itemGrid:SetItem(nEquipId, pEquip.dwTemplateId)
+  itemGrid:SetClickEnable(true, function()
+    self:OnEquipClick(i)
+  end)
+  tbElement.pPanel:SetActive("imgSelected", i == self.nEquipIndex)
+  pPanel:Label_SetText("txtEquipName", Item:GetName(pEquip.dwTemplateId, me))
+  if not tbElement.tbStoneSV then
+    tbElement.tbStoneSV = Ui:NewScrollView(tbElement, "StoneList/StoneTemplate", nil, false, true)
+  end
+  tbElement.tbStoneSV:Reset()
+  local nIndex = 0
+  for i = 1, Item.Stone.INSET_COUNT_MAX do
+    local nTemplateId = Item.Stone:GetStoneHoleTemplateId(me, nEquipPos, i)
+    if nTemplateId > 0 then
+      nIndex = nIndex + 1
+      tbElement.tbStoneSV:SetElement(nIndex, function(tbElement)
+        local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        itemGrid:SetItemByTemplate(nTemplateId)
+      end)
+    end
+  end
+  RedPointMgr:DynamicRegisteRedPoint(pPanel, "Main", {
+    Item.Stone.tbEquipPos2RedPoint[nEquipPos]
+  })
+end
+
+function tbWnd:UpdateEquipSV()
+  self.tbEquipScrollView:Reset()
+  for i, v in pairs(self.tbSVData) do
+    self.tbEquipScrollView:SetElement(i, function(tbElement)
+      self:fnSetItem(i, tbElement)
+    end)
+  end
+end
+
+function tbWnd:UpdateStoneDetailInfo(szParam, nParam)
+  local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+  local pEquip = me.GetEquipByPos(nEquipPos)
+  if not pEquip then
+    return
+  end
+  self:UpdateEmptyStoneIndex()
+  local tbStone = Item.Stone
+  local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, pEquip.nEquipPos)
+  local nMaxHole, nMaxStoneLevel = Item.Stone:GetMaxHoleAndLevel(nLianHuaLevel, pEquip.nLevel, nEquipPos)
+  local bTipFlag = true
+  for i = 1, tbStone.INSET_COUNT_MAX do
+    local szStonePath = self.StonePath .. i .. "/"
+    local UIItemGrid = szStonePath .. "UIItemGrid"
+    local txtStoneName = szStonePath .. "txtStoneName"
+    local txtAttr1 = szStonePath .. "txtAttr1"
+    local txtAttr2 = szStonePath .. "txtAttr2"
+    local btnLvUp = szStonePath .. "btnLvUp"
+    local btnDelete = szStonePath .. "btnDelete"
+    local imgEmpty = szStonePath .. "imgEmpty"
+    local imgSelected = szStonePath .. "imgSelected"
+    local StoneTemplateId = Item.Stone:GetStoneHoleTemplateId(me, nEquipPos, i)
+    self.pPanel:Button_BindEvent(imgEmpty, function()
+      local bHaveStone = false
+      local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+      local pEquip = me.GetEquipByPos(nEquipPos)
+      if not pEquip then
+        return
+      end
+      local tbItemBag = me.GetItemListInBag()
+      local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, pEquip.nEquipPos)
+      local nMaxHole, nMaxStoneLevel = Item.Stone:GetMaxHoleAndLevel(nLianHuaLevel, pEquip.nLevel, nEquipPos)
+      for i, v in ipairs(tbItemBag) do
+        if Item.Stone:CheckStonePos(v.dwTemplateId, nEquipPos) and nMaxStoneLevel >= v.nLevel then
+          bHaveStone = true
+          break
+        end
+      end
+      if bHaveStone then
+        me.CenterMsg(i18n.EasyGet("\233\128\137\230\139\169\229\143\179\228\190\167\229\174\157\231\159\179\232\191\155\232\161\140\233\149\182\229\181\140"))
+      else
+        self.tbOwner:ShowJumpToInfo(2)
+      end
+    end)
+    if StoneTemplateId > 0 then
+      bTipFlag = false
+      self.pPanel:SetActive(self.StonePath .. i, true)
+      self.pPanel:SetActive(UIItemGrid, true)
+      self.pPanel:SetActive(txtStoneName, true)
+      self.pPanel:SetActive(txtAttr1, true)
+      self.pPanel:SetActive(txtAttr2, true)
+      self.pPanel:SetActive(btnLvUp, true)
+      self.pPanel:SetActive(btnDelete, true)
+      self.pPanel:SetActive(imgEmpty, false)
+      local tbStoneGrid = Ui:NewExistItemGrid(self, UIItemGrid)
+      tbStoneGrid:SetClickEnable(true)
+      tbStoneGrid:SetItemByTemplate(StoneTemplateId)
+      local szName, nIcon, nView, nQuality = KItem.GetItemShowInfo(StoneTemplateId, me.nFaction, me.nFactionSect)
+      local _, szColor = Item:GetQualityColor(nQuality)
+      self.pPanel:Label_SetText(txtStoneName, i18n.EasyGet("<color=#{0}>{1}</color>", szColor, i18n.Parse(szName)))
+      local tbStoneAttrCfg = Item.Stone:GetStoneAttri(StoneTemplateId)
+      for i = 1, 2 do
+        local attrText = szStonePath .. "txtAttr" .. i
+        local attrNum = szStonePath .. "txtAttr" .. i .. "/txtAttr" .. i .. "Value"
+        if tbStoneAttrCfg[i] then
+          local szDesc, szValueCur = FightSkill:GetMagicDescSplit(tbStoneAttrCfg[i][1], {
+            tbStoneAttrCfg[i][2],
+            tbStoneAttrCfg[i][3],
+            tbStoneAttrCfg[i][4]
+          })
+          self.pPanel:Label_SetText(attrText, i18n.EasyGet("<color=#{0}>{1}</color>", szColor, szDesc))
+          self.pPanel:Label_SetText(attrNum, i18n.EasyGet("<color=#{0}>{1}</color>", szColor, szValueCur))
+        else
+          self.pPanel:Label_SetText(attrText, "")
+          self.pPanel:Label_SetText(attrNum, "")
+        end
+      end
+      if i <= nMaxHole then
+        local bRet, szErr, nCostCoin = Item.Stone:CanCompose(me, nEquipPos, i, true)
+        if bRet then
+          self.pPanel:SetActive(btnLvUp, true)
+          Ui:Button_BindEvent(self.pPanel, btnLvUp, function(self)
+            me.MsgBox(i18n.EasyGet("\230\152\175\229\144\166\230\182\136\232\128\151{0}\233\147\182\228\184\164\232\191\155\232\161\140\229\144\136\230\136\144\239\188\159", nCostCoin), {
+              {
+                i18n.szOk,
+                RemoteServer.OnEquipStoneRequest,
+                "Compose",
+                nEquipPos,
+                i
+              },
+              {
+                i18n.szCancel
+              }
+            })
+          end, self)
+        else
+          self.pPanel:SetActive(btnLvUp, false)
+        end
+        Ui:Button_BindEvent(self.pPanel, btnDelete, function(self)
+          RemoteServer.OnEquipStoneRequest("TakeOff", nEquipPos, i)
+        end, self)
+      else
+        self.pPanel:SetActive(btnLvUp, false)
+        self.pPanel:SetActive(btnDelete, false)
+      end
+      Ui:Button_BindEvent(self.pPanel, self.StonePath .. i, self.ResetStoneList, self, i, nEquipPos)
+      if self.nStoneIndex and self.nStoneIndex == i then
+        self.pPanel:SetActive(imgSelected, true)
+      else
+        self.pPanel:SetActive(imgSelected, false)
+      end
+    elseif i <= nMaxHole then
+      self.pPanel:SetActive(self.StonePath .. i, true)
+      self.pPanel:SetActive(UIItemGrid, false)
+      self.pPanel:SetActive(txtStoneName, false)
+      self.pPanel:SetActive(txtAttr1, false)
+      self.pPanel:SetActive(txtAttr2, false)
+      self.pPanel:SetActive(btnLvUp, false)
+      self.pPanel:SetActive(btnDelete, false)
+      self.pPanel:SetActive(imgEmpty, true)
+      Ui:Button_BindEvent(self.pPanel, self.StonePath .. i, self.ResetStoneList, self, i, nEquipPos)
+      if self.nStoneIndex and self.nStoneIndex == i then
+        self.pPanel:SetActive(imgSelected, true)
+      else
+        self.pPanel:SetActive(imgSelected, false)
+      end
+    else
+      self.pPanel:SetActive(self.StonePath .. i, false)
+    end
+  end
+  if bTipFlag and nMaxHole <= 0 then
+    self.pPanel:SetActive(tbControls.txtHoleEmpty, true)
+  else
+    self.pPanel:SetActive(tbControls.txtHoleEmpty, false)
+  end
+end
+
+function tbWnd:ResetStoneList(i, nEquipPos)
+  if self.nStoneIndex then
+    self.pPanel:SetActive(self.StonePath .. self.nStoneIndex .. "/imgSelected", false)
+  end
+  self.nStoneIndex = i
+  self.pPanel:SetActive(self.StonePath .. self.nStoneIndex .. "/imgSelected", true)
+  self:UpdateStoneBagSV()
+end
+
+function tbWnd:OnBagStoneClick(nIndex)
+  local tbInfo = {
+    nItemId = self.tbStoneSVData[nIndex].dwId,
+    nTemplate = self.tbStoneSVData[nIndex].dwTemplateId,
+    nFaction = me.nFaction,
+    nFactionSect = me.nFactionSect,
+    szItemOpt = "StoneInsert"
+  }
+  Item:ShowItemDetail(tbInfo)
+end
+
+local function SortStoneByLevel(pItemA, pItemB)
+  if not pItemA or not pItemB then
+    return
+  end
+  if pItemA.nLevel ~= pItemB.nLevel then
+    return pItemA.nLevel > pItemB.nLevel
+  else
+  end
+  return pItemA.dwId > pItemB.dwId
+end
+
+function tbWnd:UpdateStoneBagSV()
+  local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+  local pEquip = me.GetEquipByPos(nEquipPos)
+  if not pEquip then
+    return
+  end
+  self.tbStoneScrollView:Reset()
+  self.tbStoneSVData = {}
+  local tbItemBag = me.GetItemListInBag()
+  local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, pEquip.nEquipPos)
+  local nMaxHole, nMaxStoneLevel = Item.Stone:GetMaxHoleAndLevel(nLianHuaLevel, pEquip.nLevel, nEquipPos)
+  if not nMaxHole then
+    return
+  end
+  for i, v in ipairs(tbItemBag) do
+    if Item.Stone:CheckStonePos(v.dwTemplateId, nEquipPos) and nMaxStoneLevel >= v.nLevel then
+      table.insert(self.tbStoneSVData, v)
+    end
+  end
+  table.sort(self.tbStoneSVData, SortStoneByLevel)
+  for i, pStone in pairs(self.tbStoneSVData) do
+    self.tbStoneScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      itemGrid:SetItem(pStone.dwId, pStone.dwTemplateId)
+      itemGrid:SetClickEnable(true)
+      itemGrid.szItemOpt = "StoneInsert"
+      local szName, nIcon, nView, nQuality = KItem.GetItemShowInfo(pStone.dwTemplateId, me.nFaction, me.nFactionSect)
+      local _, szColor = Item:GetQualityColor(nQuality)
+      pPanel:Label_SetText("txtStoneName", i18n.EasyGet("<color=#{0}>{1}</color>", szColor, i18n.Parse(szName)))
+      local tbStoneAttrCfg = Item.Stone:GetStoneAttri(pStone.dwTemplateId)
+      if tbStoneAttrCfg[1] then
+        local szDesc, szValueCur = FightSkill:GetMagicDescSplit(tbStoneAttrCfg[1][1], {
+          tbStoneAttrCfg[1][2],
+          tbStoneAttrCfg[1][3],
+          tbStoneAttrCfg[1][4]
+        })
+        pPanel:Label_SetText("txtAttr1", i18n.EasyGet("<color=#{0}>{1}</color>", szColor, szDesc))
+        pPanel:Label_SetText("txtAttr1/txtAttr1Value", i18n.EasyGet("<color=#{0}>{1}</color>", szColor, szValueCur))
+      else
+        pPanel:Label_SetText("txtAttr1", "")
+        pPanel:Label_SetText("txtAttr1/txtAttr1Value", "")
+      end
+      if tbStoneAttrCfg[2] then
+        local szDesc, szValueCur = FightSkill:GetMagicDescSplit(tbStoneAttrCfg[2][1], {
+          tbStoneAttrCfg[2][2],
+          tbStoneAttrCfg[2][3],
+          tbStoneAttrCfg[2][4]
+        })
+        pPanel:Label_SetText("txtAttr2", szDesc)
+        pPanel:Label_SetText("txtAttr2", i18n.EasyGet("<color=#{0}>{1}</color>", szColor, szDesc))
+        pPanel:Label_SetText("txtAttr2/txtAttr2Value", i18n.EasyGet("<color=#{0}>{1}</color>", szColor, szValueCur))
+      else
+        pPanel:Label_SetText("txtAttr2", "")
+        pPanel:Label_SetText("txtAttr2/txtAttr2Value", "")
+      end
+      local bRet, szErr = Item.Stone:CanPutOn(me, nEquipPos, self.nStoneIndex, pStone.dwId, true)
+      if bRet then
+        pPanel:Button_SetEnable("btnAdd", true)
+        Ui:Button_BindEvent(pPanel, "btnAdd", function(self)
+          self:PutOnStone(pStone.dwId)
+        end, self)
+      else
+        pPanel:Button_SetEnable("btnAdd", false)
+      end
+      local tbCfgStone = Item.Stone.tbStoneInfo[pStone.dwTemplateId]
+      local ComposeId = tbCfgStone.ComposeId
+      local nPlayerCoin = me.GetMoney("Coin")
+      local nCost = tbCfgStone.CostCoin
+      if ComposeId > 0 and pStone.nCount >= Item.Stone.nComposeNeed and nPlayerCoin >= nCost then
+        pPanel:SetActive("imgRedPoint", true)
+      else
+        pPanel:SetActive("imgRedPoint", false)
+      end
+    end)
+  end
+  if Lib:CountTB(self.tbStoneSVData) <= 0 then
+    self.pPanel:SetActive(tbControls.txtStoneEmpty, true)
+  else
+    self.pPanel:SetActive(tbControls.txtStoneEmpty, false)
+  end
+end
+
+function tbWnd:FindCanInsertStone(nTemplateId)
+  for i, pStone in pairs(self.tbStoneSVData) do
+    if pStone.dwTemplateId == nTemplateId then
+      return self.tbStoneScrollView.tbElementList[i]
+    end
+  end
+  return nil
+end

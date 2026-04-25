@@ -1,0 +1,145 @@
+local tbWnd = Ui:CreateClass("UIMailDetail", "UIPanel")
+local tbControls = {
+  txtTitle = "Mail/txtMailTitle",
+  txtFrom = "Mail/Addresser/txtName",
+  txtDate = "Mail/Date/txtNum",
+  keyContentScrollRect = "Mail/MailContent/ScrollView",
+  txtContent = "Mail/MailContent/ScrollView/Viewport/Content/txtDescription",
+  goAttach = "Mail/MailAttachment",
+  goItemTemplate = "Mail/MailAttachment/MaskLayer/Grid/AttachmentItem",
+  btnGetAttach = "Mail/btnGet",
+  btnClose = "Mail/btnClose",
+  MaskLayer = "Mail/MailAttachment/MaskLayer"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnGetAttach = function(self)
+    self:OnClickGetAttach()
+  end,
+  btnClose = function(self)
+    self:OnClosePanel()
+  end
+}
+
+function tbWnd:GoLeft()
+  local scrollView = self.pPanel:GetObject(tbControls.MaskLayer):GetComponent("ScrollRect")
+  scrollView.horizontalNormalizedPosition = 0
+end
+
+function tbWnd:ContentGoTop()
+  self.contentScrollRect.verticalNormalizedPosition = 1
+end
+
+function tbWnd:OnCreate()
+  self.tbItemView = Ui:NewItemGridView(self, tbControls.goItemTemplate)
+  self.contentScrollRect = self.pPanel:GetObject(tbControls.keyContentScrollRect):GetComponent("ScrollRect")
+end
+
+function tbWnd:OnShow(tbMail)
+  self.tbItemView:Clear()
+  self.tbMail = tbMail
+  self:ShowMail()
+end
+
+function tbWnd:ShowMail()
+  if not self.txtEmoji then
+    self.txtEmoji = self.pPanel:GetEmojiText(tbControls.txtContent)
+  end
+  local tbMail = self.tbMail
+  local tbLink = tbMail.tbLink
+  if tbLink and #tbLink > 0 then
+    self.txtEmoji.raycastTarget = true
+    
+    function self.txtEmoji.onClickLink(param)
+      local nIdx = tonumber(param) or 0
+      local tbLinkInfo = tbLink[nIdx]
+      if tbLinkInfo and tbLinkInfo.nLinkType and ChatMgr.tbLinkClickFns[tbLinkInfo.nLinkType] then
+        ChatMgr.tbLinkClickFns[tbLinkInfo.nLinkType](tbLinkInfo)
+      end
+    end
+  else
+    self.txtEmoji.onClickLink = nil
+    self.txtEmoji.raycastTarget = false
+  end
+  self.txtEmoji.text = i18n.Parse(tbMail.Text)
+  self.pPanel:Label_SetText(tbControls.txtTitle, i18n.Parse(tbMail.Title))
+  self.pPanel:Label_SetText(tbControls.txtFrom, i18n.Parse(tbMail.From))
+  self.pPanel:Label_SetText(tbControls.txtDate, Lib:GetTimeStr3(tbMail.SendTime))
+  self:ContentGoTop()
+  self.pPanel:SetActive(tbControls.goAttach, nil ~= tbMail.tbAttach)
+  if nil ~= tbMail.tbAttach then
+    self.tbItemView:Reset()
+    for nIdx, tbItem in ipairs(tbMail.tbAttach) do
+      self.tbItemView:SetItem(nIdx, tbItem, true)
+    end
+  end
+  self:GoLeft()
+  if tbMail.tbAttach then
+    self.pPanel:SetActive(tbControls.btnGetAttach, true)
+    if tbMail.nHasAttach > 0 then
+      self.pPanel:Button_SetEnable(tbControls.btnGetAttach, true)
+      self.pPanel:Button_SetText(tbControls.btnGetAttach, i18n.EasyGet("\233\162\134\229\143\150\233\153\132\228\187\182"), "Text")
+    else
+      self.pPanel:Button_SetEnable(tbControls.btnGetAttach, false)
+      self.pPanel:Button_SetText(tbControls.btnGetAttach, i18n.EasyGet("\229\183\178\233\162\134\229\143\150"), "Text")
+    end
+  else
+    self.pPanel:SetActive(tbControls.btnGetAttach, false)
+  end
+  if not tbMail.ReadFlag then
+    local bAutoDelete = not tbMail.bNotAutoDelete
+    if bAutoDelete then
+      RemoteServer.RecordReadMail(tbMail.ID, bAutoDelete)
+    else
+      RemoteServer.RecordReadMail(tbMail.ID)
+    end
+    Mail:Record(tbMail.ID)
+    tbMail.ReadFlag = true
+    Ui:GetWindow("UIChat"):CallMailViewPanel("OnOpenMail", tbMail.ID)
+  end
+end
+
+function tbWnd:OnClickGetAttach()
+  local tbMail = self.tbMail
+  if not tbMail.tbAttach or tbMail.nHasAttach <= 0 then
+    return
+  end
+  for _, tbInfo in pairs(tbMail.tbAttach) do
+    if Player.AwardType[tbInfo[1]] == Player.award_type_item then
+      if me.CheckNeedArrangeBag() then
+        me.CenterMsg(i18n.EasyGet("\232\175\183\230\184\133\231\144\134\232\131\140\229\140\133\239\188\129"))
+        return
+      end
+      break
+    end
+  end
+  RemoteServer.TakeMailAttach(tbMail.ID)
+end
+
+function tbWnd:OnClosePanel()
+  Ui:GetWindow("UIChat"):SwitchMailDetailPanel(false)
+end
+
+function tbWnd:SyncMailData(nMailId, bSuccess, nNextMailId)
+  if not nMailId or nMailId ~= self.tbMail.ID then
+    return
+  end
+  local tbNextMail = nNextMailId and Mail:GetOneMailData(nNextMailId) or nil
+  if not bSuccess then
+    if tbNextMail then
+      self:OnShow(tbNextMail)
+    else
+      Ui:GetWindow("UIChat"):SwitchMailDetailPanel(false)
+    end
+  elseif not self.tbMail.bNotAutoDelete then
+    if tbNextMail then
+      self:OnShow(tbNextMail)
+    else
+      Ui:GetWindow("UIChat"):SwitchMailDetailPanel(false)
+    end
+  elseif tbNextMail then
+    self:OnShow(tbNextMail)
+  else
+    self:ShowMail()
+  end
+end

@@ -1,0 +1,558 @@
+local tbBuildingLevel2Key = {
+  [3] = "OpenLevel59",
+  [4] = "OpenLevel79",
+  [5] = "OpenLevel99",
+  [6] = "OpenLevel119",
+  [7] = "OpenLevel139",
+  [8] = "OpenLevel159",
+  [9] = "OpenLevel179",
+  [10] = "OpenLevel199"
+}
+
+local function GetBuildingSetting()
+  local tbResult = {}
+  local tbMaxLevel = {}
+  local szBuildingPath = "Setting/Kin/KinBuilding.tab"
+  local tbSetting = Lib:LoadTabFileEx(szBuildingPath, "ddddsd", nil, {
+    "BuildingId",
+    "Level",
+    "MainBuildingLimit",
+    "LevelUpCost",
+    "Desc",
+    "nLimitedValue"
+  })
+  for _, tbLineData in ipairs(tbSetting) do
+    local nBuildingId = tbLineData.BuildingId
+    local nBuildingLevel = tbLineData.Level
+    tbResult[nBuildingId] = tbResult[nBuildingId] or {}
+    tbResult[nBuildingId][nBuildingLevel] = {
+      nMainBuildingRequire = tbLineData.MainBuildingLimit,
+      nLevelUpCost = tbLineData.LevelUpCost,
+      szDesc = tbLineData.Desc,
+      nLimitedValue = tbLineData.nLimitedValue
+    }
+    tbMaxLevel[nBuildingId] = tbMaxLevel[nBuildingId] or 1
+    if tbLineData.Level > tbMaxLevel[nBuildingId] then
+      tbMaxLevel[nBuildingId] = tbLineData.Level
+    end
+  end
+  tbResult = SetReadOnly(tbResult)
+  tbMaxLevel = SetReadOnly(tbMaxLevel)
+  return tbResult, tbMaxLevel
+end
+
+local tbBuildingSetting, tbBuildingMaxLevel = GetBuildingSetting()
+
+function Kin:RefreshMaxSalaryCfg()
+  for nType, tbSalaryType in ipairs(Kin.Cfg.Salary_Channel_Type) do
+    local nMaxSalary = 0
+    for _, tbSalary in ipairs(Kin.Cfg.Salary_Channel) do
+      if nType == tbSalary.Channel_Type and (tbSalary.szOpenTimeFrame == "" or 1 == GetTimeFrameState(tbSalary.szOpenTimeFrame)) and ("" == tbSalary.szCloseTimeFrame or 0 == GetTimeFrameState(tbSalary.szCloseTimeFrame)) then
+        nMaxSalary = nMaxSalary + tbSalary.Salary * tbSalary.MaxTimes
+      end
+    end
+    tbSalaryType.Max_Salary = nMaxSalary
+  end
+end
+
+function Kin:GetMaxSalaryByChannelType(nType)
+  if not nType or not Kin.Cfg.Salary_Channel_Type[nType] then
+    LogErr("Kin:GetMaxSalaryByChannelType the nType:", nType, "is illegitimate.")
+    return 0
+  end
+  if not Kin.Cfg.Salary_Channel_Type[nType].Max_Salary or Kin.Cfg.Salary_Channel_Type[nType].Max_Salary <= 0 then
+    self:RefreshMaxSalaryCfg()
+  end
+  return Kin.Cfg.Salary_Channel_Type[nType].Max_Salary
+end
+
+function Kin:LoadKinBuildingTimeFrameSetting()
+  local szFilePath = "Setting/Kin/KinBuildingTimeFrame.tab"
+  local tbField = {
+    "szTimeFrame",
+    "nMaxMainLevel"
+  }
+  self.tbKinBuildingTimeFrame = Lib:LoadTabFileEx(szFilePath, "sd", "szTimeFrame", tbField) or {}
+end
+
+Kin:LoadKinBuildingTimeFrameSetting()
+
+function Kin:GetKinBuildingTimeFrame()
+  return self.tbKinBuildingTimeFrame
+end
+
+function Kin:LoadKinBuildingDiscount()
+  local szFilePath = "Setting/Kin/KinBuildingDiscount.tab"
+  local tbField = {
+    "nBuildingType",
+    "nLevel",
+    "nDiscount"
+  }
+  local tbSetting = Lib:LoadTabFileEx(szFilePath, "ddd", nil, tbField)
+  self.tbKinBuildingDiscount = {}
+  for _, tbInfo in ipairs(tbSetting) do
+    self.tbKinBuildingDiscount[tbInfo.nBuildingType] = self.tbKinBuildingDiscount[tbInfo.nBuildingType] or {}
+    self.tbKinBuildingDiscount[tbInfo.nBuildingType][tbInfo.nLevel] = tbInfo.nDiscount
+  end
+end
+
+Kin:LoadKinBuildingDiscount()
+
+function Kin:GetBuildingUpGradeDiscount(nBuildingType, nLevel)
+  if not self.tbKinBuildingDiscount[nBuildingType] or not self.tbKinBuildingDiscount[nBuildingType][nLevel] then
+    return 1
+  end
+  return self.tbKinBuildingDiscount[nBuildingType][nLevel] / 100
+end
+
+function Kin:GetBuildUpgradeSetting(nBuildingId)
+  return tbBuildingSetting[nBuildingId]
+end
+
+function Kin:GetBuildingInfo(nBuildingId, nLevel)
+  local tbBuildingData = assert(tbBuildingSetting[nBuildingId])
+  return tbBuildingData[nLevel]
+end
+
+function Kin:CanLevelUp(nBuildingId, nLevel, nMainBuildingLevel)
+  if nBuildingId == Kin.Def.Building_Main then
+    return nLevel <= Kin:GetMainBuildingOpenLevel(), 1
+  end
+  local tbBuildingInfo = Kin:GetBuildingInfo(nBuildingId, nLevel)
+  if not tbBuildingInfo then
+    return false, 1
+  end
+  return nMainBuildingLevel >= tbBuildingInfo.nMainBuildingRequire, tbBuildingInfo.nMainBuildingRequire
+end
+
+function Kin:LoadKinJewelrySetting()
+  local szFilePath = "Setting/Kin/KinJewelry.tab"
+  local tbField = {
+    "nLevel",
+    "nGiftBoxItemID"
+  }
+  self.tbJewelrySetting = Lib:LoadTabFileEx(szFilePath, "dd", "nLevel", tbField)
+end
+
+Kin:LoadKinJewelrySetting()
+
+function Kin:GetKinJewelrySetting()
+  return self.tbJewelrySetting
+end
+
+function Kin:GetJewelryGiftBoxItemID(nJewelryLevel)
+  return self.tbJewelrySetting[nJewelryLevel].nGiftBoxItemID
+end
+
+function Kin:GetKinSkillLevelLimit()
+  local nLianGongFangLevel = self:GetLevelOfLianGongFang()
+  if MODULE_GAMECLIENT then
+    return math.min(nLianGongFangLevel * Kin.Def.Building_KinSkill_LevelRate, Calendar:GetPreviewInfo().nCurMaxLevel)
+  else
+    return math.min(nLianGongFangLevel * Kin.Def.Building_KinSkill_LevelRate, GetMaxLevel())
+  end
+end
+
+local function GetTimeFrameKeyByLevel(nLevel)
+  return tbBuildingLevel2Key[nLevel]
+end
+
+function Kin:GetMainBuildingOpenLevel()
+  local nMaxMainBuildingLevel = Kin.Def.BuildingInitData[Kin.Def.Building_Main].nLevel
+  for nLevel = nMaxMainBuildingLevel + 1, Kin.Def.nMaxBuildingLevel do
+    if 1 ~= GetTimeFrameState(GetTimeFrameKeyByLevel(nLevel)) then
+      break
+    end
+    nMaxMainBuildingLevel = nLevel
+  end
+  local szNextLevelTimeFrame = GetTimeFrameKeyByLevel(nMaxMainBuildingLevel + 1)
+  return nMaxMainBuildingLevel, szNextLevelTimeFrame
+end
+
+function Kin:GetBuildingMaxLevel(nBuildingId)
+  return tbBuildingMaxLevel[nBuildingId] or 1
+end
+
+function Kin:GetBuildingLevel(nBuildingType)
+  if SERVER_RUNNING_MODE then
+    if 0 == me.dwKinId then
+      return
+    end
+    local kinData = self:GetKinById(me.dwKinId)
+    if not kinData then
+      return
+    end
+    return kinData:GetBuildingLevel(nBuildingType)
+  end
+  local tbBuildingData = self:GetBuildingData(nBuildingType) or {}
+  return tbBuildingData.nLevel or 1
+end
+
+function Kin:GetCurMaxBuildingLevel(nBuildingId)
+  if nBuildingId == Kin.Def.Building_Main then
+    local tbTimeFrame = Kin:GetKinBuildingTimeFrame()
+    local szMaxTimeFrame = Lib:GetMaxTimeFrame(tbTimeFrame)
+    if not szMaxTimeFrame or "" == szMaxTimeFrame then
+      return Kin.Def.BuildingInitData[nBuildingId].nLevel
+    end
+    return tbTimeFrame[szMaxTimeFrame].nMaxMainLevel
+  end
+  local tbSetting = self:GetBuildUpgradeSetting(nBuildingId)
+  local nMainLevel = self:GetBuildingLevel(Kin.Def.Building_Main)
+  local nMaxLevel = Kin.Def.BuildingInitData[nBuildingId].nLevel
+  for nLevel, tbInfo in pairs(tbSetting) do
+    if nLevel > nMaxLevel and nMainLevel >= tbInfo.nMainBuildingRequire then
+      nMaxLevel = nLevel
+    end
+  end
+  return nMaxLevel
+end
+
+function Kin:GetBuildingUpgradeCost(nBuildingId, nLevel)
+  if nLevel > Kin:GetBuildingMaxLevel(nBuildingId) then
+    return 0, 0
+  end
+  local tbBuildingInfo = Kin:GetBuildingInfo(nBuildingId, nLevel) or {}
+  local nCost = tbBuildingInfo.nLevelUpCost
+  assert(nCost, string.format("KinBuilding.tab write error %d, %d", nBuildingId, nLevel))
+  local nMaxLevel = Kin:GetMainBuildingOpenLevel()
+  local nDiscountRate = Kin.Def.BuildingDiscountRate[nMaxLevel - nLevel] or 1
+  nCost = math.floor(nCost * nDiscountRate)
+  return nCost, nDiscountRate
+end
+
+local szKinCountSettingPath = "Setting/Kin/LevelSetting.tab"
+local tbLevelSetting = tbLevelSetting or Lib:LoadTabFileEx(szKinCountSettingPath, "ddddddddd", "Level", {
+  "Level",
+  "MaxMember",
+  "MaxNewer",
+  "MaxMaster",
+  "MaxViceMaster",
+  "MaxCommand",
+  "MaxElite",
+  "MaxMascot",
+  "MaxFund"
+})
+local CareerSettingNameMap = {
+  [Kin.Def.Career_Master] = "MaxMaster",
+  [Kin.Def.Career_ViceMaster] = "MaxViceMaster",
+  [Kin.Def.Career_Command] = "MaxCommand",
+  [Kin.Def.Career_Elite] = "MaxElite",
+  [Kin.Def.Career_Mascot] = "MaxMascot",
+  [Kin.Def.Career_Trainee] = "MaxNewer",
+  MaxMember = "MaxMember"
+}
+
+function Kin:GetMaxMember(nLevel, itemKey)
+  if itemKey == Kin.Def.Career_Normal then
+    itemKey = "MaxMember"
+  end
+  local szItemName = assert(CareerSettingNameMap[itemKey])
+  return tbLevelSetting[nLevel][szItemName]
+end
+
+function Kin:GetDonationCost(nJewelryLevel, nTime)
+  local tbSetting = self:GetDonateSetting(nJewelryLevel, nTime)
+  return tbSetting.nPrice
+end
+
+function Kin:GetDonationContrib(nJewelryLevel, nTime)
+  local tbSetting = self:GetDonateSetting(nJewelryLevel, nTime)
+  return tbSetting.nContrib
+end
+
+function Kin:GetDonationsFund(nJewelryLevel, nTimeBegin, nTimeEnd)
+  local nResult = 0
+  for i = nTimeBegin, nTimeEnd do
+    local tbSetting = self:GetDonateSetting(nJewelryLevel, i)
+    nResult = nResult + tbSetting.nFund
+  end
+  return nResult
+end
+
+function Kin:GetDonationsCost(nJewelryLevel, nTimeBegin, nTimeEnd)
+  local nResult = 0
+  for i = nTimeBegin, nTimeEnd do
+    nResult = nResult + Kin:GetDonationCost(nJewelryLevel, i)
+  end
+  return nResult
+end
+
+function Kin:GetDonationsContrib(nJewelryLevel, nTimeBegin, nTimeEnd)
+  local nResult = 0
+  for i = nTimeBegin, nTimeEnd do
+    nResult = nResult + Kin:GetDonationContrib(nJewelryLevel, i)
+  end
+  return nResult
+end
+
+function Kin:GetMaxFund(nLevel)
+  assert(tbLevelSetting[nLevel])
+  return tbLevelSetting[nLevel].MaxFund
+end
+
+function Kin:LoadActivitySetting()
+  local tbSetting = Lib:LoadTabFileEx("Setting/Kin/KinActivity.tab", "dsddd", nil, {
+    "nID",
+    "szJudgement",
+    "nWeekAvg",
+    "nHasSalary",
+    "nDismiss"
+  }, nil, nil, false)
+  table.sort(tbSetting or {}, function(tbA, tbB)
+    return tbA.nWeekAvg < tbB.nWeekAvg
+  end)
+  for nIdx, tb in ipairs(tbSetting or {}) do
+    if tb.nHasSalary > 0 then
+      tbSetting.nMinSalaryIdx = nIdx
+      break
+    end
+  end
+  tbSetting = SetReadOnly(tbSetting)
+  self.tbActivitySettings = tbSetting
+end
+
+Kin:LoadActivitySetting()
+
+function Kin:LoadKinSalarySetting()
+  local szPath = "Setting/Kin/KinSalaryMaxTime.tab"
+  local tbKinSalary = Lib:EasyLoadTabFile(szPath)
+  self.tbKinSalaryMaxTime = {}
+  for _, tbInfo in ipairs(tbKinSalary) do
+    self.tbKinSalaryMaxTime[tbInfo.szLinkKey] = self.tbKinSalaryMaxTime[tbInfo.szLinkKey] or {}
+    table.insert(self.tbKinSalaryMaxTime[tbInfo.szLinkKey], tbInfo)
+  end
+  local nFirstTime, nSecondTime
+  for szKey, tbList in pairs(self.tbKinSalaryMaxTime) do
+    table.sort(tbList, function(tbFirst, tbSecond)
+      nFirstTime = Lib:IsEmptyStr(tbFirst.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbFirst.szTimeFrameStart)
+      nSecondTime = Lib:IsEmptyStr(tbSecond.szTimeFrameStart) and 0 or Lib:CalcTimeFrameOpenTime(tbSecond.szTimeFrameStart)
+      return nFirstTime > nSecondTime
+    end)
+  end
+  self.tbKinSalaryMaxTime = SetReadOnly(self.tbKinSalaryMaxTime)
+end
+
+Kin:LoadKinSalarySetting()
+
+function Kin:GetKinSalaryMaxTime(szKey, nMaxNum)
+  if not self.tbKinSalaryMaxTime[szKey] then
+    return nMaxNum
+  end
+  for _, tbInfo in ipairs(self.tbKinSalaryMaxTime[szKey] or {}) do
+    if (Lib:IsEmptyStr(tbInfo.szTimeFrameStart) or 1 == GetTimeFrameState(tbInfo.szTimeFrameStart)) and (Lib:IsEmptyStr(tbInfo.szTimeFrameEnd) or 0 == GetTimeFrameState(tbInfo.szTimeFrameEnd)) then
+      return tbInfo.nMaxTime
+    end
+  end
+  return nMaxNum
+end
+
+function Kin:LoadDonateSetting()
+  local tbSetting = Lib:LoadTabFileEx("Setting/Kin/KinDonate.tab", "ddddd", nil, {
+    "nLevel",
+    "nMax",
+    "nPrice",
+    "nFund",
+    "nContrib"
+  }, nil, nil, false)
+  self.tbDonateSettings = {}
+  for _, tbInfo in ipairs(tbSetting) do
+    self.tbDonateSettings[tbInfo.nLevel] = self.tbDonateSettings[tbInfo.nLevel] or {}
+    table.insert(self.tbDonateSettings[tbInfo.nLevel], tbInfo)
+  end
+  self.nMaxDonateLevel = 0
+  for nLevel, tbList in pairs(self.tbDonateSettings) do
+    table.sort(tbList, function(tbFirst, tbSecond)
+      return tbFirst.nMax < tbSecond.nMax
+    end)
+    if nLevel > self.nMaxDonateLevel then
+      self.nMaxDonateLevel = nLevel
+    end
+  end
+end
+
+Kin:LoadDonateSetting()
+
+function Kin:GetDonateSetting(nJewelryLevel, nCount)
+  if not nJewelryLevel or not nCount then
+    Lib.ShowStack("Kin:GetDonateSetting args are invalid")
+  end
+  for _, tbSetting in ipairs(self.tbDonateSettings[nJewelryLevel] or self.tbDonateSettings[self.nMaxDonateLevel]) do
+    if nCount <= tbSetting.nMax then
+      return tbSetting
+    end
+  end
+  local tbSettings = self.tbDonateSettings[nJewelryLevel] or self.tbDonateSettings[self.nMaxDonateLevel]
+  return tbSettings[#tbSettings]
+end
+
+function Kin:InitQuality(tbEventsList)
+  local tbEventQuality = {}
+  local nCount = self:GetKinEventTableCount(tbEventsList)
+  local nIndex = 1
+  for _, tbEvent in pairs(tbEventsList) do
+    local nProbability = 0
+    if nIndex > 1 then
+      nProbability = tbEventQuality[nIndex - 1].nRatio + tbEvent.Ratio
+    else
+      nProbability = tbEvent.Ratio
+    end
+    local nTempEventId = tbEvent.Id
+    table.insert(tbEventQuality, {nEventId = nTempEventId, nRatio = nProbability})
+    nIndex = nIndex + 1
+  end
+  return tbEventQuality
+end
+
+function Kin:GetRandomEventId(tbEventList)
+  local tbEventQuality = self.InitQuality(self, tbEventList)
+  local nRanVal = MathRandom(1, tbEventQuality[#tbEventQuality].nRatio)
+  local nEventId = 0
+  for _, tbEvent in pairs(tbEventQuality) do
+    if nRanVal <= tbEvent.nRatio then
+      nEventId = tbEvent.nEventId
+      break
+    end
+  end
+  return nEventId
+end
+
+function Kin:GetEventAllowIdByString(sEventPlayerStr)
+  if "" == sEventPlayerStr then
+    return nil
+  end
+  local sTempEvent = string.match(sEventPlayerStr, "%[.*%]")
+  sTempEvent = string.sub(sTempEvent, 2, #sTempEvent - 1)
+  local tbAllowId = Lib:SplitStr(sTempEvent)
+  local tbResult = {}
+  for k, v in pairs(tbAllowId) do
+    tbResult[tonumber(v)] = 1
+  end
+  return tbResult
+end
+
+function Kin:GetAllowEventId(tbEventsListByRatio, tbRunNames, nIdx)
+  local tbTempEventList = Lib:CopyTB(tbEventsListByRatio)
+  Log("GetAllowEventId = ", nIdx)
+  local nRunnerId = tbRunNames[nIdx].nId
+  local nIndex = 0
+  local nCount = self.GetKinEventTableCount(self, tbTempEventList)
+  Log("#tbTempEventList=", nCount)
+  while 0 ~= nCount do
+    nIndex = self.GetRandomEventId(self, tbTempEventList)
+    local tbEvent = self.GetGatherRunEvent(self, nIndex)
+    local tbAllowId = self.GetEventAllowIdByString(self, tbEvent.PlayerId)
+    if nil == tbAllowId or nil ~= tbAllowId and nil ~= tbAllowId[nRunnerId] then
+      break
+    end
+    for k, tbEvent in pairs(tbTempEventList) do
+      if nIndex == tonumber(tbEvent.Id) then
+        tbTempEventList[tbEvent.Id] = nil
+        nCount = nCount - 1
+        break
+      end
+    end
+  end
+  if 0 == nCount then
+    nIndex = 0
+  end
+  if 0 ~= nIndex then
+    for k, tbEvent in pairs(tbEventsListByRatio) do
+      if nIndex == tbEvent.Id then
+        tbEventsListByRatio[k] = nil
+        Log("the Choosed EventId  is", k)
+        break
+      end
+    end
+  end
+  return nIndex
+end
+
+function Kin:GetKinEventTableCount(tbTempEventList)
+  local nCount = 0
+  for k, v in pairs(tbTempEventList) do
+    nCount = nCount + 1
+  end
+  return nCount
+end
+
+function Kin:HasSkillOfGenTempAttrRune()
+  local nLevel = Kin:GetTempAttrRuneGenLevel()
+  local bExist = nLevel and nLevel > 0
+  if bExist then
+    return true
+  end
+  return false
+end
+
+function Kin:IsTrainee()
+  local tbMember = Kin:GetMemberData(me.dwID)
+  if tbMember and tbMember.nCareer == Kin.Def.Career_Trainee then
+    return true
+  end
+  return false
+end
+
+function Kin:IsMaster()
+  local tbMember = Kin:GetMemberData(me.dwID)
+  if tbMember and tbMember.nCareer == Kin.Def.Career_Master then
+    return true
+  end
+  return false
+end
+
+function Kin:IsViceMaster()
+  local tbMember = Kin:GetMemberData(me.dwID)
+  if tbMember and tbMember.nCareer == Kin.Def.Career_ViceMaster then
+    return true
+  end
+  return false
+end
+
+function Kin:IsMasterOrViceMaster()
+  return Kin:IsMaster() or Kin:IsViceMaster()
+end
+
+function Kin:GetGenTempAttrRuneTimes()
+  return DegreeCtrl:GetMaxDegree("GenKinRuneLimit", me) - DegreeCtrl:GetDegree(me, "GenKinRuneLimit")
+end
+
+function Kin:IncreaseGenTempAttrRuneTimes()
+  DegreeCtrl:ReduceDegree(me, "GenKinRuneLimit", 1)
+end
+
+function Kin:ResetTempAttrRuneTimes()
+  DegreeCtrl:SetDegree(me, "GenKinRuneLimit", DegreeCtrl:GetMaxDegree("GenKinRuneLimit", me))
+end
+
+function Kin:GetTempAttrRuneGenLevel()
+  return me.GetSkillLevel(self.Def.nKinSkillGenRuneId)
+end
+
+function Kin:GetKinSkillIdSize()
+  return #self.Def.tbKinSkillIdList
+end
+
+function Kin:GetKinSkillIdByIndex(nIndex)
+  return self.Def.tbKinSkillIdList[nIndex]
+end
+
+function Kin:CheckMailContent(szContent)
+  if not szContent or "" == szContent then
+    return false, Kin.Def.tbMsgCode.PleaseEnterContent
+  end
+  if "" ~= szContent and ReplaceLimitWords(szContent) then
+    return false, Kin.Def.tbMsgCode.IllegalChar
+  end
+  if Lib:StrLen(szContent) > Kin.Cfg.nMaxMailLength then
+    return false, Kin.Def.tbMsgCode.OutOfLengthLimit
+  end
+  return true
+end
+
+function Kin:CheckSalaryTimeFrameState(nIndex)
+  local tbKinSalary = Kin.Cfg.Salary_Channel[nIndex]
+  if tbKinSalary and (tbKinSalary.szOpenTimeFrame == "" or 1 == GetTimeFrameState(tbKinSalary.szOpenTimeFrame)) and ("" == tbKinSalary.szCloseTimeFrame or 0 == GetTimeFrameState(tbKinSalary.szCloseTimeFrame)) then
+    return true
+  end
+end

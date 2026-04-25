@@ -1,0 +1,212 @@
+local tbWnd = Ui:CreateWindow("UISkillBookPickingNew")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.OnChangeMoney,
+      self
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  UIMoneyPanel = "node/UIMoneyPanel",
+  btnClose = "node/imgBG/Content/imgBG/btnClose",
+  imgPickValue = "node/imgBG/Content/imgBG/Content/IconPick",
+  imgTenPickValue = "node/imgBG/Content/imgBG/Content/IconTenPick",
+  txtTenPickValue = "node/imgBG/Content/imgBG/Content/IconTenPick/txtTenPickValue",
+  txtPickValue = "node/imgBG/Content/imgBG/Content/IconPick/txtPickValue",
+  btnTenPick = "node/imgBG/Content/imgBG/Content/btnTenPick",
+  btnPick = "node/imgBG/Content/imgBG/Content/btnPick",
+  txtBtnPick = "node/imgBG/Content/imgBG/Content/btnPick/Text",
+  Glow_Effect = "node/imgBG/Content/ImgBG01/Glow_Effect",
+  txtTitle = "node/imgBG/txtTitle",
+  btnHelp = "node/imgBG/txtTitle/btnHelp"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnTenPick = function(self)
+    if not CardPicker:CheckCardPickMoney("SkillBookTenPick") then
+      return
+    end
+    local nLastTime = LocalData:GetRoleNumber("Partner_CloseSkillBookCardPickerNoticeTime", 0)
+    local bIsDiffDay = Lib:IsDiffDay(14400, nLastTime)
+    if not bIsDiffDay then
+      self:StartCardPick("SkillBookTenPick")
+    else
+      local function fnCardPick()
+        self:StartCardPick("SkillBookTenPick")
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\231\161\174\232\174\164\229\141\129\232\191\158\230\138\189\229\143\150\230\138\128\232\131\189\228\185\166\239\188\159"), {
+        {fnCardPick},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      }, "SkillBookCardPicker", nil, i18n.EasyGet("\228\187\138\230\151\165\228\184\141\229\134\141\230\143\144\233\134\146"))
+    end
+  end,
+  btnPick = function(self)
+    if RedPointMgr:CheckEvent(RedPointMgr.EVENT.PartnerSKillBookPick) then
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.PartnerSKillBookPick)
+    end
+    if CardPicker.bIsInSkillBookFreePickActivity then
+      local nFreeTime = me.GetUserValue(CardPicker.Def.CARD_SAVE_GROUP, CardPicker.Def.SAVE_FREE_SKILLBOOK_PICK_TIME)
+      if Lib:IsDiffDay(14400, nFreeTime) then
+        self:StartCardPick("SkillBookFreePick")
+      else
+        if not CardPicker:CheckCardPickMoney("SkillBookPick") then
+          return
+        end
+        self:StartCardPick("SkillBookPick")
+      end
+    else
+      if not CardPicker:CheckCardPickMoney("SkillBookPick") then
+        return
+      end
+      self:StartCardPick("SkillBookPick")
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, self.UIMoneyPanel)
+  self.pPanel:Label_SetText(self.txtTitle, i18n.EasyGet("\230\138\128\232\131\189\228\185\166\230\138\189\229\143\150"))
+  self.pPanel:SetActive(self.btnHelp, false)
+end
+
+function tbWnd:OnOpen()
+  self.pPanel:Label_SetText(self.txtTenPickValue, CardPicker.Def.nSkillBookTenCost)
+  self.pPanel:Label_SetText(self.txtPickValue, CardPicker.Def.nSkillBookCost)
+  self.pPanel:Label_SetText(self.txtBtnPick, i18n.EasyGet("\230\138\189\229\143\150\228\184\128\230\172\161"))
+  if CardPicker.bIsInSkillBookFreePickActivity then
+    self:UpdateTimer()
+    self:RegistRedPoint()
+  end
+  self:GetPartnerPickItemInfo()
+  if CardPicker.bIsInSkillBookTenPickHalfPriceActivity then
+    self:UpdateHalfPriceState()
+  end
+  self.tbMoneyPanel:SetMoneyValue()
+  self.tbMoneyPanel:HideDynamicBtnPlus()
+end
+
+function tbWnd:OnClose()
+  if self.nFreeTimer then
+    Timer:Close(self.nFreeTimer)
+    self.nFreeTimer = nil
+  end
+  self:UnRegistRedPoint()
+end
+
+function tbWnd:StartCardPick(szPickType)
+  local bRet = SafeLock:CheckIsNeedUnLock(SafeLock.ModuleDef.Currency)
+  if bRet then
+    return
+  end
+  if self.nEffectTimer then
+    Timer:Close(self.nEffectTimer)
+    self.nEffectTimer = nil
+  end
+  self:SetAllButtonState(false)
+  self.pPanel:Animator_SetEnable(self.Glow_Effect, true)
+  self.nEffectTimer = Timer:Register(Env.GAME_FPS * 3, self.StartCardPick2, self, szPickType)
+end
+
+function tbWnd:StartCardPick2(szPickType)
+  self.pPanel:Animator_SetEnable(self.Glow_Effect, false)
+  CardPicker:RequestCardPick(szPickType)
+  self:SetAllButtonState(true)
+  return false
+end
+
+function tbWnd:SetAllButtonState(bEnable)
+  self.pPanel:Button_SetEnable(self.btnTenPick, bEnable)
+  self.pPanel:Button_SetEnable(self.btnPick, bEnable)
+  self.pPanel:Button_SetEnable(self.btnClose, bEnable)
+end
+
+function tbWnd:UpdateHalfPriceState()
+  local nCardPickTicketCount = me.GetItemCountInBags(CardPicker.Def.nPartnerSkillBookPickItemId)
+  local nLastTime = me.GetUserValue(CardPicker.Def.CARD_SAVE_GROUP, CardPicker.Def.SAVE_HALFPRICE_SKILLBOOK_PICK_TIME)
+  if Lib:IsDiffDay(14400, nLastTime) then
+    if nCardPickTicketCount > 0 and nCardPickTicketCount >= 5 then
+      self.pPanel:Label_SetText(self.txtTenPickValue, 5)
+    elseif nCardPickTicketCount > 0 and nCardPickTicketCount < 5 then
+      self.pPanel:Label_SetText(self.txtTenPickValue, string.format("%d/%d", nCardPickTicketCount, 5))
+    else
+      self.pPanel:Label_SetText(self.txtTenPickValue, CardPicker.Def.nSkillBookHalfTenCost)
+    end
+  end
+end
+
+function tbWnd:UpdateTimer()
+  self:UpdateFreePickButtonState()
+  if self.nFreeTimer then
+    Timer:Close(self.nFreeTimer)
+    self.nFreeTimer = nil
+  end
+  self.nFreeTimer = Timer:Register(Env.GAME_FPS, self.UpdateFreePickButtonState, self)
+end
+
+function tbWnd:UpdateFreePickButtonState()
+  local nFreeTime = me.GetUserValue(CardPicker.Def.CARD_SAVE_GROUP, CardPicker.Def.SAVE_FREE_SKILLBOOK_PICK_TIME)
+  local nCurTime = GetTime()
+  local nNextTime = (Lib:GetLocalDay(nFreeTime) + 1) * 3600 * 24 - Lib:GetGMTSec() + 14400
+  local nLeftSecond = nNextTime - nCurTime
+  if nLeftSecond > 0 then
+    self.pPanel:Label_SetText(self.txtBtnPick, i18n.EasyGet("\230\138\189\229\143\150\228\184\128\230\172\161"))
+    local nCoinHour, nCoinMin, nCoinSec = Lib:TransferSecond2NormalTime(nLeftSecond)
+  else
+    self.pPanel:Label_SetText(self.txtBtnPick, i18n.EasyGet("\230\156\172\230\172\161\229\133\141\232\180\185"))
+  end
+  return true
+end
+
+function tbWnd:RegistRedPoint()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnPick, {
+    RedPointMgr.EVENT.PartnerSKillBookPick
+  })
+end
+
+function tbWnd:UnRegistRedPoint()
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.btnPick)
+end
+
+function tbWnd:OnChangeMoney()
+  self.tbMoneyPanel:SetMoneyValue()
+  local nItemCount = me.GetItemCountInBags(CardPicker.Def.nPartnerPickItemId)
+  local szPickItemIconPath = "UI/icon/money/icon_JiNengbi54x54.png"
+  self.tbMoneyPanel:SetMoneyValue()
+  self.tbMoneyPanel:SetDynamicShow(true)
+  self.tbMoneyPanel:SetDynamicCurrencyInfo("PartnerPickItem", nItemCount, szPickItemIconPath)
+  self.tbMoneyPanel:HideDynamicBtnPlus()
+end
+
+function tbWnd:GetPartnerPickItemInfo()
+  local nCardPickTicketCount = me.GetItemCountInBags(CardPicker.Def.nPartnerSkillBookPickItemId)
+  local szPickItemIconPath = "UI/icon/money/icon_JiNengbi54x54.png"
+  local szYuanbaoIconPath = "UI/icon/money/icon_yuanbao.png"
+  self.tbMoneyPanel:SetDynamicShow(true)
+  self.tbMoneyPanel:SetDynamicCurrencyInfo("PartnerPickItem", nCardPickTicketCount, szPickItemIconPath)
+  self.tbMoneyPanel:HideDynamicBtnPlus()
+  if nCardPickTicketCount > 0 then
+    self.pPanel:Sprite_SetSprite(self.imgPickValue, szPickItemIconPath)
+    self.pPanel:Sprite_SetSprite(self.imgTenPickValue, szPickItemIconPath)
+    self.pPanel:Label_SetText(self.txtPickValue, 1)
+    if nCardPickTicketCount > 0 and nCardPickTicketCount < 10 then
+      self.pPanel:Label_SetText(self.txtTenPickValue, string.format("%d/%d", nCardPickTicketCount, 10))
+    else
+      self.pPanel:Label_SetText(self.txtTenPickValue, 10)
+    end
+  else
+    self.pPanel:Sprite_SetSprite(self.imgPickValue, szYuanbaoIconPath)
+    self.pPanel:Sprite_SetSprite(self.imgTenPickValue, szYuanbaoIconPath)
+    self.pPanel:Label_SetText(self.txtPickValue, CardPicker.Def.nSkillBookCost)
+    self.pPanel:Label_SetText(self.txtTenPickValue, CardPicker.Def.nSkillBookTenCost)
+  end
+end

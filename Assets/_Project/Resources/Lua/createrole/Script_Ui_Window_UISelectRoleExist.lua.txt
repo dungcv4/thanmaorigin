@@ -1,0 +1,148 @@
+local tbWnd = Ui:CreateWindow("UISelectRoleExist")
+tbWnd.tbRoleList = nil
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_LOADED,
+      self.OnMapLoaded
+    },
+    {
+      EventNotify.emNOTIFY_LOGIN_ROLE_RESPOND,
+      self.OnLoginRoleRespond,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SERVER_CONNECT_LOST,
+      self.OnServerConnectLost
+    }
+  }
+end
+
+local tbControls = {
+  btnEnterGame = "imgBG/btnEnterGame",
+  btnCreateRole = "imgBG/btnCreateRole",
+  BanReson = "imgBG/PanelOwnedRole/bgBan/txtBanReson",
+  animMale = "imgBG/roles/male",
+  animFemale = "imgBG/roles/female",
+  txtRoleName = "imgBG/PanelSelectRole/bg/txtRoleName",
+  txtRoleLevel = "imgBG/PanelSelectRole/bg/txtRoleLv",
+  RoleTemplate = "imgBG/Left/ScrollViewRoles/Viewport/List/Template",
+  btnReturn = "imgBG/Left/btnReturn",
+  btnChooseRole = "imgBG/btnChooseRole"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnEnterGame = function(self)
+    local tbRole = self.tbRoleList[self.nSelectRole]
+    if tbRole.nBanEndTime > GetTime() then
+      if not tbRole.szBanReason or tbRole.szBanReason == "" then
+        Ui:AddCenterMsg(i18n.EasyGet("\230\173\164\232\167\146\232\137\178\229\183\178\232\162\171\229\176\129\229\129\156\239\188\140\232\175\183\233\135\141\230\150\176\233\128\137\230\139\169\227\128\130"))
+      else
+        Ui:AddCenterMsg(i18n.Parse(tbRole.szBanReason))
+      end
+      Ui:AddCenterMsg(i18n.EasyGet("\229\137\169\228\189\153\232\167\163\229\176\129\230\151\182\233\151\180{0}", Lib:TimeFullDesc(tbRole.nBanEndTime - GetTime())))
+      return
+    end
+    Ui.PlayerPrefs.SetInt("LoginRoleID", tbRole.nRoleID)
+    LoginRole(tbRole.nRoleID)
+  end,
+  btnCreateRole = function(self)
+    Ui:OpenWindow("UICreateRole", self.tbRoleList)
+    Ui:CloseWindow("UISelectRoleExist")
+  end,
+  btnReturn = function(self)
+    self:CloseByDefault()
+  end
+}
+
+function tbWnd:GetIndexByRoleID(nRoleID)
+  if not self.tbRoleList then
+    return 1
+  end
+  for i, tbRole in ipairs(self.tbRoleList) do
+    if tbRole.nRoleID == nRoleID then
+      return i
+    end
+  end
+  return 1
+end
+
+function tbWnd:OnCreate()
+  self.tbBanMark = {}
+  Ui:CloseWindow("UILoginChannelInner")
+  Ui:CloseWindow("UILoginChannelSDK")
+  self.tbRoleListScrollView = Ui:NewScrollView(self, tbControls.RoleTemplate, function(self, nIndex)
+    local tbRole = self.tbRoleList[nIndex]
+    EventNotify.OnNotify(EventNotify.emNOTIFY_UILOGINBG_ACTION, "Play", tbRole.nFaction, tbRole.nSex)
+    self.nSelectRole = nIndex
+    self.pPanel:Label_SetText(self.txtRoleName, tbRole.szName)
+    if tbRole.nLevel >= GameSetting.MAX_PLAYER_LEVEL then
+      self.pPanel:Label_SetText(self.txtRoleLevel, i18n.EasyGet("\229\174\151\229\184\136.{0}", tbRole.nZongShiLevel))
+    else
+      self.pPanel:Label_SetText(self.txtRoleLevel, i18n.EasyGet("\231\173\137\231\186\167.{0}", tbRole.nLevel))
+    end
+  end, false, false)
+end
+
+function tbWnd:OnClose()
+  Ui:ResetCamera()
+end
+
+function tbWnd:OnOpen(tbRoleList)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UILOGINBG_ACTION, "Stop")
+  self.loginflag = false
+  self.tbRoleList = tbRoleList
+  for i, tbRole in ipairs(self.tbRoleList) do
+    self.tbRoleListScrollView:SetElement(i, function(tbElement)
+      tbElement.pPanel:Sprite_SetSprite("imgFactionIcon", Faction:GetIcon(tbRole.nFaction))
+      tbElement.pPanel:Label_SetText("txtName", tbRole.szName)
+      tbElement.pPanel:Label_SetText("txtLevel", self:GetServerRoleLevelInfo(tbRole.nLevel, tbRole.nZongShiLevel))
+    end)
+  end
+  self.nSelectRole = self:GetIndexByRoleID(Ui.PlayerPrefs.GetInt("LoginRoleID", 0))
+  self.tbRoleListScrollView:SelectElement(self.nSelectRole)
+  local nServerId = Sdk:GetServerId()
+  local tbSerList = GetServerList()
+  for i, v in ipairs(tbSerList) do
+    if nServerId == v.dwServerId then
+      Login.ServerName = v.szName
+      break
+    end
+  end
+end
+
+function tbWnd:GetServerRoleLevelInfo(nLevel, nZongShiLevel)
+  if nLevel < GameSetting.MAX_PLAYER_LEVEL then
+    return i18n.EasyGet("{0}\231\186\167", nLevel)
+  end
+  return i18n.EasyGet("\229\174\151\229\184\136{0}", nZongShiLevel)
+end
+
+function tbWnd:OnMapLoaded()
+  self:Close()
+end
+
+function tbWnd:OnServerConnectLost()
+  if Ui.bForRetrunLogin then
+    return
+  end
+  Ui:OpenWindow("UIMessageBoxBig", i18n.Get("DisconnectedFromServer"), {
+    function()
+      Ui:BackToLogin(true)
+    end
+  }, {
+    i18n.szOk
+  })
+end
+
+function tbWnd:CloseByDefault()
+  Ui.bForRetrunLogin = true
+  Ui:ReturnToLogin()
+  CloseServerConnect()
+  Ui.bForRetrunLogin = nil
+end
+
+function tbWnd:OnLoginRoleRespond(bSuccessed, nCode, dwRoleId)
+  Ui:OnLoginRoleRespond(bSuccessed, nCode, dwRoleId)
+end

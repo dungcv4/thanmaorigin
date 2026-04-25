@@ -1,0 +1,405 @@
+Item.WuXingYin = Item.WuXingYin or {}
+local WuXingYin = Item.WuXingYin
+WuXingYin.tbResultLv = {}
+WuXingYin.nLastRequestTime = 0
+WuXingYin.nLockTime = 5
+WuXingYin.tbIndex2RedPoint = {
+  [1] = RedPointMgr.EVENT.WuXingYinEnhanceLvUp,
+  [2] = RedPointMgr.EVENT.WuXingYinabateLvUp
+}
+
+function WuXingYin:UnLock()
+  self.nLastRequestTime = 0
+end
+
+function WuXingYin:LevelUp(nItemId, nIndex, nCost)
+  local bRet = self:FixAttrCheck(nItemId, nIndex, nCost, me)
+  if not bRet then
+    return
+  end
+  if GetTime() < self.nLastRequestTime + self.nLockTime then
+    return
+  end
+  self.nLastRequestTime = GetTime()
+  RemoteServer.WuXingYinCmd("FixAttrUp", nIndex, nCost)
+end
+
+function WuXingYin:EquipLvUp(nItemId)
+  local bRet = self:EquipLvCheck(nItemId, me)
+  if not bRet then
+    return
+  end
+  if GetTime() < self.nLastRequestTime + self.nLockTime then
+    return
+  end
+  if Item.WuXingYin.tbNewRandAttr then
+    me.CenterMsg(i18n.Get(Item.WuXingYin.MSG.EXSITNOSAVE))
+    Ui:OpenWindow("UIWuxingyin", 3, nItemId)
+    return
+  end
+  self.nLastRequestTime = GetTime()
+  RemoteServer.WuXingYinCmd("EquipLvUp")
+end
+
+function WuXingYin:WashType(nItemId)
+  local bRet = self:WashTypeCheck(me, nItemId)
+  if not bRet then
+    return
+  end
+  if GetTime() < self.nLastRequestTime + self.nLockTime then
+    return
+  end
+  self.nLastRequestTime = GetTime()
+  RemoteServer.WuXingYinCmd("WashType")
+end
+
+function WuXingYin:WashValue(nItemId, nIndex)
+  if not nIndex then
+    me.CenterMsg(i18n.Get(Item.WuXingYin.MSG.NOSELECT))
+    return
+  end
+  local bRet = self:WashValueCheck(me, nItemId)
+  if not bRet then
+    return
+  end
+  if GetTime() < self.nLastRequestTime + self.nLockTime then
+    return
+  end
+  self.nLastRequestTime = GetTime()
+  RemoteServer.WuXingYinCmd("WashValue", nIndex)
+end
+
+function WuXingYin:SynFixAttrUp(nItemId, nIndex, nAddLevel)
+  self:RefreshFixAttrib(me, nIndex, nAddLevel)
+  local pItem = KItem.GetItemObj(nItemId)
+  local tbWuXingYin = Item:GetClass("WuXingYin")
+  tbWuXingYin:UpdateFightPower(pItem)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_WUXINGYIN_SYNC, nItemId)
+  self.nLastRequestTime = 0
+end
+
+function WuXingYin:SynEquipLv(nItemId, bRemove)
+  local pEquip = KItem.GetItemObj(nItemId)
+  if not pEquip then
+    return
+  end
+  if bRemove and not me.IsMaskPlayerAttr() then
+    self:RemoveAttrib(me, pEquip)
+  end
+  local tbWuXingYin = Item:GetClass("WuXingYin")
+  tbWuXingYin:UpdateFightPower(pEquip)
+  local bUpdateBtn = 2 == pEquip.nLevel
+  EventNotify.OnNotify(EventNotify.emNOTIFY_WUXINGYIN_SYNC, nItemId, bUpdateBtn)
+  self.nLastRequestTime = 0
+end
+
+function WuXingYin:SynWashType(nItemId, szResult, szOldAttr)
+  self.tbNewRandAttr = self.tbNewRandAttr or {}
+  local pEquip = KItem.GetItemObj(nItemId)
+  if not pEquip then
+    return
+  end
+  if szOldAttr then
+    local tbAttr = Lib:SplitStr(szOldAttr, ",")
+    self:RefreshRandAttrib(me, pEquip, tbAttr)
+    self.tbNewRandAttr = nil
+  end
+  if szResult then
+    local tbNewRandAttr = Lib:SplitStr(szResult, ",")
+    for index, nGroup in pairs(tbNewRandAttr) do
+      local nAttr = pEquip.GetIntValue(Item.EQUIP_WUXINGYIN_RANDATTR_VALUE_BEGIN - 1 + index)
+      local nOldGroup, nLevel = self:UnpackAttr(nAttr)
+      local nNewValue = self:PackAttr(nGroup, nLevel)
+      self.tbNewRandAttr[index] = nNewValue
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_WUXINGYIN_SYNC, nItemId)
+  self.nLastRequestTime = 0
+end
+
+function WuXingYin:SynWashValue(nItemId, nResultLv, nIndex, nOldLevel)
+  local pEquip = KItem.GetItemObj(nItemId)
+  if not pEquip then
+    return
+  end
+  if nResultLv then
+    self.tbResultLv[nIndex] = nResultLv
+  end
+  if nOldLevel then
+    local nAttrIndex = self.RANDATTR_INDEX[nIndex]
+    self:RefreshOneAttrib(me, pEquip, nAttrIndex, nOldLevel)
+    self.tbResultLv[nIndex] = nil
+    local tbWuXingYin = Item:GetClass("WuXingYin")
+    tbWuXingYin:UpdateFightPower(pEquip)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_WUXINGYIN_SYNC, nItemId)
+  self.nLastRequestTime = 0
+end
+
+function WuXingYin:IsOpen(pPlayer, nIndex)
+  local szOpenTime = Item.WuXingYin.OPENTIME[nIndex]
+  if 0 == GetTimeFrameState(szOpenTime) then
+    return false, i18n.Get(Item.WuXingYin.MSG.TIMELIMIT)
+  end
+  if nIndex == Item.WuXingYin.UISORT.WashType or nIndex == Item.WuXingYin.UISORT.WashValue then
+    local pEquip = pPlayer.GetEquipByPos(Item.EQUIPPOS_WUXINGYIN)
+    if not pEquip then
+      return false, ""
+    end
+    if pEquip.nLevel <= 1 then
+      return false, i18n.Get(Item.WuXingYin.MSG.TIMELIMIT)
+    end
+  end
+  return true, ""
+end
+
+function WuXingYin:OnBuyMaterial(szType, ...)
+  local nTemplate
+  local tbfn = {
+    FixAttrUp = function(...)
+      local nLevel = self:GetFixAttrLevel(...)
+      return self:GetFixAttrUpCost(nLevel)
+    end,
+    EquipLvUp = function(...)
+      return WuXingYin:GetEquipLvUpCost(...)
+    end,
+    WashType = function(...)
+      return WuXingYin:GetWashTypeCost(...)
+    end,
+    WashValue = function(...)
+      return WuXingYin:GetWashValueCost(...)
+    end
+  }
+  nTemplate = tbfn[szType](...)
+  local tbWare = Shop:GetAWare2("YuanBao", nTemplate)
+  if not tbWare then
+    return
+  end
+  local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+  Ui:OpenWindow("UIShopBuy", tbWare, true, nRemainCount)
+end
+
+function WuXingYin:GetAttrList(nEquipId, nLevel, bNext)
+  local pEquip = KItem.GetItemObj(nEquipId)
+  if not pEquip then
+    return
+  end
+  local tbFixAttr = self:GetFixAttr(pEquip)
+  local tbRandAttr = self:GetRandAttr(pEquip, nLevel, bNext)
+  local tbResult = self:FormatTips(tbFixAttr, tbRandAttr)
+  return tbResult
+end
+
+function WuXingYin:GetFixAttr(pEquip)
+  local tbFixAttr = {}
+  for i = 1, self.nFixAttr do
+    local szName, szValue = self:GetFixAttrAllValue(pEquip.dwId, i)
+    local szMagic = string.format("%s  %s", szName, szValue)
+    local szColor = Item.WuXingYin.ATTRCOLOR[pEquip.nQuality]
+    table.insert(tbFixAttr, {szMagic = szMagic, szColor = szColor})
+  end
+  return tbFixAttr
+end
+
+function WuXingYin:GetRandAttr(pEquip, nLevel, bNext)
+  local tbRandAttr = {}
+  if nLevel <= 1 then
+    return tbRandAttr
+  end
+  if not self.tbCfg[nLevel] then
+    return tbRandAttr
+  end
+  for i = 1, self.nRandAttr do
+    local szName, szValue, nQuality = self:GetRandAttrAllValue(pEquip.dwId, i, nLevel)
+    if szName then
+      local szMagic = string.format("%s : %s", szName, szValue)
+      local szColor = Item.WuXingYin.ATTRCOLOR[nQuality]
+      table.insert(tbRandAttr, {szMagic = szMagic, szColor = szColor})
+    end
+  end
+  local nNewAttr = self.tbCfg[nLevel].nNewAttr
+  if bNext and nNewAttr > 0 then
+    for i = 1, nNewAttr do
+      local szText = i18n.Get(Item.WuXingYin.MSG.EQUIPLVMSG)
+      table.insert(tbRandAttr, {szMagic = szText, szColor = "Red"})
+    end
+  end
+  return tbRandAttr
+end
+
+function WuXingYin:FormatTips(tbFixAttr, tbRandAttr)
+  local tbResult = {}
+  if tbFixAttr and next(tbFixAttr) then
+    local szTittle = i18n.EasyGet("\229\159\186\231\161\128\229\177\158\230\128\167")
+    table.insert(tbResult, {szTittle})
+    for index, tbValue in ipairs(tbFixAttr) do
+      table.insert(tbResult, {
+        nil,
+        {
+          szValue = tbValue.szMagic,
+          szColor = tbValue.szColor
+        }
+      })
+    end
+  end
+  if tbRandAttr and next(tbRandAttr) then
+    local szTittle = i18n.EasyGet("\233\154\143\230\156\186\229\177\158\230\128\167")
+    table.insert(tbResult, {szTittle})
+    for index, tbValue in ipairs(tbRandAttr) do
+      table.insert(tbResult, {
+        nil,
+        {
+          szValue = tbValue.szMagic,
+          szColor = tbValue.szColor
+        }
+      })
+    end
+  end
+  return tbResult
+end
+
+function WuXingYin:FormatAttr(tbAttr, nEquipLevel)
+  local tbTips = {}
+  if not tbAttr or 0 == #tbAttr then
+    return tbTips
+  end
+  for index, nAttr in ipairs(tbAttr) do
+    nAttr = tonumber(nAttr)
+    local szCurName, szCurValue, nQuality = self:GetRandAttrByValue(nEquipLevel, nAttr)
+    local szColor = Item.WuXingYin.ATTRCOLOR[nQuality]
+    local szMagic = string.format("%s : %s", szCurName, szCurValue)
+    table.insert(tbTips, {szMagic = szMagic, szColor = szColor})
+  end
+  return tbTips
+end
+
+function WuXingYin:GetWashValueList(pEquip)
+  local tbRandAttr = {}
+  if not pEquip then
+    return tbRandAttr
+  end
+  for i = 1, self.nRandAttr do
+    local nMinLevel, nMaxLevel = self:GetAttrRange(pEquip.nLevel)
+    local szName, szValue, nQuality = self:GetRandAttrAllValue(pEquip.dwId, i, pEquip.nLevel)
+    local _, szMin = self:GetRandAttrAllValue(pEquip.dwId, i, nil, nMinLevel)
+    local _, szMax = self:GetRandAttrAllValue(pEquip.dwId, i, nil, nMaxLevel)
+    local nMin = tonumber(szMin)
+    local nMax = tonumber(szMax)
+    local szNewValue, nNewQuality, szNewColor, szCompare, szChangeColor
+    if self.tbResultLv[i] then
+      _, szNewValue, nNewQuality = self:GetRandAttrAllValue(pEquip.dwId, i, nil, self.tbResultLv[i])
+      szNewColor = Item.WuXingYin.ATTRCOLOR[nNewQuality]
+      local nValue1, bPer1 = string.gsub(szNewValue, "[%%]", "")
+      local nValue2, bPer2 = string.gsub(szValue, "[%%]", "")
+      local nResult = nValue1 - nValue2
+      local szFront = nResult >= 0 and "+" or ""
+      local szBack = (bPer1 > 0 or bPer2 > 0) and "%" or ""
+      szCompare = szFront .. tostring(nResult) .. szBack
+      szChangeColor = nResult >= 0 and "Green" or "Red"
+    end
+    if szName then
+      local szColor = Item.WuXingYin.ATTRCOLOR[nQuality]
+      local szRange = i18n.EasyGet("({0} - {1})", nMin, nMax)
+      table.insert(tbRandAttr, {
+        szName = szName,
+        szValue = szValue,
+        szRange = szRange,
+        szColor = szColor,
+        szNewValue = szNewValue,
+        szNewColor = szNewColor,
+        szCompare = szCompare,
+        szChangeColor = szChangeColor
+      })
+    end
+  end
+  return tbRandAttr
+end
+
+function WuXingYin:IsShowSave(nEquipId, nIndex)
+  local pEquip = KItem.GetItemObj(nEquipId)
+  if not pEquip or not nIndex then
+    return
+  end
+  local nAttrIndex = self.RANDATTR_INDEX[nIndex]
+  local nAttr = pEquip.GetIntValue(nAttrIndex)
+  if 0 == nAttr then
+    return
+  end
+  local nGroup, nLevel = self:UnpackAttr(nAttr)
+  if self.tbResultLv[nIndex] and nLevel < self.tbResultLv[nIndex] then
+    return true
+  end
+  return false
+end
+
+function WuXingYin:OnReturnLogin()
+  self.tbResultLv = {}
+  self.tbNewRandAttr = nil
+end
+
+function WuXingYin:OnFactionChange(nItemId, szOldAttr)
+  local pEquip = KItem.GetItemObj(nItemId)
+  if not pEquip then
+    return
+  end
+  if szOldAttr then
+    local tbAttr = Lib:SplitStr(szOldAttr, ",")
+    self:RefreshRandAttrib(me, pEquip, tbAttr)
+  end
+end
+
+function WuXingYin:CheckRedPoint()
+  if me.nLevel < self.nOpenLevel then
+    return
+  end
+  local pEquip = me.GetEquipByPos(Item.EQUIPPOS_WUXINGYIN)
+  if pEquip then
+    return
+  end
+  if Task:IsTaskFinished(me, Item.WuXingYin.nTaskId) then
+    return
+  end
+  if not RedPointMgr:CheckEvent(RedPointMgr.EVENT.WuXingYin) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.WuXingYin)
+  end
+end
+
+function WuXingYin:CheckMainRedPoint()
+  local pEquip = me.GetEquipByPos(Item.EQUIPPOS_WUXINGYIN)
+  if not pEquip then
+    return
+  end
+  for i = Item.EQUIP_WUXINGYIN_FIXATTR_LV_BEGIN, Item.EQUIP_WUXINGYIN_FIXATTR_LV_END do
+    local nDegree, nMaxDegree = self:GetFixAttrDegree(pEquip.dwId, i)
+    local nLevel, nMaxLevel = self:GetFixAttrLevel(pEquip.dwId, i)
+    local nDiff = nMaxDegree - nDegree
+    local nCostTemplate = Item.WuXingYin:GetFixAttrUpCost(nLevel)
+    local nHave = me.GetItemCountInBags(nCostTemplate)
+    if nLevel ~= nMaxLevel and nDiff < nHave then
+      local nRedPoint = self.tbIndex2RedPoint[i]
+      if not nRedPoint then
+        return
+      end
+      RedPointMgr:LightRedPoint(nRedPoint)
+    end
+  end
+  local nTemplate, nCost = self:GetEquipLvUpCost(pEquip.dwId)
+  local nHave = me.GetItemCountInBags(nTemplate)
+  local szOpenTime = self.tbCfg[pEquip.nLevel].szOpenTime
+  local bEnoughItem = nCost <= nHave
+  local bOpenNextLv = 1 == GetTimeFrameState(szOpenTime)
+  if bEnoughItem and bOpenNextLv then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.WuXingYinEquipLvUp)
+  end
+end
+
+function WuXingYin:CheckFixLvUp(pEquip)
+  local bEnhanceLight = RedPointMgr:CheckEvent(RedPointMgr.EVENT.WuXingYinEnhanceLvUp)
+  local bAbateLight = RedPointMgr:CheckEvent(RedPointMgr.EVENT.WuXingYinabateLvUp)
+  local bEquipLvLight = RedPointMgr:CheckEvent(RedPointMgr.EVENT.WuXingYinEquipLvUp)
+  return bEnhanceLight or bAbateLight or bEquipLvLight
+end
+
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, WuXingYin.OnReturnLogin, WuXingYin)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, WuXingYin.CheckRedPoint, WuXingYin)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, WuXingYin.CheckRedPoint, WuXingYin)

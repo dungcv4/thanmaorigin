@@ -1,0 +1,1779 @@
+Require("CommonScript/Item/ItemForEquip.lua")
+Require("CommonScript/Item/ExtEquip/ExtEquipCfg.lua")
+Require("CommonScript/ShenBingPu/ShenBingPuCfg.lua")
+Require("CommonScript/Player/FightPowerCommom.lua")
+local ShenBingPu = Item.ShenBingPu
+local ShenBingPuCFG = Item.ShenBingPu.CFG
+ShenBingPu.EXT_PARAM_SEED_GROUP_ID = 1
+ShenBingPu.eSTATUS = {UNACTIVATE = 1, ACTIVATED = 2}
+ShenBingPu.eATTRCHOICE = {
+  ONLYBASE = 1,
+  ONLYENHANCE = 2,
+  ALL = 3
+}
+ShenBingPu.Protocol = {
+  Enhance = 1,
+  Compose = 2,
+  Recycle = 3,
+  Activate = 4,
+  SyncSuitAttrib = 5,
+  Identify = 6,
+  MaterialCompose = 7,
+  SyncAttrib = 8
+}
+ShenBingPu.ENHANCE_LEVEL_ASYNC_BEGIN = 9700
+ShenBingPu.ENHANCE_LEVEL_ASYNC_END = 9711
+ShenBingPu.ACTIVATE_ASYNC_BEGIN = 9712
+ShenBingPu.ACTIVATE_ASYNC_END = 9714
+ShenBingPu.SAVE_GROUP = GetGroupKey("ShenBingPu")
+ShenBingPu.ENHANCE_OFFSET = 10
+ShenBingPu.SAVE_ID = {
+  MAX_SUITLEVEL = 1,
+  STRENGTHEN_SALE = 2,
+  STRENGTHEN_SALE_TIME = 3,
+  ALL_STAR_LEVEL = 4,
+  MAX_HONORLEVEL = 5,
+  WEAPON_1_ARRT_1_ENHANCE_LEVEL = ShenBingPu.ENHANCE_OFFSET + 1,
+  WEAPON_1_ARRT_2_ENHANCE_LEVEL = ShenBingPu.ENHANCE_OFFSET + 2,
+  WEAPON_1_ARRT_3_ENHANCE_LEVEL = ShenBingPu.ENHANCE_OFFSET + 3,
+  WEAPON_1_ARRT_4_ENHANCE_LEVEL = ShenBingPu.ENHANCE_OFFSET + 4,
+  WEAPON_1_ACTIVATE = ShenBingPu.ENHANCE_OFFSET + ShenBingPu.ENHANCE_OFFSET,
+  WEAPON_2_ARRT_1_ENHANCE_LEVEL = ShenBingPu.ENHANCE_OFFSET * 2 + 1,
+  WEAPON_2_ARRT_2_ENHANCE_LEVEL = ShenBingPu.ENHANCE_OFFSET * 2 + 2,
+  WEAPON_2_ARRT_3_ENHANCE_LEVEL = ShenBingPu.ENHANCE_OFFSET * 2 + 3,
+  WEAPON_2_ARRT_4_ENHANCE_LEVEL = ShenBingPu.ENHANCE_OFFSET * 2 + 4,
+  WEAPON_2_ACTIVATE = ShenBingPu.ENHANCE_OFFSET * 2 + ShenBingPu.ENHANCE_OFFSET,
+  WEAPON_3_ARRT_1_ENHANCE_LEVEL = ShenBingPu.ENHANCE_OFFSET * 3 + 1,
+  WEAPON_3_ARRT_2_ENHANCE_LEVEL = ShenBingPu.ENHANCE_OFFSET * 3 + 2,
+  WEAPON_3_ARRT_3_ENHANCE_LEVEL = ShenBingPu.ENHANCE_OFFSET * 3 + 3,
+  WEAPON_3_ARRT_4_ENHANCE_LEVEL = ShenBingPu.ENHANCE_OFFSET * 3 + 4,
+  WEAPON_3_ACTIVATE = ShenBingPu.ENHANCE_OFFSET * 3 + ShenBingPu.ENHANCE_OFFSET
+}
+ShenBingPu.ATTR_OFFSET = 10
+ShenBingPu.ATTR_HOLE_NUM = 20
+ShenBingPu.FIXED_ATTR_MAX_NUM = 10
+ShenBingPu.FIXED_ATTR_MIN = 1
+ShenBingPu.FIXED_ATTR_MAX = 10
+ShenBingPu.RAND_ATTR_MAX_NUM = 10
+ShenBingPu.RAND_ATTR_MIN = 11
+ShenBingPu.RAND_ATTR_MAX = 20
+ShenBingPu.WEAPON_LEVEL = 1
+ShenBingPu.WEAPON_STATUS = 2
+ShenBingPu.GROUP_MAX_WEIGHT = 1000000
+ShenBingPu.RAND_ATTR_NUM_MAX_WEIGHT = 100
+ShenBingPu.IDENT_MAX_WEIGHT = 1000000
+ShenBingPu.COMPOSE_MAX_WEIGHT = 100
+ShenBingPu.COMPOSE_MAX_RESULT_NUM = 3
+
+function ShenBingPu:InitCfg()
+  if self.bLoadConfig then
+    Log("ShenBingPuCommon: Cfg Has been Loaded, do you want to reload?")
+    return true
+  end
+  local szFilepath = "Setting/ShenBingPu/ShenBingPuAttrCfg.tab"
+  self.tbAttrCfg = Lib:EasyLoadTabFile(szFilepath, {"nAttrId"})
+  if not self.tbAttrCfg then
+    Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, %s not found", szFilepath)
+    return false
+  end
+  szFilepath = "Setting/ShenBingPu/ShenBingPuRandAttrGroupCfg.tab"
+  local tbAttrGroupCfg = Lib:EasyLoadTabFile(szFilepath)
+  if not tbAttrGroupCfg then
+    Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, %s not found", szFilepath)
+    return false
+  end
+  self.tbAttrGroupCfg = {}
+  local tbAttrGroupWeightForCheck = {}
+  for _, tbInfo in pairs(tbAttrGroupCfg) do
+    self.tbAttrGroupCfg[tbInfo.nGroupId] = self.tbAttrGroupCfg[tbInfo.nGroupId] or {}
+    tbAttrGroupWeightForCheck[tbInfo.nGroupId] = tbAttrGroupWeightForCheck[tbInfo.nGroupId] or 0
+    if not self.tbAttrGroupCfg[tbInfo.nGroupId][tbInfo.nAttrId] then
+      self.tbAttrGroupCfg[tbInfo.nGroupId][tbInfo.nAttrId] = tbInfo
+      tbAttrGroupWeightForCheck[tbInfo.nGroupId] = tbAttrGroupWeightForCheck[tbInfo.nGroupId] + tbInfo.nWeight
+    else
+      Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, duplicate attr id in the same group, nGroupId = %d, nAttrId = %d", tbInfo.nGroupId, tbInfo.nAttrId)
+      return false
+    end
+    if not self.tbAttrCfg[tbInfo.nAttrId] then
+      Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, nAttrId exist in ShenBingPuRandAttrGroupCfg.tab not found in ShenBingPuAttrCfg.tab, nAttrId = %d", tbInfo.nAttrId)
+      return false
+    end
+  end
+  for nGroupId, nSumWeight in pairs(tbAttrGroupWeightForCheck) do
+    if nSumWeight > self.GROUP_MAX_WEIGHT then
+      Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, sum weight over than %d, nGroupId = %d", self.GROUP_MAX_WEIGHT, nGroupId)
+      return false
+    end
+  end
+  szFilepath = "Setting/ShenBingPu/ShenBingPuItemCfg.tab"
+  self.tbItemCfg = Lib:EasyLoadTabFile(szFilepath, {
+    "nTemplateId"
+  })
+  if not self.tbItemCfg then
+    Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, %s not found", szFilepath)
+    return false
+  end
+  szFilepath = "Setting/ShenBingPu/ShenBingPuFaction.tab"
+  self.tbFactionCfg = Lib:EasyLoadTabFile(szFilepath, {"nFaction", "nSect"})
+  if not self.tbFactionCfg then
+    Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, %s not found", szFilepath)
+    return false
+  end
+  szFilepath = "Setting/ShenBingPu/ShenBingPuGetWay.tab"
+  self.tbEquipGetWayCfg = Lib:EasyLoadTabFile(szFilepath, nil)
+  if not self.tbEquipGetWayCfg then
+    Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, %s not found", szFilepath)
+    return false
+  end
+  szFilepath = "Setting/ShenBingPu/ShenBingPuRandAttrNumCfg.tab"
+  local tbRandAttrNumCfg = Lib:EasyLoadTabFile(szFilepath, nil)
+  if not tbRandAttrNumCfg then
+    Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, %s not found", szFilepath)
+    return false
+  end
+  self.tbRandAttrNumCfg = {}
+  for _, tbCfg in pairs(tbRandAttrNumCfg) do
+    self.tbRandAttrNumCfg[tbCfg.nStarLevel] = self.tbRandAttrNumCfg[tbCfg.nStarLevel] or {}
+    if not self.tbRandAttrNumCfg[tbCfg.nStarLevel][tbCfg.nQuality] then
+      self.tbRandAttrNumCfg[tbCfg.nStarLevel][tbCfg.nQuality] = {}
+      local nSumWeight = 0
+      for i = 0, self.RAND_ATTR_MAX_NUM do
+        local nProbility = tbCfg["nProbilityNum" .. i]
+        local nFightPower = tbCfg["nFightPower" .. i]
+        if nProbility and nFightPower then
+          nSumWeight = nSumWeight + nProbility
+          table.insert(self.tbRandAttrNumCfg[tbCfg.nStarLevel][tbCfg.nQuality], {
+            nNum = i,
+            nProbility = nProbility,
+            nFightPower = nFightPower
+          })
+        else
+          break
+        end
+      end
+      if nSumWeight ~= self.RAND_ATTR_NUM_MAX_WEIGHT then
+        Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, sum probility of rand attr num cfg is not equal to max probility, nStarLevel = %d, nQuality = %d, nSumWeight = %d", tbCfg.nStarLevel, tbCfg.nQuality, nSumWeight)
+        return false
+      end
+    else
+      Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, duplicate quality in the same star level, nStarLevel = %d, nQuality = %d", tbCfg.nStarLevel, tbCfg.nQuality)
+      return false
+    end
+  end
+  szFilepath = "Setting/ShenBingPu/ShenBingPuComposeCfg.tab"
+  local tbEquipComposeCfg = Lib:EasyLoadTabFile(szFilepath, nil)
+  if not tbEquipComposeCfg then
+    Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, %s not found", szFilepath)
+    return false
+  end
+  self.tbEquipComposeCfg = {}
+  for _, tbCfg in pairs(tbEquipComposeCfg) do
+    self.tbEquipComposeCfg[tbCfg.nEquipTemplateId1] = self.tbEquipComposeCfg[tbCfg.nEquipTemplateId1] or {}
+    if not self.tbEquipComposeCfg[tbCfg.nEquipTemplateId1][tbCfg.nEquipTemplateId2] then
+      local nSumWeight = 0
+      for i = 1, self.COMPOSE_MAX_RESULT_NUM do
+        local nComposeTemplateId = tbCfg["nComposeTemplateId" .. i]
+        local nProbability = tbCfg["nProbability" .. i]
+        if 0 == nComposeTemplateId and 0 == nProbability then
+        elseif nComposeTemplateId > 0 and nProbability > 0 then
+        else
+          Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, invalid compose template id or probability, nTemplateId = %d, nIndex = %d", tbCfg.nEquipTemplateId, i)
+          return false
+        end
+        nSumWeight = nSumWeight + nProbability
+      end
+      if nSumWeight > self.COMPOSE_MAX_WEIGHT then
+        Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, sum weight of compose cfg is not equal to max weight, nTemplateId = %d, nSumWeight = %d", tbCfg.nEquipTemplateId, nSumWeight)
+        return false
+      end
+      self.tbEquipComposeCfg[tbCfg.nEquipTemplateId1][tbCfg.nEquipTemplateId2] = tbCfg
+    else
+      Lib:LogErrFormat("ShenBingPuCommon: InitCfg failed, duplicate equip template id in the same compose cfg, nEquipTemplateId1 = %d, nEquipTemplateId2 = %d", tbCfg.nEquipTemplateId1, tbCfg.nEquipTemplateId2)
+      return false
+    end
+  end
+  self.tbSortIterationList = Lib:SetToList(ShenBingPuCFG.OpenTimeFrame)
+  table.sort(self.tbSortIterationList, function(szIter1, szIter2)
+    return Lib:CalcTimeFrameOpenTime(ShenBingPuCFG.OpenTimeFrame[szIter1]) < Lib:CalcTimeFrameOpenTime(ShenBingPuCFG.OpenTimeFrame[szIter2])
+  end)
+  self.tbSortIterationSet = {}
+  for nIndex, szIter in ipairs(self.tbSortIterationList) do
+    self.tbSortIterationSet[szIter] = nIndex
+  end
+  table.sort(ShenBingPuCFG.SUIT_ATTR, function(tbA, tbB)
+    return tbA[1] < tbB[1]
+  end)
+  table.sort(ShenBingPuCFG.HONOR, function(tbA, tbB)
+    return tbA[1] + tbA[2] < tbB[1] + tbB[2]
+  end)
+  self.bLoadConfig = true
+  return true
+end
+
+ShenBingPu.bLoadConfig = false
+ShenBingPu.bInitRet = ShenBingPu:InitCfg()
+
+function ShenBingPu:CheckCfg()
+  return self.bInitRet
+end
+
+Validator:Register(ShenBingPu.CheckCfg, ShenBingPu)
+
+function ShenBingPu:CheckIsShenBingPu(pEquip)
+  if not pEquip then
+    return
+  end
+  local nSlot = Item:GetExtEquipSlot(pEquip)
+  return self:CheckIsValidSlot(nSlot)
+end
+
+function ShenBingPu:CheckIsValidSlot(nSlot)
+  if not Lib:IsInteger(nSlot) then
+    return false
+  end
+  if nSlot < Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1 or nSlot > Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON3 then
+    return false
+  else
+    return true
+  end
+end
+
+function ShenBingPu:CheckCanEnhance(pPlayer, nSlot, nMaterialId)
+  if not self:CheckHasActivate(pPlayer, nSlot) then
+    return false, i18n.EasyGet("\232\163\133\229\164\135\229\176\154\230\156\170\229\188\128\229\136\131")
+  end
+  local szMaterialIteration = self:GetMaterialIteration(nMaterialId)
+  local szCurIteration = self:GetCurIteration()
+  if Lib:IsEmptyStr(szMaterialIteration) then
+    return false, ""
+  elseif self.tbSortIterationSet[szCurIteration] > self.tbSortIterationSet[szMaterialIteration] then
+    return false, i18n.EasyGet("\232\175\165\230\157\144\230\150\153\230\151\160\230\179\149\229\188\186\229\140\150\232\175\165\232\163\133\229\164\135")
+  end
+  local bFullMax = self:IsAllFixedAttrFullMax(pPlayer, nSlot)
+  if bFullMax then
+    return false, i18n.EasyGet("\232\175\165\232\163\133\229\164\135\229\188\186\229\140\150\229\183\178\232\190\190\228\184\138\233\153\144")
+  else
+    return true, ""
+  end
+end
+
+function ShenBingPu:CheckHasActivate(pPlayer, nSlot)
+  if not pPlayer then
+    return
+  end
+  if not self:CheckIsValidSlot(nSlot) then
+    return
+  end
+  local szActivateSaveId = string.format("WEAPON_%d_ACTIVATE", nSlot - Item.ShenBingPu.WEAPON_1 + 1)
+  if self.SAVE_ID[szActivateSaveId] then
+    return pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_ID[szActivateSaveId]) == self.eSTATUS.ACTIVATED
+  end
+end
+
+function ShenBingPu:CheckHasActivateAsync(pPlayerAsync, nSlot)
+  if not self:CheckIsValidSlot(nSlot) then
+    return
+  end
+  return pPlayerAsync.GetShenBingPuActivate(nSlot - Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1 + 1) == self.eSTATUS.ACTIVATED
+end
+
+function ShenBingPu:CheckEnoughMaterial(pPlayer, nMaterialId, nNeedNum)
+  if not pPlayer or not Lib:IsInteger(nNeedNum) then
+    return
+  end
+  local nHasMaterialNum = pPlayer.GetItemCountInBags(nMaterialId)
+  if nNeedNum > nHasMaterialNum then
+    return false, i18n.EasyGet("\230\157\144\230\150\153\228\184\141\232\182\179")
+  else
+    return true, ""
+  end
+end
+
+function ShenBingPu:CheckHasDailySaleCount(pPlayer)
+  if not pPlayer then
+    return
+  end
+  local nRemainSaleCount = DegreeCtrl:GetDegree(pPlayer, "ShenBingPu")
+  return nRemainSaleCount > 0
+end
+
+function ShenBingPu:CalcRandAttrNum(nStarLevel, nQuality)
+  local tbRandAttrCfg = self.tbRandAttrNumCfg[nStarLevel] and self.tbRandAttrNumCfg[nStarLevel][nQuality] or nil
+  local nCurWeight = 0
+  if tbRandAttrCfg then
+    local nRand = MathRandom(1, self.RAND_ATTR_NUM_MAX_WEIGHT)
+    for _, tbInfo in ipairs(tbRandAttrCfg) do
+      nCurWeight = nCurWeight + tbInfo.nProbility
+      if nRand <= nCurWeight then
+        return tbInfo.nNum
+      end
+    end
+  end
+end
+
+function ShenBingPu:ModifyDailySaleCount(pPlayer, nAddCount)
+  if not pPlayer or not Lib:IsInteger(nAddCount) then
+    return
+  end
+  DegreeCtrl:AddDegree(pPlayer, "ShenBingPu", nAddCount)
+end
+
+function ShenBingPu:GetFactionWeaponName(nFaction, nSect, nSlot)
+  local szSlotName = ""
+  local szWeaponName = ""
+  if ShenBingPuCFG.SlotName[nSlot] then
+    szSlotName = i18n.Get(ShenBingPuCFG.SlotName[nSlot])
+  end
+  if self.tbFactionCfg[nFaction] and self.tbFactionCfg[nFaction][nSect] then
+    szWeaponName = i18n.Parse(self.tbFactionCfg[nFaction][nSect].szWeaponName)
+  end
+  local szLanguage = i18n.CurrentLanguageCode()
+  if "zh-CN" == szLanguage or "zh-TW" == szLanguage then
+    return szSlotName .. szWeaponName
+  else
+    return szSlotName .. " " .. szWeaponName
+  end
+end
+
+function ShenBingPu:GetIterationSuitName(szIteration)
+  local szIterSuitName = "unknow"
+  if ShenBingPuCFG.IterationName[szIteration] then
+    szIterSuitName = ShenBingPuCFG.IterationName[szIteration]
+  end
+  return i18n.Get(szIterSuitName)
+end
+
+function ShenBingPu:GetUsingShenBingPuBySlot(pPlayer, nSlot)
+  if nSlot < Item.ShenBingPu.WEAPON_1 or nSlot > Item.ShenBingPu.WEAPON_3 then
+    return
+  end
+  return Item.ExtEquip:GetEquipObj(pPlayer, nSlot)
+end
+
+function ShenBingPu:GetAllUsingShenBingPu(pPlayer)
+  local tbWeaponList = {}
+  for i = Item.ShenBingPu.WEAPON_1, Item.ShenBingPu.WEAPON_3 do
+    local pUsingWeapon = self:GetUsingShenBingPuBySlot(pPlayer, i)
+    if pUsingWeapon then
+      table.insert(tbWeaponList, pUsingWeapon)
+    end
+  end
+  return tbWeaponList
+end
+
+function ShenBingPu:GetAllUsingShenBingPu2(pPlayer)
+  local tbWeapon = {}
+  for i = Item.ShenBingPu.WEAPON_1, Item.ShenBingPu.WEAPON_3 do
+    local pUsingWeapon = self:GetUsingShenBingPuBySlot(pPlayer, i)
+    if pUsingWeapon then
+      tbWeapon[i] = pUsingWeapon
+    end
+  end
+  return tbWeapon
+end
+
+function ShenBingPu:GetAllShenBingPuItemInBagBySlot(pPlayer, nSlot, bNotSort)
+  if not self:CheckIsValidSlot(nSlot) then
+    return {}
+  end
+  local tbAllItem = {}
+  local tbItemList = pPlayer.GetItemListInBag("ShenBingPuItem") or {}
+  for _, pWeapon in ipairs(tbItemList) do
+    if Item:GetExtEquipSlot(pWeapon) == nSlot then
+      table.insert(tbAllItem, pWeapon)
+    end
+  end
+  if not bNotSort then
+    table.sort(tbAllItem, function(pWeaponA, pWeaponB)
+      local nStarLevelA = self:GetStarLevel(pWeaponA)
+      local nStarLevelB = self:GetStarLevel(pWeaponB)
+      return nStarLevelA > nStarLevelB
+    end)
+  end
+  return tbAllItem
+end
+
+function ShenBingPu:GetAllShenBingPuSeedInBagBySlot(pPlayer, nSlot, bNotSort)
+  if not self:CheckIsValidSlot(nSlot) then
+    return {}
+  end
+  local tbAllItem = {}
+  local tbSeedClass = Item:GetClass("ShenBingPuSeed")
+  local tbItemList = pPlayer.GetItemListInBag("ShenBingPuSeed") or {}
+  for _, pSeed in ipairs(tbItemList) do
+    if tbSeedClass:GetSlot(pSeed.dwTemplateId) == nSlot then
+      table.insert(tbAllItem, pSeed)
+    end
+  end
+  if not bNotSort then
+    table.sort(tbAllItem, function(pWeaponA, pWeaponB)
+      local nStarLevelA = self:GetStarLevelForSeed(pWeaponA)
+      local nStarLevelB = self:GetStarLevelForSeed(pWeaponB)
+      return nStarLevelA > nStarLevelB
+    end)
+  end
+  return tbAllItem
+end
+
+function ShenBingPu:GetAllCanComposeShenBingPuInBagBySlot(pPlayer, nSlot, bNotSort)
+  local tbAllItem = self:GetAllShenBingPuInBagBySlot(pPlayer, nSlot, bNotSort)
+  local tbCanComposeItem = {}
+  for _, pItem in ipairs(tbAllItem) do
+    if self.tbEquipComposeCfg[pItem.dwTemplateId] then
+      local szOpenTimeFrame = ""
+      if self:CheckIsShenBingPu(pItem) then
+        local szIteration = self:GetIteration(pItem)
+        szOpenTimeFrame = ShenBingPuCFG.ComposeOpenTimeFrame[szIteration]
+      elseif pItem.szClass == "ShenBingPuSeed" then
+        local szIteration = self:GetIterationForSeed(pItem)
+        szOpenTimeFrame = ShenBingPuCFG.ComposeOpenTimeFrame[szIteration]
+      end
+      if not Lib:IsEmptyStr(szOpenTimeFrame) and 1 == GetTimeFrameState(szOpenTimeFrame) then
+        table.insert(tbCanComposeItem, pItem)
+      end
+    end
+  end
+  return tbCanComposeItem
+end
+
+function ShenBingPu:GetAllShenBingPuInBagBySlot(pPlayer, nSlot, bNotSort)
+  if not self:CheckIsValidSlot(nSlot) then
+    return {}
+  end
+  local tbAllItem = {}
+  Lib:MergeTable(tbAllItem, self:GetAllShenBingPuItemInBagBySlot(pPlayer, nSlot, false))
+  Lib:MergeTable(tbAllItem, self:GetAllShenBingPuSeedInBagBySlot(pPlayer, nSlot, false))
+  if not bNotSort then
+    table.sort(tbAllItem, function(pWeaponA, pWeaponB)
+      local nIsSeedA = pWeaponA.szClass == "ShenBingPuSeed" and 1 or 0
+      local nIsSeedB = pWeaponB.szClass == "ShenBingPuSeed" and 1 or 0
+      if nIsSeedA ~= nIsSeedB then
+        return nIsSeedA < nIsSeedB
+      end
+      local nStarLevelA = pWeaponA.GetIntValue(self.WEAPON_LEVEL)
+      local nStarLevelB = pWeaponB.GetIntValue(self.WEAPON_LEVEL)
+      if nStarLevelA ~= nStarLevelB then
+        return nStarLevelA > nStarLevelB
+      end
+      return pWeaponA.nQuality > pWeaponA.nQuality
+    end)
+  end
+  return tbAllItem
+end
+
+function ShenBingPu:GetIdentifyCost(nSeedTemplateId)
+  local tbCostCfg = ShenBingPuCFG.IDENTIFY_COST[nSeedTemplateId]
+  if tbCostCfg then
+    return tbCostCfg[1], tbCostCfg[2]
+  end
+end
+
+function ShenBingPu:GetStarLevel(pEquip)
+  if not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  return pEquip.GetIntValue(self.WEAPON_LEVEL)
+end
+
+function ShenBingPu:GetStarLevelForSeed(pSeed)
+  if pSeed.szClass ~= "ShenBingPuSeed" then
+    return
+  end
+  return pSeed.GetIntValue(self.WEAPON_LEVEL)
+end
+
+function ShenBingPu:GetIteration(pEquip)
+  if not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  return self.tbItemCfg[pEquip.dwTemplateId] and self.tbItemCfg[pEquip.dwTemplateId].szIteration or nil
+end
+
+function ShenBingPu:GetIterationForSeed(pSeed)
+  if pSeed.szClass ~= "ShenBingPuSeed" then
+    return
+  end
+  local tbSeedItem = Item:GetClass("ShenBingPuSeed")
+  local nItemTemplate = KItem.GetItemExtParam(pSeed.dwTemplateId, tbSeedItem.EXTPARAM_IDENTTEMPLATE)
+  return self.tbItemCfg[nItemTemplate] and self.tbItemCfg[nItemTemplate].szIteration or nil
+end
+
+function ShenBingPu:GetStarLevelByTemplateId(nTemplateId)
+  return self.tbItemCfg[nTemplateId] and self.tbItemCfg[nTemplateId].nStarLevel or 0
+end
+
+function ShenBingPu:GetAllStarLevel(pPlayer)
+  if not pPlayer then
+    return 0
+  end
+  local tbUsingWeaponList = self:GetAllUsingShenBingPu(pPlayer)
+  local nAllStarLevel = 0
+  for _, pUsingWeapon in ipairs(tbUsingWeaponList) do
+    nAllStarLevel = nAllStarLevel + self:GetStarLevel(pUsingWeapon)
+  end
+  return nAllStarLevel
+end
+
+function ShenBingPu:GetAllStarLevelAsync(pPlayerAsync)
+  if not pPlayerAsync then
+    return 0
+  end
+  return pPlayerAsync.GetShenBingPuAllStarLevel()
+end
+
+function ShenBingPu:UpdateAllStarLevelAsync(pPlayer)
+  local nAllStarLevel = self:GetAllStarLevel(pPlayer)
+  local pPlayerAsync = KPlayer.GetAsyncData(pPlayer.dwID)
+  if pPlayerAsync then
+    pPlayerAsync.SetShenBingPuAllStarLevel(nAllStarLevel)
+  end
+end
+
+function ShenBingPu:SetStarLevel(pEquip, nStarLevel)
+  if not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  pEquip.SetIntValue(self.WEAPON_LEVEL, nStarLevel)
+end
+
+function ShenBingPu:SetStarLevelForSeed(pSeed, nStarLevel)
+  if pSeed.szClass ~= "ShenBingPuSeed" then
+    return
+  end
+  pSeed.SetIntValue(self.WEAPON_LEVEL, nStarLevel)
+end
+
+function ShenBingPu:GetRandAttrValRange(nWeaponTemplate, nAttrId, bAllowStrVal)
+  local nRandGroupId = self.tbItemCfg[nWeaponTemplate] and self.tbItemCfg[nWeaponTemplate].nRandAttrGroupId or -1
+  if not self.tbAttrGroupCfg[nRandGroupId] or not self.tbAttrGroupCfg[nRandGroupId][nAttrId] then
+    return 0, 0
+  end
+  local tbRandAttrCfg = self.tbAttrGroupCfg[nRandGroupId][nAttrId]
+  local tbMinAttrInfo = {
+    nAttrId = nAttrId,
+    nAttrValue1 = tbRandAttrCfg.nAttrValueMin1,
+    nAttrValue2 = tbRandAttrCfg.nAttrValueMin2,
+    nAttrValue3 = tbRandAttrCfg.nAttrValueMin3
+  }
+  local tbMaxAttrInfo = {
+    nAttrId = nAttrId,
+    nAttrValue1 = tbRandAttrCfg.nAttrValueMax1,
+    nAttrValue2 = tbRandAttrCfg.nAttrValueMax2,
+    nAttrValue3 = tbRandAttrCfg.nAttrValueMax3
+  }
+  local _, nAttrMinValue, nAttrMaxValue = self:GetWeaponAttrDiff(tbMinAttrInfo, tbMaxAttrInfo, bAllowStrVal)
+  if bAllowStrVal then
+    return tostring(nAttrMinValue) or "", tostring(nAttrMaxValue) or ""
+  else
+    return tonumber(nAttrMinValue) or 0, tonumber(nAttrMaxValue) or 0
+  end
+end
+
+function ShenBingPu:GetAllFixedAttrValRange(nWeaponTemplateId)
+  local tbItemCfg = self.tbItemCfg[nWeaponTemplateId]
+  local tbMinAttrInfoList = {}
+  local tbMaxAttrInfoList = {}
+  local tbRangeValList = {}
+  if tbItemCfg then
+    for i = 1, Item.ShenBingPu.CFG.nMainAttrNum do
+      local nFixedAttrId = tbItemCfg["nFixedAttr" .. i .. "Id"]
+      if nFixedAttrId then
+        local tbMinFixAttr = {
+          nAttrId = nFixedAttrId,
+          nAttrValue1 = tbItemCfg["nFixedAttr" .. i .. "MinValue1"],
+          nAttrValue2 = tbItemCfg["nFixedAttr" .. i .. "MinValue2"],
+          nAttrValue3 = tbItemCfg["nFixedAttr" .. i .. "MinValue3"]
+        }
+        local tbMaxFixAttr = {
+          nAttrId = nFixedAttrId,
+          nAttrValue1 = tbItemCfg["nFixedAttr" .. i .. "MaxValue1"],
+          nAttrValue2 = tbItemCfg["nFixedAttr" .. i .. "MaxValue2"],
+          nAttrValue3 = tbItemCfg["nFixedAttr" .. i .. "MaxValue3"]
+        }
+        table.insert(tbMinAttrInfoList, tbMinFixAttr)
+        table.insert(tbMaxAttrInfoList, tbMaxFixAttr)
+      end
+    end
+    local tbAllDiff = self:GetWeaponAttrDiffByBatch(tbMinAttrInfoList, tbMaxAttrInfoList) or {}
+    for _, tbDiffInfo in ipairs(tbAllDiff) do
+      table.insert(tbRangeValList, {
+        nMinValue = tbDiffInfo.nAttr1Value,
+        nMaxValue = tbDiffInfo.nAttr2Value
+      })
+    end
+  end
+  return tbRangeValList
+end
+
+function ShenBingPu:GetAttrFromRandomGroup(nGroupId, tbExceptAttrList)
+  if not self.tbAttrGroupCfg[nGroupId] then
+    Lib:LogErrFormat("ShenBingPuCommon: GetAttrFromRandomGroup failed, unexist nGroupId = %d", nGroupId)
+    return nil
+  end
+  local tbExceptAttrIdList = {}
+  if not tbExceptAttrList then
+    tbExceptAttrList = {}
+  else
+    for _, tbAttr in pairs(tbExceptAttrList) do
+      tbExceptAttrIdList[tbAttr.nAttrId] = true
+    end
+  end
+  local tbAttrGroup = Lib:CopyTB(self.tbAttrGroupCfg[nGroupId])
+  tbAttrGroup = Lib:GetSubTable2(tbAttrGroup, tbExceptAttrIdList)
+  local nSumWeight = 0
+  local nPrevWeight = 0
+  for nAttrId, tbInfo in pairs(tbAttrGroup) do
+    nSumWeight = nSumWeight + tbInfo.nWeight
+    tbAttrGroup[nAttrId] = nPrevWeight + self.tbAttrGroupCfg[nGroupId][nAttrId].nWeight
+    nPrevWeight = tbAttrGroup[nAttrId]
+  end
+  if nSumWeight > 0 then
+    local nRand = MathRandom(1, nSumWeight)
+    for nAttrId, nDealWeight in pairs(tbAttrGroup) do
+      if nDealWeight >= nRand then
+        return self:CalcNewRandAttr(nAttrId, nGroupId)
+      end
+    end
+    return nil
+  else
+    Lib:LogErrFormat("ShenBingPuCommon: GetAttrFromRandomGroup failed, SumWeight less than zero, nGroupId = %d", nGroupId)
+    return nil
+  end
+end
+
+function ShenBingPu:CalcNewRandAttr(nAttrId, nRandGroupId)
+  local tbAttr = self.tbAttrCfg[nAttrId]
+  if not tbAttr then
+    Lib:LogErrFormat("ShenBingPuCommon: CalcNewAttrById failed, Attr not exist in ShenBingPuAttrCfg, nAttrId = %d", nAttrId)
+    return nil
+  end
+  if not self.tbAttrGroupCfg[nRandGroupId] or not self.tbAttrGroupCfg[nRandGroupId][nAttrId] then
+    Lib:LogErrFormat("ShenBingPuCommon: CalcNewAttrById failed, groupId or Attr not exist in ShenBingPuAttrCfg, nGroupId = %d, nAttrId = %d", nRandGroupId, nAttrId)
+  end
+  local tbRandAttrCfg = self.tbAttrGroupCfg[nRandGroupId][nAttrId]
+  local nAttrValue1 = MathRandom(tbRandAttrCfg.nAttrValueMin1, tbRandAttrCfg.nAttrValueMax1)
+  local nAttrValue2 = MathRandom(tbRandAttrCfg.nAttrValueMin2, tbRandAttrCfg.nAttrValueMax2)
+  local nAttrValue3 = 0
+  if tbAttr.szAttrType == "basic_damage_v" then
+    nAttrValue3 = nAttrValue1
+  else
+    nAttrValue3 = MathRandom(tbRandAttrCfg.nAttrValueMin3, tbRandAttrCfg.nAttrValueMin3)
+  end
+  return {
+    nAttrId = nAttrId,
+    szAttrType = tbAttr.szAttrType,
+    nAttrValue1 = nAttrValue1,
+    nAttrValue2 = nAttrValue2,
+    nAttrValue3 = nAttrValue3
+  }
+end
+
+function ShenBingPu:GetAttrTypeStrByAttrId(nAttrId)
+  if not self.tbAttrCfg[nAttrId] then
+    return nil
+  else
+    return self.tbAttrCfg[nAttrId].szAttrType
+  end
+end
+
+function ShenBingPu:GetAttrIdByHoleIndex(pPlayer, pEquip, nHoleIndex)
+  local tbAttrInfo = self:GetAttrInfoByHoleIndex(pPlayer, pEquip, nHoleIndex)
+  return tbAttrInfo and tbAttrInfo.nAttrId or 0
+end
+
+function ShenBingPu:GetAttrInfoByHoleIndex(pPlayer, pEquip, nHoleIndex, nAttrChoice)
+  if not Lib:IsInteger(nHoleIndex) then
+    return nil
+  end
+  if nHoleIndex < 1 or nHoleIndex > self.ATTR_HOLE_NUM then
+    return nil
+  end
+  local nOffset = 5 * (nHoleIndex - 1) + self.ATTR_OFFSET
+  local nAttrId = pEquip.GetIntValue(nOffset + 1)
+  if nAttrId <= 0 then
+    return nil
+  end
+  local nAttrFightPower = 0
+  local nAttrValue1 = 0
+  local nAttrValue2 = 0
+  local nAttrValue3 = 0
+  local szAttrType = self:GetAttrTypeStrByAttrId(nAttrId)
+  local nSlot = 0
+  if pEquip.szClass == "ShenBingPuSeed" then
+    local nItemTemplate = KItem.GetItemExtParam(pEquip.dwTemplateId, Item:GetClass("ShenBingPuSeed").EXTPARAM_IDENTTEMPLATE)
+    local tbInfo = KItem.GetItemBaseProp(nItemTemplate)
+    nSlot = tbInfo.nDetailType
+  else
+    nSlot = Item:GetExtEquipSlot(pEquip)
+  end
+  local nAttrEnhanceLevel = self:GetAttrEnhanceLevel(pPlayer, nSlot, nHoleIndex)
+  nAttrChoice = nAttrChoice or self.eATTRCHOICE.ALL
+  if nAttrChoice == self.eATTRCHOICE.ONLYBASE then
+    nAttrValue1 = pEquip.GetIntValue(nOffset + 2)
+    nAttrValue2 = pEquip.GetIntValue(nOffset + 3)
+    nAttrValue3 = pEquip.GetIntValue(nOffset + 4)
+  elseif nAttrChoice == self.eATTRCHOICE.ONLYENHANCE then
+    local nVal1, nVal2, nVal3
+    if nHoleIndex >= self.FIXED_ATTR_MIN and nHoleIndex <= self.FIXED_ATTR_MAX then
+      nVal1, nVal2, nVal3 = self:GetAttrEnhanceValByHole(pPlayer, nSlot, nHoleIndex)
+      local tbEnhanceValCfg = ShenBingPuCFG.ENHANCE_ATTR_VAL[nSlot]
+      for i = 1, nAttrEnhanceLevel do
+        if tbEnhanceValCfg[i] then
+          nAttrFightPower = nAttrFightPower + (tbEnhanceValCfg[i][5] or 0)
+        end
+      end
+    end
+    nAttrValue1 = nVal1 or 0
+    nAttrValue2 = nVal2 or 0
+    nAttrValue3 = nVal3 or 0
+  else
+    local nVal1, nVal2, nVal3
+    if nHoleIndex >= self.FIXED_ATTR_MIN and nHoleIndex <= self.FIXED_ATTR_MAX then
+      nVal1, nVal2, nVal3 = self:GetAttrEnhanceValByHole(pPlayer, nSlot, nHoleIndex)
+      local tbEnhanceValCfg = ShenBingPuCFG.ENHANCE_ATTR_VAL[nSlot]
+      for i = 1, nAttrEnhanceLevel do
+        if tbEnhanceValCfg[i] then
+          nAttrFightPower = nAttrFightPower + (tbEnhanceValCfg[i][5] or 0)
+        end
+      end
+    end
+    nAttrValue1 = pEquip.GetIntValue(nOffset + 2) + (nVal1 or 0)
+    nAttrValue2 = pEquip.GetIntValue(nOffset + 3) + (nVal2 or 0)
+    nAttrValue3 = pEquip.GetIntValue(nOffset + 4) + (nVal3 or 0)
+  end
+  return {
+    szAttrType = szAttrType,
+    nAttrId = nAttrId,
+    nAttrValue1 = nAttrValue1,
+    nAttrValue2 = nAttrValue2,
+    nAttrValue3 = nAttrValue3,
+    nFightPower = nAttrFightPower
+  }
+end
+
+function ShenBingPu:GetAttrInfoByHoleIndexAsync(pPlayerAsync, pEquip, nHoleIndex, nAttrChoice)
+  if not self:CheckIsShenBingPu(pEquip) then
+    return nil
+  end
+  if not Lib:IsInteger(nHoleIndex) then
+    return nil
+  end
+  if nHoleIndex < 1 or nHoleIndex > self.ATTR_HOLE_NUM then
+    return nil
+  end
+  local nOffset = 5 * (nHoleIndex - 1) + self.ATTR_OFFSET
+  local nAttrId = pEquip.GetIntValue(nOffset + 1)
+  if nAttrId <= 0 then
+    return nil
+  end
+  local nAttrFightPower = 0
+  local nAttrValue1 = 0
+  local nAttrValue2 = 0
+  local nAttrValue3 = 0
+  local szAttrType = self:GetAttrTypeStrByAttrId(nAttrId)
+  local nSlot = 0
+  if pEquip.szClass == "ShenBingPuSeed" then
+    local tbClass = Item:GetClass("ShenBingPuSeed")
+    if tbClass then
+      nSlot = tbClass:GetSlot(pEquip.dwTemplateId) or 0
+    end
+  else
+    nSlot = Item:GetExtEquipSlot(pEquip)
+  end
+  local nAttrEnhanceLevel = self:GetAttrEnhanceLevelAsync(pPlayerAsync, nSlot, nHoleIndex)
+  nAttrChoice = nAttrChoice or self.eATTRCHOICE.ALL
+  if nAttrChoice == self.eATTRCHOICE.ONLYBASE then
+    nAttrValue1 = pEquip.GetIntValue(nOffset + 2)
+    nAttrValue2 = pEquip.GetIntValue(nOffset + 3)
+    nAttrValue3 = pEquip.GetIntValue(nOffset + 4)
+  elseif nAttrChoice == self.eATTRCHOICE.ONLYENHANCE then
+    local nVal1, nVal2, nVal3
+    if nHoleIndex >= self.FIXED_ATTR_MIN and nHoleIndex <= self.FIXED_ATTR_MAX then
+      nVal1, nVal2, nVal3 = self:GetAttrEnhanceValByHoleAsync(pPlayerAsync, nSlot, nHoleIndex)
+      local tbEnhanceValCfg = ShenBingPuCFG.ENHANCE_ATTR_VAL[nSlot]
+      for i = 1, nAttrEnhanceLevel do
+        if tbEnhanceValCfg[i] then
+          nAttrFightPower = nAttrFightPower + (tbEnhanceValCfg[i][4] or 0)
+        end
+      end
+    end
+    nAttrValue1 = nVal1 or 0
+    nAttrValue2 = nVal2 or 0
+    nAttrValue3 = nVal3 or 0
+  else
+    local nVal1, nVal2, nVal3
+    if nHoleIndex >= self.FIXED_ATTR_MIN and nHoleIndex <= self.FIXED_ATTR_MAX then
+      nVal1, nVal2, nVal3 = self:GetAttrEnhanceValByHoleAsync(pPlayerAsync, nSlot, nHoleIndex)
+      local tbEnhanceValCfg = ShenBingPuCFG.ENHANCE_ATTR_VAL[nSlot]
+      for i = 1, nAttrEnhanceLevel do
+        if tbEnhanceValCfg[i] then
+          nAttrFightPower = nAttrFightPower + (tbEnhanceValCfg[i][5] or 0)
+        end
+      end
+    end
+    nAttrValue1 = pEquip.GetIntValue(nOffset + 2) + (nVal1 or 0)
+    nAttrValue2 = pEquip.GetIntValue(nOffset + 3) + (nVal2 or 0)
+    nAttrValue3 = pEquip.GetIntValue(nOffset + 4) + (nVal3 or 0)
+  end
+  return {
+    szAttrType = szAttrType,
+    nAttrId = nAttrId,
+    nAttrValue1 = nAttrValue1,
+    nAttrValue2 = nAttrValue2,
+    nAttrValue3 = nAttrValue3,
+    nFightPower = nAttrFightPower
+  }
+end
+
+function ShenBingPu:GetAllFixedAttr(pPlayer, pEquip, nAttrChoice)
+  if not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  local tbAllFixedAttr = {}
+  for i = self.FIXED_ATTR_MIN, self.FIXED_ATTR_MAX do
+    local tbAttr = self:GetAttrInfoByHoleIndex(pPlayer, pEquip, i, nAttrChoice)
+    if tbAttr then
+      table.insert(tbAllFixedAttr, tbAttr)
+    end
+  end
+  return tbAllFixedAttr
+end
+
+function ShenBingPu:GetAllFixedAttrForSeed(pPlayer, pEquip, nAttrChoice)
+  if pEquip.szClass ~= "ShenBingPuSeed" then
+    return
+  end
+  local tbAllFixedAttr = {}
+  for i = self.FIXED_ATTR_MIN, self.FIXED_ATTR_MAX do
+    local tbAttr = self:GetAttrInfoByHoleIndex(pPlayer, pEquip, i, nAttrChoice)
+    if tbAttr then
+      table.insert(tbAllFixedAttr, tbAttr)
+    end
+  end
+  return tbAllFixedAttr
+end
+
+function ShenBingPu:GetAllFixedAttrAsync(pPlayerAsync, pEquip, nAttrChoice)
+  if not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  local tbAllFixedAttr = {}
+  for i = self.FIXED_ATTR_MIN, self.FIXED_ATTR_MAX do
+    local tbAttr = self:GetAttrInfoByHoleIndexAsync(pPlayerAsync, pEquip, i, nAttrChoice)
+    if tbAttr then
+      table.insert(tbAllFixedAttr, tbAttr)
+    end
+  end
+  return tbAllFixedAttr
+end
+
+function ShenBingPu:GetAllRandAttr(pPlayer, pEquip)
+  if not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  local tbAllRandAttr = {}
+  for i = self.RAND_ATTR_MIN, self.RAND_ATTR_MAX do
+    local tbAttr = self:GetAttrInfoByHoleIndex(pPlayer, pEquip, i)
+    if tbAttr then
+      table.insert(tbAllRandAttr, tbAttr)
+    end
+  end
+  return tbAllRandAttr
+end
+
+function ShenBingPu:GetAllRandAttrForSeed(pPlayer, pEquip)
+  if pEquip.szClass ~= "ShenBingPuSeed" then
+    return
+  end
+  local tbAllRandAttr = {}
+  for i = self.RAND_ATTR_MIN, self.RAND_ATTR_MAX do
+    local tbAttr = self:GetAttrInfoByHoleIndex(pPlayer, pEquip, i)
+    if tbAttr then
+      table.insert(tbAllRandAttr, tbAttr)
+    end
+  end
+  return tbAllRandAttr
+end
+
+function ShenBingPu:GetAllRandAttrAsync(pPlayerAsync, pEquip)
+  if not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  local tbAllRandAttr = {}
+  for i = self.RAND_ATTR_MIN, self.RAND_ATTR_MAX do
+    local tbAttr = self:GetAttrInfoByHoleIndexAsync(pPlayerAsync, pEquip, i)
+    if tbAttr then
+      table.insert(tbAllRandAttr, tbAttr)
+    end
+  end
+  return tbAllRandAttr
+end
+
+function ShenBingPu:GetAllMagicAttr(pPlayer, pEquip)
+  if not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  local tbAllAttr = {}
+  tbAllAttr = Lib:MergeTable(tbAllAttr, self:GetAllFixedAttr(pPlayer, pEquip) or {})
+  tbAllAttr = Lib:MergeTable(tbAllAttr, self:GetAllRandAttr(pPlayer, pEquip) or {})
+  return tbAllAttr
+end
+
+function ShenBingPu:GetSuitAttrDescByLevel(nSuitLevel)
+  local tbSuitAttrCfg = ShenBingPuCFG.SUIT_ATTR[nSuitLevel]
+  local tbDesc = {}
+  if not tbSuitAttrCfg then
+    return nil, tbDesc
+  else
+    for i = 1, 3 do
+      local tbAttrInfo = tbSuitAttrCfg[i + 1]
+      if type(tbAttrInfo) == "table" and not Lib:IsEmptyStr(tbAttrInfo[1]) then
+        local szDesc = FightSkill:GetMagicDesc(tbAttrInfo[1], {
+          tbAttrInfo[2],
+          tbAttrInfo[3],
+          tbAttrInfo[4]
+        })
+        table.insert(tbDesc, szDesc)
+      end
+    end
+    return tbSuitAttrCfg[1], tbDesc
+  end
+end
+
+function ShenBingPu:GetAllSuitAttrByAllStarLevel(nAllStarLevel)
+  local tbAllSuitAttr = {}
+  local szSuitAttrName = ""
+  local nSuitAttrLevel = 0
+  for i = #ShenBingPuCFG.SUIT_ATTR, 1, -1 do
+    if nAllStarLevel >= ShenBingPuCFG.SUIT_ATTR[i][1] then
+      local tbSuitAttrCfg = ShenBingPuCFG.SUIT_ATTR[i]
+      szSuitAttrName = ShenBingPuCFG.SUIT_ATTR[i][6]
+      nSuitAttrLevel = i
+      for j = 1, 3 do
+        if not Lib:IsEmptyStr(tbSuitAttrCfg[1 + j][1]) then
+          local tbSingleAttrCfg = tbSuitAttrCfg[1 + j]
+          table.insert(tbAllSuitAttr, {
+            nAttrId = 0,
+            szAttrType = tbSingleAttrCfg[1],
+            nAttrValue1 = tbSingleAttrCfg[2],
+            nAttrValue2 = tbSingleAttrCfg[3],
+            nAttrValue3 = tbSingleAttrCfg[4],
+            nFightPower = 0
+          })
+        end
+      end
+      if #tbAllSuitAttr > 0 then
+        tbAllSuitAttr[#tbAllSuitAttr].nFightPower = tbSuitAttrCfg[5]
+      end
+      break
+    end
+  end
+  return tbAllSuitAttr, nSuitAttrLevel, szSuitAttrName
+end
+
+function ShenBingPu:GetPlayerAllSuitAttr(pPlayer)
+  if not pPlayer then
+    return
+  end
+  local nAllStarLevel = self:GetAllStarLevel(pPlayer)
+  local tbAllSuitAttr, nSuitAttrLevel, szSuitAttrName = self:GetAllSuitAttrByAllStarLevel(nAllStarLevel)
+  return tbAllSuitAttr, nSuitAttrLevel, szSuitAttrName, nAllStarLevel
+end
+
+function ShenBingPu:GetPlayerAllSuitAttrAsync(pPlayerAsync)
+  if not pPlayerAsync then
+    return
+  end
+  local nAllStarLevel = pPlayerAsync.GetShenBingPuAllStarLevel()
+  local tbAllSuitAttr, nSuitAttrLevel, szSuitAttrName = self:GetAllSuitAttrByAllStarLevel(nAllStarLevel)
+  return tbAllSuitAttr, nSuitAttrLevel, szSuitAttrName, nAllStarLevel
+end
+
+function ShenBingPu:GetAllMagicAttrAsync(pPlayerAsync, pEquip)
+  if not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  local tbAllAttr = {}
+  tbAllAttr = Lib:MergeTable(tbAllAttr, self:GetAllFixedAttrAsync(pPlayerAsync, pEquip) or {})
+  tbAllAttr = Lib:MergeTable(tbAllAttr, self:GetAllRandAttrAsync(pPlayerAsync, pEquip) or {})
+  return tbAllAttr
+end
+
+function ShenBingPu:GetAttrEnhanceLevel(pPlayer, nSlot, nHoleIndex)
+  if not pPlayer then
+    return
+  end
+  if not Lib:IsInteger(nSlot) or not self:CheckIsValidSlot(nSlot) then
+    return
+  end
+  if nHoleIndex < self.FIXED_ATTR_MIN or nHoleIndex > self.FIXED_ATTR_MAX then
+    return
+  end
+  local szEnhanceSaveId = string.format("WEAPON_%d_ARRT_%d_ENHANCE_LEVEL", nSlot - Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1 + 1, nHoleIndex)
+  if self.SAVE_ID[szEnhanceSaveId] then
+    return pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_ID[szEnhanceSaveId])
+  end
+end
+
+function ShenBingPu:GetAttrEnhanceLevelAsync(pPlayerAsync, nSlot, nHoleIndex)
+  if not pPlayerAsync then
+    return
+  end
+  if not Lib:IsInteger(nSlot) or not self:CheckIsValidSlot(nSlot) then
+    return
+  end
+  if nHoleIndex < self.FIXED_ATTR_MIN or nHoleIndex > self.FIXED_ATTR_MAX then
+    return
+  end
+  local nAyncIndex = (nSlot - Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1) * ShenBingPuCFG.nMainAttrNum + nHoleIndex
+  return pPlayerAsync.GetShenBingPuEnhanceLevel(nAyncIndex)
+end
+
+function ShenBingPu:GetAttrEnhanceValByLevel(nAttrEnhanceLevel, nSlot, nHoleIndex)
+  local tbVal = ShenBingPuCFG.ENHANCE_ATTR_VAL[nSlot][nAttrEnhanceLevel][nHoleIndex - self.FIXED_ATTR_MIN + 1]
+  if tbVal then
+    return tbVal[1], tbVal[2], tbVal[3]
+  else
+    return 0, 0, 0
+  end
+end
+
+function ShenBingPu:GetAttrEnhanceValByHole(pPlayer, nEquipSlot, nHoleIndex)
+  local nEnhanceLevel = self:GetAttrEnhanceLevel(pPlayer, nEquipSlot, nHoleIndex)
+  if nEnhanceLevel and self:CheckHasActivate(pPlayer, nEquipSlot) then
+    return self:GetAttrEnhanceValByLevel(nEnhanceLevel, nEquipSlot, nHoleIndex)
+  end
+end
+
+function ShenBingPu:GetAttrEnhanceValByHoleAsync(pPlayerAsync, nEquipSlot, nHoleIndex)
+  local nEnhanceLevel = self:GetAttrEnhanceLevelAsync(pPlayerAsync, nEquipSlot, nHoleIndex)
+  if nEnhanceLevel and self:CheckHasActivateAsync(pPlayerAsync, nEquipSlot) then
+    return self:GetAttrEnhanceValByLevel(nEnhanceLevel, nEquipSlot, nHoleIndex)
+  end
+end
+
+function ShenBingPu:GetEnhanceLevelIter(nEnhanceLevel)
+  local szLevelIteration = "T" .. Lib:CountTB(ShenBingPuCFG.OpenTimeFrame)
+  for szIter, nLevelLimit in pairs(ShenBingPuCFG.ATTR_LEVEL_LIMIT) do
+    if nEnhanceLevel < nLevelLimit and self.tbSortIterationSet[szLevelIteration] > self.tbSortIterationSet[szIter] then
+      szLevelIteration = szIter
+    end
+  end
+  return szLevelIteration
+end
+
+function ShenBingPu:GetEnhanceLevelInfo(pPlayer, nEquipSlot)
+  local tbEnhanceLevel = {}
+  if not self:CheckIsValidSlot(nEquipSlot) then
+    return tbEnhanceLevel
+  end
+  for i = self.FIXED_ATTR_MIN, self.FIXED_ATTR_MAX do
+    local nEnhanceLevel = self:GetAttrEnhanceLevel(pPlayer, nEquipSlot, i)
+    if nEnhanceLevel then
+      local szLevelIter = self:GetEnhanceLevelIter(nEnhanceLevel)
+      tbEnhanceLevel[i] = {nEnhanceLevel = nEnhanceLevel, szLevelIter = szLevelIter}
+    end
+  end
+  return tbEnhanceLevel
+end
+
+function ShenBingPu:GetMinEnhanceLevel(pPlayer, nEquipSlot)
+  if not self:CheckIsValidSlot(nEquipSlot) then
+    return
+  end
+  local nMinEnhanceLevel = Env.INT_MAX
+  local nMinEnhanceAttrIndex = 0
+  for i = self.FIXED_ATTR_MIN, self.FIXED_ATTR_MAX do
+    local nEnhanceLevel = self:GetAttrEnhanceLevel(pPlayer, nEquipSlot, i)
+    if nEnhanceLevel and nMinEnhanceLevel > nEnhanceLevel then
+      nMinEnhanceLevel = nEnhanceLevel
+      nMinEnhanceAttrIndex = i
+    end
+  end
+  return nMinEnhanceAttrIndex, nMinEnhanceLevel
+end
+
+function ShenBingPu:GetCurIteration()
+  local szCurIteration = ""
+  local nCurTimeFrameTime = -1
+  for szIteration, szTimeFrame in pairs(ShenBingPuCFG.OpenTimeFrame) do
+    if 1 == GetTimeFrameState(szTimeFrame) then
+      local nOpenTime = Lib:CalcTimeFrameOpenTime(szTimeFrame)
+      if nCurTimeFrameTime < nOpenTime then
+        nCurTimeFrameTime = nOpenTime
+        szCurIteration = szIteration
+      end
+    end
+  end
+  return szCurIteration
+end
+
+function ShenBingPu:GetCurMaxEnhanceLevel()
+  local szCurIteration = self:GetCurIteration()
+  local nCurMaxEnhanceLevel = ShenBingPuCFG.ATTR_LEVEL_LIMIT[szCurIteration]
+  return nCurMaxEnhanceLevel
+end
+
+function ShenBingPu:GetCurMaxStarLevel()
+  local szCurIteration = self:GetCurIteration()
+  local nCurMaxStarLevel = 0
+  for _, tbItemInfo in pairs(self.tbItemCfg) do
+    if self.tbSortIterationSet[tbItemInfo.szIteration] <= self.tbSortIterationSet[szCurIteration] and nCurMaxStarLevel < tbItemInfo.nStarLevel then
+      nCurMaxStarLevel = tbItemInfo.nStarLevel
+    end
+  end
+  return nCurMaxStarLevel
+end
+
+function ShenBingPu:IsAllFixedAttrFullMax(pPlayer, nEquipSlot)
+  local bFullMax = true
+  for i = self.FIXED_ATTR_MIN, self.FIXED_ATTR_MAX do
+    if self:IsAttrEnhanceFullMax(pPlayer, nEquipSlot, i) == false then
+      bFullMax = false
+      break
+    end
+  end
+  return bFullMax
+end
+
+function ShenBingPu:IsAttrEnhanceFullMax(pPlayer, nSlot, nHoleIndex)
+  if not pPlayer then
+    return
+  end
+  if not Lib:IsInteger(nSlot) or not self:CheckIsValidSlot(nSlot) then
+    return
+  end
+  if nHoleIndex < self.FIXED_ATTR_MIN or nHoleIndex > self.FIXED_ATTR_MAX then
+    return
+  end
+  local nEnhanceLevel = self:GetAttrEnhanceLevel(pPlayer, nSlot, nHoleIndex)
+  local nCurMaxEnhanceLevel = self:GetCurMaxEnhanceLevel()
+  if not Lib:IsInteger(nCurMaxEnhanceLevel) then
+    LogErr("ShenBingPuCommon: IsAttrEnhanceFullMax failed, nCurMaxEnhanceLevel is nil, nPlayerId = ", pPlayer.dwID, "nEquipSlot = ", nSlot, "nHoleIndex = ", nHoleIndex)
+    return
+  end
+  if not Lib:IsInteger(nEnhanceLevel) then
+    return
+  end
+  return nEnhanceLevel >= nCurMaxEnhanceLevel
+end
+
+function ShenBingPu:CalcEnhancePlan(pPlayer, nSlot, nMainAttrIndex, nMaterialId)
+  local nSingleVal = self:GetMaterialVal(nMaterialId)
+  local nCurEnhanceLevel = self:GetAttrEnhanceLevel(pPlayer, nSlot, nMainAttrIndex)
+  local nTargetCostVal = self:GetEnhanceCostValByIter(nCurEnhanceLevel)
+  local nAddLevel = 0
+  local nNeedCoin = 0
+  local nNextCostVal = self:GetEnhanceCostValByLevel(nCurEnhanceLevel + nAddLevel)
+  local nTotalCostVal = 0
+  if nTargetCostVal >= nNextCostVal then
+    local nRestVal = nTargetCostVal
+    while nRestVal > 0 and nNextCostVal <= nRestVal do
+      nTotalCostVal = nTotalCostVal + nNextCostVal
+      nNeedCoin = nNeedCoin + self:GetEnhanceCostCoinByLevel(nCurEnhanceLevel + nAddLevel)
+      nAddLevel = nAddLevel + 1
+      goto lbl_38
+      do break end
+      ::lbl_38::
+      nRestVal = nRestVal - nNextCostVal
+      nNextCostVal = self:GetEnhanceCostValByLevel(nCurEnhanceLevel + nAddLevel)
+    end
+  else
+    nTotalCostVal = nNextCostVal
+    nNeedCoin = self:GetEnhanceCostCoinByLevel(nCurEnhanceLevel)
+    nAddLevel = 1
+  end
+  return nAddLevel, math.ceil(nTotalCostVal / nSingleVal), nNeedCoin
+end
+
+function ShenBingPu:GetHornorLevel(pPlayer)
+  if not pPlayer then
+    return
+  end
+  local nAllStarLevel = self:GetAllStarLevel(pPlayer)
+  local nAllEnhanceLevel = 0
+  for i = Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1, Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON3 do
+    local nCurMinEnhanceLevel = Env.INT_MAX
+    for j = 1, self.FIXED_ATTR_MAX do
+      local nEnhanceLevel = self:GetAttrEnhanceLevel(pPlayer, i, j)
+      if nEnhanceLevel and nCurMinEnhanceLevel > nEnhanceLevel then
+        nCurMinEnhanceLevel = nEnhanceLevel
+      end
+    end
+    nAllEnhanceLevel = nAllEnhanceLevel + nCurMinEnhanceLevel
+  end
+  local nHonorLevel = 0
+  for i = #ShenBingPuCFG.HONOR, 1, -1 do
+    if nAllStarLevel >= ShenBingPuCFG.HONOR[i][1] and nAllEnhanceLevel >= ShenBingPuCFG.HONOR[i][2] then
+      nHonorLevel = i
+      break
+    end
+  end
+  return nHonorLevel, nAllEnhanceLevel
+end
+
+function ShenBingPu:GetHornorLevelAsync(pPlayerAsync)
+  if not pPlayerAsync then
+    return
+  end
+  local nAllStarLevel = self:GetAllStarLevelAsync(pPlayerAsync)
+  local nAllEnhanceLevel = 0
+  for i = Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1, Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON3 do
+    local nCurMinEnhanceLevel = Env.INT_MAX
+    for j = 1, self.FIXED_ATTR_MAX do
+      local nEnhanceLevel = self:GetAttrEnhanceLevelAsync(pPlayerAsync, i, j)
+      if nEnhanceLevel and nCurMinEnhanceLevel > nEnhanceLevel then
+        nCurMinEnhanceLevel = nEnhanceLevel
+      end
+    end
+    nAllEnhanceLevel = nAllEnhanceLevel + nCurMinEnhanceLevel
+  end
+  local nHonorLevel = 0
+  for i = #ShenBingPuCFG.HONOR, 1, -1 do
+    if nAllStarLevel >= ShenBingPuCFG.HONOR[i][1] and nAllEnhanceLevel >= ShenBingPuCFG.HONOR[i][2] then
+      nHonorLevel = i
+      break
+    end
+  end
+  return nHonorLevel, nAllEnhanceLevel
+end
+
+function ShenBingPu:IsExistAttrInHole(pEquip, nHoleIndex)
+  if not Lib:IsInteger(nHoleIndex) then
+    return
+  end
+  if nHoleIndex < 1 or nHoleIndex > self.ATTR_HOLE_NUM then
+    return
+  end
+  local nOffset = 5 * (nHoleIndex - 1) + self.ATTR_OFFSET
+  local nAttrId = pEquip.GetIntValue(nOffset + 1)
+  return nAttrId > 0
+end
+
+function ShenBingPu:RemoveAttrInfoByHoleIndex(pEquip, nHoleIndex)
+  local tbEmptyAttr = {
+    nAttrId = 0,
+    nAttrValue1 = 0,
+    nAttrValue2 = 0,
+    nAttrValue3 = 0
+  }
+  self:SetAttrInfoByHoleIndex(pEquip, nHoleIndex, tbEmptyAttr, true)
+end
+
+function ShenBingPu:SetAttrInfoByHoleIndex(pEquip, nHoleIndex, tbAttrInfo, bForce)
+  if not Lib:IsInteger(nHoleIndex) then
+    return
+  end
+  if nHoleIndex < 1 or nHoleIndex > self.ATTR_HOLE_NUM then
+    return
+  end
+  if self:IsExistAttrInHole(pEquip, nHoleIndex) and not bForce then
+    return
+  end
+  local nOffset = 5 * (nHoleIndex - 1) + self.ATTR_OFFSET
+  pEquip.SetIntValue(nOffset + 1, tbAttrInfo.nAttrId)
+  pEquip.SetIntValue(nOffset + 2, tbAttrInfo.nAttrValue1)
+  pEquip.SetIntValue(nOffset + 3, tbAttrInfo.nAttrValue2)
+  pEquip.SetIntValue(nOffset + 4, tbAttrInfo.nAttrValue3)
+end
+
+function ShenBingPu:SetActivateStatus(pPlayer, nEquipSlot, eStatus)
+  local szActivateSaveId = string.format("WEAPON_%d_ACTIVATE", nEquipSlot - Item.ShenBingPu.WEAPON_1 + 1)
+  if self.SAVE_ID[szActivateSaveId] then
+    pPlayer.SetUserValue(self.SAVE_GROUP, self.SAVE_ID[szActivateSaveId], eStatus)
+  else
+    LogErr("ShenBingPu: SetActivateStatus failed, unexist saveid = ", szActivateSaveId, " nPlayerId = ", pPlayer.dwID, " nEquipSlot = ", nEquipSlot)
+    return
+  end
+  local pPlayerAsync = KPlayer.GetAsyncData(pPlayer.dwID)
+  if pPlayerAsync then
+    pPlayerAsync.SetShenBingPuActivate(nEquipSlot - Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1 + 1, eStatus)
+  end
+end
+
+function ShenBingPu:SetAttrEnhanceLevel(pPlayer, nSlot, nHoleIndex, nNewLevel)
+  if not pPlayer or not Lib:IsInteger(nNewLevel) then
+    return
+  end
+  if not self:CheckIsValidSlot(nSlot) then
+    return
+  end
+  if nHoleIndex < self.FIXED_ATTR_MIN or nHoleIndex > self.FIXED_ATTR_MAX then
+    return
+  end
+  local nCurMaxEnhanceLevel = self:GetCurMaxEnhanceLevel()
+  if not nCurMaxEnhanceLevel or nNewLevel > nCurMaxEnhanceLevel then
+    return
+  end
+  local szEnhanceSaveId = string.format("WEAPON_%d_ARRT_%d_ENHANCE_LEVEL", nSlot - Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1 + 1, nHoleIndex)
+  if self.SAVE_ID[szEnhanceSaveId] then
+    pPlayer.SetUserValue(self.SAVE_GROUP, self.SAVE_ID[szEnhanceSaveId], nNewLevel)
+  else
+    LogErr("ShenBingPu: SetAttrEnhanceLevel Err, unexist saveid = ", szEnhanceSaveId, " nPlayerId = ", pPlayer.dwID, " nSlot = ", nSlot, " nHoleIndex = ", nHoleIndex, " nNewLevel = ", nNewLevel)
+    return
+  end
+  local pPlayerAsync = KPlayer.GetAsyncData(pPlayer.dwID)
+  if pPlayerAsync then
+    local nAsyncIndex = (nSlot - Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1) * ShenBingPuCFG.nMainAttrNum + nHoleIndex
+    local nAsyncIndexForCheck = nAsyncIndex + self.ENHANCE_LEVEL_ASYNC_BEGIN - 1
+    if nAsyncIndexForCheck >= self.ENHANCE_LEVEL_ASYNC_BEGIN and nAsyncIndexForCheck <= self.ENHANCE_LEVEL_ASYNC_END then
+      pPlayerAsync.SetShenBingPuEnhanceLevel(nAsyncIndex, nNewLevel)
+    end
+  end
+end
+
+function ShenBingPu:SetRandAttr(pEquip, tbAttrInfo)
+  if not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  for i = self.RAND_ATTR_MIN, self.RAND_ATTR_MAX do
+    if not self:IsExistAttrInHole(pEquip, i) then
+      self:SetAttrInfoByHoleIndex(pEquip, i, tbAttrInfo)
+      break
+    end
+  end
+end
+
+function ShenBingPu:SetRandAttrForSeed(pSeed, tbAttrInfo)
+  if pSeed.szClass ~= "ShenBingPuSeed" then
+    return
+  end
+  for i = self.RAND_ATTR_MIN, self.RAND_ATTR_MAX do
+    if not self:IsExistAttrInHole(pSeed, i) then
+      self:SetAttrInfoByHoleIndex(pSeed, i, tbAttrInfo)
+      break
+    end
+  end
+end
+
+function ShenBingPu:SetFixedAttr(pEquip, tbAttrInfo)
+  if not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  for i = self.FIXED_ATTR_MIN, self.FIXED_ATTR_MAX do
+    if not self:IsExistAttrInHole(pEquip, i) then
+      self:SetAttrInfoByHoleIndex(pEquip, i, tbAttrInfo)
+      break
+    end
+  end
+end
+
+function ShenBingPu:SetFixedAttrForSeed(pSeed, tbAttrInfo)
+  if pSeed.szClass ~= "ShenBingPuSeed" then
+    return
+  end
+  for i = self.FIXED_ATTR_MIN, self.FIXED_ATTR_MAX do
+    if not self:IsExistAttrInHole(pSeed, i) then
+      self:SetAttrInfoByHoleIndex(pSeed, i, tbAttrInfo)
+      break
+    end
+  end
+end
+
+function ShenBingPu:GetEnhanceCostValByLevel(nCurLevel)
+  for _, szIter in ipairs(self.tbSortIterationList) do
+    if nCurLevel < ShenBingPuCFG.ATTR_LEVEL_LIMIT[szIter] then
+      return ShenBingPuCFG.ENHANCE_COST_VAL[szIter]
+    end
+  end
+  return Env.INT_MAX
+end
+
+function ShenBingPu:GetEnhanceCostValByIter(nAttrLevel)
+  local szCurIteration = self:GetCurIteration()
+  local szLevelIteration = self:GetEnhanceLevelIter(nAttrLevel)
+  return math.min(ShenBingPuCFG.ENHANCE_COST_VAL[szCurIteration], ShenBingPuCFG.ENHANCE_COST_VAL[szLevelIteration])
+end
+
+function ShenBingPu:GetEnhanceCostCoinByLevel(nCurLevel)
+  for _, szIter in ipairs(self.tbSortIterationList) do
+    if nCurLevel < ShenBingPuCFG.ATTR_LEVEL_LIMIT[szIter] then
+      return ShenBingPuCFG.ENHANCE_COST_COIN[szIter]
+    end
+  end
+  return Env.INT_MAX
+end
+
+function ShenBingPu:GetEnhanceCostCoinByIter(pPlayer, nEquipSlot)
+  if not self:CheckIsValidSlot(nEquipSlot) then
+    return Env.INT_MAX
+  end
+  local szCurIteration = self:GetCurIteration()
+  local _, nMinLevel = self:GetMinEnhanceLevel(pPlayer, nEquipSlot)
+  local szLevelIteration = self:GetEnhanceLevelIter(nMinLevel)
+  return math.min(ShenBingPuCFG.ENHANCE_COST_COIN[szCurIteration], ShenBingPuCFG.ENHANCE_COST_COIN[szLevelIteration])
+end
+
+function ShenBingPu:GetEnhanceCostNumByIter(pPlayer, nEquipSlot)
+  if not self:CheckIsValidSlot(nEquipSlot) then
+    return Env.INT_MAX
+  end
+  local nMaterialId = self:GetCurIterMaterial()
+  if nMaterialId then
+    local _, nMinLevel = self:GetMinEnhanceLevel(pPlayer, nEquipSlot)
+    local nCurIterCostVal = self:GetEnhanceCostValByIter(nMinLevel)
+    local nCurMaterialVal = self:GetMaterialVal(nMaterialId)
+    return math.ceil(nCurIterCostVal / nCurMaterialVal)
+  else
+    return Env.INT_MAX
+  end
+end
+
+function ShenBingPu:GetMaterialVal(nMaterialId)
+  return ShenBingPuCFG.ENHANCE_MATERIAL_VAL[nMaterialId]
+end
+
+function ShenBingPu:GetCurIterMaterial()
+  local szIteration = self:GetCurIteration()
+  return ShenBingPuCFG.ENHANCE_ITERATION_MATERIAL[szIteration]
+end
+
+function ShenBingPu:GetMaterialIteration(nMaterialId)
+  local szMaxIter = ""
+  for szIter, nItemId in pairs(ShenBingPuCFG.ENHANCE_ITERATION_MATERIAL) do
+    if nMaterialId == nItemId and self.tbSortIterationSet[szIter] > (self.tbSortIterationSet[szMaxIter] or 0) then
+      szMaxIter = szIter
+    end
+  end
+  return szMaxIter
+end
+
+function ShenBingPu:CompareIteration(szIteration1, szIteration2)
+  return self.tbSortIterationSet[szIteration1] > self.tbSortIterationSet[szIteration2]
+end
+
+function ShenBingPu:GetActivateCost(szCurIteration)
+  local tbCostInfo = ShenBingPuCFG.ACTIVATE_COST[szCurIteration]
+  if tbCostInfo then
+    return tbCostInfo[1], tbCostInfo[2]
+  end
+end
+
+function ShenBingPu:IsUseEquip(pPlayer, pEquip)
+  local nSlot = Item:GetExtEquipSlot(pEquip)
+  local pUseEquip = Item.ExtEquip:GetEquipObj(pPlayer, nSlot)
+  if not pUseEquip or pUseEquip.dwId ~= pEquip.dwId then
+    return false
+  else
+    return true
+  end
+end
+
+function ShenBingPu:DoMultiApplyMagicAttr(pPlayer, tbAttrInfo)
+  for _, tbMA in pairs(tbAttrInfo) do
+    pPlayer.ApplyMagicAttrib(tbMA.szAttrType, tbMA.nAttrValue1, tbMA.nAttrValue2, tbMA.nAttrValue3)
+    AttributeHelp:LogAttrApply(pPlayer.dwID, "ShenBingPu", tbMA.szAttrType, tbMA.nAttrValue1, tbMA.nAttrValue2, tbMA.nAttrValue3)
+  end
+end
+
+function ShenBingPu:DoMultiRemoveMagicAttr(pPlayer, tbAttrInfo)
+  for _, tbMA in pairs(tbAttrInfo) do
+    pPlayer.RemoveMagicAttrib(tbMA.szAttrType, tbMA.nAttrValue1, tbMA.nAttrValue2, tbMA.nAttrValue3)
+    AttributeHelp:LogAttrRemove(pPlayer.dwID, "ShenBingPu", tbMA.szAttrType, tbMA.nAttrValue1, tbMA.nAttrValue2, tbMA.nAttrValue3)
+  end
+end
+
+function ShenBingPu:GetWeaponAttrDiff(tbAttrInfo1, tbAttrInfo2, bAllowStrVal)
+  if Lib:IsEmptyStr(tbAttrInfo1.szAttrType) and tbAttrInfo1.nAttrId > 0 then
+    tbAttrInfo1.szAttrType = self:GetAttrTypeStrByAttrId(tbAttrInfo1.nAttrId)
+  end
+  if tbAttrInfo2 and Lib:IsEmptyStr(tbAttrInfo2.szAttrType) and tbAttrInfo1.nAttrId > 0 then
+    tbAttrInfo2.szAttrType = self:GetAttrTypeStrByAttrId(tbAttrInfo2.nAttrId)
+  end
+  if tbAttrInfo2 and tbAttrInfo1.szAttrType ~= tbAttrInfo2.szAttrType then
+    return
+  end
+  local szAttr1Desc, szAttr1Value = FightSkill:GetMagicDescSplit(tbAttrInfo1.szAttrType, {
+    tbAttrInfo1.nAttrValue1,
+    tbAttrInfo1.nAttrValue2,
+    tbAttrInfo1.nAttrValue3
+  })
+  if tbAttrInfo2 then
+    local _, szAttr2Value = FightSkill:GetMagicDescSplit(tbAttrInfo2.szAttrType, {
+      tbAttrInfo2.nAttrValue1,
+      tbAttrInfo2.nAttrValue2,
+      tbAttrInfo2.nAttrValue3
+    })
+    if bAllowStrVal then
+      return szAttr1Desc, tonumber(szAttr1Value) or szAttr1Value, tonumber(szAttr2Value) or szAttr2Value
+    else
+      return szAttr1Desc, tonumber(szAttr1Value), tonumber(szAttr2Value)
+    end
+  end
+  if bAllowStrVal then
+    return szAttr1Desc, tonumber(szAttr1Value) or szAttr1Value, nil
+  else
+    return szAttr1Desc, tonumber(szAttr1Value), nil
+  end
+end
+
+function ShenBingPu:GetWeaponAttrDiffByBatch(tbAttrInfoList1, tbAttrInfoList2)
+  local tbAttrDiff = {}
+  if tbAttrInfoList2 and #tbAttrInfoList1 ~= #tbAttrInfoList2 then
+    return
+  end
+  for i = 1, #tbAttrInfoList1 do
+    local szAttrDesc, nAttr1Value, nAttr2Value = self:GetWeaponAttrDiff(tbAttrInfoList1[i], tbAttrInfoList2 and tbAttrInfoList2[i] or nil)
+    if szAttrDesc and nAttr1Value then
+      table.insert(tbAttrDiff, {
+        szAttrDesc = szAttrDesc,
+        nAttr1Value = nAttr1Value,
+        nAttr2Value = nAttr2Value
+      })
+    end
+  end
+  return tbAttrDiff
+end
+
+function ShenBingPu:GetFixedAttrMaxVal(pPlayer, pWeapon, nHoleIndex)
+  if not self:CheckIsShenBingPu(pWeapon) then
+    return
+  end
+  local tbFixedAttrInfo = self:GetAttrInfoByHoleIndex(pPlayer, pWeapon, nHoleIndex, 1)
+  if not tbFixedAttrInfo then
+    return
+  end
+  local nCurMaxEnhanceLevel = self:GetCurMaxEnhanceLevel()
+  local nSlot = Item:GetExtEquipSlot(pWeapon)
+  local tbEnhanceValCfg = ShenBingPuCFG.ENHANCE_ATTR_VAL[nSlot]
+  local tbMaxEnhanceVal = tbEnhanceValCfg[nCurMaxEnhanceLevel][nHoleIndex - self.FIXED_ATTR_MIN + 1]
+  tbFixedAttrInfo.nAttrValue1 = tbMaxEnhanceVal[1]
+  tbFixedAttrInfo.nAttrValue2 = tbMaxEnhanceVal[2]
+  tbFixedAttrInfo.nAttrValue3 = tbMaxEnhanceVal[3]
+  return tbFixedAttrInfo
+end
+
+function ShenBingPu:CheckCanCompose(pEquip1, pEquip2)
+  local tbEquipComposeCfg = self.tbEquipComposeCfg[pEquip1.dwTemplateId] and self.tbEquipComposeCfg[pEquip1.dwTemplateId][pEquip2.dwTemplateId] or nil
+  if not tbEquipComposeCfg then
+    return false, i18n.EasyGet("\230\151\160\230\179\149\229\144\136\230\136\144\239\188\140\232\175\183\233\128\137\230\139\169\231\155\184\229\144\140\231\154\147\230\156\136\229\128\188\231\154\132\231\165\158\229\133\181\230\157\144\230\150\153")
+  end
+  if self:CheckIsShenBingPu(pEquip1) then
+    local szIteration = self:GetIteration(pEquip1)
+    local szOpenTimeFrame = ShenBingPuCFG.ComposeOpenTimeFrame[szIteration]
+    return 1 == GetTimeFrameState(szOpenTimeFrame), i18n.EasyGet("\229\144\136\230\136\144\232\191\152\230\156\170\229\188\128\230\148\190")
+  elseif pEquip1.szClass == "ShenBingPuSeed" then
+    local szIteration = self:GetIterationForSeed(pEquip1)
+    local szOpenTimeFrame = ShenBingPuCFG.ComposeOpenTimeFrame[szIteration]
+    return 1 == GetTimeFrameState(szOpenTimeFrame), i18n.EasyGet("\229\144\136\230\136\144\232\191\152\230\156\170\229\188\128\230\148\190")
+  end
+  return false
+end
+
+function ShenBingPu:CalcComposeResult(nEquipTemplateId1, nEquipTemplateId2)
+  local nRandomNum = MathRandom(self.COMPOSE_MAX_WEIGHT)
+  local nSumWeight = 0
+  local tbEquipComposeCfg = self.tbEquipComposeCfg[nEquipTemplateId1] and self.tbEquipComposeCfg[nEquipTemplateId1][nEquipTemplateId2] or nil
+  if not tbEquipComposeCfg then
+    LogErr("ShenBingPu: CalcComposeResult failed, unexist compose cfg, nEquipTemplateId1 = ", nEquipTemplateId1, ", nEquipTemplateId2 = ", nEquipTemplateId2)
+    return
+  end
+  for i = 1, self.COMPOSE_MAX_RESULT_NUM do
+    nSumWeight = nSumWeight + tbEquipComposeCfg["nProbability" .. i]
+    if nRandomNum <= nSumWeight then
+      return tbEquipComposeCfg["nComposeTemplateId" .. i]
+    end
+  end
+  return 0
+end
+
+function ShenBingPu:GetComposeSuccessResultStrict(nEquipId1, nEquipId2)
+  local pEquip1 = me.GetItemInBag(nEquipId1)
+  local pEquip2 = me.GetItemInBag(nEquipId2)
+  if not pEquip1 or not pEquip2 then
+    return 0, 0, 0
+  end
+  if not self:CheckCanCompose(pEquip1, pEquip2) then
+    return 0, 0, 0
+  end
+  local tbEquipComposeCfg = self.tbEquipComposeCfg[pEquip1.dwTemplateId] and self.tbEquipComposeCfg[pEquip1.dwTemplateId][pEquip2.dwTemplateId] or nil
+  if not tbEquipComposeCfg then
+    return 0, 0, 0
+  end
+  return tbEquipComposeCfg.nProbability1 or 0, tbEquipComposeCfg.nComposeTemplateId1 or 0, tbEquipComposeCfg.nRefundCoinNum or 0
+end
+
+function ShenBingPu:GetComposeSuccessResultRelex(nEquipId)
+  local pEquip = me.GetItemInBag(nEquipId)
+  if not pEquip then
+    return 0, 0, 0
+  end
+  local szOpenTimeFrame = ""
+  if self:CheckIsShenBingPu(pEquip) then
+    local szIteration = self:GetIteration(pEquip)
+    szOpenTimeFrame = ShenBingPuCFG.ComposeOpenTimeFrame[szIteration]
+  elseif pEquip.szClass == "ShenBingPuSeed" then
+    local szIteration = self:GetIterationForSeed(pEquip)
+    szOpenTimeFrame = ShenBingPuCFG.ComposeOpenTimeFrame[szIteration]
+  end
+  if Lib:IsEmptyStr(szOpenTimeFrame) or 1 ~= GetTimeFrameState(szOpenTimeFrame) then
+    return 0, 0, 0
+  end
+  if self.tbEquipComposeCfg[pEquip.dwTemplateId] then
+    local _, v = next(self.tbEquipComposeCfg[pEquip.dwTemplateId])
+    if v then
+      return v.nProbability1, v.nComposeTemplateId1, v.nRefundCoinNum
+    end
+  end
+  return 0, 0, 0
+end
+
+function ShenBingPu:onApplyEquip(pPlayer, pEquip)
+  if not pPlayer or not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  local tbAllAttr = self:GetAllMagicAttr(pPlayer, pEquip) or {}
+  self:DoMultiApplyMagicAttr(pPlayer, tbAllAttr)
+  self:UpdateAllStarLevelAsync(pPlayer)
+end
+
+function ShenBingPu:onRemoveEquip(pPlayer, pEquip)
+  if not pPlayer or not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  local tbAllAttr = self:GetAllMagicAttr(pPlayer, pEquip) or {}
+  self:DoMultiRemoveMagicAttr(pPlayer, tbAllAttr)
+  self:UpdateAllStarLevelAsync(pPlayer)
+end
+
+Item:RegisterExtEquipModule({
+  Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1,
+  Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON2,
+  Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON3
+}, "ShenBingPu", ShenBingPu)
+
+function ShenBingPu:OnEquip(pPlayer)
+  local tbAllSuitAttr = self:GetPlayerAllSuitAttr(pPlayer)
+  if tbAllSuitAttr then
+    for _, tbAttrInfo in pairs(tbAllSuitAttr) do
+      pPlayer.ApplyMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+      AttributeHelp:LogAttrApply(pPlayer.dwID, "ShenBingPu", tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+    end
+  end
+end
+
+function ShenBingPu:OnUnEquip(pPlayer)
+  local tbAllSuitAttr = self:GetPlayerAllSuitAttr(pPlayer)
+  if tbAllSuitAttr then
+    for _, tbAttrInfo in pairs(tbAllSuitAttr) do
+      pPlayer.RemoveMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+      AttributeHelp:LogAttrRemove(pPlayer.dwID, "ShenBingPu", tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+    end
+  end
+end
+
+function ShenBingPu:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  local tbAllSuitAttr = self:GetPlayerAllSuitAttrAsync(pPlayerAsync)
+  if tbAllSuitAttr then
+    for _, tbAttrInfo in pairs(tbAllSuitAttr) do
+      pNpc.ApplyMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+    end
+  end
+end
+
+function ShenBingPu:onApplyRobotNpcEquip(pPlayerAsync, pNpc, pEquip)
+  if not self:CheckIsShenBingPu(pEquip) then
+    return
+  end
+  local tbAllAttr = self:GetAllMagicAttrAsync(pPlayerAsync, pEquip)
+  for _, tbAttrInfo in pairs(tbAllAttr or {}) do
+    pNpc.ApplyMagicAttrib(tbAttrInfo.szAttrType, tbAttrInfo.nAttrValue1, tbAttrInfo.nAttrValue2, tbAttrInfo.nAttrValue3)
+  end
+end
+
+AttributeModule:Register("ShenBingPu", ShenBingPu)
+
+function ShenBingPu:GetWeaponFightPowerForSeed(pPlayer, pSeed)
+  local tbAllRandAttrInfo = self:GetAllRandAttrForSeed(pPlayer, pSeed)
+  local tbAllFixedAttrInfo = self:GetAllFixedAttrForSeed(pPlayer, pSeed)
+  local nItemTemplate = KItem.GetItemExtParam(pSeed.dwTemplateId, Item:GetClass("ShenBingPuSeed").EXTPARAM_IDENTTEMPLATE)
+  local tbInfo = KItem.GetItemBaseProp(nItemTemplate)
+  local nSumFightPower = pSeed.nFightPower
+  nSumFightPower = nSumFightPower + ShenBingPuCFG.ENHANCE_ATTR_VAL[tbInfo.nDetailType][0][5]
+  if tbAllFixedAttrInfo then
+    for _, tbAttr in pairs(tbAllFixedAttrInfo) do
+      nSumFightPower = nSumFightPower + tbAttr.nFightPower
+    end
+  end
+  local nRandAttrNum = #tbAllRandAttrInfo
+  local nStarLevel = self:GetStarLevelForSeed(pSeed)
+  nSumFightPower = nSumFightPower + self.tbRandAttrNumCfg[nStarLevel][pSeed.nQuality][nRandAttrNum + 1].nFightPower
+  return nSumFightPower
+end
+
+function ShenBingPu:GetWeaponFightPower(pPlayer, pWeapon)
+  local tbAllRandAttrInfo = self:GetAllRandAttr(pPlayer, pWeapon)
+  local tbAllFixedAttrInfo = self:GetAllFixedAttr(pPlayer, pWeapon)
+  local nSlot = Item:GetExtEquipSlot(pWeapon)
+  local nSumFightPower = pWeapon.nFightPower
+  nSumFightPower = nSumFightPower + ShenBingPuCFG.ENHANCE_ATTR_VAL[nSlot][0][5]
+  if tbAllFixedAttrInfo then
+    for _, tbAttr in pairs(tbAllFixedAttrInfo) do
+      nSumFightPower = nSumFightPower + tbAttr.nFightPower
+    end
+  end
+  local nRandAttrNum = #tbAllRandAttrInfo
+  local nStarLevel = self:GetStarLevel(pWeapon)
+  nSumFightPower = nSumFightPower + self.tbRandAttrNumCfg[nStarLevel][pWeapon.nQuality][nRandAttrNum + 1].nFightPower
+  return nSumFightPower
+end
+
+function ShenBingPu:CalcFightPower(pPlayer)
+  local nTotalPower = 0
+  for nEquipPos = Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1, Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON3 do
+    local pEquip = Item.ExtEquip:GetEquipObj(pPlayer, nEquipPos)
+    if pEquip then
+      nTotalPower = nTotalPower + self:GetWeaponFightPower(pPlayer, pEquip)
+    end
+  end
+  return nTotalPower
+end
+
+function ShenBingPu:GetWeaponFightPowerAsync(pPlayerAsync, pWeapon)
+  if not self:CheckIsShenBingPu(pWeapon) then
+    return 0
+  end
+  local tbAllRandAttrInfo = self:GetAllRandAttrAsync(pPlayerAsync, pWeapon)
+  local tbAllFixedAttrInfo = self:GetAllFixedAttrAsync(pPlayerAsync, pWeapon)
+  local nSlot = Item:GetExtEquipSlot(pWeapon)
+  local nSumFightPower = pWeapon.nFightPower
+  nSumFightPower = nSumFightPower + ShenBingPuCFG.ENHANCE_ATTR_VAL[nSlot][0][5]
+  if tbAllFixedAttrInfo then
+    for _, tbAttr in pairs(tbAllFixedAttrInfo) do
+      nSumFightPower = nSumFightPower + tbAttr.nFightPower
+    end
+  end
+  local nRandAttrNum = #tbAllRandAttrInfo
+  local nStarLevel = self:GetStarLevel(pWeapon)
+  nSumFightPower = nSumFightPower + self.tbRandAttrNumCfg[nStarLevel][pWeapon.nQuality][nRandAttrNum + 1].nFightPower
+  return nSumFightPower
+end
+
+function ShenBingPu:CalcFightPowerAsync(pPlayerAsync, tbUsingWeapon)
+  local nTotalPower = 0
+  for _, pUsingWeapon in pairs(tbUsingWeapon) do
+    if pUsingWeapon then
+      nTotalPower = nTotalPower + self:GetWeaponFightPowerAsync(pPlayerAsync, pUsingWeapon)
+    end
+  end
+  return nTotalPower
+end
+
+function ShenBingPu:UpdateFightPower(tbTypes, dwPlayerId)
+  local pPlayer = KPlayer.GetPlayerObjById(dwPlayerId)
+  if not pPlayer then
+    return
+  end
+  FightPower:ChangePower(tbTypes, pPlayer)
+end
+
+function ShenBingPu:onFightPowerUpdateEvent(tbTypes)
+  Event:RegisterEvent(Event.emEVENT_SHENBINGPU_ENHANCE, ShenBingPu, "UpdateFightPower", tbTypes)
+  Event:RegisterEvent(Event.emEVENT_SHENBINGPU_ACTIVATE, ShenBingPu, "UpdateFightPower", tbTypes)
+end
+
+function ShenBingPu:OnEventFightPowerChange(dwID, szType, nFightPower)
+  Event:OnEvent(Event.emEVENT_SHENBINGPU_FIGHTPOWER_CHANGE, dwID, nFightPower)
+end
+
+FightPower:RegisterFPSystemModule({"ShenBingPu"}, ShenBingPu)

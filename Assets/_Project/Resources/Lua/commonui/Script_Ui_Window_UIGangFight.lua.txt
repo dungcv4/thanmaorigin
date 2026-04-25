@@ -1,0 +1,127 @@
+local tbWnd = Ui:CreateWindow("UIGangFight")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_FIRSTTONG_SYNC_FINAL,
+      self.UpdatePanel,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_FIRSTTONG_SYNC_CONTRACT,
+      self.UpdatePanel,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  LeftTemplate = "node/imgBG/Content/Left/Scroll View/Viewport/Content/Template0",
+  txtRank = "node/imgBG/Content/Left/MineRank/txtRank",
+  btnList = "node/imgBG/Content/Right/btnList",
+  RightTemplate = "node/imgBG/Content/Right/Scroll View/Viewport/Content/Template",
+  txtTime = "node/imgBG/Content/Right/txtTime",
+  txtInfo = "node/imgBG/Content/Right/txtInfo"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+  end,
+  btnList = function(self)
+    Ui:OpenWindow("UIGangListTip")
+  end
+}
+tbWnd.LEFT_MAX_NUM = 3
+
+function tbWnd:OnCreate()
+  self.tbRankView = Ui:NewScrollView(self, tbControls.RightTemplate)
+end
+
+function tbWnd:OnOpen()
+  self:UpdatePanel()
+  self.pPanel:SetActive(tbControls.btnHelp, false)
+  FirstTong:RequestFinalStageMatch()
+  FirstTong:RequestSyncContract()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnList, {
+    RedPointMgr.EVENT.FirstTongContract
+  })
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:UpdatePanel()
+  self.tbTongRankList = {}
+  if FirstTong.tbFinalMatchData and FirstTong.tbFinalMatchData[FirstTong.FINAL_PAHSE.PAHSE64] then
+    self.tbTongRankList = FirstTong.tbFinalMatchData[FirstTong.FINAL_PAHSE.PAHSE64]
+  end
+  self:UpdateLeft()
+  self:UpdateRight()
+end
+
+function tbWnd:UpdateLeft()
+  for i = 1, self.LEFT_MAX_NUM do
+    if self.tbTongRankList[i] then
+      self.pPanel:Label_SetText(tbControls.LeftTemplate .. i .. "/txtName", self.tbTongRankList[i].szTongName)
+    else
+      self.pPanel:Label_SetText(tbControls.LeftTemplate .. i .. "/txtName", i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+    end
+  end
+  for nRank, tbData in ipairs(self.tbTongRankList) do
+    if tbData.nTongId == me.dwTongId then
+      self.pPanel:Label_SetText(tbControls.txtRank, nRank)
+      break
+    end
+  end
+end
+
+function tbWnd:UpdateRight()
+  local nContractTongId, szContractTongName
+  for _, tbTong in ipairs(FirstTong.tbContractList or {}) do
+    if tbTong[1] == me.dwTongId then
+      nContractTongId = tbTong[2]
+    elseif tbTong[2] == me.dwTongId then
+      nContractTongId = tbTong[1]
+    end
+  end
+  self.tbRankView:Clear()
+  for nRank, tbData in ipairs(self.tbTongRankList) do
+    if tbData.nTongId ~= me.dwTongId then
+      self.tbRankView:SetElement(nRank, function(tbElement)
+        tbElement.pPanel:Label_SetText("txtName", tbData.szTongName or "")
+        tbElement.pPanel:Label_SetText("txtDistinguish", tbData.szServerName or "")
+        tbElement.pPanel:Label_SetText("txtRank", nRank or "")
+        Ui:Button_BindEvent(tbElement.pPanel, "btnFight", function()
+          FirstTong:RequestInviteContract(tbData.nTongId)
+        end)
+      end)
+    end
+    if tbData.nTongId == nContractTongId then
+      szContractTongName = tbData.szTongName
+    end
+  end
+  if szContractTongName then
+    self.pPanel:Label_SetText(tbControls.txtInfo, i18n.EasyGet("\231\186\166\230\136\152\229\184\174\228\188\154\239\188\154{0}", szContractTongName))
+  else
+    self.pPanel:Label_SetText(tbControls.txtInfo, i18n.EasyGet("\231\186\166\230\136\152\229\184\174\228\188\154\239\188\154{0}", i18n.EasyGet("\230\151\160")))
+  end
+  local nShowTime
+  local nNowTime = GetTime()
+  for nDate, nTime in pairs(FirstTong.ContractDateCfg) do
+    local nMatchTime = Lib:GetConfigDate2Time(nDate * 10000 + nTime)
+    if (not nShowTime or nShowTime > nMatchTime) and nNowTime < nMatchTime then
+      nShowTime = nMatchTime
+    end
+  end
+  if 0 ~= nShowTime then
+    self.pPanel:SetActive(tbControls.txtTime, true)
+    self.pPanel:Label_SetText(tbControls.txtTime, i18n.EasyGet("\230\151\182\233\151\180\239\188\154{0}", Lib:GetTimeStr2(nShowTime)))
+  else
+    self.pPanel:SetActive(tbControls.txtTime, false)
+  end
+end

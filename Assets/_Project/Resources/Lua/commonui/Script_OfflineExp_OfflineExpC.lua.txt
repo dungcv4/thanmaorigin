@@ -1,0 +1,171 @@
+OfflineExp.nCurMaxLevel = 1000
+OfflineExp.nHookReadyCount = OfflineExp.nHookReadyCount or 0
+OfflineExp.bClickUI = OfflineExp.bClickUI or false
+
+function OfflineExp:SetHookReadyNum(nHookReadyNum)
+  self.nHookReadyNum = nHookReadyNum
+end
+
+function OfflineExp.szOnlineHookContent()
+  local nColorId = Ui.tbColor:GetColorHexBySettingId(502)
+  return i18n.EasyGet("\228\189\160\229\188\128\229\144\175\228\186\134\229\156\168\231\186\191\230\137\152\231\174\161<color=#{0}>\239\188\136\231\156\129\231\148\181\230\168\161\229\188\143\239\188\137</color>\239\188\140\229\143\175\228\187\165\231\180\175\231\167\175\230\137\152\231\174\161\230\151\182\233\151\180\239\188\140\230\137\152\231\174\161\231\138\182\230\128\129\228\184\139\239\188\140\228\184\141\232\131\189\231\167\187\229\138\168\239\188\140\229\143\175\228\187\165\230\159\165\231\156\139\231\149\140\233\157\162\229\146\140\232\129\138\229\164\169\227\128\130(\229\136\135\230\141\162\229\156\176\229\155\190\229\146\140\229\143\130\229\138\160\230\180\187\229\138\168\239\188\140\228\188\154\232\135\170\229\138\168\231\187\147\230\157\159\230\137\152\231\174\161)", nColorId)
+end
+
+function OfflineExp:OnGetExpFinish(nAddExp, nUseExpTime, nGetType)
+  if nAddExp > 0 then
+    local szMsg = i18n.EasyGet("\230\130\168\232\142\183\229\190\151\228\186\134\231\187\143\233\170\140\195\151{0}\239\188\136{1}\239\188\137", nAddExp, OfflineExp.Name[nGetType]())
+    me.CenterMsg(szMsg)
+    Ui:ShowHint(szMsg)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_OFFLINE_EXP_FINISH)
+end
+
+function OfflineExp:RefreshClientMaxLevel()
+  self.nCurMaxLevel = Calendar:GetWorldLevel()
+end
+
+function OfflineExp:GetClientMaxLevel()
+  self:RefreshClientMaxLevel()
+  return self.nCurMaxLevel
+end
+
+function OfflineExp:RefreshOfflineExp()
+  if self:IsOfflineExp() then
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_HOOK_ONLINE_STOP, function(self)
+      EventNotify:UnRegistNotify(EventNotify.emNOTIFY_HOOK_ONLINE_STOP, OfflineExp)
+      self:HookStart()
+    end, OfflineExp)
+    self:HookStop()
+  end
+end
+
+function OfflineExp:GetOfflineExpTime(pPlayer)
+  if pPlayer.nLastLoginTime then
+    local bIsCross = self:IsCrossDay(pPlayer, GetTime(), pPlayer.nLastLoginTime)
+    if bIsCross then
+      return self.OfflineExpTimePerDay
+    end
+  end
+  return self:OfflineExpTime(pPlayer)
+end
+
+function OfflineExp:OnLogin(bIsReconnect)
+  if not bIsReconnect then
+    self:CreateReadyTimer()
+  end
+end
+
+function OfflineExp:CreateReadyTimer()
+  if self.nHookReadyTimer then
+    Timer:Close(self.nHookReadyTimer)
+  end
+  self.nHookReadyCount = 0
+  self.nHookReadyTimer = Timer:Register(Env.GAME_FPS * 5, function()
+    self.nHookReadyCount = self.nHookReadyCount + 5
+    if self.nHookReadyCount > self.nHookReadyNum then
+      OfflineExp:HookStart()
+    end
+    return true
+  end)
+end
+
+function OfflineExp:RemoveReadyTimer()
+  if self.nHookReadyTimer then
+    Timer:Close(self.nHookReadyTimer)
+    self.nHookReadyTimer = nil
+  end
+  self.nHookReadyCount = 0
+end
+
+function OfflineExp:OnOpenWindow()
+end
+
+function OfflineExp:HookStart(bNotice)
+  if self:IsOfflineExp() then
+    return
+  end
+  local bOpen, szMsg = self:CheckIsOpen(me, true)
+  if not bOpen then
+    if bNotice then
+      me.CenterMsg(szMsg)
+    end
+    return
+  end
+  RemoteServer.OfflineExpRequest("OnlineHookStart")
+end
+
+function OfflineExp:OnDisConnect()
+  if self:IsOfflineExp() then
+    me.bOfflineExpOnline = nil
+  end
+end
+
+function OfflineExp:SCOfflineExpStart()
+  local nOfflineExpTime = self:GetOfflineExpTime(me)
+  local szTips = i18n.EasyGet("\230\137\152\231\174\161\229\188\128\229\167\139\239\188\140\231\155\174\229\137\141\229\137\169\228\189\153\229\143\175\230\137\152\231\174\161\230\151\182\233\151\180: {0}", Lib:TimeDesc8(nOfflineExpTime))
+  me.bOfflineExpOnline = true
+  self:RemoveReadyTimer()
+  ChatMgr:OnChannelMessage(ChatMgr.ChannelType.System, 0, ChatMgr.SystemMsgType.System, "", 0, 0, 0, szTips)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_HOOK_ONLINE_START)
+end
+
+function OfflineExp:HookStop()
+  self.nHookReadyCount = 0
+  if not self:IsOfflineExp() then
+    return
+  end
+  RemoteServer.OfflineExpRequest("OnlineHookStop")
+end
+
+function OfflineExp:SCOfflineExpStop()
+  me.bOfflineExpOnline = nil
+  self.nHookReadyCount = 0
+  EventNotify.OnNotify(EventNotify.emNOTIFY_HOOK_ONLINE_STOP)
+  self:CreateReadyTimer()
+  self:OnCheckRedPoint()
+end
+
+function OfflineExp:OfflineExpFailed()
+end
+
+function OfflineExp:IsOfflineExp()
+  return me.bOfflineExpOnline
+end
+
+function OfflineExp:OnExpChange()
+  self:HookStop()
+end
+
+function OfflineExp:OnFightStatusChange()
+  if me.nFightMode == Npc.FIGHT_MODE.emFightMode_Fight then
+    self:HookStop()
+  end
+end
+
+function OfflineExp:OnMapEnter(nTemplateID)
+  if not Map:CanOnHook(nTemplateID) then
+    self:HookStop()
+  end
+end
+
+function OfflineExp:OnCheckRedPoint()
+  if self.bClickUI then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.OfflineExp)
+    return
+  end
+  local nExpTime = OfflineExp:ExpTime(me)
+  if nExpTime > 21600 then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.OfflineExp)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.OfflineExp)
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, OfflineExp)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, OfflineExp.OnCheckRedPoint, OfflineExp)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_EXP, OfflineExp)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_EXP, OfflineExp.OnExpChange, OfflineExp)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_FIGHT_STATE, OfflineExp)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_FIGHT_STATE, OfflineExp.OnFightStatusChange, OfflineExp)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_ENTER, OfflineExp)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_ENTER, OfflineExp.OnMapEnter, OfflineExp)

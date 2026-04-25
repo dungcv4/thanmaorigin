@@ -1,0 +1,257 @@
+Partner.tbPartnerGroup = Partner.tbPartnerGroup or {}
+local tbPartnerGroup = Partner.tbPartnerGroup
+
+function Partner:InitPartnerGroup(pPlayer, nMaxPartnerNum, bNotPlayerDeathEvent)
+  self:ClosePartnerGroup(pPlayer)
+  pPlayer.tbPartnerGroup = Lib:NewClass(self.tbPartnerGroup)
+  pPlayer.tbPartnerGroup:Init(pPlayer, nMaxPartnerNum, bNotPlayerDeathEvent)
+end
+
+function Partner:InitPartnerGroupByPosInfo(pPlayer, tbCreateInfo, bNotPlayerDeathEvent)
+  self:ClosePartnerGroup(pPlayer)
+  pPlayer.tbPartnerGroup = Lib:NewClass(self.tbPartnerGroup)
+  pPlayer.tbPartnerGroup:InitByCreateInfo(pPlayer, tbCreateInfo, bNotPlayerDeathEvent)
+end
+
+function Partner:ClosePartnerGroup(pPlayer)
+  if not pPlayer.tbPartnerGroup then
+    return
+  end
+  pPlayer.tbPartnerGroup:Close()
+  pPlayer.tbPartnerGroup = nil
+end
+
+function Partner:TraversePartnerGroup(pPlayer, func)
+  if not pPlayer.tbPartnerGroup then
+    return
+  end
+  for nPos, nNpcId in pairs(pPlayer.tbPartnerGroup.tbPartnerInfo) do
+    local pNpc = KNpc.GetById(nNpcId)
+    if pNpc then
+      func(pNpc)
+    end
+  end
+end
+
+function tbPartnerGroup:Init(pPlayer, nMaxPartnerNum, bNotPlayerDeathEvent)
+  self.nPlayerId = pPlayer.dwID
+  self.nMaxPartnerNum = nMaxPartnerNum
+  self.tbPartnerInfo = {}
+  self.tbPartnerList = {}
+  self.nPartnerDeathId = PlayerEvent:Register(pPlayer, "OnPartnerDeath", self.OnPartnerDeath, self)
+  if not bNotPlayerDeathEvent then
+    self.nPlayerDeathId = PlayerEvent:Register(pPlayer, "OnDeath", self.OnPlayerDeath, self)
+  end
+  self:AddPartnerNpc()
+end
+
+function tbPartnerGroup:InitByCreateInfo(pPlayer, tbCreateInfo, bNotPlayerDeathEvent)
+  self.nPlayerId = pPlayer.dwID
+  self.tbCreateInfo = tbCreateInfo
+  self.tbPartnerInfo = {}
+  self.nPartnerDeathId = PlayerEvent:Register(pPlayer, "OnPartnerDeath", self.OnPartnerDeath, self)
+  if not bNotPlayerDeathEvent then
+    self.nPlayerDeathId = PlayerEvent:Register(pPlayer, "OnDeath", self.OnPlayerDeath, self)
+  end
+  self:AddPartnerNpcByCreateInfo()
+end
+
+function tbPartnerGroup:Close()
+  local pPlayer = self:GetPlayer()
+  if pPlayer and self.nPartnerDeathId then
+    PlayerEvent:UnRegister(pPlayer, "OnPartnerDeath", self.nPartnerDeathId)
+    self.nPartnerDeathId = nil
+  end
+  if pPlayer and self.nPlayerDeathId then
+    PlayerEvent:UnRegister(pPlayer, "OnDeath", self.nPlayerDeathId)
+    self.nPlayerDeathId = nil
+  end
+  self:RemovePartnerNpc()
+end
+
+function tbPartnerGroup:GetPlayer()
+  return KPlayer.GetPlayerObjById(self.nPlayerId)
+end
+
+function tbPartnerGroup:AddPartnerNpc()
+  local pPlayer = self:GetPlayer()
+  if not pPlayer then
+    return
+  end
+  self:RemovePartnerNpc()
+  local _, nMapX, nMapY = pPlayer.GetWorldPos()
+  local nDir = pPlayer.GetNpc().GetDir()
+  local tbPosInfo = pPlayer.GetPartnerPosInfo()
+  local tbPartnerDirInfo, tbPartnerLenInfo = Partner:GetPartnerDirAndLenInfo(false, pPlayer, 0)
+  local nPartnerNum = 0
+  for nPos, nPartnerId in pairs(tbPosInfo) do
+    if nPartnerId > 0 and nPartnerNum < self.nMaxPartnerNum then
+      local nNewMapX, nNewMapY = nMapX, nMapY
+      if tbPartnerDirInfo[nPartnerId] and tbPartnerLenInfo[nPartnerId] then
+        nNewMapX, nNewMapY = KMath:GetPosByLenDir(nMapX, nMapY, tbPartnerLenInfo[nPartnerId], nDir + tbPartnerDirInfo[nPartnerId])
+      end
+      local pNpc = pPlayer.CreatePartnerByPos(nPos, nNewMapX, nNewMapY)
+      if pNpc then
+        table.insert(self.tbPartnerList, pNpc.nId)
+        self.tbPartnerInfo[nPos] = pNpc.nId
+        pNpc.nFightMode = Npc.FIGHT_MODE.emFightMode_Fight
+      end
+      nPartnerNum = nPartnerNum + 1
+    end
+  end
+end
+
+function tbPartnerGroup:AddPartnerNpcByCreateInfo()
+  local pPlayer = self:GetPlayer()
+  if not pPlayer then
+    return
+  end
+  self:RemovePartnerNpc()
+  local tbPosInfo = pPlayer.GetPartnerPosInfo()
+  for _, tbInfo in ipairs(self.tbCreateInfo) do
+    for nPos, nPartnerId in pairs(tbPosInfo) do
+      if nPartnerId == tbInfo.nPartnerId then
+        local pNpc = pPlayer.CreatePartnerByPos(nPos, tbInfo.nMapX, tbInfo.nMapY)
+        if pNpc then
+          self.tbPartnerInfo[nPos] = pNpc.nId
+          pNpc.nFightMode = Npc.FIGHT_MODE.emFightMode_Fight
+        end
+        break
+      end
+    end
+  end
+end
+
+function tbPartnerGroup:RemovePartnerNpc()
+  for nPos, nNpcId in pairs(self.tbPartnerInfo) do
+    local pNpc = KNpc.GetById(nNpcId)
+    if pNpc then
+      Npc:UnRegNpcOnDeath(pNpc)
+      pNpc.Delete()
+    end
+  end
+  self.tbPartnerInfo = {}
+end
+
+function tbPartnerGroup:OnPartnerDeath(nPartnerId)
+  local pPlayer = self:GetPlayer()
+  if not pPlayer then
+    return
+  end
+  local tbPosInfo = pPlayer.GetPartnerPosInfo()
+  local nPos
+  for nOtherPos, nOtherPartnerId in pairs(tbPosInfo) do
+    if nPartnerId == nOtherPartnerId then
+      nPos = nOtherPos
+      break
+    end
+  end
+  if not nPos or not self.tbPartnerInfo[nPos] then
+    return
+  end
+  self.tbPartnerInfo[nPos] = nil
+end
+
+function tbPartnerGroup:OnPlayerDeath()
+  local pPlayer = self:GetPlayer()
+  if not pPlayer then
+    return
+  end
+  if pPlayer.dwID ~= me.dwID then
+    return
+  end
+  self:RemovePartnerNpc()
+end
+
+Partner.MirrorPlayerPartnerSystemKey = {Arena = 1, TongChallenge = 2}
+
+function Partner:InitMirrorPlayerPartnerGroup(nPlayerId, nMaxPartnerNum, nMapId, tbPartnerPosTable, nFightMode, nModelDirection, nSystemKey, nPosX, nPosY, nDir)
+  if nil == nSystemKey then
+    return
+  end
+  self.nMirrorPlayerPartnerId = 0
+  if nil == self.tbMirrorPlayerPartnerTable then
+    self.tbMirrorPlayerPartnerTable = {}
+  end
+  if nil == self.tbMirrorPlayerPartnerTable[nPlayerId] then
+    self.tbMirrorPlayerPartnerTable[nPlayerId] = {}
+  end
+  if nil ~= self.tbMirrorPlayerPartnerTable[nPlayerId][nSystemKey] then
+    self:ClearMirrorPlayerPartnerGroup(nPlayerId, nSystemKey)
+  end
+  self.tbMirrorPlayerPartnerTable[nPlayerId][nSystemKey] = {}
+  local tbStayInfo = KPlayer.GetRoleStayInfo(nPlayerId, true)
+  local tbPartInfo = tbStayInfo.tbPartInfo
+  local nCount = 1
+  if nil == nMaxPartnerNum then
+    nMaxPartnerNum = Partner.nMaxMirrorPlayerPartnerNum
+  end
+  local tbPartnerDirInfo, tbPartnerLenInfo = Partner:GetPartnerDirAndLenInfo(true, nil, nPlayerId)
+  for nPos, partInfoData in pairs(tbPartInfo) do
+    if nil ~= partInfoData.dwPartnerId and partInfoData.dwPartnerId > 0 then
+      if nCount > nMaxPartnerNum then
+        break
+      end
+      nCount = nCount + 1
+      local nNewMapX, nNewMapY = nPosX, nPosY
+      if tbPartnerDirInfo[partInfoData.dwPartnerId] and tbPartnerLenInfo[partInfoData.dwPartnerId] then
+        nNewMapX, nNewMapY = KMath:GetPosByLenDir(nPosX, nPosY, tbPartnerLenInfo[partInfoData.dwPartnerId], nDir + tbPartnerDirInfo[partInfoData.dwPartnerId])
+      end
+      local nPartnerNpcId = Partner.tbPartnerEnemyNpcCfg[partInfoData.dwTemplateId].nNpcTemplateId
+      local nPartnerAiId = Partner.tbAllPartnerInfo[partInfoData.dwTemplateId].nAiType
+      local szPartnerAiPath = Partner.tbPartnerAiTypeSetting[nPartnerAiId].szAiPath
+      local nSkill1 = Partner.tbPartnerAiTypeSetting[nPartnerAiId].nAiSkillId1
+      local nSkill2 = Partner.tbPartnerAiTypeSetting[nPartnerAiId].nAiSkillId2
+      local nBaseSkillId = Partner.tbAllPartnerInfo[partInfoData.dwTemplateId].nBaseSkillId
+      local pNpc = KNpc.Add(nPartnerNpcId, partInfoData.nLevel, -1, nMapId, nNewMapX, nNewMapY, 0, 0)
+      pNpc.AddSkill(nBaseSkillId, 1)
+      pNpc.AddSkill(nSkill1, 1)
+      pNpc.AddSkill(nSkill2, 1)
+      pNpc.SetAi(szPartnerAiPath)
+      pNpc.SetAiActive(1)
+      pNpc.SetDir(nModelDirection)
+      pNpc.ApplyMagicAttrib("strength_v", partInfoData.nStrength)
+      pNpc.ApplyMagicAttrib("dexterity_v", partInfoData.nDexterity)
+      pNpc.ApplyMagicAttrib("vitality_v", partInfoData.nVitality)
+      pNpc.ApplyMagicAttrib("energy_v", partInfoData.nEnergy)
+      pNpc.RestoreHP()
+      if pNpc then
+        pNpc.nFightMode = nFightMode
+      end
+      table.insert(self.tbMirrorPlayerPartnerTable[nPlayerId][nSystemKey], pNpc.nId)
+    end
+  end
+end
+
+function Partner:ClearMirrorPlayerPartnerGroup(nPlayerId, nSystemKey)
+  if self.tbMirrorPlayerPartnerTable == nil or self.tbMirrorPlayerPartnerTable[nPlayerId] == nil or self.tbMirrorPlayerPartnerTable[nPlayerId][nSystemKey] == nil then
+    return
+  end
+  for i, nNpcId in ipairs(self.tbMirrorPlayerPartnerTable[nPlayerId][nSystemKey]) do
+    local pNpc = KNpc.GetById(nNpcId)
+    if pNpc then
+      Npc:UnRegNpcOnDeath(pNpc)
+      pNpc.Delete()
+    end
+  end
+  self.tbMirrorPlayerPartnerTable[nPlayerId][nSystemKey] = nil
+end
+
+function Partner:ChangeMirrorPlayerPartnerFightMode(nPlayerId, nFightMode, nSystemKey)
+  if self.tbMirrorPlayerPartnerTable == nil or self.tbMirrorPlayerPartnerTable[nPlayerId] == nil or self.tbMirrorPlayerPartnerTable[nPlayerId][nSystemKey] == nil then
+    return
+  end
+  for i, nNpcId in ipairs(self.tbMirrorPlayerPartnerTable[nPlayerId][nSystemKey]) do
+    local pNpc = KNpc.GetById(nNpcId)
+    if pNpc then
+      pNpc.nFightMode = nFightMode
+    end
+  end
+end
+
+function Partner:GetMirrorPlayerPartnerGroup(nPlayerId, nSystemKey)
+  if self.tbMirrorPlayerPartnerTable == nil or self.tbMirrorPlayerPartnerTable[nPlayerId] == nil or self.tbMirrorPlayerPartnerTable[nPlayerId][nSystemKey] == nil then
+    return nil
+  end
+  return self.tbMirrorPlayerPartnerTable[nPlayerId][nSystemKey]
+end

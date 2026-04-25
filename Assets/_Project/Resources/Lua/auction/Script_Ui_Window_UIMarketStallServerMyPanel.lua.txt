@@ -1,0 +1,178 @@
+local tbWnd = Ui:CreateClass("UIMarketStallServerMyPanel", "UIPanel")
+local tbControls = {
+  goStallTemplate = "SalesScrollView/Content/ElementTemplate",
+  txtStallEmptyTip = "txtTip",
+  txtStallAmount = "PanelInfo/txtAmount",
+  dropdownKind = "BagPanel/DropdownLevel",
+  goItemTemplate = "BagPanel/bagBackground/maskView/imgInventory/Item",
+  txtItemEmptyTip = "txtTip1"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {}
+tbWnd.DROPDOWN_VALUE_ALL = 1
+tbWnd.MAX_BAG_WARE_COL_NUM = 5
+tbWnd.MIN_BAG_WARE_ROW_NUM = 5
+
+function tbWnd:OnCreate()
+  self.tbStallScrollView = Ui:NewScrollView(self, tbControls.goStallTemplate)
+  self.tbKindList = Lib:CopyTB(TreasureShop.tbKindSetting)
+  table.insert(self.tbKindList, self.DROPDOWN_VALUE_ALL, i18n.EasyGet("\229\133\168\233\131\168"))
+  self.pPanel:Dropdown_ResetOptions(tbControls.dropdownKind, self.tbKindList)
+  self.pPanel:Dropdown_SetValue(tbControls.dropdownKind, 1)
+  self.pPanel:Dropdown_BindEvent(tbControls.dropdownKind, function(nValue)
+    self:OnSelectKind(nValue)
+  end)
+  self.tbItemScrollView = Ui:NewScrollView(self, tbControls.goItemTemplate)
+end
+
+function tbWnd:OnOpen()
+  TreasureShop:QueryMyStallReq()
+  TreasureShop:QueryAvgPriceReq()
+  self:ShowStall()
+  self:ShowBag()
+  self:AddExpireTimer()
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.TreasureShopStallTimeout)
+end
+
+function tbWnd:OnClose()
+  self:DelExpireTimer()
+end
+
+function tbWnd:ShowStall()
+  local nNowTime = GetTime()
+  for nIndex, tbGoods in ipairs(TreasureShop.tbMyStallList) do
+    self.tbStallScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      if not tbElement.tbItemGrid then
+        tbElement.tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbElement.tbItemGrid:SetClickEnable(true)
+      end
+      local tbWareSetting = TreasureShop:GetWareSettingByWareId(tbGoods.nWareId)
+      tbElement.tbItemGrid:SetItemByTemplate(tbWareSetting.nItemTid, tbGoods.nNum)
+      pPanel:Label_SetText("txtName", i18n.Parse(KItem.GetItemShowInfo(tbWareSetting.nItemTid)))
+      pPanel:Label_SetText("txtnubGroup/txtnub1", tostring(tbGoods.nNum))
+      pPanel:Sprite_SetSprite("PriceObj/imgMoney", Currency:GetIcon(tbWareSetting.szCurrency))
+      pPanel:Label_SetText("PriceObj/txtSale", tostring(tbGoods.nPrice))
+      local nLeftTime = tbGoods.nCreateTime + TreasureShop.CFG.STALL_EXPIRE_TIME - nNowTime
+      if nLeftTime <= 0 then
+        pPanel:SetActive("txtTimeOut", true)
+        pPanel:SetActive("txtCountdown", false)
+      else
+        pPanel:SetActive("txtTimeOut", false)
+        pPanel:SetActive("txtCountdown", true)
+        pPanel:Label_SetText("txtCountdown/txtTime", self.DescExpireTime(nLeftTime))
+      end
+      tbElement.tbData = tbGoods
+      Ui:Button_BindEvent(pPanel, "btnBack", self.OnCancelStall, self, tbGoods.szOrderId)
+    end)
+  end
+  local nStallNum = #TreasureShop.tbMyStallList
+  self.tbStallScrollView:ResetFrom(nStallNum + 1)
+  self.pPanel:SetActive(tbControls.txtStallEmptyTip, 0 == nStallNum)
+  self.pPanel:Label_SetText(tbControls.txtStallAmount, string.format("%d/%d", nStallNum, TreasureShop.CFG.STALL_NUM_LIMIT))
+end
+
+function tbWnd.DescExpireTime(nLeftTime)
+  if nLeftTime < 3600 then
+    return string.format("00:%02d", math.ceil(nLeftTime / 60))
+  else
+    return string.format("%02d:%02d", math.floor(nLeftTime / 3600), math.floor(nLeftTime % 3600 / 60))
+  end
+end
+
+function tbWnd:ShowBag()
+  local nDropdownValue = self.pPanel:Dropdown_GetValue(tbControls.dropdownKind)
+  local szKind
+  if nDropdownValue ~= self.DROPDOWN_VALUE_ALL then
+    szKind = self.tbKindList[nDropdownValue]
+  end
+  local tbBagWareList = TreasureShop:PrepareItem(szKind)
+  for nIndex, nItemId in ipairs(tbBagWareList) do
+    self.tbItemScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      if not tbElement.tbItemGrid then
+        tbElement.tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbElement.tbItemGrid:SetClickEnable(true)
+      end
+      tbElement.tbItemGrid:SetItem(nItemId)
+      tbElement.tbItemGrid:SetClickEnable(true, function()
+        self:OnSelectBagWare(nItemId)
+      end)
+    end)
+  end
+  local nBagWareNum = #tbBagWareList
+  local nPadNum = 0
+  if nBagWareNum > self.MIN_BAG_WARE_ROW_NUM * self.MAX_BAG_WARE_COL_NUM then
+    local nModNum = nBagWareNum % self.MAX_BAG_WARE_COL_NUM
+    if 0 ~= nModNum then
+      nPadNum = self.MAX_BAG_WARE_COL_NUM - nModNum
+    end
+  else
+    nPadNum = self.MIN_BAG_WARE_ROW_NUM * self.MAX_BAG_WARE_COL_NUM - nBagWareNum
+  end
+  for nIndex = nBagWareNum + 1, nBagWareNum + nPadNum do
+    self.tbItemScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      if not tbElement.tbItemGrid then
+        tbElement.tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbElement.tbItemGrid:SetClickEnable(true)
+      end
+      tbElement.tbItemGrid:SetEmpty()
+      tbElement.tbItemGrid:SetClickEnable(false)
+    end)
+  end
+  self.tbItemScrollView:ResetFrom(nBagWareNum + nPadNum + 1)
+  self.pPanel:SetActive(tbControls.txtItemEmptyTip, false)
+end
+
+function tbWnd:AddExpireTimer()
+  self:DelExpireTimer()
+  self.nExpireTimer = Timer:Register(Env.GAME_FPS, self.OnExpireTimer, self)
+end
+
+function tbWnd:DelExpireTimer()
+  if not self.nExpireTimer then
+    return
+  end
+  Timer:Close(self.nExpireTimer)
+  self.nExpireTimer = nil
+end
+
+function tbWnd:OnExpireTimer()
+  local nNowTime = GetTime()
+  local nNum = self.tbStallScrollView:GetShowCount()
+  for nIndex = 1, nNum do
+    local tbElement = self.tbStallScrollView:GetElement(nIndex)
+    local pPanel = tbElement.pPanel
+    local nLeftTime = tbElement.tbData.nCreateTime + TreasureShop.CFG.STALL_EXPIRE_TIME - nNowTime
+    if nLeftTime <= 0 then
+      pPanel:SetActive("txtTimeOut", true)
+      pPanel:SetActive("txtCountdown", false)
+    else
+      pPanel:SetActive("txtTimeOut", false)
+      pPanel:SetActive("txtCountdown", true)
+      pPanel:Label_SetText("txtCountdown/txtTime", self.DescExpireTime(nLeftTime))
+    end
+  end
+  return true
+end
+
+function tbWnd:OnCancelStall(szOrderId)
+  TreasureShop:CancelReq(szOrderId)
+end
+
+function tbWnd:OnUpdateStall()
+  self:ShowStall()
+end
+
+function tbWnd:OnSelectKind(nValue)
+  self:ShowBag()
+end
+
+function tbWnd:OnSelectBagWare(nItemId)
+  Ui:OpenWindow("UIMarketStallSellServer", nItemId)
+end
+
+function tbWnd:OnUpdateBagWare()
+  self:ShowBag()
+end

@@ -1,0 +1,189 @@
+local tbWnd = Ui:CreateWindow("UINpcDialogBubble")
+local nMaxOptionCount = 20
+local nMinCloseTime = 200
+local nMaxCloseTime = 5000
+local nTimeScale = 1000
+tbWnd.tbControls = {
+  btnSkip = "Panel/btnSkip",
+  txtMsg = "Panel/bubble/txtMsg",
+  txtNpcName = "Panel/bubble/txtNpcName",
+  btnOptionTemplate = "Panel/panelButton/btnOptionTemplate"
+}
+tbWnd.tbOnClick = {
+  btnSkip = function(self)
+    self:EndTalk()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbScrollView = Ui:NewScrollView(self, self.btnOptionTemplate, function(self, nIndex, tbElement)
+    if self.nCloseTimer then
+      print("UINpcDialogBubble:OnClick faile", nIndex)
+      return
+    end
+    local callBack = self.tbDlgToClient.OptList[nIndex].Callback
+    if not callBack or 0 == callBack then
+      self:Close()
+    end
+    if self.bIsClient then
+      Dialog:OnDialogSelect(nIndex)
+    else
+      RemoteServer.OnDialogSelect(nIndex)
+    end
+    self:DelayClose()
+  end, false, true)
+end
+
+function tbWnd:OnOpen(tbDlgToClient, bIsClient, szNpcName, nNpcTemplate, nSoundId, nNpcID)
+  self.bAutoNextDlg = false
+  self.nCurDlgBeginTime = 0
+  self:UpdateDialog(tbDlgToClient, bIsClient, szNpcName, nNpcTemplate, nSoundId, nNpcID)
+end
+
+function tbWnd:UpdateDialog(tbDlgToClient, bIsClient, szNpcName, nNpcTemplate, nSoundId, nNpcID)
+  if not bIsClient then
+    szNpcName = i18n.Parse(szNpcName)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_NPC_NOT_IN_TALK_RANGE, 0, 0)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_TALK_TO_NPC, nNpcTemplate)
+  local szDlgToClientText = i18n.Parse(tbDlgToClient.Text)
+  self:CloseTimer()
+  self.pPanel:SetActive(self.btnSkip, false)
+  self.nNpcID = nNpcID
+  if not szDlgToClientText or "" == szDlgToClientText then
+    local tbNpcTemplateInfo = KNpc.GetNpcTemplateInfo(nNpcTemplate)
+    if tbNpcTemplateInfo then
+      local szClassName = tbNpcTemplateInfo.szClassName
+      local szDefaultDialogMsg = ClientNpc:GetDefaultMsg(szClassName)
+      local szMsg = "\227\128\128\227\128\128" .. szDefaultDialogMsg
+      if not self.nNoOpsTimer or 0 == self.nNoOpsTimer then
+        self.nNoOpsTimer = Timer:Register(Env.GAME_FPS * 15, self.Close, self)
+      end
+      self.pPanel:Label_SetText(self.txtMsg, szMsg)
+    end
+  else
+    local szMsg = "\227\128\128\227\128\128" .. szDlgToClientText
+    if Lib:StrStartWith(szDlgToClientText, "<auto_next>") then
+      self.bAutoNextDlg = true
+      self.nCurDlgBeginTime = GetTime()
+      self.pPanel:SetActive(self.btnSkip, true)
+      szDlgToClientText = string.sub(szDlgToClientText, string.len("<auto_next>") + 1)
+      szMsg = "\227\128\128\227\128\128" .. szDlgToClientText
+      if not self.nAutoNextTimer or 0 == self.nAutoNextTimer then
+        self.nAutoNextTimer = Timer:Register(Env.GAME_FPS, self.__timer_AutoNext, self)
+      end
+    elseif not self.nNoOpsTimer or 0 == self.nNoOpsTimer then
+      self.nNoOpsTimer = Timer:Register(Env.GAME_FPS * 15, self.Close, self)
+    end
+    self.pPanel:Label_SetText(self.txtMsg, szMsg)
+  end
+  self.pPanel:Label_SetText(self.txtNpcName, szNpcName .. "\239\188\154")
+  self.tbDlgToClient = tbDlgToClient
+  self.bIsClient = bIsClient
+  self.tbScrollView:Reset()
+  table.insert(tbDlgToClient.OptList, {
+    Text = i18n.Get("OptEnd"),
+    Callback = 0,
+    Type = "Script"
+  })
+  for i = 1, #tbDlgToClient.OptList do
+    self.tbScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("Text", i18n.Parse(tbDlgToClient.OptList[i].Text))
+    end)
+  end
+  local nMapId, nPosX, nPosY = me.GetWorldPos()
+  if nNpcID and nNpcID > 0 then
+    local pNpc = KNpc.GetById(nNpcID)
+    if pNpc then
+      local nNpcMapId, nMpcPosX, nNpcPosY = pNpc.GetWorldPos()
+      local tbPosition = self.pPanel:Object_GetPosition("Panel/imgBG")
+      self.pPanel:Object_SetPosition("Panel/bubble", Ui.Vector3(tbPosition.x + (nMpcPosX - nPosX) / 800, tbPosition.y + (nNpcPosY - nPosY) / 1600, tbPosition.z))
+      pNpc.SetDirToNpc(me.GetNpc().nId)
+    end
+  end
+  local tbWndMiniMap = Ui:GetWindow("UIMiniMap")
+  if tbWndMiniMap then
+    tbWndMiniMap:SetAutoPathFlagVisible(false)
+  end
+  AutoPath.bProcessAutoPath = false
+end
+
+function tbWnd:DelayClose()
+  if not self.nCloseTimer then
+    local nCloseTime = GetPingDelay() * 2
+    nCloseTime = math.max(nMinCloseTime, nCloseTime)
+    nCloseTime = math.min(nMaxCloseTime, nCloseTime)
+    self.nCloseTimer = Timer:Register(Env.GAME_FPS * (nCloseTime / nTimeScale), self.Close, self)
+  end
+end
+
+function tbWnd:CloseTimer()
+  if self.nCloseTimer then
+    Timer:Close(self.nCloseTimer)
+    self.nCloseTimer = nil
+  end
+  if self.nAutoNextTimer and self.nAutoNextTimer > 0 then
+    Timer:Close(self.nAutoNextTimer)
+    self.nAutoNextTimer = nil
+  end
+  if self.nNoOpsTimer and self.nNoOpsTimer > 0 then
+    Timer:Close(self.nNoOpsTimer)
+    self.nNoOpsTimer = nil
+  end
+end
+
+function tbWnd:OnClose()
+  self:CloseTimer()
+end
+
+function tbWnd:__timer_AutoNext()
+  if Ui:IsDlgAutoNext() and self.nCurDlgBeginTime > 0 and GetTime() - self.nCurDlgBeginTime >= 15 then
+    self:AutoSelect()
+    self.nCurDlgBeginTime = 0
+  end
+  return true
+end
+
+function tbWnd:AutoSelect()
+  local nOptNum = Lib:CountTB(self.tbDlgToClient.OptList)
+  if 1 ~= nOptNum then
+    return
+  end
+  local nSelectIndex = 1
+  local callBack = self.tbDlgToClient.OptList[nSelectIndex].Callback
+  if not callBack or 0 == callBack then
+    self:Close()
+  end
+  if self.bIsClient then
+    Dialog:OnDialogSelect(nSelectIndex)
+  else
+    RemoteServer.OnDialogSelect(nSelectIndex)
+  end
+  self:Close()
+end
+
+function tbWnd:SwitchAutoNext()
+  Ui:SetIsDlgAutoNext(not Ui:IsDlgAutoNext())
+  if Ui:IsDlgAutoNext() and self.bAutoNextDlg then
+    self.nCurDlgBeginTime = GetTime()
+  end
+end
+
+function tbWnd:EndTalk()
+  local nOptNum = Lib:CountTB(self.tbDlgToClient.OptList)
+  if 1 ~= nOptNum then
+    return
+  end
+  local nSelectIndex = 1
+  local callBack = self.tbDlgToClient.OptList[nSelectIndex].Callback
+  if not callBack or 0 == callBack then
+    self:Close()
+  end
+  if self.bIsClient then
+    Dialog:OnDialogSelect(nSelectIndex)
+  else
+    RemoteServer.OnEndTalk()
+  end
+  self:Close()
+end

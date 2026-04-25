@@ -1,0 +1,599 @@
+Require("Script/EventSystem/EventNotify.lua")
+Require("Script/Common/AFK_Setting.lua")
+local AFKMedicineSetting = AFK:GetSetting():GetMedicineSetting()
+MedicineMgr.nMaxMedicineCount = Item:GetClass("MedicineItem").nMaxMedicineCount
+MedicineMgr.nDefaultMedicineTId = Item:GetClass("MedicineItem").nDefaultMedicineTId
+MedicineMgr.tbMedicineChangeValue = Item:GetClass("MedicineItem").tbMedicineChangeValue
+MedicineMgr.szMoneyType = Item:GetClass("MedicineItem").szMoneyType
+MedicineMgr.tbMedicineList = {}
+MedicineMgr.nMedicineCount = 0
+MedicineMgr.bHasMedicine = false
+MedicineMgr.bOpenMedicineShopFlag = false
+MedicineMgr.tbShowTips = {}
+
+function MedicineMgr:Init()
+  self:RefeshCD()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self.UpdateMedicine, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_UPDATE_MEDICINEITEM, self.UpdateMedicine, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_OPEN_MEDICINESHOP_SUCCESS, self.BreakOpenMedicineShopSuccess, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_OPEN_MEDICINESHOP_FAIL, self.BreakOpenMedicineShopFail, self)
+end
+
+function MedicineMgr:RefeshCD()
+  self.tbMedicineClientCDEnd = self.tbMedicineClientCDEnd or {}
+  self.tbMedicineClientCDEnd[self.nDefaultMedicineTId] = true
+  if self.nTimerID then
+    Timer:Close(self.nTimerID)
+    self.nTimerID = nil
+  end
+end
+
+function MedicineMgr:CheckCDEnd()
+  return self.tbMedicineClientCDEnd[self.nDefaultMedicineTId]
+end
+
+function MedicineMgr:UnInit()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_UPDATE_MEDICINEITEM, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_OPEN_MEDICINESHOP_SUCCESS, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_OPEN_MEDICINESHOP_FAIL, self)
+end
+
+function MedicineMgr:OpenShop(tbTips)
+  self.bOpenMedicineShopFlag = false
+  self.bIsShopOpenRemote = false
+  self.bOpenRemote = false
+  self.tbShowTips = tbTips or {}
+  self.bIsSafe = 0 == me.nFightMode
+  if self:IsDisableBuyMedicine(me) then
+    return
+  end
+  if not self:MoneyEnough() then
+    me.CenterMsg(i18n.EasyGet("\230\130\168\231\154\132\233\147\182\228\184\164\228\184\141\229\164\159\239\188\129"))
+    return
+  end
+  if self.bIsSafe then
+    Ui:OpenWindow("UIMedicineShop")
+  end
+  if self.bOpenMedicineShopFlag then
+    return
+  end
+  self:OpenRemoteShop()
+end
+
+function MedicineMgr:MoneyEnough()
+  local szMoneyType = Item:GetClass("MedicineItem").szMoneyType
+  local nMedicineID = MedicineMgr:GetCurMedicineTId(me)
+  local nPrice = Item:GetItemBaseProp(nMedicineID).nPrice
+  local nDefaultNum = 20
+  return Shop:HasEnoughMoney(me, szMoneyType, nPrice, nDefaultNum)
+end
+
+function MedicineMgr:OpenRemoteShop()
+  if not self.bIsSafe then
+    if self.bOpenMedicineShopFlag then
+      return
+    end
+    RemoteServer.OpenMedicineShop()
+    self.bOpenMedicineShopFlag = true
+    self.bOpenRemote = true
+    return
+  end
+end
+
+function MedicineMgr:CloseShop()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_OPEN_MEDICINESHOP_FAIL)
+  self.bOpenMedicineShopFlag = false
+  self.bIsShopOpenRemote = false
+  self.bSellMedicine = false
+  self.bOpenRemote = false
+  Ui:CloseWindow("UIMedicineShop")
+end
+
+function MedicineMgr:IfIsTeamMedicine(dwTemplateId)
+  return false
+end
+
+function MedicineMgr:GetMedicineIconForRoyaleBattle(tbMedicineList)
+  if nil == tbMedicineList or 0 == #tbMedicineList then
+    return MedicineMgr:GetDefaultIcon()
+  end
+  local _, szIcon = Item:GetIcon(tbMedicineList[1].nIconId)
+  return szIcon
+end
+
+function MedicineMgr:NotifyMedicineCD(dwTemplateId, nRemainCDTime, nTotalCDTime)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_NOTIFY_MEDICINE_CD, dwTemplateId, nRemainCDTime, nTotalCDTime)
+  if self.nTimerID then
+    Timer:Close(self.nTimerID)
+    self.nTimerID = nil
+  end
+  if nRemainCDTime == nTotalCDTime then
+    self.nTimerID = Timer:Register(Env.GAME_FPS * nTotalCDTime, function()
+      self.nTimerID = nil
+      self.tbMedicineClientCDEnd[dwTemplateId] = true
+    end)
+    self.tbMedicineClientCDEnd[dwTemplateId] = false
+  elseif 0 == nRemainCDTime then
+    self.tbMedicineClientCDEnd[dwTemplateId] = true
+  else
+    self.nTimerID = Timer:Register(Env.GAME_FPS * nRemainCDTime, function()
+      self.nTimerID = nil
+      self.tbMedicineClientCDEnd[dwTemplateId] = true
+    end)
+    self.tbMedicineClientCDEnd[dwTemplateId] = false
+  end
+end
+
+function MedicineMgr:UseLeftMedicine()
+  if MedicineMgr:HasMedicineLeft() then
+    MedicineMgr:UseRoyaleBattleMedicine(self.tbLeftMedicineList)
+    return
+  end
+  if MedicineMgr:IfIsTeamMedicine(BattleRoyaleDef.LeftMedicineTemplateID) then
+    return
+  end
+  MedicineMgr.nTemplateOfMedicineForOpen = BattleRoyaleDef.LeftMedicineTemplateID
+  MedicineMgr:OpenShop(nil)
+end
+
+function MedicineMgr:UseRightMedicine()
+  if MedicineMgr:HasMedicineRight() then
+    MedicineMgr:UseRoyaleBattleMedicine(self.tbRightMedicineList)
+    return
+  end
+  if MedicineMgr:IfIsTeamMedicine(BattleRoyaleDef.RightMedicineTemplateID) then
+    return
+  end
+  MedicineMgr.nTemplateOfMedicineForOpen = BattleRoyaleDef.RightMedicineTemplateID
+  MedicineMgr:OpenShop(nil)
+end
+
+function MedicineMgr:UseBottomMedicine()
+  if MedicineMgr:HasMedicineBottom() then
+    MedicineMgr:UseRoyaleBattleMedicine(self.tbBottomMedicineList)
+    return
+  end
+  if MedicineMgr:IfIsTeamMedicine(BattleRoyaleDef.BottomMedicineTemplateID) then
+    return
+  end
+  MedicineMgr.nTemplateOfMedicineForOpen = BattleRoyaleDef.BottomMedicineTemplateID
+  MedicineMgr:OpenShop(nil)
+end
+
+function MedicineMgr:GetMedicineLeftIcon()
+  return MedicineMgr:GetMedicineIconForRoyaleBattle(self.tbLeftMedicineList)
+end
+
+function MedicineMgr:GetMedicineRightIcon()
+  return MedicineMgr:GetMedicineIconForRoyaleBattle(self.tbRightMedicineList)
+end
+
+function MedicineMgr:GetMedicineBottomIcon()
+  return MedicineMgr:GetMedicineIconForRoyaleBattle(self.tbBottomMedicineList)
+end
+
+function MedicineMgr:GetMedicineLeftCount()
+  return self.nLeftMedicineCount or 0
+end
+
+function MedicineMgr:GetMedicineRightCount()
+  return self.nRightMedicineCount or 0
+end
+
+function MedicineMgr:GetMedicineBottomCount()
+  return self.nBottomMedicineCount or 0
+end
+
+function MedicineMgr:HasOneBattleRoyalMedicine(dwTemplateId)
+  if dwTemplateId == BattleRoyaleDef.LeftMedicineTemplateID then
+    return 1 == self.nLeftMedicineCount
+  elseif dwTemplateId == BattleRoyaleDef.RightMedicineTemplateID then
+    return 1 == self.nRightMedicineCount
+  elseif dwTemplateId == BattleRoyaleDef.BottomMedicineTemplateID then
+    return 1 == self.nBottomMedicineCount
+  end
+  return false
+end
+
+function MedicineMgr:HasMedicineLeft()
+  if self.tbLeftMedicineList == nil then
+    return false
+  end
+  return 0 ~= #self.tbLeftMedicineList
+end
+
+function MedicineMgr:HasMedicineRight()
+  if self.tbRightMedicineList == nil then
+    return false
+  end
+  return 0 ~= #self.tbRightMedicineList
+end
+
+function MedicineMgr:HasMedicineBottom()
+  if self.tbBottomMedicineList == nil then
+    return false
+  end
+  return 0 ~= #self.tbBottomMedicineList
+end
+
+function MedicineMgr:PrintBattleRoyaleMedicineCount()
+  LogErr("self.nLeftMedicineCount:" .. tostring(self.nLeftMedicineCount))
+  LogErr("self.nRightMedicineCount:" .. tostring(self.nRightMedicineCount))
+  LogErr("self.nBottomMedicineCount:" .. tostring(self.nBottomMedicineCount))
+end
+
+function MedicineMgr:UpdateBattleRoyaleMedicine()
+  self.tbLeftMedicineList = {}
+  self.tbRightMedicineList = {}
+  self.tbBottomMedicineList = {}
+  self.nLeftMedicineCount = 0
+  self.nRightMedicineCount = 0
+  self.nBottomMedicineCount = 0
+  local tbItems = me.GetItemListInMedicineBag()
+  
+  local function GetMedicineItem(pItem)
+    local _, nIcon = KItem.GetItemShowInfo(pItem.dwTemplateId)
+    local tbData = {
+      dwItemId = pItem.dwId,
+      dwTemplateId = pItem.dwTemplateId,
+      nLevel = pItem.nLevel,
+      nIconId = nIcon
+    }
+    return tbData
+  end
+  
+  for _, pItem in ipairs(tbItems) do
+    if pItem.dwTemplateId == BattleRoyaleDef.LeftMedicineTemplateID then
+      table.insert(self.tbLeftMedicineList, GetMedicineItem(pItem))
+      self.nLeftMedicineCount = self.nLeftMedicineCount + pItem.nCount
+    elseif pItem.dwTemplateId == BattleRoyaleDef.RightMedicineTemplateID then
+      table.insert(self.tbRightMedicineList, GetMedicineItem(pItem))
+      self.nRightMedicineCount = self.nRightMedicineCount + pItem.nCount
+    elseif pItem.dwTemplateId == BattleRoyaleDef.BottomMedicineTemplateID then
+      table.insert(self.tbBottomMedicineList, GetMedicineItem(pItem))
+      self.nBottomMedicineCount = self.nBottomMedicineCount + pItem.nCount
+    end
+  end
+end
+
+function MedicineMgr:UpdateMedicine()
+  self.tbMedicineList = {}
+  self.nMedicineCount = 0
+  self.bHasMedicine = false
+  self.nTemplateId = self.nTemplateId or nil
+  local tbItems = me.GetItemListInMedicineBag()
+  local tbItemKind = {}
+  local tbItemKindNum = {}
+  local nMaxLevel = 1
+  for _, pItem in ipairs(tbItems) do
+    if nMaxLevel < pItem.nLevel then
+      nMaxLevel = pItem.nLevel
+    end
+    local _, nIcon = KItem.GetItemShowInfo(pItem.dwTemplateId)
+    local tbData = {
+      dwItemId = pItem.dwId,
+      dwTemplateId = pItem.dwTemplateId,
+      nLevel = pItem.nLevel,
+      nIconId = nIcon
+    }
+    tbItemKind[pItem.nLevel] = tbItemKind[pItem.nLevel] or {}
+    tbItemKindNum[pItem.nLevel] = tbItemKindNum[pItem.nLevel] or 0
+    table.insert(tbItemKind[pItem.nLevel], tbData)
+    if 1 == pItem.IsStackable() then
+      tbItemKindNum[pItem.nLevel] = tbItemKindNum[pItem.nLevel] + pItem.nCount
+    else
+      tbItemKindNum[pItem.nLevel] = tbItemKindNum[pItem.nLevel] + 1
+    end
+    if not self.nTemplateId then
+      self.nTemplateId = pItem.dwTemplateId
+    end
+  end
+  self.tbMedicineList = tbItemKind[nMaxLevel] or {}
+  self.nMedicineCount = tbItemKindNum[nMaxLevel] or 0
+  if #self.tbMedicineList > 0 then
+    self.bHasMedicine = true
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MEDICINE_INFO_UPDATE)
+end
+
+function MedicineMgr:HasMedicine()
+  return self.bHasMedicine
+end
+
+function MedicineMgr:GetCurUsedMedicineList()
+  return self.tbMedicineList[1]
+end
+
+function MedicineMgr:GetCurUsedMedicineIcon()
+  if self:HasMedicine() then
+    local _, szIcon = Item:GetIcon(self.tbMedicineList[1].nIconId)
+    return szIcon
+  end
+  return self:GetDefaultIcon()
+end
+
+function MedicineMgr:GetCurUsedMedicineCount()
+  return self.nMedicineCount
+end
+
+function MedicineMgr:GetDefaultIcon()
+  local _, szIcon = Item:GetIcon(50001)
+  return szIcon
+end
+
+function MedicineMgr:GetTotalRemainingCount()
+  local nCount = 0
+  nCount = MedicineMgr.nMaxMedicineCount - self:GetMedicineCount()
+  return nCount
+end
+
+function MedicineMgr:GetMedicineCount()
+  local tbList = me.GetItemListInMedicineBag()
+  local nCount = 0
+  for _, value in pairs(tbList) do
+    nCount = nCount + value.nCount
+  end
+  return nCount
+end
+
+function MedicineMgr:GetMedicineSumPrice()
+  local nSumPrice = 0
+  local tbList = me.GetItemListInMedicineBag()
+  for _, pItem in pairs(tbList) do
+    local nPrice = self:GetTotalPrice(pItem.dwTemplateId, pItem.nCount)
+    nSumPrice = nSumPrice + nPrice
+  end
+  return nSumPrice
+end
+
+function MedicineMgr:GetTotalPrice(nTemplateId, nCount)
+  local nPrice = Shop:GetSellSumPrice(me, nTemplateId, nCount)
+  return nPrice
+end
+
+function MedicineMgr:GetSingleCount(nTemplateId)
+  local nCount = 0
+  local tbItems = me.GetItemListInMedicineBag()
+  for _, pItem in pairs(tbItems) do
+    if pItem.dwTemplateId == nTemplateId then
+      nCount = nCount + pItem.nCount
+    end
+  end
+  return nCount
+end
+
+function MedicineMgr:GetSingleRemainCount(nTemplateId)
+  local nNowMedicineCount = self:GetSingleCount(nTemplateId)
+  local nMaxMedicineCount
+  if Guide:CurrentLock() == Guide.Cfg.GuideNameToId.Fight and nNowMedicineCount < Guide.Cfg.nMedicineCountBeforeGuide then
+    nMaxMedicineCount = Guide.Cfg.nMedicineCountBeforeGuide
+  else
+    nMaxMedicineCount = MedicineMgr.nMaxMedicineCount
+  end
+  local nRemainCount = math.max(nMaxMedicineCount - self:GetSingleCount(nTemplateId), 0)
+  return nRemainCount
+end
+
+function MedicineMgr:GetMedicineIdByTemplateId(nTemplateId)
+  local nId
+  local tbItems = me.GetItemListInMedicineBag()
+  for _, pItem in pairs(tbItems) do
+    if pItem.dwTemplateId == nTemplateId then
+      nId = pItem.dwId
+      break
+    end
+  end
+  return nId
+end
+
+function MedicineMgr:GetMedicineTemplateIdById(nMedicineId)
+  local nId
+  local tbItems = me.GetItemListInMedicineBag()
+  for _, pItem in pairs(tbItems) do
+    if pItem.dwId == nMedicineId then
+      nId = pItem.dwTemplateId
+      break
+    end
+  end
+  return nId
+end
+
+function MedicineMgr:OpenMedicineShopSuccess()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_OPEN_MEDICINESHOP_SUCCESS)
+  self.bOpenMedicineShopFlag = false
+  self.bIsShopOpenRemote = true
+  Ui:OpenWindow("UIMedicineShop")
+end
+
+function MedicineMgr:OpenMedicineShopFail()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_OPEN_MEDICINESHOP_FAIL)
+  self.bOpenMedicineShopFlag = true
+  self.bIsShopOpenRemote = false
+end
+
+function MedicineMgr:BreakOpenMedicineShopSuccess()
+  self.bOpenMedicineShopFlag = false
+  self.bIsShopOpenRemote = true
+end
+
+function MedicineMgr:BreakOpenMedicineShopFail()
+  self.bOpenMedicineShopFlag = true
+  self.bIsShopOpenRemote = false
+end
+
+function MedicineMgr:IsShopOpenRemote()
+  return self.bIsShopOpenRemote
+end
+
+function MedicineMgr:IsDisableBuyMedicine(pPlayer)
+  if Map:IsDisableBuyMedicine(pPlayer.nMapTemplateId) then
+    return true
+  end
+  return false
+end
+
+local function Buy(nTemplateId, nBuyCount)
+  if MedicineMgr:IsDisableBuyMedicine(me) then
+    return
+  end
+  if Ui.bInZone then
+    RemoteServer.Zone_BuyMedicine(nTemplateId, nBuyCount)
+  else
+    RemoteServer.BuyMedicine(nTemplateId, nBuyCount)
+  end
+  if Ui:WindowVisible("UIMedicineShop") then
+    Ui:CloseWindow("UIMedicineShop")
+  end
+end
+
+function MedicineMgr:BuyMedicine(nTemplateId, nBuyCount, bNeedTips)
+  if not nTemplateId or not nBuyCount then
+    return
+  end
+  if self.bOpenMedicineShopFlag then
+    me.CenterMsg(i18n.EasyGet("\232\175\187\230\157\161\228\184\173..........."))
+    return
+  end
+  local nRemainingCount = 0
+  nRemainingCount = self:GetTotalRemainingCount()
+  nBuyCount = math.min(nRemainingCount, nBuyCount)
+  if 0 == nBuyCount then
+    me.CenterMsg(i18n.EasyGet("\232\141\175\229\147\129\230\149\176\233\135\143\229\183\178\232\190\190\228\184\138\233\153\144"))
+    return
+  end
+  self.nBuyCount = nBuyCount
+  self.nTemplateId = nTemplateId
+  Buy(nTemplateId, nBuyCount)
+end
+
+function MedicineMgr:BuyMedicineDirectly(nTemplateId, nBuyCount, bNeedTips)
+  local nRemainingCount = self:GetTotalRemainingCount()
+  if 0 == nRemainingCount then
+    me.CenterMsg(i18n.EasyGet("\232\141\175\229\147\129\230\149\176\233\135\143\229\183\178\232\190\190\228\184\138\233\153\144"))
+    return
+  end
+  nBuyCount = math.min(nRemainingCount, nBuyCount)
+  self.nBuyCount = nBuyCount
+  self.nTemplateId = nTemplateId
+  Buy(nTemplateId, nBuyCount)
+end
+
+function MedicineMgr:BuyAfterSell(bSuccess)
+  if bSuccess and self.bSellMedicine then
+    if self.nSellTId and self.nSellCount then
+      local szMedicineName = KItem.GetItemShowInfo(self.nSellTId, me.nFaction, me.nFactionSect, me.nSex)
+      local tbMedicineLinkInfo = {
+        nLinkType = ChatMgr.LinkType.Item,
+        nFaction = me.nFaction,
+        nFactionSect = me.nFactionSect,
+        nTemplateId = self.nSellTId,
+        nBodySex = me.nSex
+      }
+      local szCount = self.nSellCount > 1 and string.format("x%s", self.nSellCount) or ""
+      local nSumPrice = Shop:GetSellSumPrice(me, self.nSellTId, self.nSellCount)
+      local szMedicineMsg = i18n.EasyGet("\229\148\174\229\135\186<{0}>{1}\239\188\140\232\142\183\229\190\151\233\147\182\228\184\164{2}", szMedicineName, szCount, nSumPrice)
+      me.Msg(szMedicineMsg, nil, tbMedicineLinkInfo)
+    end
+    self.nSellTId = nil
+    self.nSellCount = nil
+    Buy(self.nTemplateId, self.nBuyCount)
+  end
+  self.bSellMedicine = false
+end
+
+function MedicineMgr:CheckUseMedicine()
+  local pMeNpc = me.GetNpc()
+  if not pMeNpc then
+    return false
+  end
+  if not GoodwillValue:CheckValueCanUseMedicine(me) then
+    return false, i18n.Get(GoodwillValue.tbText.szValueTooLowCanNotUseMedicine, GoodwillValue.Cfg.nLessThanOrEqualValueCanNotUseMedicine)
+  end
+  return true
+end
+
+function MedicineMgr:UseMedicine(bCastByCommand)
+  local nItemId = MedicineMgr:GetCurUsedMedicineList().dwItemId
+  local nTemplateId = MedicineMgr:GetCurUsedMedicineList().dwTemplateId
+  local bCanUse, szErr = self:CheckUseMedicine()
+  if not bCanUse then
+    if not bCastByCommand then
+      me.GetNpc().SetUseMedicineCommandCache()
+    end
+    if nil ~= szErr and not bCastByCommand then
+      me.CenterMsg(szErr)
+    end
+    return false
+  end
+  if Ui.bInZone then
+    RemoteServer.Zone_UseItem(nItemId)
+  else
+    RemoteServer.UseItem(nItemId)
+  end
+  if IsAlone and 1 == IsAlone() then
+    Item:UseItem(nItemId)
+  end
+  AFKMedicineSetting:SetReplyMedicineTemplateId(nTemplateId)
+  return true
+end
+
+function MedicineMgr:IsCanSell(nMedicineId)
+  if not nMedicineId then
+    return false
+  end
+  local bSuccess, szInfo = Shop:CanSellWare(me, nMedicineId or 0, 1)
+  return bSuccess, szInfo
+end
+
+function MedicineMgr:SellMedicine(nMedicineId, nSellCount)
+  if not nMedicineId or not nSellCount then
+    return
+  end
+  self.nSellTId = nMedicineId
+  self.nSellCount = nSellCount
+  local tbToSell = {
+    {nId = nMedicineId, nCount = nSellCount}
+  }
+  RemoteServer.OnShopRequest(Shop.Protocol.C2SSell, tbToSell, Shop.nRequestIndex, true)
+end
+
+function MedicineMgr:SellAllMedicine(fnCallBack)
+  if 0 ~= me.nFightMode and not self.bIsShopOpenRemote and not self.bOpenRemote then
+    self:OpenRemoteShop()
+    return
+  end
+  local tbItems = me.GetItemListInMedicineBag()
+  local tbToSell = {}
+  local bSuccess, szInfo
+  self.nSellTId = nil
+  self.nSellCount = 0
+  for nIndex, pItem in pairs(tbItems) do
+    bSuccess, szInfo = self:IsCanSell(pItem.dwId)
+    if not bSuccess then
+      me.CenterMsg(szInfo)
+      return
+    end
+    self.nSellTId = pItem.dwTemplateId
+    self.nSellCount = self.nSellCount + pItem.nCount
+    tbToSell[nIndex] = {
+      nId = pItem.dwId,
+      nCount = pItem.nCount
+    }
+  end
+  RemoteServer.OnShopRequest(Shop.Protocol.C2SSell, tbToSell, Shop.nRequestIndex, true)
+  self.bSellMedicine = true
+  if fnCallBack then
+    fnCallBack()
+  end
+end
+
+function MedicineMgr:GetCurMedicineTId(pPlayer)
+  if nil == pPlayer then
+    pPlayer = me
+  end
+  return Item:GetClass("MedicineItem"):GetCurMedicineTId(pPlayer)
+end
+
+MedicineMgr:UnInit()
+MedicineMgr:Init()

@@ -1,0 +1,593 @@
+local tbWnd = Ui:CreateWindow("UIShop")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.OnChangeMoney,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SHOP_BUY_RESULT,
+      self.OnResponseBuy,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_SHOP_WARE,
+      self.OnSyncShopWare,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_LOCALIZE_CHANGE,
+      self.OnSyncShopWare,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  UIMoneyPanel = "node/UIMoneyPanel",
+  btnLimitShop = "node/imgBG/btnList/btnLimitShop",
+  btnYuanbaoShop = "node/imgBG/btnList/btnYuanbaoShop",
+  btnGoldShop = "node/imgBG/btnList/btnGoldShop",
+  ItemSVWid = "node/imgBG/Content/ShopGoods/GoodsList/ItemSVWid",
+  ElementTemplate = "node/imgBG/Content/ShopGoods/GoodsList/ItemSVWid/Viewport/pnlContant/ElementTemplate",
+  NotInfo = "node/imgBG/Content/ShopGoods/GoodsList/NotInfo",
+  txtTitle = "node/imgBG/txtTitle",
+  txtTips = "node/imgBG/Content/txtTips",
+  btnStore = "node/imgBG/btnList/btnStore",
+  btnPay = "node/imgBG/btnList/btnPay",
+  btnClosetShop = "node/imgBG/btnList/btnClosetShop",
+  EffectBtnClosetShop = "node/imgBG/btnList/btnClosetShop/Hud_Effect",
+  btnClose = "node/imgBG/btnClose",
+  uiTreeRoot = "node/imgBG/ContentLimitShop/UITree",
+  LimitShopItemSVWid = "node/imgBG/ContentLimitShop/ShopGoodsLimitShop/GoodsList/ItemSVWid",
+  LimitShopNotInfo = "node/imgBG/ContentLimitShop/ShopGoodsLimitShop/GoodsList/NotInfo",
+  LimitShopElementTemplate = "node/imgBG/ContentLimitShop/ShopGoodsLimitShop/GoodsList/ItemSVWid/Viewport/pnlContant/ElementTemplate",
+  Content = "node/imgBG/Content",
+  LimitShopContent = "node/imgBG/ContentLimitShop"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnStore = function(self)
+    Ui:OpenWindow("UIStore")
+  end,
+  btnPay = function(self)
+    GainCurrency:DirectJump("Gold")
+  end,
+  btnClosetShop = function(self)
+    Ui:OpenWindow("UIClosetShopNew", nil, nil, 2)
+  end
+}
+
+function tbWnd:OnCreate()
+  if not IsPayOpen() then
+    self.pPanel:SetActive(tbControls.btnPay, false)
+  end
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, tbControls.UIMoneyPanel)
+  self.nNormalRow = 5
+  self.nLimitShopRow = 4
+  self.nRow = self.nNormalRow
+  self.tbShopKindGroup = Ui:NewButtonGroup(self, {
+    [1] = tbControls.btnYuanbaoShop,
+    [2] = tbControls.btnGoldShop,
+    [3] = tbControls.btnLimitShop
+  }, true, function(self, nIndex)
+    self.nShopIndex = nIndex
+    if nIndex == Shop.ShopType2ViewIndex.LimitBuy then
+      self.tbWareScroll = self.tbLimishopScroll
+      self.nRow = self.nLimitShopRow
+    else
+      self.tbWareScroll = self.tbNortmalWareScroll
+      self.nRow = self.nNormalRow
+    end
+    self:UpdateItemSV_Helper(nIndex)
+    self.tbWareScroll:PlayItemGridAnimation(self.nRow)
+  end)
+  self.tbNortmalWareScroll = Ui:NewLoopScrollView(self, tbControls.ElementTemplate, "Cell")
+  self.tbLimishopScroll = Ui:NewLoopScrollView(self, tbControls.LimitShopElementTemplate, "Cell")
+  self.uiTree = Ui:NewTree(self, tbControls.uiTreeRoot, self.onClickTreeBigBtn, self.onClickTreeSmallBtn)
+  self.nCurLimitShopBigType = 1
+end
+
+function tbWnd:OnOpen(nShopIndex, nId)
+  self.nShopIndex = nShopIndex or 1
+  self.tbShopKindGroup:Select(self.nShopIndex)
+  if self.nShopIndex == Shop.ShopType2ViewIndex.LimitBuy then
+    self.tbWareScroll = self.tbLimishopScroll
+  else
+    self.tbWareScroll = self.tbNortmalWareScroll
+  end
+  if nId and self.tbWareList then
+    for k, v in pairs(self.tbWareList) do
+      if v.nWareId == nId then
+        self.tbWareScroll:GridScrollToIndex(k)
+        break
+      end
+    end
+  end
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnStore, {
+    RedPointMgr.EVENT.StoreShop
+  })
+  local tbId = {}
+  for i = RedPointMgr.EVENT.VipLevelGiftBagBegin, RedPointMgr.EVENT.VipLevelGiftBagEnd do
+    table.insert(tbId, i)
+  end
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnPay, tbId)
+  self.tbMoneyPanel:OnOpen()
+  self.tbMoneyPanel:SetMoneyValue()
+  local bStoreTip = LocalData:GetRoleBoolean("StoreTip", false)
+  if bStoreTip then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.StoreShop)
+  else
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.StoreShop)
+  end
+  self.nRemainTimeTimer = Timer:Register(Env.GAME_FPS, function()
+    self:UpdateRemianTime()
+    return true
+  end)
+  self:RefreshClosetShopEffectShow()
+  self:UpdateTree()
+  if self.nShopIndex == Shop.ShopType2ViewIndex.LimitBuy then
+    self.uiTree:SelectNode(self.nCurLimitShopBigType, nil, true)
+  end
+end
+
+function tbWnd:OnClose()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnPay)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnStore)
+  if self.nRemainTimeTimer then
+    Timer:Close(self.nRemainTimeTimer)
+    self.nRemainTimeTimer = nil
+  end
+  self.tbTimeInfo = {}
+end
+
+function tbWnd:OnChangeMoney()
+  self.tbMoneyPanel:SetMoneyValue()
+  if self.tbMoneyPanel.szDynamicType then
+    self.tbMoneyPanel:SetDynamicCurrencyValue()
+  end
+end
+
+function tbWnd:OnItemClick(tbWare)
+  local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+  if 0 == nRemainCount then
+    me.CenterMsg(i18n.Get(Shop.Terms.InsufficientRemainInventory))
+    return
+  end
+  if tbWare.nBuyVipLevel and me.GetVipLevel() < tbWare.nBuyVipLevel then
+    Item:ShowItemDetail({
+      nTemplate = tbWare.nItemId,
+      nFaction = me.nFaction,
+      nFactionSect = me.nFactionSect,
+      tbLinkInfo = {
+        nSex = me.nSex
+      }
+    })
+    return
+  end
+  Ui:OpenWindow("UIShopBuy", tbWare, true)
+end
+
+function tbWnd.fnSetItem(tbLoopScroll, nIndex, self)
+  local nCount = #self.tbWareList
+  local nCol = nCount - self.nRow * (nIndex - 1)
+  local nCurTime = GetTime()
+  for i = 1, self.nRow do
+    if i <= nCol then
+      local tbElement = tbLoopScroll:GetGridElement(nIndex, i)
+      local curIndex = (nIndex - 1) * self.nRow + i
+      local pPanel = tbElement.pPanel
+      pPanel:SetActive("Main", true)
+      local tbInfo = self.tbWareList[curIndex]
+      local tbWare = Shop:GetAWare(tbInfo.nWareId)
+      tbElement.tbData = tbWare
+      if not tbWare then
+        return
+      end
+      local nPrice = Shop:GetPrice(tbWare)
+      pPanel:Label_SetText("txtMoneyNum", nPrice)
+      local szName = KItem.GetItemShowInfo(tbWare.nItemId, me.nFaction, me.nFactionSect, me.nSex)
+      local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      itemGrid:SetItemByTemplate(tbWare.nItemId)
+      itemGrid:SetClickEnable(true, function()
+        self:OnItemClick(tbWare)
+      end)
+      pPanel:Label_SetText("txtTitle", i18n.Parse(szName))
+      local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+      if -1 == nRemainCount then
+        pPanel:SetActive("Limit", false)
+        pPanel:Label_SetText("Limit/txtLimitNum", "")
+      else
+        pPanel:SetActive("Limit", true)
+        pPanel:Label_SetText("Limit/txtLimitNum", tostring(nRemainCount))
+      end
+      if tbWare.szHotText and "" ~= tbWare.szHotText then
+        pPanel:SetActive("imgGiftMark", true)
+        pPanel:Label_SetText("imgGiftMark/txtTip", i18n.Parse(tbWare.szHotText))
+      else
+        pPanel:SetActive("imgGiftMark", false)
+      end
+      if 0 == nRemainCount then
+        pPanel:SetActive("imgSoldOutBg", true)
+        pPanel:SetActive("imgSoldOutMark", true)
+      elseif tbWare.nBuyVipLevel and me.GetVipLevel() < tbWare.nBuyVipLevel then
+        pPanel:SetActive("imgSoldOutBg", true)
+        pPanel:SetActive("imgSoldOutMark", false)
+      else
+        pPanel:SetActive("imgSoldOutBg", false)
+        pPanel:SetActive("imgSoldOutMark", false)
+      end
+      local szMoney, szMoneyAtlas = Currency:GetIcon(tbWare.szCurrencyType)
+      pPanel:Sprite_SetSprite("imgMoney", szMoney)
+      local nShowDiscount = math.floor(nPrice * 100 / tbWare.nPrice)
+      if nShowDiscount > 0 and nShowDiscount < 100 then
+        pPanel:SetActive("imgZK", true)
+        pPanel:Label_SetText("imgZK/txtZK", i18n.GetDiscountText(nShowDiscount / 10))
+      else
+        pPanel:SetActive("imgZK", false)
+        pPanel:Label_SetText("imgZK/txtZK", "")
+      end
+      pPanel:SetActive("txtTimeLimit", false)
+      local szIndex = tostring(nIndex) .. tostring(i)
+      if tbWare.nEndTimestamp then
+        if nCurTime < tbWare.nEndTimestamp then
+          self.tbTimeInfo[szIndex] = self.tbTimeInfo[szIndex] or {}
+          self.tbTimeInfo[szIndex].nIndex = nIndex
+          self.tbTimeInfo[szIndex].nCol = i
+          self.tbTimeInfo[szIndex].nEndTimestamp = tbWare.nEndTimestamp
+          pPanel:SetActive("txtTimeLimit", true)
+          pPanel:Label_SetText("txtTimeLimit", i18n.EasyGet("{0}\229\144\142\228\184\139\230\158\182", Lib:TimeDesc14(tbWare.nEndTimestamp - nCurTime)))
+        else
+          self.tbTimeInfo[szIndex] = nil
+        end
+      else
+        self.tbTimeInfo[szIndex] = nil
+      end
+      Ui:Button_BindEvent(pPanel, "", function()
+        self:OnItemClick(tbWare)
+      end)
+    else
+      tbLoopScroll:GetGridElement(nIndex, i).pPanel:SetActive("Main", false)
+    end
+  end
+end
+
+function tbWnd.fnSetItem2(tbLoopScroll, nIndex, self)
+  local nCount = #self.tbWareList
+  local nCol = nCount - self.nRow * (nIndex - 1)
+  local nCurTime = GetTime()
+  for i = 1, self.nRow do
+    if i <= nCol then
+      local tbElement = tbLoopScroll:GetGridElement(nIndex, i)
+      local curIndex = (nIndex - 1) * self.nRow + i
+      local pPanel = tbElement.pPanel
+      pPanel:SetActive("Main", true)
+      pPanel:Animator_SetEnable("Main", false)
+      local tbInfo = self.tbWareList[curIndex]
+      local tbWare = Shop:GetAWare(tbInfo.nWareId)
+      tbElement.tbData = tbWare
+      if not tbWare then
+        return
+      end
+      local nPrice = Shop:GetPrice(tbWare)
+      pPanel:Label_SetText("txtMoneyNum", nPrice)
+      local szName = KItem.GetItemShowInfo(tbWare.nItemId, me.nFaction, me.nFactionSect, me.nSex)
+      local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      itemGrid:SetItemByTemplate(tbWare.nItemId)
+      itemGrid:SetClickEnable(true, function()
+        self:OnItemClick(tbWare)
+      end)
+      pPanel:Label_SetText("txtTitle", i18n.Parse(szName))
+      local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+      if -1 == nRemainCount then
+        pPanel:SetActive("Limit", false)
+        pPanel:Label_SetText("Limit/txtLimitNum", "")
+      else
+        pPanel:SetActive("Limit", true)
+        pPanel:Label_SetText("Limit/txtLimitNum", tostring(nRemainCount))
+      end
+      if tbWare.szHotText and "" ~= tbWare.szHotText then
+        pPanel:SetActive("imgGiftMark", true)
+        pPanel:Label_SetText("imgGiftMark/txtTip", i18n.Parse(tbWare.szHotText))
+      else
+        pPanel:SetActive("imgGiftMark", false)
+      end
+      if 0 == nRemainCount then
+        pPanel:SetActive("imgSoldOutBg", true)
+        pPanel:SetActive("imgSoldOutMark", true)
+      elseif tbWare.nBuyVipLevel and me.GetVipLevel() < tbWare.nBuyVipLevel then
+        pPanel:SetActive("imgSoldOutBg", true)
+        pPanel:SetActive("imgSoldOutMark", false)
+      else
+        pPanel:SetActive("imgSoldOutBg", false)
+        pPanel:SetActive("imgSoldOutMark", false)
+      end
+      local szMoney, szMoneyAtlas = Currency:GetIcon(tbWare.szCurrencyType)
+      pPanel:Sprite_SetSprite("imgMoney", szMoney)
+      local nShowDiscount = math.floor(nPrice * 100 / tbWare.nPrice)
+      if nShowDiscount > 0 and nShowDiscount < 100 then
+        pPanel:SetActive("imgZK", true)
+        pPanel:Label_SetText("imgZK/txtZK", i18n.GetDiscountText(nShowDiscount / 10))
+      else
+        pPanel:SetActive("imgZK", false)
+        pPanel:Label_SetText("imgZK/txtZK", "")
+      end
+      pPanel:SetActive("txtTimeLimit", false)
+      local szIndex = tostring(nIndex) .. tostring(i)
+      if tbWare.nEndTimestamp then
+        if nCurTime < tbWare.nEndTimestamp then
+          self.tbTimeInfo[szIndex] = self.tbTimeInfo[szIndex] or {}
+          self.tbTimeInfo[szIndex].nIndex = nIndex
+          self.tbTimeInfo[szIndex].nCol = i
+          self.tbTimeInfo[szIndex].nEndTimestamp = tbWare.nEndTimestamp
+          pPanel:SetActive("txtTimeLimit", true)
+          pPanel:Label_SetText("txtTimeLimit", i18n.EasyGet("{0}\229\144\142\228\184\139\230\158\182", Lib:TimeDesc14(tbWare.nEndTimestamp - nCurTime)))
+        else
+          self.tbTimeInfo[szIndex] = nil
+        end
+      else
+        self.tbTimeInfo[szIndex] = nil
+      end
+      Ui:Button_BindEvent(pPanel, "", function()
+        self:OnItemClick(tbWare)
+      end)
+    else
+      tbLoopScroll:GetGridElement(nIndex, i).pPanel:SetActive("Main", false)
+    end
+  end
+end
+
+function tbWnd:UpdateItemSV_Helper(nShopIndex, nItemId, bGoTop, bRefreshAnimator)
+  local bIsLimitShop = nShopIndex == Shop.ShopType2ViewIndex.LimitBuy
+  self.pPanel:SetActive("node/imgBG/Content", not bIsLimitShop)
+  self.pPanel:SetActive("node/imgBG/ContentLimitShop", bIsLimitShop)
+  if bIsLimitShop then
+    self:UpdateLimitShopItemSV(nItemId, bGoTop, bRefreshAnimator)
+  else
+    self.tbMoneyPanel:SetCoinShow(true)
+    self.tbMoneyPanel:SetGoldShow(true)
+    self.tbMoneyPanel:SetYuanBaoShow(true)
+    self.tbMoneyPanel:SetDynamicShow(false)
+    self:UpdateItemSV(nShopIndex, nItemId, bGoTop, bRefreshAnimator)
+  end
+end
+
+function tbWnd:UpdateItemSV(nShopIndex, nItemId, bGoTop, bRefreshAnimator)
+  self.tbTimeInfo = {}
+  bGoTop = nil == bGoTop and true or bGoTop
+  bRefreshAnimator = nil == bRefreshAnimator and true or bRefreshAnimator
+  self.tbWareList = Shop:GetWareAvaliableList(nShopIndex)
+  local nCount = #self.tbWareList
+  self:SetItemSVActive(nCount > 0)
+  if not nItemId then
+    if self.tbWareList and not Lib:IsEmptyTB(self.tbWareList) then
+      local nFirstSort, nSecondSort, nRemainCount
+      local nMaxSortValue = 1000000
+      local tbRemainList = {}
+      table.sort(self.tbWareList, function(tbFirst, tbSecond)
+        tbRemainList[tbFirst.nWareId] = tbRemainList[tbFirst.nWareId] or Shop:GetShopRemainCount(Shop:GetAWare(tbFirst.nWareId), me)
+        nRemainCount = tbRemainList[tbFirst.nWareId]
+        nFirstSort = 0 == nRemainCount and tbFirst.nSort + nMaxSortValue or tbFirst.nSort
+        tbRemainList[tbSecond.nWareId] = tbRemainList[tbSecond.nWareId] or Shop:GetShopRemainCount(Shop:GetAWare(tbSecond.nWareId), me)
+        nRemainCount = tbRemainList[tbSecond.nWareId]
+        nSecondSort = 0 == nRemainCount and tbSecond.nSort + nMaxSortValue or tbSecond.nSort
+        return nFirstSort < nSecondSort
+      end)
+    end
+    self.tbWareScroll:Clear()
+    self.tbWareScroll:SetGridElement(nCount, self.nRow, self.fnSetItem)
+    if bGoTop then
+      self.tbWareScroll:GoTop()
+    end
+    if bRefreshAnimator then
+      self.tbWareScroll:SetGridElement(nCount, self.nRow, self.fnSetItem)
+    else
+      self.tbWareScroll:SetGridElement(nCount, self.nRow, self.fnSetItem2)
+    end
+  end
+end
+
+function tbWnd:UpdateLimitShopItemSV(nItemId, bGoTop, bRefreshAnimator)
+  self.tbTimeInfo = {}
+  self.uiTree:SelectNode(self.nCurLimitShopBigType, self.nCurLimitShopSmallType, true)
+end
+
+function tbWnd:SetItemSVActive(bStatus)
+  if bStatus then
+    self.pPanel:SetActive(tbControls.ItemSVWid, true)
+    self.pPanel:SetActive(tbControls.NotInfo, false)
+  else
+    self.pPanel:SetActive(tbControls.ItemSVWid, false)
+    self.pPanel:SetActive(tbControls.NotInfo, true)
+  end
+end
+
+function tbWnd:OnResponseBuy(bSuccess, nItemId)
+  if bSuccess then
+    if self.nShopIndex == Shop.ShopType2ViewIndex.LimitBuy then
+      self:UpdateItemContent()
+    else
+      self:UpdateItemSV_Helper(self.nShopIndex, nil, false, false)
+    end
+  end
+end
+
+function tbWnd:OnSyncShopWare(nItemId)
+  if nItemId then
+    for i, tbInfo in ipairs(self.tbWareList) do
+      local tbWare = Shop:GetAWare(tbInfo.nWareId)
+      if tbWare and tbWare.nItemId == nItemId then
+        local nIndex = math.ceil(i / self.nRow)
+        local nCol = i - self.nRow * (nIndex - 1)
+        local tbElement = self.tbWareScroll:GetGridElement(nIndex, nCol)
+        if tbElement then
+          self.fnSetItem(self.tbWareScroll, nIndex, self)
+        end
+      end
+    end
+  else
+    self:UpdateItemSV_Helper(self.nShopIndex)
+  end
+end
+
+function tbWnd:UpdateRemianTime()
+  local nCurTime = GetTime()
+  local bNeedUpdateAll = false
+  for nIndex, tbV in pairs(self.tbTimeInfo) do
+    local nEndTimestamp = tbV.nEndTimestamp
+    if nCurTime > nEndTimestamp then
+      bNeedUpdateAll = true
+      self.tbTimeInfo[nIndex] = nil
+    else
+      local tbElement = self.tbWareScroll:GetGridElement(tbV.nIndex, tbV.nCol)
+      if tbElement then
+        tbElement.pPanel:Label_SetText("txtTimeLimit", i18n.EasyGet("{0}\229\144\142\228\184\139\230\158\182", Lib:TimeDesc14(nEndTimestamp - nCurTime)))
+      end
+    end
+  end
+  if bNeedUpdateAll then
+    self:UpdateItemSV_Helper(self.nShopIndex)
+  end
+end
+
+function tbWnd:RefreshClosetShopEffectShow()
+  self.pPanel:SetActive(tbControls.EffectBtnClosetShop, true)
+end
+
+local function fnSortBigData(tbA, tbB)
+  return tbA.nType < tbB.nType
+end
+
+local function fnSortSmallData(tbA, tbB)
+  if tbA.nType ~= tbB.nType then
+    return tbA.nType < tbB.nType
+  end
+  return tbA.tbInfo[2] < tbB.tbInfo[2]
+end
+
+function tbWnd:UpdateTree()
+  self.tbBigTypeData = {}
+  self.tbSmallTypeData = {}
+  for nBigType, tbBigInfo in pairs(Shop.tbClassifySetting) do
+    local bHaveOpen = false
+    local nCurTime = GetTime()
+    for nSmallType, tbSmallInfo in pairs(tbBigInfo.tbSmallInfo) do
+      local bShow = false
+      if not tbSmallInfo.nOpenTime and not tbSmallInfo.nCloseTime then
+        bShow = true
+      elseif nCurTime > tbSmallInfo.nOpenTime and nCurTime < tbSmallInfo.nCloseTime then
+        bShow = true
+      end
+      if tbSmallInfo.szOpenTimeFrame and tbSmallInfo.szOpenTimeFrame ~= "" then
+        bShow = 1 == GetTimeFrameState(tbSmallInfo.szOpenTimeFrame)
+      end
+      if tbSmallInfo.szEndTimeFrame and "" ~= tbSmallInfo.szEndTimeFrame then
+        bShow = bShow and 1 ~= GetTimeFrameState(tbSmallInfo.szEndTimeFrame)
+      end
+      if bShow then
+        bHaveOpen = true
+        table.insert(self.tbSmallTypeData, {
+          nType = nBigType,
+          szText = i18n.Parse(tbSmallInfo.szName),
+          tbInfo = {nBigType, nSmallType}
+        })
+      end
+    end
+    if bHaveOpen then
+      table.insert(self.tbBigTypeData, {
+        nType = nBigType,
+        szText = i18n.Parse(tbBigInfo.szName),
+        tbInfo = {nBigType}
+      })
+    end
+  end
+  table.sort(self.tbBigTypeData, fnSortBigData)
+  table.sort(self.tbSmallTypeData, fnSortSmallData)
+  self.uiTree:SetData(self.tbBigTypeData, self.tbSmallTypeData)
+end
+
+function tbWnd:onClickTreeBigBtn(tbInfo)
+  self.nCurLimitShopBigType = tbInfo[1]
+  self.pPanel:SetActive(tbControls.LimitShopNotInfo, Shop.tbLimishopType2Ware[self.nCurLimitShopBigType] == nil)
+  self.pPanel:SetActive(tbControls.LimitShopItemSVWid, Shop.tbLimishopType2Ware[self.nCurLimitShopBigType] ~= nil)
+  local nRet, nIndex = self.uiTree:AutoSelectSmall(self.nCurLimitShopBigType)
+end
+
+function tbWnd:onClickTreeSmallBtn(tbInfo)
+  self.nCurLimitShopBigType = tbInfo[1]
+  self.nCurLimitShopSmallType = tbInfo[2]
+  local tbWareList = Shop.tbLimishopType2Ware[self.nCurLimitShopBigType] and Shop.tbLimishopType2Ware[self.nCurLimitShopBigType][self.nCurLimitShopSmallType]
+  local bHave = tbWareList and #tbWareList > 0
+  self.pPanel:SetActive(tbControls.LimitShopNotInfo, not bHave)
+  self.pPanel:SetActive(tbControls.LimitShopItemSVWid, bHave)
+  self.tbMoneyPanel:SetDynamicShow(false)
+  self.tbMoneyPanel:SetCoinShow(false)
+  self.tbMoneyPanel:SetGoldShow(false)
+  self.tbMoneyPanel:SetYuanBaoShow(false)
+  for _, szCurrency in pairs(Shop.tbClassifySetting[self.nCurLimitShopBigType].tbSmallInfo[self.nCurLimitShopSmallType].tbCurrency) do
+    if "Coin" == szCurrency then
+      self.tbMoneyPanel:SetCoinShow(true)
+    end
+    if "Gold" == szCurrency then
+      self.tbMoneyPanel:SetGoldShow(true)
+    end
+    if "YuanBao" == szCurrency then
+      self.tbMoneyPanel:SetYuanBaoShow(true)
+    end
+    if "Coin" ~= szCurrency and "Gold" ~= szCurrency and "YuanBao" ~= szCurrency then
+      self.tbMoneyPanel:SetDynamicShow(true)
+      self.tbMoneyPanel:SetDynamicCurrencyType(szCurrency)
+    end
+  end
+  self:UpdateItemContent(true)
+end
+
+function tbWnd:UpdateItemContent(bRefresh)
+  local tbWareList = Shop.tbLimishopType2Ware[self.nCurLimitShopBigType] and Shop.tbLimishopType2Ware[self.nCurLimitShopBigType][self.nCurLimitShopSmallType]
+  self.tbWareScroll:Clear()
+  local bHave = tbWareList and #tbWareList > 0
+  if not bHave then
+    return
+  end
+  if not tbWareList or Lib:IsEmptyTB(tbWareList) then
+    return
+  end
+  self.tbWareList = {}
+  for _, v in ipairs(tbWareList) do
+    local tbWare = Shop:GetAWare(v.nWareId)
+    if Shop:CheckWareAvaliable(tbWare, me) then
+      table.insert(self.tbWareList, v)
+    end
+  end
+  local nFirstSort, nSecondSort, nRemainCount
+  local nMaxSortValue = 1000000
+  local tbRemainList = {}
+  table.sort(self.tbWareList, function(tbFirst, tbSecond)
+    tbRemainList[tbFirst.nWareId] = tbRemainList[tbFirst.nWareId] or Shop:GetShopRemainCount(Shop:GetAWare(tbFirst.nWareId), me)
+    nRemainCount = tbRemainList[tbFirst.nWareId]
+    nFirstSort = 0 == nRemainCount and tbFirst.nSort + nMaxSortValue or tbFirst.nSort
+    tbRemainList[tbSecond.nWareId] = tbRemainList[tbSecond.nWareId] or Shop:GetShopRemainCount(Shop:GetAWare(tbSecond.nWareId), me)
+    nRemainCount = tbRemainList[tbSecond.nWareId]
+    nSecondSort = 0 == nRemainCount and tbSecond.nSort + nMaxSortValue or tbSecond.nSort
+    return nFirstSort < nSecondSort
+  end)
+  self.tbWareScroll:SetGridElement(#self.tbWareList, self.nRow, bRefresh and self.fnSetItem or self.fnSetItem2)
+end
+
+function tbWnd:TrySelectNode(nBigType, nSmallType)
+  for nBigIndex, tbBigInfo in ipairs(self.tbBigTypeData) do
+    if tbBigInfo.nType == nBigType then
+      for nSmallIndex, tbSmallInfo in ipairs(self.tbSmallTypeData) do
+        if tbSmallInfo.tbInfo[2] == nSmallType then
+          self.uiTree:SelectNode(nBigIndex, nSmallIndex, true)
+          break
+        end
+      end
+    end
+  end
+end

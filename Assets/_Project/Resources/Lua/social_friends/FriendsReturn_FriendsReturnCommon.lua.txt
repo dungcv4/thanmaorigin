@@ -1,0 +1,498 @@
+Require("CommonScript/FriendsReturn/FriendsReturnCfg.lua")
+Require("CommonScript/FriendsReturn/FriendsReturnDef.lua")
+FriendsReturn = FriendsReturn or {}
+
+function FriendsReturn:GetDayCountByOfflineTime(pPlayer)
+  if not pPlayer then
+    return 0
+  end
+  local nLastOfflineTime = OfflineExp:LastOfflineTime(pPlayer)
+  local nDayOffset = Lib:CalcDayOffset(14400, nLastOfflineTime)
+  return nDayOffset
+end
+
+function FriendsReturn:CalcPlayerReturnerAwardTime(tbAwardData, tbVipData, nDayLeft, nVipLevel)
+  if not tbAwardData or Lib:CountTB(tbAwardData) <= 0 then
+    return 0
+  end
+  if not tbVipData or Lib:CountTB(tbVipData) <= 0 then
+    return 0
+  end
+  local nTotalCount = math.min(tbAwardData[1], math.floor(nDayLeft / tbAwardData[2]) * tbAwardData[3])
+  local nVipOffset = tbVipData[nVipLevel + 1] or tbVipData[#tbVipData]
+  nTotalCount = math.floor(nTotalCount * nVipOffset)
+  return nTotalCount
+end
+
+function FriendsReturn:CheckIfPlayerCanBeReturner(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local nPlayerLevel = pPlayer.nLevel
+  local nCurTime = GetTime()
+  local nLastOfflineTime = OfflineExp:LastOfflineTime(pPlayer)
+  local nActiveCheck = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerActiveCheck)
+  if nPlayerLevel < self.Cfg.nNeedLevel then
+    return false
+  end
+  if nLastOfflineTime <= 0 then
+    return false
+  end
+  if nCurTime - nLastOfflineTime < self.Cfg.nOfflineTime then
+    return false
+  end
+  if nCurTime - nActiveCheck < self.Cfg.nOfflineTime then
+    return false
+  end
+  return true
+end
+
+function FriendsReturn:CheckIsPlayerReturner(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local nReturnerState = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerState)
+  if 0 == nReturnerState then
+    return false, self.Def.tbReturnerState.notReturner, 0
+  end
+  local nNowTime = GetTime()
+  local nReturnerStartTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerStartTime)
+  local nLeftTime = self.Cfg.nReturnerContinueTIme + nReturnerStartTime - nNowTime
+  if nLeftTime <= 0 then
+    if MODULE_GAMESERVER then
+      self:ClearReturnerUserValue(pPlayer)
+      self:ClearReturnerBuff(pPlayer)
+    end
+    return false, self.Def.tbReturnerState.isReturnerButOutOfTime, 0
+  end
+  return true, self.Def.tbReturnerState.isReturner, nLeftTime
+end
+
+function FriendsReturn:CheckIfPlayerCanBeSpecialReturner(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local nCurTime = GetTime()
+  local nStartTime = Lib:ParseDateTime(self.Cfg.SpecialActivity.nActivityStartTime)
+  local nEndTime = Lib:ParseDateTime(self.Cfg.SpecialActivity.nActivityEndTime)
+  if nCurTime >= nStartTime and nCurTime < nEndTime then
+    return true
+  end
+  return false
+end
+
+function FriendsReturn:CheckIsPlayerSpecialReturner(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local bIsReturner = self:CheckIsPlayerReturner(pPlayer)
+  if not bIsReturner then
+    return false
+  end
+  local nSpecialReturnerState = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerSpecialActivityState)
+  if 0 == nSpecialReturnerState then
+    return false
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanGetSpecialClothingGift(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local bIsReturner = self:CheckIsPlayerReturner(pPlayer)
+  local bIsSpecialReturner = self:CheckIsPlayerSpecialReturner(pPlayer)
+  if not bIsReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  if not bIsSpecialReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  local nReturnerSpecialActivityAwardGet = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerSpecialActivityAwardGet)
+  if 0 ~= nReturnerSpecialActivityAwardGet then
+    return false, i18n.EasyGet("\230\137\128\230\156\137\229\165\150\229\138\177\233\131\189\229\183\178\233\162\134\229\143\150\232\191\135\228\186\134")
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanGetSpecialChuanGong(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local nCurMaxLevel = self:GetMaxLevel()
+  if pPlayer.nTotalLevel >= nCurMaxLevel - 10 then
+    return false, i18n.EasyGet("\229\164\167\228\190\160\229\189\147\229\137\141\231\173\137\231\186\167\229\183\178\231\187\143\228\184\141\233\156\128\232\166\129\230\142\140\233\151\168\228\188\160\229\138\159\228\186\134")
+  end
+  local bIsReturner = self:CheckIsPlayerReturner(pPlayer)
+  local bIsSpecialReturner = self:CheckIsPlayerSpecialReturner(pPlayer)
+  if not bIsReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  if not bIsSpecialReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  local nChuanGongState = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerSpecialActivityChuanGong)
+  if 0 ~= nChuanGongState then
+    return false, i18n.EasyGet("\230\130\168\229\183\178\231\187\143\230\142\165\229\143\151\232\191\135\230\142\140\233\151\168\228\188\160\229\138\159\228\186\134")
+  end
+  local bMonthCardState = WeekMonthCard:CheckMonthCardState(pPlayer)
+  if not bMonthCardState then
+    return false, i18n.EasyGet("\230\178\161\230\156\137\230\156\136\229\141\161\239\188\140\228\184\141\230\187\161\232\182\179\230\180\187\229\138\168\230\157\161\228\187\182")
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanRequestVipReturnAward(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local nReturnerState = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerVipAwardCheck)
+  if 0 ~= nReturnerState then
+    return false
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanRequestVNVipReturnAward(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local nNowTime = GetTime()
+  local nActivityStartTime = Lib:ParseDateTime(self.Cfg.SpecialActivity.nNewSerActivityStartTime)
+  local nActivityEndTime = Lib:ParseDateTime(self.Cfg.SpecialActivity.nNewSerActivityEndTime)
+  local nNewSerActivityGetEndTime = nActivityEndTime + 4320000
+  if nNowTime < nActivityStartTime or nNowTime > nNewSerActivityGetEndTime then
+    return false, i18n.EasyGet("\228\184\141\229\156\168\230\180\187\229\138\168\230\151\182\233\151\180\229\134\133")
+  end
+  if pPlayer.nLevel < self.Cfg.SpecialActivity.nNewSerTriggerLevel then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\231\172\166\229\144\136\233\162\134\229\143\150\229\165\150\229\138\177\231\154\132\230\157\161\228\187\182")
+  end
+  local nReturnerVNVipAwardCheck = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerVNVipAwardCheck)
+  local nReturnerVNVipTotalYuanbaoCount = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerVNVipTotalYuanbaoCount)
+  local nReturnerVNVipYuanbaoGetCount = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerVNVipYuanbaoGetCount)
+  local nReturnerVNVipYuanbaoGetPerTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerVNVipYuanbaoGetPerTime)
+  local nReturnerVNVipYuanbaoCanGetTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerVNVipYuanbaoCanGetTime)
+  if 0 == nReturnerVNVipAwardCheck or 2 == nReturnerVNVipAwardCheck or 3 == nReturnerVNVipAwardCheck then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\231\172\166\229\144\136\233\162\134\229\143\150\229\165\150\229\138\177\231\154\132\230\157\161\228\187\182")
+  end
+  if nReturnerVNVipTotalYuanbaoCount <= 0 or nReturnerVNVipTotalYuanbaoCount <= nReturnerVNVipYuanbaoGetCount then
+    return false, i18n.EasyGet("\230\137\128\230\156\137\229\165\150\229\138\177\233\131\189\229\183\178\233\162\134\229\143\150")
+  end
+  local nCurTime = GetTime()
+  if not Lib:IsDiffDay(14400, nCurTime, nReturnerVNVipYuanbaoCanGetTime) then
+    return false, i18n.EasyGet("\228\187\138\229\164\169\229\183\178\231\187\143\233\162\134\232\191\135\229\165\150\229\138\177\228\186\134")
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanRequestVNVipReturnLevelupAward(pPlayer, nId)
+  if not pPlayer then
+    return false
+  end
+  local nNowTime = GetTime()
+  local nActivityStartTime = Lib:ParseDateTime(self.Cfg.SpecialActivity.nNewSerActivityStartTime)
+  local nActivityEndTime = Lib:ParseDateTime(self.Cfg.SpecialActivity.nNewSerActivityEndTime)
+  local nNewSerActivityGetEndTime = nActivityEndTime + 4320000
+  if nNowTime < nActivityStartTime or nNowTime > nNewSerActivityGetEndTime then
+    return false, i18n.EasyGet("\228\184\141\229\156\168\230\180\187\229\138\168\230\151\182\233\151\180\229\134\133")
+  end
+  if pPlayer.nLevel < self.Cfg.SpecialActivity.nNewSerTriggerLevel then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\231\172\166\229\144\136\233\162\134\229\143\150\229\165\150\229\138\177\231\154\132\230\157\161\228\187\182")
+  end
+  local nReturnerVNVipAwardCheck = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerVNVipAwardCheck)
+  if 0 == nReturnerVNVipAwardCheck or 2 == nReturnerVNVipAwardCheck or 3 == nReturnerVNVipAwardCheck then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\231\172\166\229\144\136\233\162\134\229\143\150\229\165\150\229\138\177\231\154\132\230\157\161\228\187\182")
+  end
+  if pPlayer.nLevel < self.tbVNVipAwardInfoById[nId].nLevel then
+    return false, i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179")
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfReturnerWelfareUIOpen(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  if self:CheckIsPlayerReturner(pPlayer) then
+    return true
+  end
+  local nTimeExpand = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailyFundExpandTime)
+  local nNow = GetTime()
+  if nTimeExpand > nNow then
+    return true
+  end
+  return false
+end
+
+function FriendsReturn:CheckIfPlayerCanUpdateDailyAward(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local bIsReturner = self:CheckIsPlayerReturner(pPlayer)
+  local bIsSpecialReturner = self:CheckIsPlayerSpecialReturner(pPlayer)
+  if not bIsReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  local nActiveCount = ActivePoint:GetCount(pPlayer)
+  if nActiveCount < self.Cfg.nDailySignActivePoint then
+    return false, i18n.EasyGet("\230\156\172\230\151\165\230\180\187\232\183\131\229\186\166\230\156\170\232\190\190\229\136\176{0}", self.Cfg.nDailySignActivePoint)
+  end
+  local tbSignInAwardInfo = self.tbDailySignInInfo
+  if bIsSpecialReturner then
+    tbSignInAwardInfo = self.tbSpecialDailySignInInfo
+  end
+  local nReturnerDailySignInCanGetCheck = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailySignInCanGetCheck)
+  if nReturnerDailySignInCanGetCheck >= Lib:CountTB(tbSignInAwardInfo) then
+    return false, i18n.EasyGet("\230\137\128\230\156\137\229\165\150\229\138\177\233\131\189\229\183\178\232\167\163\233\148\129")
+  end
+  local nReturnerDailySignInCheck = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailySignInCheck)
+  if nReturnerDailySignInCheck >= Lib:CountTB(tbSignInAwardInfo) then
+    return false, i18n.EasyGet("\230\137\128\230\156\137\229\165\150\229\138\177\233\131\189\229\183\178\233\162\134\229\143\150\232\191\135\228\186\134")
+  end
+  local nCurTime = GetTime()
+  local nReturnerLastDailyCanGetTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailySignInCanGetTime)
+  if not Lib:IsDiffDay(14400, nCurTime, nReturnerLastDailyCanGetTime) then
+    return false, i18n.EasyGet("\228\187\138\229\164\169\229\183\178\231\187\143\232\167\163\233\148\129\232\191\135\229\165\150\229\138\177\228\186\134")
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanGetDailyAward(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local bIsReturner = self:CheckIsPlayerReturner(pPlayer)
+  local bIsSpecialReturner = self:CheckIsPlayerSpecialReturner(pPlayer)
+  if not bIsReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  local tbSignInAwardInfo = self.tbDailySignInInfo
+  if bIsSpecialReturner then
+    tbSignInAwardInfo = self.tbSpecialDailySignInInfo
+  end
+  local nReturnerDailySignInCheck = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailySignInCheck)
+  if nReturnerDailySignInCheck >= Lib:CountTB(tbSignInAwardInfo) then
+    return false, i18n.EasyGet("\230\137\128\230\156\137\229\165\150\229\138\177\233\131\189\229\183\178\233\162\134\229\143\150\232\191\135\228\186\134")
+  end
+  local nReturnerDailySignInCanGetCheck = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailySignInCanGetCheck)
+  if nReturnerDailySignInCheck >= nReturnerDailySignInCanGetCheck then
+    return false, i18n.EasyGet("\230\137\128\230\156\137\229\165\150\229\138\177\233\131\189\229\183\178\233\162\134\229\143\150\232\191\135\228\186\134")
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanUpdateFund(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local nReturnerDailyFundBuy = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailyFundBuy)
+  if 1 ~= nReturnerDailyFundBuy then
+    return false, i18n.EasyGet("\230\130\168\230\178\161\230\156\137\232\180\173\228\185\176\229\155\158\229\189\146\229\159\186\233\135\145")
+  end
+  local nReturnerFundCanGetCheck = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailyFundCanGetCheck)
+  if nReturnerFundCanGetCheck >= Lib:CountTB(self.tbDailyFundInfo) then
+    return false, i18n.EasyGet("\230\137\128\230\156\137\229\165\150\229\138\177\233\131\189\229\183\178\232\167\163\233\148\129")
+  end
+  local nReturnerFundCheck = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailyFundCheck)
+  if nReturnerFundCheck >= Lib:CountTB(self.tbDailyFundInfo) then
+    return false, i18n.EasyGet("\230\137\128\230\156\137\229\165\150\229\138\177\233\131\189\229\183\178\233\162\134\229\143\150\232\191\135\228\186\134")
+  end
+  local nCurTime = GetTime()
+  local nReturnerFundCanGetTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailyFundCanGetTime)
+  if not Lib:IsDiffDay(14400, nCurTime, nReturnerFundCanGetTime) then
+    return false, i18n.EasyGet("\228\187\138\229\164\169\229\183\178\231\187\143\232\167\163\233\148\129\232\191\135\229\165\150\229\138\177\228\186\134")
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanGetReturnFund(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local nReturnerDailyFundBuy = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailyFundBuy)
+  if 1 ~= nReturnerDailyFundBuy then
+    return false, i18n.EasyGet("\230\130\168\230\178\161\230\156\137\232\180\173\228\185\176\229\155\158\229\189\146\229\159\186\233\135\145")
+  end
+  local nReturnerDailyFundCheck = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailyFundCheck)
+  if nReturnerDailyFundCheck >= Lib:CountTB(self.tbDailyFundInfo) then
+    return false, i18n.EasyGet("\230\137\128\230\156\137\229\165\150\229\138\177\233\131\189\229\183\178\233\162\134\229\143\150\232\191\135\228\186\134")
+  end
+  local nReturnerDailyFundCanGetCheck = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailyFundCanGetCheck)
+  if nReturnerDailyFundCheck >= nReturnerDailyFundCanGetCheck then
+    return false, i18n.EasyGet("\230\137\128\230\156\137\229\165\150\229\138\177\233\131\189\229\183\178\233\162\134\229\143\150\232\191\135\228\186\134")
+  end
+  local nReturnerDailyFundExpandTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailyFundExpandTime)
+  if nReturnerDailyFundExpandTime < GetTime() then
+    return false, i18n.EasyGet("\230\180\187\229\138\168\229\183\178\232\191\135\230\156\159")
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanBuyReturnFund(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local bIsReturner = self:CheckIsPlayerReturner(pPlayer)
+  if not bIsReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  local nReturnerDailyFundTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerDailyFundBuy)
+  if 1 == nReturnerDailyFundTime then
+    return false, i18n.EasyGet("\230\130\168\229\183\178\231\187\143\232\180\173\228\185\176\232\191\135\229\155\158\229\189\146\229\159\186\233\135\145\228\186\134")
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanGetReturnerXiuLianRestore(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local bIsReturner = self:CheckIsPlayerReturner(pPlayer)
+  if not bIsReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  local nReturnerXiuLianTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerXiuLianTimeLeft)
+  if nReturnerXiuLianTime <= 0 then
+    return false, i18n.EasyGet("\229\183\178\230\178\161\230\156\137\229\137\169\228\189\153\230\172\161\230\149\176")
+  end
+  local bCanGet, szMsg = FieldPractice:CheckCanUseXiuLianDan(pPlayer, self.Cfg.nTimeXiuLianAdd)
+  if not bCanGet then
+    return false, szMsg
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanGetReturnerJiaZuJuanXianRestore(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local bIsReturner = self:CheckIsPlayerReturner(pPlayer)
+  if not bIsReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  local nReturnerJuanXianTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerJiaZuJuanXianTimeLeft)
+  if nReturnerJuanXianTime <= 0 then
+    return false, i18n.EasyGet("\229\183\178\230\178\161\230\156\137\229\137\169\228\189\153\230\172\161\230\149\176")
+  end
+  local nCurDegreeCtrl = DegreeCtrl:GetDegree(pPlayer, "DonationCount")
+  local nMaxDegreeCtrl = DegreeCtrl:GetMaxDegree("DonationCount", pPlayer)
+  if nCurDegreeCtrl >= nMaxDegreeCtrl then
+    return false, i18n.EasyGet("\229\174\182\230\151\143\232\180\161\231\140\174\230\172\161\230\149\176\229\183\178\230\187\161\239\188\140\230\151\160\233\156\128\229\162\158\229\138\160")
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanGetReturnerChuanGongRestore(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local bIsReturner = self:CheckIsPlayerReturner(pPlayer)
+  if not bIsReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  local nReturnerChuanGongTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerChuanGongTimeLeft)
+  if nReturnerChuanGongTime <= 0 then
+    return false, i18n.EasyGet("\229\183\178\230\178\161\230\156\137\229\137\169\228\189\153\230\172\161\230\149\176")
+  end
+  if pPlayer.dwKinId <= 0 then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\230\156\170\229\138\160\229\133\165\229\174\182\230\151\143")
+  end
+  local nCurDegreeCtrl = DegreeCtrl:GetDegree(pPlayer, "ChuanGongRecieve")
+  local nMaxDegreeCtrl = DegreeCtrl:GetMaxDegree("ChuanGongRecieve", pPlayer)
+  if nCurDegreeCtrl >= nMaxDegreeCtrl then
+    return false, i18n.EasyGet("\232\162\171\228\188\160\229\138\159\230\172\161\230\149\176\229\183\178\230\187\161\239\188\140\230\151\160\233\156\128\229\162\158\229\138\160")
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanGetReturnerYaoQianShuRestore(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local bIsReturner = self:CheckIsPlayerReturner(pPlayer)
+  if not bIsReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  local nReturnerYaoQianShuTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerYaoQianShuTimeLeft)
+  if nReturnerYaoQianShuTime <= 0 then
+    return false, i18n.EasyGet("\229\183\178\230\178\161\230\156\137\229\137\169\228\189\153\230\172\161\230\149\176")
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanGetReturnerSongJinRestore(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local bIsReturner = self:CheckIsPlayerReturner(pPlayer)
+  if not bIsReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  local nReturnerSongJinTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerSongJinTimeLeft)
+  if nReturnerSongJinTime <= 0 then
+    return false, i18n.EasyGet("\229\183\178\230\178\161\230\156\137\229\137\169\228\189\153\230\172\161\230\149\176")
+  end
+  local nCurDegreeCtrl = DegreeCtrl:GetDegree(pPlayer, "Battle")
+  local nMaxDegreeCtrl = DegreeCtrl:GetMaxDegree("Battle", pPlayer)
+  if nCurDegreeCtrl >= nMaxDegreeCtrl then
+    return false, i18n.EasyGet("\229\174\139\233\135\145\230\136\152\229\156\186\229\143\175\229\143\130\228\184\142\230\172\161\230\149\176\229\183\178\230\187\161\239\188\140\230\151\160\233\156\128\229\162\158\229\138\160")
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanGetReturnerChuanGongDanRestore(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local bIsReturner = self:CheckIsPlayerReturner(pPlayer)
+  if not bIsReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  local nReturnerChuanGongDanTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerChuanGongDanTimeLeft)
+  if nReturnerChuanGongDanTime <= 0 then
+    return false, i18n.EasyGet("\229\183\178\230\178\161\230\156\137\229\137\169\228\189\153\230\172\161\230\149\176")
+  end
+  local nCurDegreeCtrl = DegreeCtrl:GetDegree(pPlayer, "ChuanGongAdd")
+  local nMaxDegreeCtrl = DegreeCtrl:GetMaxDegree("ChuanGongAdd", pPlayer)
+  if nCurDegreeCtrl >= nMaxDegreeCtrl then
+    return false, i18n.EasyGet("\228\188\160\229\138\159\228\184\185\229\143\175\228\189\191\231\148\168\230\172\161\230\149\176\229\183\178\232\190\190{0}\230\172\161\239\188\140\230\151\160\233\156\128\229\162\158\229\138\160", nCurDegreeCtrl)
+  end
+  return true
+end
+
+function FriendsReturn:CheckIfPlayerCanGetReturnerXiuLianDanRestore(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local bIsReturner = self:CheckIsPlayerReturner(pPlayer)
+  if not bIsReturner then
+    return false, i18n.EasyGet("\230\130\168\228\184\141\230\152\175\229\155\158\229\189\146\231\142\169\229\174\182")
+  end
+  local nReturnerXiuLianDanTime = pPlayer.GetUserValue(self.Def.nGroup, self.Def.KEY.nReturnerXiuLianDanTimeLeft)
+  if nReturnerXiuLianDanTime <= 0 then
+    return false, i18n.EasyGet("\229\183\178\230\178\161\230\156\137\229\137\169\228\189\153\230\172\161\230\149\176")
+  end
+  local nCurDegreeCtrl = FieldPractice:GetXiuLianDanCounts(pPlayer)
+  local nMaxDegreeCtrl = FieldPractice.tbDef.XiuLianDanMaxTime
+  if nCurDegreeCtrl >= nMaxDegreeCtrl then
+    return false, i18n.EasyGet("\228\191\174\231\130\188\228\184\185\229\143\175\228\189\191\231\148\168\230\172\161\230\149\176\229\183\178\232\190\190{0}\230\172\161\239\188\140\230\151\160\233\156\128\229\162\158\229\138\160", nMaxDegreeCtrl)
+  end
+  return true
+end
+
+function FriendsReturn:GetMaxLevel()
+  local nCreateTime = GetServerCreateTime()
+  local nCurOpenServerDay = Lib:GetLocalDay(nCreateTime)
+  local nToday = Lib:GetLocalDay(GetTime() - 14400)
+  local nCurMaxLevel = 0
+  local nCurMaxZongShiLevel = 0
+  for i, v in ipairs(Calendar.tbOpenLevelTimeFrame) do
+    local nOpenDay = v.OpenDay + nCurOpenServerDay - 1
+    if nToday < nOpenDay then
+      break
+    end
+    nCurMaxLevel = v.NewMaxLevel
+    nCurMaxZongShiLevel = v.NewMaxZongShiLevel
+  end
+  return nCurMaxLevel + nCurMaxZongShiLevel
+end

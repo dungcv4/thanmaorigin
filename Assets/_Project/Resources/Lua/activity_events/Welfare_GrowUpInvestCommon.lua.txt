@@ -1,0 +1,126 @@
+Require("CommonScript/Welfare/GrowUpInvestCfg.lua")
+GrowUpInvest.SAVE_GROUP = GetGroupKey("GrowUpInvest")
+GrowUpInvest.BuyProductId = 1
+GrowUpInvest.AwardState = 2
+GrowUpInvest.nNotBuy = 1
+GrowUpInvest.nNotGet = 2
+GrowUpInvest.nHadGet = 3
+GrowUpInvest.nNotArrive = 4
+GrowUpInvest.nOpenLevel = 25
+
+function GrowUpInvest:GetBuyProductId(pPlayer)
+  return pPlayer.GetUserValue(self.SAVE_GROUP, self.BuyProductId)
+end
+
+function GrowUpInvest:CheckIsGetAllAward(pPlayer)
+  local tbCfg = GrowUpInvest:GetGrowAwardCfg(pPlayer)
+  if Lib:IsEmptyTB(tbCfg) then
+    return false
+  end
+  local nState = pPlayer.GetUserValue(self.SAVE_GROUP, self.AwardState)
+  for nAwardIndex, tbV in ipairs(tbCfg) do
+    if 0 == 1 << nAwardIndex - 1 & nState then
+      return false
+    end
+  end
+  return true
+end
+
+function GrowUpInvest:CheckIsCanBuy(pPlayer, nJiJinIndex)
+  local tbCfg = self.Cfg[nJiJinIndex]
+  if not tbCfg then
+    pPlayer.CenterMsg(i18n.EasyGet("\230\136\144\233\149\191\229\159\186\233\135\145\233\133\141\231\189\174\233\148\153\232\175\175\239\188\129"))
+    return false
+  end
+  if pPlayer.nTotalLevel < tbCfg.nOpenLevel then
+    pPlayer.CenterMsg(i18n.EasyGet("\232\167\146\232\137\178\231\173\137\231\186\167\228\184\141\232\182\179{0}, \230\151\160\230\179\149\232\180\173\228\185\176\239\188\129", tbCfg.nOpenLevel))
+    return false
+  end
+  local nPId = GrowUpInvest.tbIndex2ProductId[nJiJinIndex]
+  local nBuyProductId = self:GetBuyProductId(pPlayer)
+  local nBuyIndex = 0
+  if nBuyProductId > 0 then
+    nBuyIndex = GrowUpInvest.tbProductId2Index[nBuyProductId]
+    if not nBuyIndex then
+      LogErr("GrowUpInvest:CheckIsCanBuy nBuyIndex is nil.", nJiJinIndex, nBuyProductId, nBuyIndex)
+      return false
+    end
+  end
+  local nDiffLevel = nJiJinIndex - nBuyIndex
+  Log("CheckIsCanBuy", pPlayer.dwID, nJiJinIndex, nPId, nBuyProductId, nDiffLevel)
+  if 0 == nBuyProductId and 1 ~= nJiJinIndex then
+    pPlayer.CenterMsg(i18n.EasyGet("\230\136\144\233\149\191\229\159\186\233\135\145\229\191\133\233\161\187\228\187\142\231\172\172\228\184\128\230\161\163\228\185\176\232\181\183!"))
+    return false
+  elseif nBuyProductId > 0 and 1 ~= nDiffLevel then
+    pPlayer.CenterMsg(i18n.EasyGet("\230\136\144\233\149\191\229\159\186\233\135\145\228\184\141\232\131\189\232\182\138\231\186\167\232\180\173\228\185\176!"))
+    return false
+  end
+  return true
+end
+
+function GrowUpInvest:GetGrowAwardCfg(pPlayer)
+  local tbCfg = {}
+  local nBuyProductId = self:GetBuyProductId(pPlayer)
+  if 0 == nBuyProductId then
+    return tbCfg
+  end
+  local nJiJinIndex = self.tbProductId2Index[nBuyProductId]
+  if not nJiJinIndex or not GrowUpInvest.Cfg[nJiJinIndex] then
+    return tbCfg
+  end
+  for key, value in pairs(GrowUpInvest.Cfg[nJiJinIndex]) do
+    if type(key) == "number" then
+      table.insert(tbCfg, {key, value})
+    end
+  end
+  table.sort(tbCfg, function(a, b)
+    return a[1] < b[1]
+  end)
+  return tbCfg
+end
+
+function GrowUpInvest:HaveGetAward(pPlayer, nAwardIndex)
+  local nState = pPlayer.GetUserValue(self.SAVE_GROUP, self.AwardState)
+  nState = 1 << nAwardIndex - 1 & nState
+  return 0 ~= nState
+end
+
+function GrowUpInvest:CheckIsCanGetAward(pPlayer, nAwardIndex)
+  if not Lib:IsInteger(nAwardIndex) then
+    return false, i18n.EasyGet("\229\165\150\229\138\177\228\184\139\230\160\135\233\148\153\232\175\175!")
+  end
+  local tbCfg = GrowUpInvest:GetGrowAwardCfg(pPlayer)
+  if nAwardIndex <= 0 or nAwardIndex > #tbCfg then
+    return false, i18n.EasyGet("\229\165\150\229\138\177\228\184\139\230\160\135\233\148\153\232\175\175!")
+  end
+  if pPlayer.nTotalLevel < tbCfg[nAwardIndex][1] then
+    return false, i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179")
+  end
+  if self:HaveGetAward(pPlayer, nAwardIndex) then
+    return false, i18n.EasyGet("\229\165\150\229\138\177\229\183\178\233\162\134\229\143\150!")
+  end
+  return true
+end
+
+GrowUpInvest.nMaxGiveYuanBao = 100000
+
+function GrowUpInvest:CheckGrowUpConfigValid()
+  local tbLevel = {}
+  for _, tbV in ipairs(GrowUpInvest.Cfg) do
+    for nLevel, nYuanBao in pairs(tbV) do
+      if type(nLevel) == "number" then
+        if tbLevel[nLevel] then
+          LogErr(string.format("CheckGrowUpConfigValid Error tbLevel[%d]", nLevel))
+          return false
+        end
+        if nYuanBao > self.nMaxGiveYuanBao then
+          LogErr(string.format("CheckGrowUpConfigValid Error nYuanBao(%d)(%d)", nYuanBao, self.nMaxGiveYuanBao))
+          return false
+        end
+      end
+    end
+  end
+  return true
+end
+
+Validator:Register(GrowUpInvest.CheckGrowUpConfigValid, GrowUpInvest)

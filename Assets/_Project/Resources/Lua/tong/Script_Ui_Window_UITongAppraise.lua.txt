@@ -1,0 +1,170 @@
+local tbWnd = Ui:CreateWindow("UITongAppraise")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_TONG_APPRAISE,
+      self.GenerateApplyList
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  Template = "node/imgBG/Content/imgList/List/Viewport/Content/Template",
+  txtOwnVote = "node/imgBG/Content/imgList/txtOwnVote",
+  NotInfo = "node/imgBG/Content/imgList/NotInfo",
+  btnFightPower = "node/imgBG/Content/MemberListTitle/btnFightPower",
+  btnActivity = "node/imgBG/Content/MemberListTitle/btnActivity",
+  btnPoll = "node/imgBG/Content/MemberListTitle/btnPoll"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnFightPower = function(self)
+    self:UpdateListView("FightPower")
+  end,
+  btnActivity = function(self)
+    self:UpdateListView("Activity")
+  end,
+  btnPoll = function(self)
+    self:UpdateListView("Poll")
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbAppraiseListScrollView = Ui:NewScrollView(self, self.Template)
+end
+
+function tbWnd:OnOpen()
+  RemoteServer.OnTongRequest("SyncAppraise", 0)
+  self:GenerateApplyList()
+end
+
+local SortFunction = {
+  Default = function(tbAppraiseList, bIsDown)
+    table.sort(tbAppraiseList, function(tbA, tbB)
+      if tbA.bOutstanding == tbB.bOutstanding then
+        if tbA.nVotes == tbB.nVotes then
+          return tbA.nActive > tbB.nActive
+        else
+          return tbA.nVotes > tbB.nVotes
+        end
+      else
+        return tbA.bOutstanding
+      end
+    end)
+  end,
+  FightPower = function(tbAppraiseList, bIsDown)
+    table.sort(tbAppraiseList, function(tbA, tbB)
+      if tbA.nFightPower == tbB.nFightPower then
+        if bIsDown then
+          return tbA.szName > tbB.szName
+        else
+          return tbA.szName < tbB.szName
+        end
+      elseif bIsDown then
+        return tbA.nFightPower > tbB.nFightPower
+      else
+        return tbA.nFightPower < tbB.nFightPower
+      end
+    end)
+  end,
+  Activity = function(tbAppraiseList, bIsDown)
+    table.sort(tbAppraiseList, function(tbA, tbB)
+      if tbA.nActive == tbB.nActive then
+        if bIsDown then
+          return tbA.szName > tbB.szName
+        else
+          return tbA.szName < tbB.szName
+        end
+      elseif bIsDown then
+        return tbA.nActive > tbB.nActive
+      else
+        return tbA.nActive < tbB.nActive
+      end
+    end)
+  end,
+  Poll = function(tbAppraiseList, bIsDown)
+    table.sort(tbAppraiseList, function(tbA, tbB)
+      if tbA.nVotes == tbB.nVotes then
+        if bIsDown then
+          return tbA.szName > tbB.szName
+        else
+          return tbA.szName < tbB.szName
+        end
+      elseif bIsDown then
+        return tbA.nVotes > tbB.nVotes
+      else
+        return tbA.nVotes < tbB.nVotes
+      end
+    end)
+  end
+}
+
+function tbWnd:UpdateListView(szSortType)
+  if self.szSortType == szSortType then
+    self.bIsDown = not self.bIsDown
+  else
+    self.szSortType = szSortType
+    self.bIsDown = true
+  end
+  local nMyVotes = Tong:GetMyVotes()
+  local nMyChooseMemberId = Tong:GetMyChooseMemberId()
+  local bAppraiseOpen = Tong:GetAppraiseOpen()
+  self.pPanel:SetActive(self.NotInfo, 0 == #self.tbAppraiseList)
+  self.tbAppraiseListScrollView:Clear()
+  SortFunction[szSortType](self.tbAppraiseList, self.bIsDown)
+  for i = 1, #self.tbAppraiseList do
+    self.tbAppraiseListScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtKinName", self.tbAppraiseList[i].szKinName)
+      pPanel:Label_SetText("txtName", self.tbAppraiseList[i].szName)
+      pPanel:Label_SetText("txtFightPowerNum", self.tbAppraiseList[i].nFightPower)
+      pPanel:Label_SetText("txtActivityNum", self.tbAppraiseList[i].nActive)
+      pPanel:Label_SetText("txtGangNum", self.tbAppraiseList[i].nVotes)
+      pPanel:SetActive("btnPoll", bAppraiseOpen and (nMyVotes > 0 or nMyChooseMemberId == self.tbAppraiseList[i].nMemberId))
+      pPanel:Button_SetEnable("btnPoll", nMyVotes > 0)
+      pPanel:Button_SetText("btnPoll", nMyVotes > 0 and i18n.EasyGet("\230\138\149\231\165\168") or i18n.EasyGet("\229\183\178\230\138\149\231\165\168"), "Text")
+      pPanel:SetActive("txtGangNum/btnDetails", self.tbAppraiseList[i].nMemberId == me.dwID)
+      pPanel:Button_SetEnable("txtGangNum/btnDetails", self.tbAppraiseList[i].nMemberId == me.dwID)
+      pPanel:SetActive("imgExcellence", self.tbAppraiseList[i].bOutstanding)
+      if bAppraiseOpen and nMyVotes > 0 then
+        Ui:Button_BindEvent(pPanel, "btnPoll", self.Vote, self, self.tbAppraiseList[i].nMemberId)
+      end
+      if self.tbAppraiseList[i].nMemberId == me.dwID then
+        Ui:Button_BindEvent(pPanel, "txtGangNum/btnDetails", self.VoteDetails, self, self.tbAppraiseList[i].tbVoteInfo)
+      end
+    end)
+  end
+end
+
+function tbWnd:GenerateApplyList()
+  local tbAppraiseList = Tong:GetAppraiseList()
+  self.tbAppraiseList = {}
+  for nMember, tbInfo in pairs(tbAppraiseList) do
+    table.insert(self.tbAppraiseList, tbInfo)
+  end
+  self:UpdateListView("Default")
+  local nMyVotes = Tong:GetMyVotes()
+  self.pPanel:Label_SetText(self.txtOwnVote, i18n.EasyGet("\229\189\147\229\137\141\229\143\175\230\138\149\231\165\168\230\149\176 {0}", nMyVotes))
+end
+
+function tbWnd:Vote(nMemberId)
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\228\189\160\229\143\170\232\131\189\228\184\128\230\172\161\230\128\167\230\138\149\229\174\140\230\137\128\230\156\137\231\165\168\239\188\140\230\152\175\229\144\166\230\138\149\231\165\168\239\188\159"), {
+    {
+      function()
+        RemoteServer.OnTongRequest("Vote", me.dwID, nMemberId)
+      end
+    },
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function tbWnd:VoteDetails(tbVoteInfo)
+  Ui:OpenWindow("UITongAppraise_Tip", tbVoteInfo)
+end

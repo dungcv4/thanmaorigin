@@ -1,0 +1,224 @@
+Require("CommonScript/Item/ItemDefine.lua")
+local tbRandItem = Item:GetClass("FixItem")
+tbRandItem.PARAM_AWARDID = 1
+tbRandItem.PARAM_AWARDKEY = 2
+tbRandItem.PARAM_EXPENDITEMID = 3
+tbRandItem.PARAM_EXPENDITEMNUM = 4
+local tbCheckJingHuoItems = {
+  [414] = 500,
+  [400] = 500,
+  [2000] = 888,
+  [1999] = 100
+}
+local tbCheckYuanQiItems = {
+  [671604] = 1000
+}
+
+function tbRandItem:OnUse(it)
+  return self:OnUseMany(it, 1)
+end
+
+function tbRandItem:GetUseNeedItemTemplateId(nTemplateId)
+  return KItem.GetItemExtParam(nTemplateId, self.PARAM_EXPENDITEMID)
+end
+
+function tbRandItem:OnAutoUse(pPlayer, nItemTemplateId, nCount, szMsg, tbItemExtParams, nLogReason, nLogReason2)
+  local nAwardId = KItem.GetItemExtParam(nItemTemplateId, self.PARAM_AWARDID)
+  local nAwardKey = KItem.GetItemExtParam(nItemTemplateId, self.PARAM_AWARDKEY)
+  local tbAwardStudio = StudioRandomItem:GetStudioAward(pPlayer, nItemTemplateId)
+  local nExpendItemId = KItem.GetItemExtParam(nItemTemplateId, self.PARAM_EXPENDITEMID)
+  local nExpendItemNum = KItem.GetItemExtParam(nItemTemplateId, self.PARAM_EXPENDITEMNUM)
+  if tbAwardStudio then
+    nAwardId = tbAwardStudio.nAwardId
+    nAwardKey = tbAwardStudio.nAwardKey
+  end
+  if not nAwardKey or nAwardKey <= 0 then
+    nAwardKey = Award:GetLevelAwardKey(pPlayer.nLevel)
+  end
+  local szItemName = Item:GetName(nItemTemplateId, pPlayer)
+  if not self:CheckJingHuoMaxValue(pPlayer, nItemTemplateId, nCount) then
+    return false
+  end
+  if not self:CheckYuanQiMaxValue(pPlayer, nItemTemplateId, nCount) then
+    return false
+  end
+  if nExpendItemId and nExpendItemNum and nExpendItemId > 0 and nExpendItemNum > 0 then
+    local pItem = pPlayer.GetOneItemByTypeInBag(nExpendItemId)
+    local nExpendItemSumNum = nExpendItemNum * nCount
+    if not pItem or not (nExpendItemSumNum <= pPlayer.ConsumeItemInBag(nExpendItemId, nExpendItemSumNum, Env.LogWay_UseItem)) then
+      pPlayer.CallClientScript("Item:CanNotUseCallBack", "FixItem", nExpendItemId)
+      return false
+    end
+    Event:OnEvent(Event.emEVENT_RANDITEM_COSTITEM_COST, pPlayer.dwID, nExpendItemId, nExpendItemSumNum)
+  end
+  local tbAwards = {}
+  for i = 1, nCount do
+    local _, tbAward = Award:SendAutoUseAward(pPlayer, nAwardId, nAwardKey, nItemTemplateId, szItemName, true, false, true, tbItemExtParams, nLogReason, nLogReason2)
+    if tbAward then
+      Lib:MergeTable(tbAwards, tbAward)
+    end
+  end
+  local tbMoneyForTrack, tbItemForTrack = Award:GetAwardListForMBILog(Award:MergetSameTypeAward(tbAwards), true, {
+    "Gold",
+    "YuanBao",
+    "Coin"
+  })
+  Lib:TrackEvent(pPlayer.dwID, Env.track_openbox_open, nItemTemplateId, nCount, nExpendItemId, nExpendItemNum * nCount, tbMoneyForTrack.Gold or 0, tbMoneyForTrack.YuanBao or 0, tbMoneyForTrack.Coin or 0, Lib:EncodeJson(tbItemForTrack) or "")
+  return true, tbAwards
+end
+
+function tbRandItem:OnUseMany(it, nCount)
+  local nAwardId = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_AWARDID)
+  local nAwardKey = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_AWARDKEY)
+  local tbAwardStudio = StudioRandomItem:GetStudioAward(me, it.dwTemplateId)
+  local nExpendItemId = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_EXPENDITEMID)
+  local nExpendItemNum = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_EXPENDITEMNUM)
+  if tbAwardStudio then
+    nAwardId = tbAwardStudio.nAwardId
+    nAwardKey = tbAwardStudio.nAwardKey
+  end
+  if not nAwardKey or nAwardKey <= 0 then
+    nAwardKey = Award:GetLevelAwardKey(me.nLevel)
+  end
+  if not self:CheckJingHuoMaxValue(me, it.dwTemplateId, nCount) then
+    return 0
+  end
+  if not self:CheckYuanQiMaxValue(me, it.dwTemplateId, nCount) then
+    return 0
+  end
+  local nLeftBag = me.GetFreeBagCount()
+  if nLeftBag <= 0 then
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\231\169\186\233\151\180\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\228\189\191\231\148\168\239\188\129"))
+    return 0
+  end
+  local szMsg = it.szName
+  local nConsumeItemTemplateId = it.dwTemplateId
+  if nExpendItemId and nExpendItemNum and nExpendItemId > 0 and nExpendItemNum > 0 then
+    local pItem = me.GetOneItemByTypeInBag(nExpendItemId)
+    local nExpendItemSumNum = nExpendItemNum * nCount
+    if not pItem or not (nExpendItemSumNum <= me.ConsumeItemInBag(nExpendItemId, nExpendItemSumNum, Env.LogWay_UseItem)) then
+      me.CallClientScript("Item:CanNotUseCallBack", "FixItem", nExpendItemId, it.dwId)
+      return 0
+    end
+    Event:OnEvent(Event.emEVENT_RANDITEM_COSTITEM_COST, me.dwID, nExpendItemId, nExpendItemSumNum)
+  end
+  local tbAwardList = Award:GetAward_Fix(nAwardId, nAwardKey, {nRatio = nCount}) or {}
+  local tbNeedAddItemList = {}
+  for _, tbInfo in pairs(tbAwardList) do
+    local szAwardType = tbInfo[1]
+    if szAwardType == Player.AwardType2Name[Player.award_type_item] or szAwardType == Player.AwardType2Name[Player.award_type_item_Unsafe] then
+      local nCountIndex = Player.AwardTypeCountIndex[Player.AwardType[szAwardType]]
+      local nItemId = 3 == nCountIndex and tbInfo[2] or nil
+      local nItemCount = 3 == nCountIndex and tbInfo[3] or nil
+      if nItemId and nItemCount then
+        local nItemStack = KItem.GetItemBaseProp(nItemId).nStackMax
+        if nItemCount > nItemStack then
+          local nSplitCount = math.floor(nItemCount / nItemStack)
+          local nLastPartNum = nItemCount % nItemStack
+          tbInfo[3] = nItemStack
+          for i = 2, nSplitCount do
+            local tbNew = Lib:CopyTB(tbInfo)
+            table.insert(tbNeedAddItemList, tbNew)
+          end
+          local tbNew = Lib:CopyTB(tbInfo)
+          tbNew[3] = nLastPartNum
+          table.insert(tbNeedAddItemList, tbNew)
+        end
+      end
+    end
+  end
+  for _, tbNewInfo in pairs(tbNeedAddItemList) do
+    table.insert(tbAwardList, tbNewInfo)
+  end
+  Award:SendAward(me.dwID, tbAwardList, {
+    nLogReason = Env.LogWay_UseItem
+  })
+  local tbMoneyForTrack, tbItemForTrack = Award:GetAwardListForMBILog(tbAwardList, true, {
+    "Gold",
+    "YuanBao",
+    "Coin"
+  })
+  Lib:TrackEvent(me.dwID, Env.track_openbox_open, nConsumeItemTemplateId, nCount, nExpendItemId, nExpendItemNum * nCount, tbMoneyForTrack.Gold or 0, tbMoneyForTrack.YuanBao or 0, tbMoneyForTrack.Coin or 0, Lib:EncodeJson(tbItemForTrack) or "")
+  return nCount
+end
+
+function tbRandItem:GetClientDefaultUseCount(nItemId)
+  local pItem = me.GetItemInBag(nItemId)
+  local nResult = math.min(pItem.nCount, Item.UseManyLimit.FixItem)
+  local nExpendItemId = KItem.GetItemExtParam(pItem.dwTemplateId, self.PARAM_EXPENDITEMID)
+  if nExpendItemId > 0 then
+    local nExpendLimit = 0
+    local pExpendItem = me.GetOneItemByTypeInBag(nExpendItemId)
+    if nil ~= pExpendItem then
+      local nExpendItemOnceUseNum = KItem.GetItemExtParam(pItem.dwTemplateId, self.PARAM_EXPENDITEMNUM)
+      nExpendLimit = math.floor(pExpendItem.nCount / nExpendItemOnceUseNum)
+    end
+    nResult = math.min(nResult, nExpendLimit)
+  end
+  return nResult
+end
+
+function tbRandItem:GeNeedCount(nItemId)
+  local pItem = me.GetItemInBag(nItemId)
+  local nResult = 1
+  local nExpendItemId = KItem.GetItemExtParam(pItem.dwTemplateId, self.PARAM_EXPENDITEMID)
+  if nExpendItemId > 0 then
+    local nExpendItemOnceUseNum = KItem.GetItemExtParam(pItem.dwTemplateId, self.PARAM_EXPENDITEMNUM)
+    nResult = pItem.nCount * nExpendItemOnceUseNum
+  end
+  return nResult
+end
+
+function tbRandItem:HandleCanUseCallBack(nTemplateId, nItemId)
+  local function funcOK()
+    local nNeedNum = 1
+    
+    if nItemId then
+      nNeedNum = self:GeNeedCount(nItemId)
+    end
+    Ui:CloseWindow("UIItemTips")
+    Shop:OpenShopBuyWidDefault(nTemplateId, nNeedNum)
+  end
+  
+  local function funcCancel()
+  end
+  
+  local tbInfo = Item:GetItemBaseProp(nTemplateId)
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\229\165\135\231\143\141\233\152\129\232\191\155\232\161\140\232\180\173\228\185\176\239\188\159", tbInfo.szName), {
+    {funcOK},
+    {funcCancel}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function tbRandItem:CheckJingHuoMaxValue(pPlayer, nItemTemplateId, nCount)
+  local nJingHuoCount = tbCheckJingHuoItems[nItemTemplateId]
+  if nJingHuoCount and nJingHuoCount > 0 then
+    local nJingHuoCount = nJingHuoCount * nCount
+    if not Currency:CheckOverMaxValue_JingHuo(pPlayer, nJingHuoCount) then
+      pPlayer.CenterMsg(i18n.EasyGet("\231\178\190\230\180\187\232\182\133\229\135\186\229\173\152\229\130\168\228\184\138\233\153\144\239\188\140\230\151\160\230\179\149\228\189\191\231\148\168"))
+      return false
+    end
+  end
+  return true
+end
+
+function tbRandItem:OnTimeOut(pItem, pPlayer)
+  Item:OnTimeOutHelper(pItem, pPlayer, "FixItem")
+end
+
+function tbRandItem:CheckYuanQiMaxValue(pPlayer, nItemTemplateId, nCount)
+  local nYuanQiNum = tbCheckYuanQiItems[nItemTemplateId]
+  if nYuanQiNum and nYuanQiNum > 0 then
+    local nUseCount = nCount * nYuanQiNum
+    local nMaxValue = Currency:GetUserMaxValue(pPlayer, Currency.TYPE.ZhenQi)
+    local nOldCount = pPlayer.GetMoney(Currency.TYPE.ZhenQi)
+    if nMaxValue < nUseCount + nOldCount then
+      pPlayer.CenterMsg(i18n.EasyGet("\229\133\131\230\176\148\232\182\133\229\135\186\229\173\152\229\130\168\228\184\138\233\153\144\239\188\140\230\151\160\230\179\149\228\189\191\231\148\168"))
+      return false
+    end
+  end
+  return true
+end

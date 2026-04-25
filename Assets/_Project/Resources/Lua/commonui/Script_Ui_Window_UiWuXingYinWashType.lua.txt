@@ -1,0 +1,131 @@
+local tbWnd = Ui:CreateWindow("UiWuXingYinWashType")
+local tbControls = {
+  EquipGrid = "EquipInfo/UIItemGrid",
+  txtName = "EquipInfo/txtName",
+  txtLevel = "EquipInfo/txtLevel",
+  ItemGrid = "AttributeList/UIItemGrid",
+  btnWash = "AttributeList/btnReset",
+  txtCost = "AttributeList/txtCost",
+  NowTemplate = "AttributeList/Now/RandomAttib/RandomTemplate",
+  NextTemplate = "AttributeList/Next/RandomAttib/RandomTemplate",
+  nowTxtTitle = "AttributeList/Now/txtTitle",
+  nextTxtTitle = "AttributeList/Next/txtTitle",
+  btnAdd = "AttributeList/btnAdd",
+  btnSaveNow = "AttributeList/btnSaveNow",
+  btnSaveNext = "AttributeList/btnSaveNext",
+  txtPrompt = "AttributeList/txtPrompt"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnWash = function(self)
+    Item.WuXingYin:WashType(self.nEquipId)
+  end,
+  btnAdd = function(self)
+    Ui:OpenWindow("UIMarketStall", MarketStallBase.tbStallType.Gold, Ui.UIMarketStall.tbSelectTypeIndex.SELECT_TYPE_BUY, 4)
+  end,
+  btnSaveNow = function(self)
+    Item.WuXingYin.tbNewRandAttr = nil
+    self:Update()
+    RemoteServer.WuXingYinCmd("ClearAttrType")
+  end,
+  btnSaveNext = function(self)
+    if Item.WuXingYin.tbNewRandAttr then
+      Item.WuXingYin.tbNewRandAttr = nil
+      RemoteServer.WuXingYinCmd("SaveNewAttr")
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.ItemGrid = Ui:NewExistItemGrid(self, tbControls.ItemGrid)
+  self.EquipGrid = Ui:NewExistItemGrid(self, tbControls.EquipGrid)
+  self.tbNowScrollView = Ui:NewScrollView(self, tbControls.NowTemplate, nil, false, true)
+  self.tbNextScrollView = Ui:NewScrollView(self, tbControls.NextTemplate, nil, false, true)
+end
+
+function tbWnd:OnOpen(nEquipId)
+  self.nEquipId = nEquipId
+  self:Update()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.OnSyncItemEvent, self)
+  RemoteServer.WuXingYinCmd("OnSynType")
+  self.pPanel:Label_SetText(tbControls.nowTxtTitle, i18n.EasyGet("\230\180\151\231\187\131\229\137\141"))
+  self.pPanel:Label_SetText(tbControls.nextTxtTitle, i18n.EasyGet("\230\180\151\231\187\131\229\144\142"))
+  self.pPanel:Label_SetText(tbControls.btnSaveNow .. "/Text", i18n.EasyGet("\228\191\157\231\149\153\230\180\151\231\187\131\229\137\141"))
+  self.pPanel:Label_SetText(tbControls.btnSaveNext .. "/Text", i18n.EasyGet("\228\191\157\231\149\153\230\180\151\231\187\131\229\144\142"))
+  self.pPanel:Label_SetText(tbControls.btnWash .. "/Text", i18n.EasyGet("\230\180\151\231\187\131"))
+end
+
+function tbWnd:Update(nEquipId)
+  self.nEquipId = nEquipId or self.nEquipId
+  local pEquip = KItem.GetItemObj(self.nEquipId)
+  if not pEquip then
+    return
+  end
+  if Item.WuXingYin.tbNewRandAttr then
+    self.pPanel:Button_SetEnable(tbControls.btnSaveNow, true)
+    self.pPanel:Button_SetEnable(tbControls.btnSaveNext, true)
+  else
+    self.pPanel:Button_SetEnable(tbControls.btnSaveNow, false)
+    self.pPanel:Button_SetEnable(tbControls.btnSaveNext, false)
+  end
+  self.EquipGrid:SetItem(self.nEquipId, pEquip.dwTemplateId, {bShowTip = true}, me.nFaction, me.nFactionSect, me.nSex)
+  self.EquipGrid:SetClickEnable(true)
+  self.pPanel:Label_SetText(tbControls.txtName, i18n.Parse(pEquip.szName))
+  self.pPanel:Label_SetText(tbControls.txtLevel, i18n.EasyGet("{0}\233\152\182", pEquip.nLevel))
+  self:UpdateMaterial()
+  local tbNowAttr = Item.WuXingYin:GetRandAttr(pEquip, pEquip.nLevel)
+  self.tbNowScrollView:Reset()
+  for i = 1, #tbNowAttr do
+    self.tbNowScrollView:SetElement(i, function(tbElement)
+      self:SetText(tbElement, tbNowAttr[i])
+    end)
+  end
+  self.tbNextScrollView:Reset()
+  local bHaveNewAttr = Item.WuXingYin.tbNewRandAttr and true
+  self.pPanel:SetActive(tbControls.txtPrompt, bHaveNewAttr)
+  if bHaveNewAttr then
+    local tbTips = Item.WuXingYin:FormatAttr(Item.WuXingYin.tbNewRandAttr, pEquip.nLevel)
+    for i = 1, #tbTips do
+      self.tbNextScrollView:SetElement(i, function(tbElement)
+        self:SetText(tbElement, tbTips[i])
+      end)
+    end
+  end
+end
+
+function tbWnd:UpdateMaterial()
+  local nTemplate, nCost = Item.WuXingYin:GetWashTypeCost(self.nEquipId)
+  local nHave = me.GetItemCountInBags(nTemplate)
+  self.ItemGrid:SetItemByTemplate(nTemplate, nil, nil, nil, {bShowTip = true})
+  self.ItemGrid:SetClickEnable(true)
+  self.pPanel:Label_SetText(tbControls.txtCost, i18n.EasyGet("{0}/{1}", nHave, nCost))
+  if nCost > nHave then
+    self.pPanel:Label_SetColorByName(tbControls.txtCost, "Red")
+  else
+    self.pPanel:Label_SetColorByName(tbControls.txtCost, "BlackGreen")
+  end
+end
+
+function tbWnd:SetText(tbElement, tbDesc)
+  local pPanel = tbElement.pPanel
+  pPanel:SetActive("txtAttrib", true)
+  pPanel:Label_SetText("txtAttrib", tbDesc.szMagic)
+  pPanel:Label_SetColorByName("txtAttrib", tbDesc.szColor or "Red")
+end
+
+function tbWnd:OnSyncItemEvent(nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  local pEquip = me.GetEquipByPos(Item.EQUIPPOS_WUXINGYIN)
+  if not pItem or not pEquip then
+    return
+  end
+  local nCostTemplate = Item.WuXingYin:GetWashTypeCost(pEquip.dwId)
+  if nCostTemplate ~= pItem.dwTemplateId then
+    return
+  end
+  self:UpdateMaterial()
+end
+
+function tbWnd:OnClose()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+end

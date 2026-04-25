@@ -1,0 +1,195 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.HandInActivity)
+tbActivity.Protocol = {HandIn = 1, OnDialog = 2}
+tbActivity.tbSaveKeyID = {nRateAwardGetCountID = 1}
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/Common/HandInActivity/HandInActivityCfg.tab"
+  local tbLoadConfigs = Lib:EasyLoadTabFile(szFilepath, {"nConfigID"})
+  self.ACTIVITY_CONFIG = {}
+  for nConfigID, tbConfig in pairs(tbLoadConfigs or {}) do
+    self.ACTIVITY_CONFIG[nConfigID] = tbConfig
+    self.ACTIVITY_CONFIG[nConfigID].tbNPCMapID = Lib:SplitStrTry2Num(tbConfig.szNPCMapID, "|")
+  end
+  szFilepath = "Setting/Activity/Common/HandInActivity/RateAward.tab"
+  local tbField = {
+    "nConfigID",
+    "nIsStudio",
+    "nRate",
+    "nAwardID",
+    "nAwardKey",
+    "nMaxCount",
+    "nGetCountSaveID"
+  }
+  tbLoadConfigs = Lib:LoadTabFileEx(szFilepath, "ddddddd", nil, tbField)
+  for _, tbConfig in pairs(tbLoadConfigs or {}) do
+    if 1 == tbConfig.nIsStudio then
+      self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbStudioAward = tbConfig
+    else
+      self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbPlayerAward = tbConfig
+    end
+  end
+  szFilepath = "Setting/Activity/Common/HandInActivity/HandInDialogCfg.tab"
+  tbField = {
+    "nConfigID",
+    "nIndex",
+    "szDialogText",
+    "nFormulaID",
+    "szRedPointEvent",
+    "bHasExtraAward",
+    "nOnceMaxHandInCount",
+    "nHasStageAward",
+    "nStageAwardSaveID"
+  }
+  tbLoadConfigs = Lib:LoadTabFileEx(szFilepath, "ddsdsdddd", nil, tbField)
+  for _, tbConfig in pairs(tbLoadConfigs or {}) do
+    self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbNPCCfg = self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbNPCCfg or {}
+    self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbNPCCfg[tbConfig.nIndex] = tbConfig
+  end
+  szFilepath = "Setting/Activity/Common/HandInActivity/StageAward.tab"
+  tbField = {
+    "nConfigID",
+    "nFormulaID",
+    "nHandInCountSaveID",
+    "nStageStart",
+    "nStageEnd",
+    "nAwardID",
+    "nAwardKey"
+  }
+  tbLoadConfigs = Lib:LoadTabFileEx(szFilepath, "ddddddd", nil, tbField)
+  for _, tbConfig in pairs(tbLoadConfigs or {}) do
+    self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbStageAward = self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbStageAward or {}
+    self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbStageAward[tbConfig.nFormulaID] = self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbStageAward[tbConfig.nFormulaID] or {}
+    table.insert(self.ACTIVITY_CONFIG[tbConfig.nConfigID].tbStageAward[tbConfig.nFormulaID], tbConfig)
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+  self.bLoadConfig = true
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  self.tbConfig = tbActCfg.Cfg
+  self.tbConfig.szDesc = i18n.Encode(self.tbConfig.szDesc)
+  self.tbConfig.szName = i18n.Encode(self.tbConfig.szName)
+  self.tbConfig.szShowTime = i18n.Encode(self.tbConfig.szShowTime)
+  self.tbConfig.tbNPCMapID = Lib:SplitStrTry2Num(self.tbConfig.szNPCMapID, "|")
+  self.tbConfig.tbPlayerAward = self.tbConfig.tbPlayerAward or {}
+  self.tbConfig.tbStudioAward = self.tbConfig.tbStudioAward or {}
+  for _, tbInfo in pairs(tbActCfg.RateAward) do
+    if 1 == tbInfo.nIsStudio then
+      self.tbConfig.tbStudioAward[tbInfo.nFormulaID] = self.tbConfig.tbStudioAward[tbInfo.nFormulaID] or {}
+      table.insert(self.tbConfig.tbStudioAward[tbInfo.nFormulaID], tbInfo)
+    else
+      self.tbConfig.tbPlayerAward[tbInfo.nFormulaID] = self.tbConfig.tbPlayerAward[tbInfo.nFormulaID] or {}
+      table.insert(self.tbConfig.tbPlayerAward[tbInfo.nFormulaID], tbInfo)
+    end
+  end
+  self.tbConfig.tbNPCCfg = self.tbConfig.tbNPCCfg or {}
+  for _, tbInfo in pairs(tbActCfg.HandInDialogCfg) do
+    tbInfo.szDialogText = i18n.Encode(tbInfo.szDialogText)
+    self.tbConfig.tbNPCCfg[tbInfo.nIndex] = tbInfo
+  end
+  self.tbConfig.tbStageAward = self.tbConfig.tbStageAward or {}
+  for _, tbInfo in pairs(tbActCfg.StageAward) do
+    self.tbConfig.tbStageAward[tbInfo.nFormulaID] = self.tbConfig.tbStageAward[tbInfo.nFormulaID] or {}
+    table.insert(self.tbConfig.tbStageAward[tbInfo.nFormulaID], tbInfo)
+  end
+  self:SortStageAwardEveryFormula()
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+end
+
+function tbActivity:CheckConfigValid()
+  for _, tbInfo in pairs(self.tbConfig.tbPlayerAward) do
+    for _, tbCfg in pairs(tbInfo) do
+      if not self:CheckHaveHandInAward(tbCfg.nAwardID, tbCfg.nAwardKey) then
+        return false
+      end
+    end
+  end
+  for _, tbInfo in pairs(self.tbConfig.tbStudioAward) do
+    for _, tbCfg in pairs(tbInfo) do
+      if not self:CheckHaveHandInAward(tbCfg.nAwardID, tbCfg.nAwardKey) then
+        return false
+      end
+    end
+  end
+  for _, tbInfo in pairs(self.tbConfig.tbStageAward) do
+    for _, tbCfg in pairs(tbInfo) do
+      if not self:CheckHaveHandInAward(tbCfg.nAwardID, tbCfg.nAwardKey) then
+        return false
+      end
+    end
+  end
+  return true
+end
+
+function tbActivity:CheckHaveHandInAward(nAwardID, nAwardKey)
+  if self.tbConfig.nHaveHandInAward and 1 == self.tbConfig.nHaveHandInAward then
+    if not (nAwardID and 0 ~= nAwardID and nAwardKey) or 0 == nAwardKey then
+      LogErr("HandInActivity_Common CheckHaveHandInAward fail tbPlayerAward have award config.", self.tbConfig.nHaveHandInAward, nAwardID, nAwardKey)
+      return false
+    end
+  elseif nAwardID and nAwardID > 0 or nAwardKey and nAwardKey > 0 then
+    LogErr("HandInActivity_Common CheckHaveHandInAward fail, tbPlayerAward have not award config.", self.tbConfig.nHaveHandInAward, nAwardID, nAwardKey)
+    return false
+  end
+  return true
+end
+
+function tbActivity:SortStageAwardEveryFormula()
+  local function fnSort(tbAward1, tbAward2)
+    return tbAward1.nStageStart < tbAward2.nStageStart
+  end
+  
+  for _, tbStageAward in pairs(self.tbConfig.tbStageAward) do
+    tbStageAward = table.sort(tbStageAward, fnSort)
+  end
+end
+
+function tbActivity:GetNPCCfg()
+  return self.tbConfig.tbNPCCfg
+end
+
+function tbActivity:GetRateAwardCfg(nPlayerID, nFormulaID)
+  if Studio:CheckStudioSetting(nPlayerID, Studio.ModuleCfg.HandInActivity) then
+    return self.tbConfig.tbStudioAward[nFormulaID]
+  else
+    return self.tbConfig.tbPlayerAward[nFormulaID]
+  end
+end
+
+function tbActivity:GetStageAwardCfg(nFormulaID)
+  if self.tbConfig.tbStageAward then
+    return self.tbConfig.tbStageAward[nFormulaID]
+  end
+end
+
+function tbActivity:GetStageAwardSaveID(nFormulaID)
+  local tbNpcCfg = self:GetNPCCfg()
+  if tbNpcCfg then
+    for _, tbCfg in pairs(tbNpcCfg) do
+      if tbCfg.nFormulaID == nFormulaID then
+        return tbCfg.nStageAwardSaveID
+      end
+    end
+  end
+end
+
+function tbActivity:GetHasExtraAward(nFormulaID)
+  local tbNpcCfg = self:GetNPCCfg()
+  if tbNpcCfg then
+    for _, tbCfg in pairs(tbNpcCfg) do
+      if tbCfg.nFormulaID == nFormulaID then
+        if 1 == tbCfg.bHasExtraAward then
+          return true
+        end
+        break
+      end
+    end
+  end
+  return false
+end

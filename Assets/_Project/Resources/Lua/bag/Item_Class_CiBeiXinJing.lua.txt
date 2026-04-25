@@ -1,0 +1,82 @@
+local tbItem = Item:GetClass("CiBeiXinJing")
+
+function tbItem:OnClientUse(pItem)
+  local bRet, szErr = self:CheckCanUse()
+  if nil ~= szErr then
+    me.CenterMsg(szErr)
+  end
+  if bRet then
+    Ui:CloseWindow("UIItemTips")
+    Ui:CloseWindow("UIBag")
+    return 1
+  else
+    return 0
+  end
+end
+
+function tbItem:CheckCanUse()
+  if GoodwillValue:GetGoodwillValue(me) >= GoodwillValue.Cfg.nMaxValue then
+    return false, i18n.Get(GoodwillValue.tbText.szValueIsMaxUseItemShow, GoodwillValue.Cfg.nMaxValue)
+  elseif me.nFightMode ~= Npc.FIGHT_MODE.emFightMode_None then
+    return false, i18n.Get(GoodwillValue.tbText.szUseItemNotInSafeAreaShow)
+  else
+    return true, nil
+  end
+end
+
+function tbItem:OnUse(pItem)
+  local bRet, szErr = self:CheckCanUse()
+  if nil ~= szErr then
+    me.CenterMsg(szErr)
+    return 0
+  end
+  Progress:BeginProgress(me, i18n.Get(GoodwillValue.tbText.szUseItemProcessText), GoodwillValue.Cfg.nItemUseProcessTime, self.OnEndUseProgress, {
+    self,
+    pItem.dwTemplateId,
+    1
+  })
+  return 0
+end
+
+function tbItem:OnEndUseProgress(dwTemplateId, nUserCnt)
+  local nItemCnt = me.GetItemCountByTypeInBag(dwTemplateId)
+  if nUserCnt <= nItemCnt then
+    local nConsumeCount = me.ConsumeItemInBag(dwTemplateId, nUserCnt, Env.LogWay_UseItem)
+    if nUserCnt <= nConsumeCount then
+      GoodwillValue:AddGoodwillValue(me, nUserCnt)
+      local nGoodwillValue = GoodwillValue:GetGoodwillValue(me)
+      me.CenterMsg(i18n.Get(GoodwillValue.tbText.szUseItemProcessEndShow, nUserCnt, nGoodwillValue))
+    end
+  end
+end
+
+function tbItem:OnUseMany(it, nCount)
+  local bRet, szErr = self:CheckCanUse()
+  if nil ~= szErr then
+    me.CenterMsg(szErr)
+    return 0
+  end
+  local nGoodwillValue = GoodwillValue:GetGoodwillValue(me)
+  local nUserCnt = math.min(nCount, GoodwillValue.Cfg.nMaxValue - nGoodwillValue)
+  Progress:BeginProgress(me, i18n.Get(GoodwillValue.tbText.szUseItemProcessText), GoodwillValue.Cfg.nItemUseProcessTime * nUserCnt, self.OnEndUseProgress, {
+    self,
+    it.dwTemplateId,
+    nUserCnt
+  })
+  return 0
+end
+
+function tbItem:HandleCanUseCallBack(nTemplateId, nItemId)
+  me.CenterMsg(i18n.Get(GoodwillValue.tbText.szValueIsMaxUseItemShow, GoodwillValue.Cfg.nMaxValue))
+end
+
+function tbItem:GetUseNeedItemTemplateId(nTemplateId)
+  return nTemplateId
+end
+
+function tbItem:GetClientDefaultUseCount(nItemId)
+  local pItem = me.GetItemInBag(nItemId)
+  local nGoodwillValue = GoodwillValue:GetGoodwillValue(me)
+  local nResult = math.min(pItem.nCount, GoodwillValue.Cfg.nMaxValue - nGoodwillValue)
+  return nResult
+end

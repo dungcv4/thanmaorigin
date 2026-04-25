@@ -1,0 +1,208 @@
+Require("CommonScript/XiaKeDao/XiaKeDaoCfg.lua")
+Require("CommonScript/Calendar/Calendar_common.lua")
+XiaKeDao = XiaKeDao or {}
+XiaKeDao.tbClass = XiaKeDao.tbClass or {}
+XiaKeDao.szSaveKey = GetGroupKey("XiaKeDaoJoinCount")
+XiaKeDao.nBossNotifyLevel = 3
+XiaKeDao.nBossNotifyPlayerVIPLevl = 10
+XiaKeDao.szSaveXiaKeDaoNotifyKey = "SaveXiaKeDaoNotifyKey"
+XiaKeDao.tbResultDef = {
+  nWin = 1,
+  nFailed = 2,
+  nAssist = 3
+}
+
+function XiaKeDao:LoadSetting()
+  self.tbBossSetting = {}
+  self.tbTimeFrame = {}
+  local tbFileData = Lib:EasyLoadTabFile("Setting/XiaKeDao/XiaKeDaoBoss.tab")
+  for _, tbInfo in ipairs(tbFileData) do
+    if not self.tbBossSetting[tbInfo.szTimeFrame] then
+      self.tbBossSetting[tbInfo.szTimeFrame] = {}
+    end
+    table.insert(self.tbBossSetting[tbInfo.szTimeFrame], tbInfo)
+  end
+  self.tbZoneBossSetting = {}
+  tbFileData = Lib:EasyLoadTabFile("Setting/XiaKeDao/XiaKeDaoBossZone.tab")
+  for _, tbInfo in ipairs(tbFileData) do
+    if not self.tbZoneBossSetting[tbInfo.szTimeFrame] then
+      self.tbZoneBossSetting[tbInfo.szTimeFrame] = {}
+    end
+    table.insert(self.tbZoneBossSetting[tbInfo.szTimeFrame], tbInfo)
+  end
+  self.tbBossSetting = SetReadOnly(self.tbBossSetting)
+  self.tbZoneBossSetting = SetReadOnly(self.tbZoneBossSetting)
+end
+
+function XiaKeDao:GetMaxTimeFrame(tbTimeFrame)
+  local nCurTimeFrameTime = -1
+  local nTableIndex = 1
+  for nIndex, szTimeFrame in ipairs(tbTimeFrame) do
+    if "-1" ~= szTimeFrame and 1 == GetTimeFrameState(szTimeFrame) then
+      local nOpenTime = Lib:CalcTimeFrameOpenTime(szTimeFrame)
+      if nCurTimeFrameTime < nOpenTime then
+        nCurTimeFrameTime = nOpenTime
+        nTableIndex = nIndex
+      end
+    end
+  end
+  return nTableIndex
+end
+
+function XiaKeDao:IsOpenZone()
+  if 1 ~= GetTimeFrameState(self.Cfg.szZoneOpenTimeframe) then
+    return false
+  end
+  local nWeekDay = Lib:GetLocalWeekDay(GetTime())
+  for _, nDay in ipairs(self.Cfg.tbZoneOpenDay) do
+    if nWeekDay == nDay then
+      return true
+    end
+  end
+  return false
+end
+
+function XiaKeDao:GetCurTimeFrameMapList()
+  local nIndex = self:GetMaxTimeFrame(XiaKeDao.tbTimeFrameCfg)
+  local szTimeFrame = XiaKeDao.tbTimeFrameCfg[nIndex]
+  if not self.tbBossSetting or Lib:IsEmptyTB(self.tbBossSetting) then
+    XiaKeDao:LoadSetting()
+  end
+  local nCurOpenDay = Calendar:GetCurLevelOpenDay(szTimeFrame)
+  if not nCurOpenDay then
+    return
+  end
+  local tbBossList = {}
+  for index, tbBossInfo in ipairs(self.tbBossSetting[szTimeFrame]) do
+    if nCurOpenDay >= tbBossInfo.nOpenLevelDay then
+      table.insert(tbBossList, tbBossInfo)
+    end
+  end
+  return tbBossList
+end
+
+function XiaKeDao:GetZoneTimeFrameMapList(nDifficultyIndex)
+  if not self.szDayOpenTimeFrame or not self.nOpenTime then
+    Log("XiaKeDao:GetZoneTimeFrameMapList not self.szDayOpenTimeFrame")
+    return
+  end
+  if not self.tbZoneBossSetting or Lib:IsEmptyTB(self.tbZoneBossSetting) then
+    XiaKeDao:LoadSetting()
+  end
+  local nCurOpenDay = Calendar:GetCurLevelOpenDay(self.szDayOpenTimeFrame, self.nOpenTime)
+  if not nCurOpenDay then
+    return
+  end
+  local tbBossList = {}
+  for index, tbBossInfo in ipairs(self.tbZoneBossSetting[self.szDayOpenTimeFrame]) do
+    if nCurOpenDay >= tbBossInfo.nOpenLevelDay and (not nDifficultyIndex or nDifficultyIndex == tbBossInfo.nDifficulty) then
+      table.insert(tbBossList, tbBossInfo)
+    end
+  end
+  return tbBossList
+end
+
+function XiaKeDao:CreateClass(szNewClass, szBaseClass)
+  if szBaseClass and self.tbClass[szBaseClass] then
+    self.tbClass[szNewClass] = Lib:NewClass(self.tbClass[szBaseClass])
+  else
+    self.tbClass[szNewClass] = {}
+  end
+  local tbClassInst = self.tbClass[szNewClass]
+  return tbClassInst
+end
+
+function XiaKeDao:GetFBClass(szClassName)
+  if self.tbClass[szClassName] then
+    return self.tbClass[szClassName]
+  else
+    LogErr("[XiaKeDao]tbClass Not Exsit!", szClassName)
+  end
+end
+
+function XiaKeDao:IsXiaKeDaoFuben(nMapTemplateId)
+  for index, nMapId in ipairs(self.Cfg.tbMapIdList) do
+    if nMapId == nMapTemplateId then
+      return true
+    end
+  end
+  return false
+end
+
+function XiaKeDao:IsJoinXiaKeDao(pPlayer)
+  return pPlayer.GetUserValue(self.szSaveKey, 5) > 0
+end
+
+function XiaKeDao:CanChallenge(pPlayer, nIndex)
+  if DegreeCtrl:GetDegree(pPlayer, "XiaKeDaoJoinNum") <= 0 then
+    return false
+  end
+  local tbAllTBossSetting = XiaKeDao:GetCurTimeFrameMapList()
+  if self:IsOpenZone() then
+    tbAllTBossSetting = XiaKeDao:GetZoneTimeFrameMapList()
+  end
+  if not tbAllTBossSetting then
+    return false
+  end
+  local tbBossInfo = tbAllTBossSetting[nIndex]
+  if not tbBossInfo then
+    return false
+  end
+  if tbBossInfo.nPlayerOpenLevel and tbBossInfo.nPlayerOpenLevel > 0 and tbBossInfo.nPlayerOpenLevel > pPlayer.nTotalLevel then
+    return false
+  end
+  local nLeaveCD = XiaKeDao:GetLeaveCD()
+  if nLeaveCD and nLeaveCD > GetTime() then
+    return false
+  end
+  return true
+end
+
+XiaKeDao.ERROR_CODE = {
+  ERR_CONFIG = 1,
+  ERR_NOTBOSS = 2,
+  ERR_PLAYERCNT = 3,
+  ERR_ASSISTOUTTIME = 4,
+  ERR_NOTTONGID = 5,
+  ERR_LEVEL = 6,
+  ERR_HONORLEVEL = 7
+}
+XiaKeDao.tbTipMsg = {
+  [XiaKeDao.ERROR_CODE.ERR_CONFIG] = function()
+    return i18n.EasyGet("\233\133\141\231\189\174\233\148\153\232\175\175")
+  end,
+  [XiaKeDao.ERROR_CODE.ERR_NOTBOSS] = function()
+    return i18n.EasyGet("BOSS\230\156\170\229\136\183\230\150\176")
+  end,
+  [XiaKeDao.ERROR_CODE.ERR_PLAYERCNT] = function()
+    return i18n.EasyGet("\229\137\175\230\156\172\228\186\186\230\149\176\229\183\178\230\187\161")
+  end,
+  [XiaKeDao.ERROR_CODE.ERR_ASSISTOUTTIME] = function()
+    return i18n.EasyGet("\230\177\130\229\138\169\233\147\190\230\142\165\229\183\178\229\164\177\230\149\136")
+  end,
+  [XiaKeDao.ERROR_CODE.ERR_NOTTONGID] = function()
+    return i18n.EasyGet("\228\184\141\230\152\175\229\144\140\228\184\128\228\184\170\229\184\174\228\188\154\228\184\141\232\131\189\230\177\130\229\138\169")
+  end,
+  [XiaKeDao.ERROR_CODE.ERR_LEVEL] = function()
+    return i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179")
+  end
+}
+
+function XiaKeDao:CanEnterZone(pPlayer, szSaveKey)
+  if not Env:CheckSystemSwitch(pPlayer, Env.SW_SwitchMap) then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\228\184\141\229\133\129\232\174\184\229\136\135\230\141\162\229\156\176\229\155\190")
+  end
+  if not ActivityCheck:CheckCanEnterActivityEx(pPlayer, nil, nil, false, false, false, nil, nil) then
+    return false
+  end
+  if self.tbZoneLeaveFBCD[pPlayer.dwID] and self.tbZoneLeaveFBCD[pPlayer.dwID].__nLeaveCD and self.tbZoneLeaveFBCD[pPlayer.dwID].__nLeaveCD > GetTime() then
+    return false, i18n.EasyGet("{0}\231\167\146\229\144\142\229\143\175\229\134\141\230\172\161\232\191\155\229\142\187\228\190\160\229\174\162\229\178\155", self.tbZoneLeaveFBCD[pPlayer.dwID].__nLeaveCD - GetTime())
+  end
+  if Map:IsFuben(pPlayer.nMapTemplateId) then
+    return false, i18n.EasyGet("\229\156\168\229\137\175\230\156\172\228\184\173\239\188\140\230\151\160\230\179\149\232\191\155\232\161\140\230\140\145\230\136\152")
+  end
+  if DegreeCtrl:GetDegree(pPlayer, szSaveKey) <= 0 then
+    return false, i18n.EasyGet("\229\143\130\228\184\142\230\172\161\230\149\176\229\183\178\230\187\161")
+  end
+  return true
+end

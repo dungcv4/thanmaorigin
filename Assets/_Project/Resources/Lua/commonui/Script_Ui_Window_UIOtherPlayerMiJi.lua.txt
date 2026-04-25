@@ -1,0 +1,222 @@
+local tbWnd = Ui:CreateClass("UIOtherPlayerMiJi", "UIPanel")
+local SecretBook = Item.SecretBook
+local tbControls = {
+  MijiGrid1 = "Miji/MijiCell/MijiGrid1",
+  MijiGrid2 = "Miji/MijiCell/MijiGrid2",
+  MijiGrid3 = "Miji/MijiCell/MijiGrid3",
+  MijiGrid4 = "Miji/MijiCell/MijiGrid4",
+  MijiGrid5 = "Miji/MijiCell/MijiGrid5",
+  SkillIcon1 = "Miji/SkillIcon1",
+  SkillIcon2 = "Miji/SkillIcon2",
+  SkillIcon3 = "Miji/SkillIcon3",
+  SkillIcon4 = "Miji/SkillIcon4",
+  SkillIcon5 = "Miji/SkillIcon5",
+  MijiLevelPanel = "Miji/MijiLevelUp",
+  UIItemGrid = "Miji/MijiLevelUp/UIItemGrid",
+  NoWearPanel = "Miji/Empty",
+  txtName = "Miji/MijiLevelUp/txtName",
+  txtLevelValue = "Miji/MijiLevelUp/Level/txtLevelValue",
+  txtSkillLevelValue = "Miji/MijiLevelUp/SkillLevel/txtSkillLevelValue"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {}
+tbWnd.tbSecretBookRankCfg = {
+  [SecretBook.tbRank.Low] = {
+    szGridPath = tbControls.MijiGrid1,
+    szSkillPath = tbControls.SkillIcon1,
+    bShowSlot = 1 == SecretBook.tbEachRankCfg[SecretBook.tbRank.Low].bEnableShowSlot
+  },
+  [SecretBook.tbRank.Middle] = {
+    szGridPath = tbControls.MijiGrid2,
+    szSkillPath = tbControls.SkillIcon2,
+    bShowSlot = 1 == SecretBook.tbEachRankCfg[SecretBook.tbRank.Middle].bEnableShowSlot
+  },
+  [SecretBook.tbRank.High] = {
+    szGridPath = tbControls.MijiGrid3,
+    szSkillPath = tbControls.SkillIcon3,
+    bShowSlot = 1 == SecretBook.tbEachRankCfg[SecretBook.tbRank.High].bEnableShowSlot
+  },
+  [SecretBook.tbRank.JiaLanJing] = {
+    szGridPath = tbControls.MijiGrid4,
+    szSkillPath = tbControls.SkillIcon4,
+    bShowSlot = 1 == SecretBook.tbEachRankCfg[SecretBook.tbRank.JiaLanJing].bEnableShowSlot
+  },
+  [SecretBook.tbRank.JiuYinZhenJing] = {
+    szGridPath = tbControls.MijiGrid5,
+    szSkillPath = tbControls.SkillIcon5,
+    bShowSlot = 1 == SecretBook.tbEachRankCfg[SecretBook.tbRank.JiuYinZhenJing].bEnableShowSlot
+  }
+}
+
+function tbWnd:OnCreate()
+  self.tbLeftItemGridList = {}
+  local tbCfg = {}
+  for _, nRank in pairs(SecretBook.tbRank) do
+    tbCfg = self.tbSecretBookRankCfg[nRank]
+    if tbCfg.bShowSlot then
+      self.tbLeftItemGridList[nRank] = Ui:NewExistItemGrid(self, tbCfg.szGridPath .. "/UIItemGrid")
+      Ui:Button_BindEvent(self.pPanel, tbCfg.szSkillPath .. "/btnSkill", self.OnClickSkillIcon, self, nRank)
+    end
+    self.pPanel:SetActive(tbCfg.szGridPath, tbCfg.bShowSlot)
+    self.pPanel:SetActive(tbCfg.szSkillPath, tbCfg.bShowSlot)
+  end
+  self.tbRightItemGrid = Ui:NewExistItemGrid(self, tbControls.UIItemGrid)
+  self.pPanel:SetActive(tbControls.UIItemGrid, true)
+end
+
+function tbWnd:OnOpen()
+  self.tbExtEquips = self.tbOwner.tbExtEquips
+  self:UpdateLeftPanel(true)
+  self:AutoSetSelectRankByOrder()
+end
+
+function tbWnd:UpdateLeftPanel(bIsInitCall)
+  local pAsyncRole = self.tbOwner.pAsyncRole
+  local szGridKey, bSkillIconActive, nPos, nItemId, bLevelEnough, tbItemGrid, pItem, bTimeFrameIsOpenThisRank, szSkillKey, nSkillId, szIconAltlas
+  for _, nRank in pairs(SecretBook.tbRank) do
+    local tbInfo = self.tbSecretBookRankCfg[nRank]
+    if tbInfo.bShowSlot then
+      szGridKey = self.tbSecretBookRankCfg[nRank].szGridPath
+      bTimeFrameIsOpenThisRank = 0 ~= GetTimeFrameState(SecretBook.tbEachRankCfg[nRank].szOpenTimeFrame)
+      bSkillIconActive = false
+      if bTimeFrameIsOpenThisRank then
+        nPos = SecretBook.tbRankToSlot[nRank]
+        bLevelEnough = me.nLevel >= SecretBook.tbEachRankCfg[nRank].nUiShowOpenLevel
+        nItemId = self.tbExtEquips[nPos]
+        self.pPanel:SetActive(szGridKey, true)
+        self.pPanel:SetActive(szGridKey .. "/UIItemGrid", nItemId)
+        self.pPanel:SetActive(szGridKey .. "/Empty", not nItemId and bLevelEnough)
+        self.pPanel:SetActive(szGridKey .. "/Lock", not bLevelEnough)
+        self.pPanel:Label_SetText(szGridKey .. "/Lock/txtLock", i18n.EasyGet("{0}\231\186\167\229\188\128\230\148\190", SecretBook.tbEachRankCfg[nRank].nUiShowOpenLevel))
+        tbItemGrid = self.tbLeftItemGridList[nRank]
+        if nItemId then
+          pItem = KItem.GetItemObj(nItemId)
+          local tbItemExtParams = {
+            nFaction = pAsyncRole.GetFaction(),
+            nFactionSect = pAsyncRole.GetFactionSect()
+          }
+          tbItemGrid:SetItem(nItemId, pItem.dwTemplateId, nil, pAsyncRole.GetFaction(), pAsyncRole.GetFactionSect(), pAsyncRole.GetSex(), pAsyncRole, nil, tbItemExtParams)
+          bSkillIconActive = true
+          nSkillId = SecretBook:GetSkillId(pAsyncRole.GetFaction(), pAsyncRole.GetFactionSect(), nRank)
+          szIconAltlas = FightSkill:GetSkillIconAtlas(nSkillId)
+          szSkillKey = self.tbSecretBookRankCfg[nRank].szSkillPath
+          self.pPanel:Sprite_SetSprite(szSkillKey .. "/btnSkill", szIconAltlas)
+        end
+        if bIsInitCall then
+          tbItemGrid:SetClickEnable(true, self.OnClickLeftSecretBookGrid, self, nRank, tbItemGrid)
+        end
+      else
+        self.pPanel:SetActive(szGridKey .. "/Empty", false)
+        self.pPanel:SetActive(szGridKey .. "/UIItemGrid", false)
+        self.pPanel:SetActive(szGridKey .. "/Lock", true)
+        self.pPanel:SetActive(szGridKey, false)
+      end
+      szSkillKey = self.tbSecretBookRankCfg[nRank].szSkillPath
+      self.pPanel:SetActive(szSkillKey, bSkillIconActive)
+    end
+  end
+end
+
+function tbWnd:OnClickLeftSecretBookGrid(nRank, tbItemGrid)
+  self:UpdateSelectRank(nRank, true)
+  tbItemGrid:DefaultClick()
+end
+
+function tbWnd:UpdateSelectRank(nRank, bIsClickCall)
+  local nOldSelectRank = self.nNowSelectRank
+  self:SetNowSelectRank(nRank)
+  if nOldSelectRank ~= nRank or not bIsClickCall then
+    self:UpdateRightPanel()
+  end
+end
+
+function tbWnd:SetNowSelectRank(nValue)
+  local function fnSetEffectActive(bActive)
+    self.pPanel:SetActive(self.tbSecretBookRankCfg[self.nNowSelectRank].szGridPath .. "/imgSelected", bActive)
+  end
+  
+  local bSelectChange = self.nNowSelectRank ~= nValue
+  if bSelectChange then
+    if self.nNowSelectRank ~= nil then
+      fnSetEffectActive(false)
+    end
+    local nOldValue = self.nNowSelectRank
+    self.nNowSelectRank = nValue
+    if self.nNowSelectRank ~= nil then
+      fnSetEffectActive(true)
+    end
+  end
+end
+
+function tbWnd:UpdateRightPanel()
+  local bWear = false
+  local pEquip
+  if self.nNowSelectRank ~= nil then
+    local nPos = SecretBook.tbRankToSlot[self.nNowSelectRank]
+    local nItemId = self.tbExtEquips[nPos]
+    if nItemId then
+      pEquip = KItem.GetItemObj(nItemId)
+      bWear = nil ~= pEquip
+    end
+  end
+  self.pPanel:SetActive(tbControls.MijiLevelPanel, bWear)
+  self.pPanel:SetActive(tbControls.NoWearPanel, not bWear)
+  if bWear then
+    local pAsyncRole = self.tbOwner.pAsyncRole
+    self.pPanel:Label_SetText(tbControls.txtName, i18n.Parse(pEquip.szName))
+    local nLevel = SecretBook:GetLevel(pEquip)
+    self.pPanel:Label_SetText(tbControls.txtLevelValue, string.format("%d/%d", nLevel, SecretBook.Cfg.nMaxLevel))
+    local nSkillLevel = SecretBook:GetSkillLevel(pEquip)
+    local nRank = SecretBook:GetRank(pEquip)
+    local nExtraLevel = SecretBook:GetExtraSkillLevel(pAsyncRole, nRank)
+    if nExtraLevel > 0 then
+      self.pPanel:Label_SetText(tbControls.txtSkillLevelValue, i18n.EasyGet("{0}\239\188\136{1}+{2}\239\188\137/{3}", nSkillLevel + nExtraLevel, nSkillLevel, nExtraLevel, SecretBook.Cfg.nMaxSkillLevel))
+    else
+      self.pPanel:Label_SetText(tbControls.txtSkillLevelValue, i18n.EasyGet("{0}/{1}", nSkillLevel, SecretBook.Cfg.nMaxSkillLevel))
+    end
+    local tbItemExtParams = {
+      nFaction = pAsyncRole.GetFaction(),
+      nFactionSect = pAsyncRole.GetFactionSect()
+    }
+    self.tbRightItemGrid:SetItem(pEquip.dwId, pEquip.dwTemplateId, nil, pAsyncRole.GetFaction(), pAsyncRole.GetFactionSect(), pAsyncRole.GetSex(), pAsyncRole, nil, tbItemExtParams)
+    self.tbRightItemGrid:SetClickEnable(true)
+  end
+end
+
+function tbWnd:OnClickSkillIcon(nRank)
+  local pAsyncRole = self.tbOwner.pAsyncRole
+  local nSkillId = SecretBook:GetSkillId(pAsyncRole.GetFaction(), pAsyncRole.GetFactionSect(), nRank)
+  local nPos = SecretBook.tbRankToSlot[nRank]
+  local nItemId = self.tbExtEquips[nPos]
+  local pItem = KItem.GetItemObj(nItemId)
+  local nSkillLevel = SecretBook:GetSkillLevel(pItem)
+  local tbSkillInfo = FightSkill.tbAllSkillSetting[nSkillId]
+  local tbIncomeArgSkillInfo = {
+    szIconAltlas = FightSkill:GetSkillIconAtlas(nSkillId),
+    bMax = nSkillLevel < SecretBook.Cfg.nMaxSkillLevel,
+    nLevel = nSkillLevel,
+    szName = tbSkillInfo.szSkillName,
+    szClassName = "",
+    szNextMagicDesc = FightSkill:GetSkillMagicDesc(nSkillId, nSkillLevel + 1),
+    szCurMagicDesc = FightSkill:GetSkillMagicDesc(nSkillId, nSkillLevel),
+    nId = nSkillId,
+    nCD = 0,
+    bPassive = true,
+    nRadius = 0,
+    szDesc = tbSkillInfo.szDesc,
+    nMaxLevel = SecretBook.Cfg.nMaxSkillLevel
+  }
+  Ui:OpenWindow("UISkillShow", tbIncomeArgSkillInfo, true, false)
+end
+
+function tbWnd:AutoSetSelectRankByOrder()
+  local nStartSelectIndex, nPos
+  for _, nRank in pairs(SecretBook.tbRank) do
+    nPos = SecretBook.tbRankToSlot[nRank]
+    if self.tbExtEquips[nPos] then
+      nStartSelectIndex = nRank
+      break
+    end
+  end
+  self:UpdateSelectRank(nStartSelectIndex, false)
+end

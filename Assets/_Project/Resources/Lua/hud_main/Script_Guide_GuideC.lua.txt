@@ -1,0 +1,497 @@
+function Guide:Init()
+  Guide.Config = {}
+  
+  Guide.TriggerGroup = {
+    LevelUp = {},
+    OpenUI = {},
+    FinishGuide = {},
+    FinishTask = {},
+    FinishTaskStep = {},
+    MapUILoaded = {},
+    ChangeFightState = {},
+    OnClickTaskPanel = {}
+  }
+  Guide.GuideBuffer = {}
+  self:UnLockGuide()
+  local _Config = Lib:LoadTabFile("Setting/Guide/GuideConfig.tab", nil, nil, false)
+  for k, v in pairs(_Config) do
+    local nGuideID = tonumber(v.ID)
+    if self.nMaxGuideID == nil or nGuideID > self.nMaxGuideID then
+      self.nMaxGuideID = nGuideID
+    end
+    local nStep = tonumber(v.Step)
+    assert(nGuideID and nStep)
+    v.RestartStep = tonumber(v.RestartStep) or 0
+    if v.NeedCondition and v.NeedCondition ~= "" then
+      local conditionList = Lib:SplitStr(v.NeedCondition, "|")
+      for _, Condition in pairs(conditionList) do
+        local Params = Lib:SplitStr(Condition, ",")
+        v.Condition = v.Condition or {}
+        v.Condition[Params[1]] = v.Condition[Params[1]] or {}
+        for idx = 2, #Params do
+          table.insert(v.Condition[Params[1]], Params[idx])
+        end
+      end
+    end
+    if v.Trigger and "" ~= v.Trigger then
+      local triggerList = Lib:SplitStr(v.Trigger, "|")
+      v.Trigger = {}
+      for _, trigger in pairs(triggerList) do
+        local Params = Lib:SplitStr(trigger, ",")
+        v.Trigger[Params[1]] = v.Trigger[Params[1]] or {}
+        for idx = 2, #Params do
+          table.insert(v.Trigger[Params[1]], Params[idx])
+        end
+      end
+    end
+    self.Config[nGuideID] = self.Config[nGuideID] or {}
+    if self.Config[nGuideID][nStep] ~= nil then
+      error(string.format("ID:%d Step:%d is duplicated in[%s]!", nGuideID, nStep, "Setting/Guide/GuideConfig.tab"))
+    end
+    self.Config[nGuideID][nStep] = v
+  end
+  self.Config = SetReadOnly(self.Config)
+  self.tbEquipWearInfoQueue = {}
+end
+
+function Guide:RemoveFromTriggerGroup(nGuideID)
+  for key, tb in pairs(self.TriggerGroup) do
+    if self.TriggerGroup[key][nGuideID] then
+      self.TriggerGroup[key][nGuideID] = nil
+    end
+  end
+end
+
+function Guide:UpdateTrigger(nGuideID)
+  local nFixedStep = self:GetCurrentStep(nGuideID)
+  local cfg = self.Config[nGuideID]
+  if not cfg or not nFixedStep then
+    Log("UpdateTrigger (not cfg) or (not nFixedStep) return")
+    return
+  end
+  if nil ~= nFixedStep then
+    local curInsCfg = cfg[nFixedStep]
+    if curInsCfg and curInsCfg.Trigger then
+      local trigger = curInsCfg.Trigger
+      for key, tb in pairs(Guide.TriggerGroup) do
+        if trigger[key] then
+          Guide.TriggerGroup[key][nGuideID] = nFixedStep
+        else
+          Guide.TriggerGroup[key][nGuideID] = nil
+        end
+      end
+    end
+  end
+end
+
+function Guide:OpenUICheck(param)
+  local tbWnd = Ui:GetWindow(param[1])
+  if tbWnd then
+    return true
+  end
+  return false
+end
+
+Guide.tbConditionCheck = {
+  Map = function(self, ...)
+    local param = {
+      ...
+    }
+    local nMapID = me.GetNpc().GetWorldPos()
+    for _, map in pairs(param) do
+      if nMapID == tonumber(map) then
+        return true
+      end
+    end
+    return false
+  end,
+  Level = function(self, ...)
+    local param = {
+      ...
+    }
+    if 1 == #param then
+      if me.nLevel >= tonumber(param[1]) then
+        return true
+      end
+    elseif #param > 1 and me.nLevel >= param[1] and me.nLevel <= param[2] then
+      return true
+    end
+    return false
+  end,
+  FightState = function(self, ...)
+    local param = {
+      ...
+    }
+    if #param <= 0 then
+      return false
+    end
+    if tonumber(param[1]) == me.nFightMode then
+      return true
+    end
+    return false
+  end,
+  HaveEquipWeapon = function(self)
+    return me.GetEquipByPos(Item.EQUIPPOS_WEAPON) ~= nil
+  end,
+  HaveEquipWeaponAndShowEnhanceButton = function(self)
+    local pEquip = me.GetEquipByPos(Item.EQUIPPOS_WEAPON)
+    if nil ~= pEquip then
+      return Item.EquipEnhance:CanShowEnhanceButtonInUIEquipTips(pEquip.dwId)
+    else
+      return false
+    end
+  end,
+  HaveEquipWeaponAndShowJingZhuButton = function(self)
+    local pEquip = me.GetEquipByPos(Item.EQUIPPOS_WEAPON)
+    if nil ~= pEquip then
+      return Item.EquipJingZhu:CanShowJingZhuButtonInUIEquipTips(pEquip.dwId)
+    else
+      return false
+    end
+  end,
+  HaveEquipWeaponAndShowStoneInsertButton = function(self)
+    local pEquip = me.GetEquipByPos(Item.EQUIPPOS_WEAPON)
+    if nil ~= pEquip then
+      return Item.Stone:CanShowStoneInsertButtonInUIEquipTips(pEquip.dwId)
+    else
+      return false
+    end
+  end,
+  OpenServerDayMoreThan = function(self, szDay)
+    local nDay = tonumber(szDay)
+    local nSecondGap = GetTime() - GetServerCreateTime()
+    return nDay <= nSecondGap / 86400
+  end,
+  NoHaveArenaTimes = function(self)
+    return DegreeCtrl:GetDegree(me, "Arena") <= 0
+  end
+}
+
+function Guide:CheckCondition(nGuideID, nStep)
+  local cfg = self.Config[nGuideID]
+  if not cfg or not cfg[nStep] then
+    return false
+  end
+  local condition = cfg[nStep].Condition
+  if not condition then
+    return true
+  end
+  local flag = true
+  for key, param in pairs(condition) do
+    if Guide.tbConditionCheck[key] and flag then
+      flag = Guide.tbConditionCheck[key](self, table.unpack(param))
+    end
+    if not flag then
+      break
+    end
+  end
+  return flag
+end
+
+function Guide:TryDoGuide(nGuideID)
+  local nStep = self:GetRestartStep(nGuideID)
+  if nil == nStep then
+    return
+  end
+  self:WriteProcessData(nGuideID, nStep - 1)
+  if not self:IsLocked() then
+    self:LockGuide(nGuideID)
+    self:RemoveFromTriggerGroup(nGuideID)
+    self:DoGuide(nGuideID, nStep)
+    Sdk:OnStartRookieGuide()
+  elseif self:CurrentLock() ~= nGuideID then
+    Guide.GuideBuffer[nGuideID] = 1
+  end
+end
+
+function Guide:DoGuide(nGuideID, nStep)
+  if self:CheckCondition(nGuideID, nStep) then
+    Ui:OpenWindow("UIGuide", self.Config[nGuideID][nStep])
+  else
+    self:UpdateTrigger(nGuideID)
+    self:OnCloseGuideLine()
+  end
+end
+
+function Guide:OnCloseGuideLine()
+  self:UnLockGuide()
+  for nGuideID, _ in pairs(self.GuideBuffer) do
+    self.GuideBuffer[nGuideID] = nil
+    self:TryDoGuide(nGuideID)
+    return
+  end
+end
+
+function Guide:LockGuide(nGuideID)
+  self.ActLock = nGuideID
+end
+
+function Guide:UnLockGuide()
+  self.ActLock = nil
+end
+
+function Guide:IsLocked()
+  return self.ActLock ~= nil
+end
+
+function Guide:CurrentLock()
+  return self.ActLock
+end
+
+function Guide:GetNowStep()
+  if self.ActLock ~= nil then
+    return self:ReadProcessData(me, self.ActLock)
+  else
+    return nil
+  end
+end
+
+function Guide:FinishGuideStep(nGuideID, nStep)
+  self:WriteProcessData(nGuideID, nStep)
+  if nStep + 1 <= #self.Config[nGuideID] then
+    self:DoGuide(nGuideID, nStep + 1)
+  else
+    self:FinishTaskCustomEventAfterGuide(nGuideID)
+    self:OnCloseGuideLine()
+    self:OnTrigger_FinishGuide(nGuideID)
+  end
+end
+
+function Guide:JumpToStep(nGuideID, nStep)
+  if nStep <= #self.Config[nGuideID] then
+    self:DoGuide(nGuideID, nStep)
+  else
+    self:OnCloseGuideLine()
+    self:OnTrigger_FinishGuide(nGuideID)
+  end
+end
+
+function Guide:FinishWholeGuide(nGuideID)
+  local tbWnd = Ui:GetWindow("UIGuide")
+  if nil ~= tbWnd then
+    tbWnd:CloseGuideStep()
+  end
+  self:WriteProcessData(nGuideID, #self.Config[nGuideID])
+  self:FinishTaskCustomEventAfterGuide(nGuideID)
+  self:OnCloseGuideLine()
+  self:OnTrigger_FinishGuide(nGuideID)
+end
+
+function Guide:FinishTaskCustomEventAfterGuide(nGuideID)
+  local szEvent = self.Config[nGuideID][#self.Config[nGuideID]].NeedFinishTaskCustomEvent
+  if not szEvent then
+    return
+  end
+  Task:FinishCustomEventReq(szEvent)
+end
+
+function Guide:GetCurrentStep(nGuideID)
+  local value = self:ReadProcessData(me, nGuideID) + 1
+  if value > #self.Config[nGuideID] then
+    return nil
+  else
+    return value
+  end
+end
+
+function Guide:GetRestartStep(nGuideID)
+  if not self.Config[nGuideID] then
+    LogErr("Guide ID error")
+    return nil
+  end
+  local nStep = self:GetCurrentStep(nGuideID)
+  if nil == nStep then
+    return nil
+  else
+    return self.Config[nGuideID][nStep].RestartStep
+  end
+end
+
+function Guide:OnMapUILoaded()
+  for nGuideID, nStep in pairs(self.TriggerGroup.MapUILoaded) do
+    self:TryDoGuide(nGuideID)
+  end
+end
+
+function Guide:OnPlayerLevelChanged()
+  for nGuideID, nStep in pairs(self.TriggerGroup.LevelUp) do
+    self:TryDoGuide(nGuideID)
+  end
+end
+
+function Guide:OnOpenWnd(szUI)
+  for nGuideID, nStep in pairs(self.TriggerGroup.OpenUI) do
+    local cfg = self.Config[nGuideID]
+    if not cfg or not cfg[nStep] then
+      return false
+    end
+    local trigger = cfg[nStep].Trigger
+    if not trigger then
+      return false
+    end
+    if trigger.OpenUI[1] == szUI then
+      self:TryDoGuide(nGuideID)
+    end
+  end
+end
+
+function Guide:OnFinishTask(nTaskID)
+  for nGuideID, nStep in pairs(self.TriggerGroup.FinishTask) do
+    local cfg = self.Config[nGuideID]
+    if not cfg or not cfg[nStep] then
+      return false
+    end
+    local trigger = cfg[nStep].Trigger
+    if not trigger then
+      return false
+    end
+    for idx = 1, #trigger.FinishTask do
+      if tonumber(trigger.FinishTask[idx]) == nTaskID then
+        self:TryDoGuide(nGuideID)
+        return
+      end
+    end
+  end
+end
+
+function Guide:OnFinishTaskStep(nTaskID, nTaskStep)
+  for nGuideID, nStep in pairs(self.TriggerGroup.FinishTaskStep) do
+    local cfg = self.Config[nGuideID]
+    if not cfg or not cfg[nStep] then
+      return false
+    end
+    local trigger = cfg[nStep].Trigger
+    if not trigger then
+      return false
+    end
+    for idx = 1, #trigger.FinishTaskStep / 2 do
+      local nParam1Index = 2 * idx - 1
+      local nParam2Index = nParam1Index + 1
+      if tonumber(trigger.FinishTaskStep[nParam1Index]) == nTaskID and tonumber(trigger.FinishTaskStep[nParam2Index]) == nTaskStep then
+        self:TryDoGuide(nGuideID)
+        return
+      end
+    end
+  end
+end
+
+function Guide:OnPlayerLogin()
+  self:UnLockGuide()
+  self.GuideBuffer = {}
+  for id, _ in pairs(self.Config) do
+    self:UpdateTrigger(id)
+  end
+end
+
+function Guide:OnTrigger_FinishGuide(nFinishedID)
+  Sdk:OnFinishRookieGuide()
+  for nGuideID, nStep in pairs(self.TriggerGroup.FinishGuide) do
+    local cfg = self.Config[nGuideID]
+    if not cfg or not cfg[nStep] then
+      return false
+    end
+    local trigger = cfg[nStep].Trigger
+    if not trigger then
+      return false
+    end
+    if tonumber(trigger.FinishGuide[1]) == nFinishedID then
+      self:TryDoGuide(nGuideID)
+    end
+  end
+end
+
+function Guide:ChangeFightState(nFightState)
+  for nGuideID, nStep in pairs(self.TriggerGroup.ChangeFightState) do
+    local cfg = self.Config[nGuideID]
+    if not cfg or not cfg[nStep] then
+      return false
+    end
+    local trigger = cfg[nStep].Trigger
+    if not trigger then
+      return false
+    end
+    if tonumber(trigger.ChangeFightState[1]) == nFightState then
+      self:TryDoGuide(nGuideID)
+    end
+  end
+end
+
+function Guide:OnClickTaskPanel(nTaskId, nCurStep)
+  for nGuideID, nStep in pairs(self.TriggerGroup.OnClickTaskPanel) do
+    local cfg = self.Config[nGuideID]
+    if not cfg or not cfg[nStep] then
+      return false
+    end
+    local trigger = cfg[nStep].Trigger
+    if not trigger then
+      return false
+    end
+    if tonumber(trigger.OnClickTaskPanel[1]) == nTaskId and tonumber(trigger.OnClickTaskPanel[2]) == nCurStep then
+      self:TryDoGuide(nGuideID)
+    end
+  end
+end
+
+function Guide:S2CAddNeedOpenWearUIEquip(nItemId, nTemplateId)
+  table.insert(self.tbEquipWearInfoQueue, {nItemId = nItemId, nTemplateId = nTemplateId})
+end
+
+function Guide:TryShowQueueHeadEquipWearUI()
+  local tbEquipInfo = self.tbEquipWearInfoQueue[1]
+  if nil ~= tbEquipInfo then
+    table.remove(self.tbEquipWearInfoQueue, 1)
+    Item.Equip:OpenWearEquipUI(tbEquipInfo.nItemId, tbEquipInfo.nTemplateId)
+  end
+end
+
+function Guide:WriteProcessData(nGuideID, nStep)
+  local nOldStep = self:ReadProcessData(me, nGuideID)
+  if nStep ~= nOldStep then
+    RemoteServer.SaveGuideProcess(nGuideID, nStep)
+  end
+end
+
+function Guide:ClickWindowCloseCallSkipGuide(tbGuideId)
+  if self.ActLock ~= nil and tbGuideId[self.ActLock] then
+    self:FinishWholeGuide(self.ActLock)
+  end
+end
+
+function Guide:RegisterEvent()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self.OnPlayerLogin, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_WND_OPENED, self.OnOpenWnd, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, self.OnPlayerLevelChanged, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_FINISH_TASK, self.OnFinishTask, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_FINISH_TASK_STEP, self.OnFinishTaskStep, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_UI_LOADED, self.OnMapUILoaded, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_FIGHT_STATE, self.ChangeFightState, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_ON_CLICK_GOTO_TASK, self.OnClickTaskPanel, self)
+end
+
+function Guide:ShowInfo()
+  Lib:Tree(self.Config)
+  Lib:Tree(self.TriggerGroup)
+end
+
+function Guide:CheckSaveData()
+  for key, cfg in pairs(self.Config) do
+    print("<color=#00FF3F>[GuideSaveData]</color>Key:", key, "Step:", self:GetCurrentStep(key))
+  end
+end
+
+function Guide:GMClearAllStep()
+  for i, _ in pairs(self.Config) do
+    self:GMClearAStep(i)
+  end
+end
+
+function Guide:GMClearAStep(nId)
+  self:WriteProcessData(nId, 0)
+  self:UpdateTrigger(nId)
+end
+
+function Guide:Clear()
+  Guide:Init()
+end
+
+Guide:Init()

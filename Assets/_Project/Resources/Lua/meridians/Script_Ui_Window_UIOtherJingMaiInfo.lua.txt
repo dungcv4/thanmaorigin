@@ -1,0 +1,259 @@
+local tbWnd = Ui:CreateClass("UIOtherJingMaiInfo", "UIPanel")
+local tbControls = {
+  txtTittle = "txtTittle",
+  txtFightPower = "txtTittle/txtFightPower",
+  AllAttrTemplate = "Scroll View/Viewport/Content/Template",
+  btnJM = "btnList/btn",
+  btnList = "btnList",
+  UITree = "UITree"
+}
+tbControls.btnJingMaiPath = {}
+tbControls.txtJingMaiPath = {}
+for i = 1, JingMai.nMaxJingMai do
+  tbControls.btnJingMaiPath[i] = string.format("%s%d", tbControls.btnJM, i)
+  tbControls.txtJingMaiPath[i] = string.format("%s%d/%s", tbControls.btnJM, i, "Text")
+end
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {}
+
+function tbWnd:OnCreate()
+  self.tbZhouTianGrid = {}
+  self.uiTree = Ui:NewTree(self, tbControls.UITree, self.OnJingMaiGradeSelect, self.OnJingMaiSelect)
+end
+
+function tbWnd:OnOpen()
+  self.nGradeSelect = 1
+  self.pAsyncRole = self.tbOwner.pAsyncRole
+  self.pPanel:SetActive(tbControls.btnList, false)
+  local tbBigData, tbSmallData = JingMai:GetTreeShowData()
+  self.uiTree:SetData(tbBigData, tbSmallData)
+  self.uiTree:AutoSelect()
+end
+
+function tbWnd:CalcFightPower()
+  local nJMIndex = self.nJMIndex
+  local nFightPower = 0
+  for nXWIndex = 1, JingMai.nMaxXueWei do
+    local tbAttrValue = JingMai:GetSyncDataXueWeiAttrValue(self.pAsyncRole, self.nJMIndex, nXWIndex, self.nGradeSelect)
+    local nAttrId = JingMai:GetXueWeiAttrID(nJMIndex, nXWIndex)
+    if JingMai.tbJMAttrCfg[nAttrId] then
+      local nIndex = JingMai.tbAttrId2CompareIndex[nAttrId]
+      local szAttrType = JingMai.tbJMAttrCfg[nAttrId][1].szAttrType
+      if AttrFightPowerFactor[szAttrType] then
+        nFightPower = nFightPower + tbAttrValue[nIndex] * AttrFightPowerFactor[szAttrType] / 10000
+      end
+    end
+  end
+  for nZTIndex = 1, JingMai.nZhouTianCount do
+    local tbZTAttrCfg = JingMai.JMZhouTianAttrInfo[nJMIndex][nZTIndex]
+    local nIdx = JingMai.nSyncZhouTianQualityOffset * (nJMIndex - 1) + nZTIndex
+    local nZTQuality = self.pAsyncRole.GetJingMaiZhouTianQualityByGrade(self.nGradeSelect, nIdx)
+    if nZTQuality <= 0 then
+      nZTQuality = #JingMai.QualityInfo
+      for j = 1, JingMai.nZhouTianNeedXueWei do
+        local nXWIndex = (nZTIndex - 1) * JingMai.nZhouTianNeedXueWei + j
+        local nXWQuality = self.pAsyncRole.GetJingMaiByGrade(self.nGradeSelect, JingMai.nSyncValueOffset * (nJMIndex - 1) + JingMai.nSyncValueAttrQualityOffset + nXWIndex)
+        nZTQuality = math.min(nZTQuality, nXWQuality)
+      end
+    end
+    if nZTQuality > 0 then
+      local tbHuMaiData = JingMai:GetSyncHuMaiShiData(self.pAsyncRole, self.nJMIndex, nZTIndex, self.nGradeSelect)
+      local nAddCount = tbHuMaiData[1]
+      for nIndex, nAttrId in ipairs(tbZTAttrCfg) do
+        local tbAttrCfg = JingMai.tbZhouTianAttrCfg[nAttrId][nZTQuality]
+        local nIdx = JingMai.tbZTAttrAddPercentIndexType[nAttrId]
+        if tbAttrCfg then
+          local szAttrType = tbAttrCfg[1]
+          if AttrFightPowerFactor[szAttrType] then
+            nFightPower = nFightPower + tbAttrCfg[nIdx + 1] * AttrFightPowerFactor[szAttrType] / 10000
+          end
+        end
+        local tbAttrActiveCfg = JingMai.tbZhouTianAttrCfg[nAttrId][JingMai.nZhouTianBaseAttrQuality]
+        if tbAttrActiveCfg then
+          local szAttrType = tbAttrActiveCfg[1]
+          if AttrFightPowerFactor[szAttrType] then
+            nFightPower = nFightPower + tbAttrActiveCfg[nIdx + 1] * AttrFightPowerFactor[szAttrType] / 10000
+          end
+          if nIndex <= nAddCount then
+            local nAddValue1 = math.floor(tbAttrActiveCfg[nIdx + 1] * tbHuMaiData[nIndex + 1] / 100)
+            if AttrFightPowerFactor[szAttrType] then
+              nFightPower = nFightPower + nAddValue1 * AttrFightPowerFactor[szAttrType] / 10000
+            end
+          end
+        end
+      end
+    end
+  end
+  return nFightPower
+end
+
+function tbWnd:UpdateView()
+  local szJMName = JingMai:GetJingMaiName(self.nJMIndex)
+  local nFightPower = self:CalcFightPower()
+  self.pPanel:Label_SetText(tbControls.txtTittle, szJMName)
+  self.pPanel:Label_SetText(tbControls.txtFightPower, i18n.EasyGet("\230\136\152\229\138\155\229\128\188\239\188\154{0}", nFightPower))
+  self.nActiveCount = self.pAsyncRole.GetJingMaiByGrade(self.nGradeSelect, JingMai.nSyncValueOffset * (self.nJMIndex - 1) + JingMai.nSyncValueActiveCount)
+  for i = 1, 6 do
+    if 1 == i % 2 then
+      for nIdx = 1, 3 do
+        local nXWIndex = (math.ceil(i / 2) - 1) * 3 + nIdx
+        local nAttrId = JingMai:GetXueWeiAttrID(self.nJMIndex, nXWIndex)
+        local tbAttrCfg = JingMai.tbJMAttrCfg[nAttrId]
+        local szPathBase = tbControls.AllAttrTemplate .. i .. "/Cont_Acupoint/img_Info0" .. nIdx
+        local szXueWeiName = JingMai:GetXueWeiName(self.nJMIndex, nXWIndex)
+        if nXWIndex <= self.nActiveCount then
+          local tbAttrValue = JingMai:GetSyncDataXueWeiAttrValue(self.pAsyncRole, self.nJMIndex, nXWIndex, self.nGradeSelect)
+          local nZTIndex = JingMai:DoXWIndex2ZTIndex(nXWIndex)
+          local nXWQuality = self.pAsyncRole.GetJingMaiByGrade(self.nGradeSelect, JingMai.nSyncValueOffset * (self.nJMIndex - 1) + JingMai.nSyncValueAttrQualityOffset + nXWIndex)
+          local nIdx = JingMai.nSyncZhouTianQualityOffset * (self.nJMIndex - 1) + nZTIndex
+          local nZTQuality = self.pAsyncRole.GetJingMaiZhouTianQualityByGrade(self.nGradeSelect, nIdx)
+          if nZTQuality > 0 then
+            nXWQuality = nZTQuality
+          end
+          if nXWQuality <= 0 then
+            nXWQuality = 1
+          end
+          local szAttrName, szAttrValue = FightSkill:GetMagicDescSplit(tbAttrCfg[nXWQuality].szAttrType, tbAttrValue)
+          local szColor = Ui.tbColor:GetColorHexByDefineName(JingMai.QualityInfo[nXWQuality].szColorName)
+          self.pPanel:Label_SetText(szPathBase .. "/txtName", szXueWeiName)
+          self.pPanel:Label_SetText(szPathBase .. "/txtInfo", i18n.EasyGet("{0}\239\188\154<color=#{1}>{2}</color>", szAttrName, szColor, szAttrValue))
+          self.pPanel:SetActive(szPathBase .. "/img_Lock", false)
+        else
+          local tbValue = JingMai:GetXueWeiMinAttrCfg(self.nJMIndex, nXWIndex)
+          local szAttribMsg = FightSkill:GetMagicDesc(tbAttrCfg[1].szAttrType, tbValue)
+          self.pPanel:SetActive(szPathBase .. "/img_Lock", true)
+          self.pPanel:Label_SetText(szPathBase .. "/txtName", "")
+          self.pPanel:Label_SetText(szPathBase .. "/txtInfo", "")
+          self.pPanel:Label_SetText(szPathBase .. "/img_Lock/txtNameLock", szXueWeiName)
+          self.pPanel:Label_SetText(szPathBase .. "/img_Lock/txtInfoLock", szAttribMsg)
+        end
+      end
+    else
+      local nZTIndex = math.floor(i / 2)
+      if self.tbZhouTianGrid[nZTIndex] then
+        self.tbZhouTianGrid[nZTIndex]:SetEmpty(true)
+      end
+      local szPathBase = tbControls.AllAttrTemplate .. i .. "/Cont_Universe/img_Bg/"
+      local szAttrPathBase = tbControls.AllAttrTemplate .. i .. "/Cont_Universe/img_Bg/txtInfo0"
+      local tbHuMaiFuData = JingMai:GetSyncHuMaiShiData(self.pAsyncRole, self.nJMIndex, nZTIndex, self.nGradeSelect)
+      local tbZTAttrCfg = JingMai.JMZhouTianAttrInfo[self.nJMIndex][nZTIndex]
+      if not self.tbZhouTianGrid[nZTIndex] then
+        self.tbZhouTianGrid[nZTIndex] = Ui:NewExistItemGrid(self, szPathBase .. "UIItemGrid")
+      end
+      if self.tbZhouTianGrid[nZTIndex] then
+        self.tbZhouTianGrid[nZTIndex]:SetEmpty(true)
+      end
+      local nIdx = JingMai.nSyncZhouTianQualityOffset * (self.nJMIndex - 1) + nZTIndex
+      local nZTQuality = self.pAsyncRole.GetJingMaiZhouTianQualityByGrade(self.nGradeSelect, nIdx)
+      if nZTQuality <= 0 then
+        nZTQuality = #JingMai.QualityInfo
+        for j = 1, JingMai.nZhouTianNeedXueWei do
+          local nXWIndex = (nZTIndex - 1) * JingMai.nZhouTianNeedXueWei + j
+          local nXWQuality = self.pAsyncRole.GetJingMaiByGrade(self.nGradeSelect, JingMai.nSyncValueOffset * (self.nJMIndex - 1) + JingMai.nSyncValueAttrQualityOffset + nXWIndex)
+          nZTQuality = math.min(nZTQuality, nXWQuality)
+        end
+      end
+      local tbAttMsg = {}
+      for nAttrIndex, nAttrId in ipairs(tbZTAttrCfg) do
+        local tbAttrCfg = JingMai.tbZhouTianAttrCfg[nAttrId][JingMai.nZhouTianBaseAttrQuality]
+        tbAttMsg[nAttrIndex] = ""
+        local tbAttrV = {
+          0,
+          0,
+          0
+        }
+        if tbAttrCfg then
+          for nIndex = 1, 3 do
+            tbAttrV[nIndex] = tbAttrV[nIndex] + tbAttrCfg[nIndex + 1]
+          end
+          local nAttrAddType = JingMai.tbZTAttrAddPercentIndexType[nAttrId]
+          local tbAttrCfgQuality = JingMai.tbZhouTianAttrCfg[nAttrId][nZTQuality]
+          if tbAttrCfgQuality then
+            if JingMai.tbZhouTianAttrAddType.ZTADT_2 == nAttrAddType then
+              tbAttrV[2] = tbAttrV[2] + tbAttrCfgQuality[3]
+            else
+              tbAttrV[1] = tbAttrV[1] + tbAttrCfgQuality[2]
+              if JingMai.tbZhouTianAttrAddType.ZTADT_13 == nAttrAddType then
+                tbAttrV[3] = tbAttrV[3] + tbAttrCfgQuality[4]
+              end
+            end
+          end
+          if nAttrIndex <= tbHuMaiFuData[1] then
+            local nAddValue
+            if JingMai.tbZhouTianAttrAddType.ZTADT_2 == nAttrAddType then
+              nAddValue = math.floor(tbAttrCfg[3] * tbHuMaiFuData[nAttrIndex + 1] / 100)
+              tbAttrV[2] = tbAttrV[2] + nAddValue
+            else
+              nAddValue = math.floor(tbAttrCfg[2] * tbHuMaiFuData[nAttrIndex + 1] / 100)
+              tbAttrV[1] = tbAttrV[1] + nAddValue
+              if JingMai.tbZhouTianAttrAddType.ZTADT_13 == nAttrAddType then
+                tbAttrV[3] = tbAttrV[3] + nAddValue
+              end
+            end
+            local nItemQuality = JingMai:GetHuMaiFuItemQuality(tbHuMaiFuData)
+            local nTemplateId = JingMai.JMHuMaiId[nZTIndex][nItemQuality]
+            if nTemplateId then
+              self.tbZhouTianGrid[nZTIndex]:SetItemByTemplate(nTemplateId)
+              self.tbZhouTianGrid[nZTIndex]:SetClickEnable(true, function()
+                if tbHuMaiFuData[1] > 0 then
+                  local nItemQuality = JingMai:GetHuMaiFuItemQuality(tbHuMaiFuData)
+                  local nTemplateId = JingMai.JMHuMaiId[nZTIndex][nItemQuality]
+                  if nTemplateId then
+                    local tbInfo = {
+                      nTemplate = nTemplateId,
+                      nFaction = self.tbOwner.nFaction,
+                      nFactionSect = self.tbOwner.nFactionSect,
+                      nSex = self.tbOwner.nSex,
+                      tbLinkInfo = {tbHuMaiFuData = tbHuMaiFuData}
+                    }
+                    Item:ShowItemDetail(tbInfo)
+                  end
+                end
+              end)
+            else
+              self.tbZhouTianGrid[nZTIndex]:SetEmpty(true)
+            end
+          end
+          local szAttrName, szAttrValue = FightSkill:GetMagicDescSplit(tbAttrCfg[1], tbAttrV)
+          if nZTQuality >= 1 then
+            local szColor = Ui.tbColor:GetColorHexByDefineName(JingMai.QualityInfo[nZTQuality].szColorName)
+            tbAttMsg[nAttrIndex] = i18n.EasyGet("{0}\239\188\154<color=#{1}>{2}</color>", szAttrName, szColor, szAttrValue)
+          else
+            tbAttMsg[nAttrIndex] = i18n.EasyGet("{0}\239\188\154{1}", szAttrName, szAttrValue)
+          end
+        end
+      end
+      if nZTIndex <= math.floor(self.nActiveCount / JingMai.nZhouTianNeedXueWei) then
+        self.pPanel:SetActive(szPathBase .. "img_Lock", false)
+        local szZTName = JingMai.tbZhouTianName[nZTIndex]()
+        self.pPanel:Label_SetText(szPathBase .. "txtName", szZTName)
+        for nAttrIndex = 1, 3 do
+          self.pPanel:Label_SetText(szAttrPathBase .. nAttrIndex, tbAttMsg[nAttrIndex])
+        end
+      else
+        self.pPanel:Label_SetText(szPathBase .. "txtName", "")
+        self.pPanel:SetActive(szPathBase .. "img_Lock", true)
+        local szZTName = JingMai.tbZhouTianName[nZTIndex]()
+        self.pPanel:Label_SetText(szPathBase .. "img_Lock/txtName", szZTName)
+        for nAttrIndex = 1, 3 do
+          self.pPanel:Label_SetText(szAttrPathBase .. nAttrIndex, "")
+          self.pPanel:Label_SetText(szPathBase .. "img_Lock/txtInfo0" .. nAttrIndex, tbAttMsg[nAttrIndex])
+        end
+      end
+    end
+  end
+end
+
+function tbWnd:OnClose()
+  self.nJMIndex = nil
+end
+
+function tbWnd:OnJingMaiGradeSelect(tbInfo, nBigIndex)
+  self.nGradeSelect = tbInfo.nGrade
+  self.uiTree:SelectSmallByIndex(self.nGradeSelect, 1)
+end
+
+function tbWnd:OnJingMaiSelect(tbInfo, nSmallIndex)
+  self.nJMIndex = tbInfo.nJMIndex
+  self:UpdateView()
+end

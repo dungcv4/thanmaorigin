@@ -1,0 +1,89 @@
+if EDITOR or MODULE_GAMESERVER and WINDOWS then
+  local function readonly_newindex(t, k, v)
+    local tbl_mt = getmetatable(t)
+    
+    LogErr(string.format([[
+write to a read-only table with key = %s, 
+ ################SetReadOnlyKey StartTrace##############
+%s
+################SetReadOnlyKey EndTrace##############
+
+ ##################error start traceback##################
+%s
+##################error end traceback##################
+]], tostring(k), tbl_mt.__SetReadOnlyTrace or "nil", debug.traceback()))
+  end
+  
+  local travelled_tables = {}
+  
+  function SetReadOnly(inputTable, bRecurrence)
+    if not inputTable then
+      LogErr(string.format("in SetReadOnly inputTable is nil!! %s", debug.traceback()))
+      return nil
+    end
+    local proxy_mt = getmetatable(inputTable)
+    if proxy_mt and proxy_mt.__newindex == readonly_newindex then
+      return inputTable
+    end
+    local proxy = travelled_tables[inputTable]
+    if type(inputTable) ~= "table" then
+      return inputTable
+    end
+    if not proxy then
+      proxy = {}
+      local mt = {
+        __index = inputTable,
+        __SetReadOnly_proxy = proxy,
+        __SetReadOnlyTrace = debug.traceback(),
+        __newindex = readonly_newindex,
+        __len = function()
+          return #inputTable
+        end,
+        __pairs = function()
+          return next, inputTable, nil
+        end
+      }
+      setmetatable(proxy, mt)
+      travelled_tables[inputTable] = proxy
+      if bRecurrence then
+        for k, v in pairs(inputTable) do
+          if type(v) == "table" then
+            inputTable[k] = SetReadOnly(v, bRecurrence)
+          end
+        end
+      end
+    end
+    return proxy
+  end
+  
+  function IsReadOnly(tb1)
+    if type(tb1) == "table" then
+      local proxy_mt = getmetatable(tb1)
+      if proxy_mt and proxy_mt.__newindex == readonly_newindex then
+        return true
+      else
+        for k, v in pairs(tb1) do
+          if IsReadOnly(v) then
+            return true
+          end
+        end
+      end
+    end
+    return false
+  end
+else
+  function SetReadOnly(inputTable, bRecurrence)
+    return inputTable
+  end
+  
+  function IsReadOnly(tb1)
+    return false
+  end
+end
+SERVER_MODE = {
+  ALONE = 0,
+  ZONE_CLIENT = 1,
+  ZONE_SERVER = 2,
+  DATABASE_SCANNER = 3
+}
+math.mod = math.fmod

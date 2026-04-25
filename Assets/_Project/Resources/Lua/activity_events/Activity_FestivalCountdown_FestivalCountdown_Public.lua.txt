@@ -1,0 +1,91 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.FestivalCountdown)
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/FestivalCountdown/FestivalCountdownmMailCfg.tab"
+  self.tbMail = Lib:EasyLoadTabFile(szFilepath, {"nMailId"})
+  szFilepath = "Setting/Activity/FestivalCountdown/FestivalCountdownCfg.tab"
+  self.ACTIVITY_CONFIG = Lib:EasyLoadTabFile(szFilepath, {"nConfigId", "nStageId"})
+  if not self.ACTIVITY_CONFIG then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  local nMinTime = 0
+  for nConfigId, tbValue in ipairs(self.ACTIVITY_CONFIG) do
+    for nStageId, tbInfo in ipairs(tbValue) do
+      tbInfo.nStartTime = Lib:GetDate2Time(tbInfo.nStartTime)
+      if nMinTime < tbInfo.nStartTime then
+        nMinTime = tbInfo.nStartTime
+      else
+        LogErr(string.format("FestivalCountdown nStage StartTime error! nConfigId:%d, nStageId:%d", nConfigId, nStageId))
+      end
+    end
+  end
+  self.bLoadConfig = true
+end
+
+tbActivity.Protocol = {ReqStartCountDown = 1}
+
+function tbActivity:GetMailById(dwPlayerId, nMailId)
+  local tbMailCfg = self.tbMail[nMailId]
+  if not tbMailCfg then
+    return
+  end
+  local tbAward = Award:GetAward(tbMailCfg.nAwardId, tbMailCfg.nAwardKey)
+  if not tbAward then
+    return
+  end
+  local tbMail = {
+    To = dwPlayerId,
+    From = i18n.Get(tbMailCfg.szMailFrom),
+    Title = i18n.Get(tbMailCfg.szMailTitle),
+    Text = i18n.Get(tbMailCfg.szMailText),
+    tbAttach = tbAward,
+    nLogReason = Env.LogWay_NewYearCountdown
+  }
+  return tbMail
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  local nMinTime = 0
+  for nStageId, tbInfo in ipairs(tbActCfg.Cfg) do
+    tbInfo.nStartTime = Lib:GetDate2Time(tbInfo.nStartTime)
+    if nMinTime < tbInfo.nStartTime then
+      nMinTime = tbInfo.nStartTime
+    else
+      LogErr(string.format("FestivalCountdown nStage StartTime error! nStageId:%d", nStageId))
+    end
+  end
+  self.tbConfig = tbActCfg.Cfg
+  for nIndex, tbInfo in ipairs(tbActCfg.Cfg) do
+    if self.tbConfig[nIndex].szAction ~= "SendMail" then
+      self.tbConfig[nIndex].szParam = i18n.Encode(tbInfo.szParam)
+    end
+  end
+  self.tbMail = {}
+  for _, tbInfo in ipairs(tbActCfg.tbMail) do
+    self.tbMail[tbInfo.nMailId] = tbInfo
+    self.tbMail[tbInfo.nMailId].szMailFrom = i18n.Encode(tbInfo.szMailFrom)
+    self.tbMail[tbInfo.nMailId].szMailTitle = i18n.Encode(tbInfo.szMailTitle)
+    self.tbMail[tbInfo.nMailId].szMailText = i18n.Encode(tbInfo.szMailText)
+  end
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+  self.tbMail = SetReadOnly(self.tbMail, true)
+end
+
+function tbActivity:CheckConfigValid()
+  return true
+end
+
+function tbActivity:GetLogWayFieldName()
+  return ActivityMgr.NoLogWay
+end
+
+function tbActivity:GetSaveKeyFieldName()
+  return ActivityMgr.NoSaveKey
+end

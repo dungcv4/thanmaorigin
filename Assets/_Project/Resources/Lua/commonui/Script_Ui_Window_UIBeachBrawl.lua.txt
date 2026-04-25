@@ -1,0 +1,238 @@
+local tbWnd = Ui:CreateWindow("UIBeachBrawl")
+local eTeamType = {Blue = 1, Red = 2}
+local eRollStatus = {
+  Finish = 1,
+  Abandon = 2,
+  NotStart = 3
+}
+local tbControls = {
+  txtTopTittle = "imgBG/SelectCamp/txtTittle",
+  txtTopTime = "imgBG/SelectCamp/txtTime",
+  PlayerInfoTemplate = "imgBG/SelectCamp/Scroll View/Viewport/Content/Template",
+  txtBottomContent = "imgBG/SelectCamp/InfoScroll/Viewport/Content/txtInfo",
+  HeadInfo = "imgBG/HeadInfo",
+  SelectCamp = "imgBG/SelectCamp"
+}
+tbWnd.tbControls = tbControls
+local MAX_HEAD_NUM = 5
+local PlayerInfoPath = {
+  txtPlayerName = "txtPlayerName",
+  btnOk = "btnOk",
+  btnCancle = "btnCancle",
+  portraitObj = "portraitObj",
+  txtFinish = "txtFinish",
+  txtAbandon = "txtAbandon",
+  txtNotStarted = "txtNotStarted",
+  Img_TeamRed = "Img_TeamRed",
+  Img_TeamBlue = "Img_TeamBlue",
+  imgKnockOut = "Img_WeedOut",
+  imgTrapped = "Img_Trapped",
+  txtTeamRed = "txtTeamRed",
+  txtTeamBlue = "txtTeamBlue"
+}
+tbWnd.UpdateOpt = {
+  UpdateAllPlayerInfo = "UpdatePlayerAllInfo",
+  UpdateSinglePlayerInfo = "UpdateSinglePlayerInfo",
+  UpdateAllHeadInfo = "UpdateAllHeadInfo",
+  UpdateSingleHeadInfo = "UpdateSingleHeadInfo"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self.tbPlayerInfoView = Ui:NewScrollView(self, tbControls.PlayerInfoTemplate)
+  self.tbPlayerHeadInfoList = {}
+  self.tbPlayerRollInfoList = {}
+  self.tbRollFnOkCallBack = {}
+  self.tbRollFnCancelCallBack = {}
+end
+
+function tbWnd:OnOpen(szTopTitle, nRestTime, szBottomContent)
+  if Lib:IsInteger(nRestTime) then
+    self.nRestTime = nRestTime
+  end
+  self.pPanel:SetActive(tbControls.txtTopTittle, not Lib:IsEmptyStr(szTopTitle))
+  self.pPanel:Label_SetText(tbControls.txtTopTittle, szTopTitle or "")
+  self.pPanel:SetActive(tbControls.txtBottomContent, not Lib:IsEmptyStr(szBottomContent))
+  self.pPanel:Label_SetText(tbControls.txtBottomContent, szBottomContent or "")
+  if Lib:IsInteger(self.nRestTime) and self.nRestTime > 0 then
+    if self.nCountDownTimer then
+      Timer:Close(self.nCountDownTimer)
+    end
+    self.nCountDownTimer = Timer:Register(Env.GAME_FPS, self._UpdateTime, self)
+  else
+    self:_UpdateTime()
+  end
+end
+
+function tbWnd:OnClose()
+  if self.nCountDownTimer then
+    Timer:Close(self.nCountDownTimer)
+    self.nCountDownTimer = nil
+  end
+  self.nRestTime = nil
+  self.tbPlayerHeadInfoList = {}
+  self.tbPlayerRollInfoList = {}
+end
+
+function tbWnd:_UpdateTime()
+  if not Lib:IsInteger(self.nRestTime) or self.nRestTime <= 0 then
+    self.pPanel:SetActive(tbControls.txtTopTime, false)
+    if self.nCountDownTimer then
+      Timer:Close(self.nCountDownTimer)
+      self.nCountDownTimer = nil
+      return false
+    end
+  else
+    self.nRestTime = self.nRestTime - 1
+    self.pPanel:SetActive(tbControls.txtTopTime, true)
+    self.pPanel:Label_SetText(tbControls.txtTopTime, i18n.EasyGet("\229\128\146\232\174\161\230\151\182\239\188\154{0}", Lib:TimeDesc12(self.nRestTime)))
+    return true
+  end
+end
+
+function tbWnd:UpdateView(szOpt, ...)
+  if self.UpdateOpt[szOpt] and self[szOpt] then
+    Lib:CallBack({
+      self[szOpt],
+      self,
+      ...
+    })
+  end
+end
+
+function tbWnd:UpdateAllRollStatus(tbPlayerInfoList, tbRollFnOkCallBack, tbRollFnCancelCallBack)
+  self.tbPlayerInfoView:Clear()
+  self.tbPlayerRollInfoList = tbPlayerInfoList or {}
+  for _, tbPlayerInfo in ipairs(self.tbPlayerRollInfoList) do
+    Lib:CallBack({
+      self.UpdateSingleRollStatus,
+      self,
+      tbPlayerInfo,
+      tbRollFnOkCallBack,
+      tbRollFnCancelCallBack
+    })
+  end
+  self.pPanel:SetActive(tbControls.SelectCamp, 0 ~= #self.tbPlayerRollInfoList)
+end
+
+function tbWnd:UpdateSingleRollStatus(tbPlayerInfo, tbRollFnOkCallBack, tbRollFnCancelCallBack)
+  self.tbRollFnOkCallBack = tbRollFnOkCallBack or self.tbRollFnOkCallBack
+  self.tbRollFnCancelCallBack = tbRollFnCancelCallBack or self.tbRollFnCancelCallBack
+  local nIndex = #self.tbPlayerRollInfoList + 1
+  for nIdx, tbInfo in ipairs(self.tbPlayerRollInfoList) do
+    if tbInfo.nPlayerId == tbPlayerInfo.nPlayerId then
+      nIndex = nIdx
+      break
+    end
+  end
+  if nIndex <= MAX_HEAD_NUM and nIndex > 0 then
+    local tbOrgInfo = self.tbPlayerRollInfoList[nIndex] or {}
+    tbOrgInfo.nPlayerId = tbPlayerInfo.nPlayerId or tbOrgInfo.nPlayerId
+    tbOrgInfo.szName = tbPlayerInfo.szName or tbOrgInfo.szName
+    tbOrgInfo.nLevel = tbPlayerInfo.nLevel or tbOrgInfo.nLevel
+    tbOrgInfo.nPortrait = tbPlayerInfo.nPortrait or tbOrgInfo.nPortrait
+    tbOrgInfo.nPortraitFrame = tbPlayerInfo.nPortraitFrame or tbOrgInfo.nPortraitFrame
+    tbOrgInfo.nFaction = tbPlayerInfo.nFaction or tbOrgInfo.nFaction
+    tbOrgInfo.nTeamType = tbPlayerInfo.nTeamType or tbOrgInfo.nTeamType
+    tbOrgInfo.nRollPoint = tbPlayerInfo.nRollPoint or tbOrgInfo.nRollPoint
+    tbOrgInfo.nRollStatus = tbPlayerInfo.nRollStatus or tbOrgInfo.nRollStatus
+    self.tbPlayerInfoView:SetElement(nIndex, function(tbElement)
+      local tbPortraitObjPanel = Ui:NewExistPortraitObjPanel(tbElement, "PortraitObj")
+      tbPortraitObjPanel:SetRoleIcon(tbOrgInfo.nPortrait)
+      tbPortraitObjPanel:SetPortraitFrame(tbOrgInfo.nPortraitFrame or 0)
+      tbPortraitObjPanel:SetFactionIcon(tbOrgInfo.nFaction)
+      tbPortraitObjPanel:SetLevel(tbOrgInfo.nLevel)
+      tbPortraitObjPanel:SetFactionIconActive(true)
+      tbElement.pPanel:Label_SetText("txtPlayerName", tbOrgInfo.szName)
+      tbElement.pPanel:SetActive("txtPlayerName", true)
+      tbElement.pPanel:SetActive("PortraitObj", true)
+      tbElement.pPanel:SetActive(PlayerInfoPath.txtFinish, tbOrgInfo.nTeamType <= 0 and tbOrgInfo.nRollStatus == eRollStatus.Finish)
+      tbElement.pPanel:Label_SetText(PlayerInfoPath.txtFinish, i18n.EasyGet("\229\183\178\230\145\135\231\130\185\239\188\154{0}", tbOrgInfo.nRollPoint or 0))
+      tbElement.pPanel:SetActive(PlayerInfoPath.txtAbandon, tbOrgInfo.nTeamType <= 0 and tbOrgInfo.nRollStatus == eRollStatus.Abandon)
+      tbElement.pPanel:SetActive(PlayerInfoPath.txtNotStarted, tbOrgInfo.nPlayerId ~= me.dwID and tbOrgInfo.nRollStatus == eRollStatus.NotStart)
+      tbElement.pPanel:SetActive(PlayerInfoPath.txtTeamBlue, tbOrgInfo.nTeamType == eTeamType.Blue)
+      tbElement.pPanel:SetActive(PlayerInfoPath.txtTeamRed, tbOrgInfo.nTeamType == eTeamType.Red)
+      if tbOrgInfo.nPlayerId == me.dwID then
+        tbElement.pPanel:SetActive(PlayerInfoPath.btnOk, tbOrgInfo.nRollStatus == eRollStatus.NotStart)
+        tbElement.pPanel:SetActive(PlayerInfoPath.btnCancle, tbOrgInfo.nRollStatus == eRollStatus.NotStart)
+        if not Lib:IsEmptyTB(self.tbRollFnOkCallBack) then
+          Ui:Button_BindEvent(tbElement.pPanel, PlayerInfoPath.btnOk, function()
+            Lib:CallBack(self.tbRollFnOkCallBack)
+          end)
+        else
+          Ui:Button_UnBindEvent(tbElement.pPanel, PlayerInfoPath.btnOk)
+        end
+        if not Lib:IsEmptyTB(self.tbRollFnCancelCallBack) then
+          Ui:Button_BindEvent(tbElement.pPanel, PlayerInfoPath.btnCancle, function()
+            Lib:CallBack(self.tbRollFnCancelCallBack)
+          end)
+        else
+          Ui:Button_UnBindEvent(tbElement.pPanel, PlayerInfoPath.btnCancle)
+        end
+      else
+        tbElement.pPanel:SetActive(PlayerInfoPath.btnOk, false)
+        tbElement.pPanel:SetActive(PlayerInfoPath.btnCancle, false)
+      end
+    end)
+  end
+end
+
+function tbWnd:UpdateSingleHeadInfo(tbPlayerInfo, bNotSort)
+  if not bNotSort then
+    table.sort(self.tbPlayerHeadInfoList, function(tbA, tbB)
+      return tbA.nTeamType > tbB.nTeamType
+    end)
+  end
+  local nIndex = #self.tbPlayerHeadInfoList + 1
+  for nIdx, tbInfo in ipairs(self.tbPlayerHeadInfoList) do
+    if tbInfo.nPlayerId == tbPlayerInfo.nPlayerId then
+      nIndex = nIdx
+      break
+    end
+  end
+  if nIndex < 1 or nIndex > MAX_HEAD_NUM then
+    return
+  end
+  local tbOrgInfo = self.tbPlayerHeadInfoList[nIndex] or {}
+  tbOrgInfo.nPlayerId = tbPlayerInfo.nPlayerId or tbOrgInfo.nPlayerId
+  tbOrgInfo.szName = tbPlayerInfo.szName or tbOrgInfo.szName
+  tbOrgInfo.nLevel = tbPlayerInfo.nLevel or tbOrgInfo.nLevel
+  tbOrgInfo.nPortrait = tbPlayerInfo.nPortrait or tbOrgInfo.nPortrait
+  tbOrgInfo.nPortraitFrame = tbPlayerInfo.nPortraitFrame or tbOrgInfo.nPortraitFrame
+  tbOrgInfo.nFaction = tbPlayerInfo.nFaction or tbOrgInfo.nFaction
+  tbOrgInfo.nTeamType = tbPlayerInfo.nTeamType or tbOrgInfo.nTeamType
+  tbOrgInfo.nRollStatus = tbPlayerInfo.nRollStatus or tbOrgInfo.nRollStatus
+  tbOrgInfo.nStatus = tbPlayerInfo.nStatus or tbOrgInfo.nStatus
+  local szObjPath = string.format("%s/Player0%d/", tbControls.HeadInfo, nIndex)
+  self.pPanel:Sprite_SetSprite(szObjPath .. "imgFactionIcon", Faction:GetIcon(tbOrgInfo.nFaction))
+  self.pPanel:Label_SetText(szObjPath .. "Level/Text", tbOrgInfo.nLevel)
+  self.pPanel:Sprite_SetSprite(szObjPath .. "Portrait/Image", PlayerPortrait:GetIcon(tbOrgInfo.nPortrait))
+  PlayerPortraitFrame:SetPortraitFrame(self.pPanel, szObjPath .. "PortraitFrame", tbOrgInfo.nPortraitFrame)
+  self.pPanel:SetActive(szObjPath, true)
+  self.pPanel:SetActive(szObjPath .. PlayerInfoPath.Img_TeamBlue, tbOrgInfo.nTeamType == eTeamType.Blue)
+  self.pPanel:SetActive(szObjPath .. PlayerInfoPath.Img_TeamRed, tbOrgInfo.nTeamType == eTeamType.Red)
+  self.pPanel:SetActive(szObjPath .. PlayerInfoPath.imgKnockOut, tbOrgInfo.nStatus == BeachFight.Def.PlayerStatus2Index.KnockOut)
+  self.pPanel:SetActive(szObjPath .. PlayerInfoPath.imgTrapped, tbOrgInfo.nStatus == BeachFight.Def.PlayerStatus2Index.Prison)
+  self.pPanel:SetActive(tbControls.HeadInfo, true)
+end
+
+function tbWnd:UpdateAllHeadInfo(tbPlayerInfoList)
+  self.tbPlayerHeadInfoList = tbPlayerInfoList or {}
+  table.sort(self.tbPlayerHeadInfoList, function(tbA, tbB)
+    return tbA.nTeamType > tbB.nTeamType
+  end)
+  for i = 1, MAX_HEAD_NUM do
+    local szObjPath = string.format("%s/Player0%d", tbControls.HeadInfo, i)
+    if self.tbPlayerHeadInfoList[i] then
+      Lib:CallBack({
+        self.UpdateSingleHeadInfo,
+        self,
+        self.tbPlayerHeadInfoList[i],
+        true
+      })
+      self.pPanel:SetActive(szObjPath, true)
+    else
+      self.pPanel:SetActive(szObjPath, false)
+    end
+  end
+end

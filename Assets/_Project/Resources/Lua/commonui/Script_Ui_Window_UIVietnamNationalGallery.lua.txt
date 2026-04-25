@@ -1,0 +1,109 @@
+local tbWnd = Ui:CreateWindow("UIVietnamNationalGallery")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  txtUnlockedValue = "node/imgBG/Content/Unlocked/txtUnlockedValue",
+  txtRankingValue = "node/imgBG/Content/Ranking/txtRankingValue",
+  Template = "node/imgBG/Content/List/Viewport/Content/Template",
+  btnRanking = "node/imgBG/Content/btnRanking"
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_ENTER,
+      self.CloseByDefault
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_RANKBOARD_DATA,
+      self.OnSyncRankData
+    }
+  }
+end
+
+local tbQuality = {
+  [2] = "imgNBg",
+  [3] = "imgRBg",
+  [4] = "imgSRBg",
+  [6] = "imgSSRBg"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseByDefault()
+  end,
+  btnRanking = function(self)
+    local tbEntranceRankData = ActivityMgr.EntranceSchedule:GetEntranceRankData(self.nEntranceIndex)
+    Ui:OpenWindow("UITemporaryActivityRank", tbEntranceRankData, 1)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbListView = Ui:NewScrollView(self, tbControls.Template, nil)
+end
+
+function tbWnd:OnOpen(nCardBookId, nEntranceIndex)
+  if not nCardBookId then
+    LogErr("UIVietnamNationalGallery: Open failed, nCardBookId is nil")
+    return 0
+  end
+  if not nEntranceIndex then
+    LogErr("UIVietnamNationalGallery: Open failed, nEntranceIndex is nil")
+    return 0
+  end
+  self.nCardBookId = nCardBookId
+  self.nEntranceIndex = nEntranceIndex
+  self.szRankType = RankBoard.RankType.VnNation
+  self:ShowCollectInfo()
+  self:UpdateListView()
+  self:ReqMyRankData()
+end
+
+function tbWnd:UpdateListView()
+  self.tbListView:Clear()
+  local tbBookCfg = Item.SouvenirCard:GetCfgById(self.nCardBookId)
+  if not tbBookCfg or not tbBookCfg.tbSortList then
+    me.CenterMsg(i18n.EasyGet("\230\154\130\230\151\160\228\191\161\230\129\175"))
+    return
+  end
+  for nIndex, tbInfo in ipairs(tbBookCfg.tbSortList) do
+    self.tbListView:SetElement(nIndex, function(tbElement)
+      self:SetElement(tbElement, tbInfo.nTemplateId)
+    end)
+  end
+end
+
+function tbWnd:SetElement(tbElement, nItemTemplateId)
+  local nCollectNum = Item.SouvenirCard:GetCollectNum(me, self.nCardBookId, nItemTemplateId)
+  local szName, _, _, nQuality = KItem.GetItemShowInfo(nItemTemplateId, me.nFaction, me.nFactionSect, me.nSex)
+  if nCollectNum > 0 then
+    tbElement.pPanel:SetActive("imgLockBg", false)
+    tbElement.pPanel:SetActive(tbQuality[nQuality], true)
+  else
+    tbElement.pPanel:SetActive("imgLockBg", true)
+  end
+  tbElement.pPanel:Label_SetText("txtName", i18n.Parse(szName))
+end
+
+function tbWnd:ShowCollectInfo()
+  local nTotalKindNum = Item.SouvenirCard:GetCardKindNum(self.nCardBookId)
+  local nCollectKindNum = Item.SouvenirCard:GetCollectKindNum(me, self.nCardBookId)
+  self.pPanel:Label_SetText(tbControls.txtUnlockedValue, i18n.EasyGet("{0}/{1}", nCollectKindNum, nTotalKindNum))
+end
+
+function tbWnd:OnSyncRankData()
+  self:ShowRankInfo()
+end
+
+function tbWnd:ReqMyRankData()
+  self.pPanel:Label_SetText(tbControls.txtRankingValue, "")
+  RankBoard:RequestOpenRankBoard(self.szRankType, 1, true)
+end
+
+function tbWnd:ShowRankInfo()
+  local nPosition, _ = RankBoard:GetMyRankInfo(self.szRankType)
+  if nPosition and nPosition > 0 then
+    self.pPanel:Label_SetText(tbControls.txtRankingValue, nPosition)
+  else
+    self.pPanel:Label_SetText(tbControls.txtRankingValue, i18n.EasyGet("\230\156\170\228\184\138\230\166\156"))
+  end
+end

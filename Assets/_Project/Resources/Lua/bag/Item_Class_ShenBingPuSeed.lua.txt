@@ -1,0 +1,175 @@
+local tbSeedItem = Item:GetClass("ShenBingPuSeed")
+local ShenBingPu = Item.ShenBingPu
+tbSeedItem.EXTPARAM_IDENTTEMPLATE = 1
+tbSeedItem.EXTPARAM_RECYCLE_MATERIAL_ID = 2
+tbSeedItem.EXTPARAM_RECYCLE_MATERIAL_NUM = 3
+
+function tbSeedItem:OnCreate(pSeed)
+  self:InitStarLevel(pSeed)
+  self:InitFixAttr(pSeed)
+  self:InitRandomAttr(pSeed)
+end
+
+function tbSeedItem:InitRandomAttr(pSeed)
+  local nItemTemplate = KItem.GetItemExtParam(pSeed.dwTemplateId, self.EXTPARAM_IDENTTEMPLATE)
+  local nStarLevel = ShenBingPu:GetStarLevelForSeed(pSeed)
+  if not nStarLevel then
+    return
+  end
+  local nRandAttrNum = ShenBingPu:CalcRandAttrNum(nStarLevel, pSeed.nQuality)
+  if not nRandAttrNum then
+    Lib:LogErrFormat("ShenBingPuSeed: InitRandomAttr falied, nRandAttrNum is nil, nItemId = %d", pSeed.dwId)
+    return
+  end
+  local tbExceptAttrList = {}
+  for i = 1, nRandAttrNum do
+    local tbNewRandAttr = ShenBingPu:GetAttrFromRandomGroup(ShenBingPu.tbItemCfg[nItemTemplate].nRandAttrGroupId, tbExceptAttrList)
+    if tbNewRandAttr then
+      tbNewRandAttr.nAttrValue1 = 0
+      tbNewRandAttr.nAttrValue2 = 0
+      tbNewRandAttr.nAttrValue3 = 0
+      ShenBingPu:SetRandAttrForSeed(pSeed, tbNewRandAttr)
+      table.insert(tbExceptAttrList, tbNewRandAttr)
+    end
+  end
+end
+
+function tbSeedItem:InitFixAttr(pSeed)
+  local nItemTemplate = KItem.GetItemExtParam(pSeed.dwTemplateId, self.EXTPARAM_IDENTTEMPLATE)
+  local tbItemCfg = ShenBingPu.tbItemCfg[nItemTemplate]
+  if not tbItemCfg then
+    return
+  end
+  for i = 1, Item.ShenBingPu.CFG.nMainAttrNum do
+    local nFixedAttrId = tbItemCfg["nFixedAttr" .. i .. "Id"]
+    if nFixedAttrId then
+      local nValue1 = 0
+      local nValue2 = 0
+      local nValue3 = 0
+      local tbNewFixAttr = {
+        nAttrId = nFixedAttrId,
+        nAttrValue1 = nValue1,
+        nAttrValue2 = nValue2,
+        nAttrValue3 = nValue3
+      }
+      ShenBingPu:SetFixedAttrForSeed(pSeed, tbNewFixAttr)
+    end
+  end
+end
+
+function tbSeedItem:InitStarLevel(pSeed)
+  local nItemTemplate = KItem.GetItemExtParam(pSeed.dwTemplateId, self.EXTPARAM_IDENTTEMPLATE)
+  if ShenBingPu.tbItemCfg[nItemTemplate] then
+    ShenBingPu:SetStarLevelForSeed(pSeed, ShenBingPu.tbItemCfg[nItemTemplate].nStarLevel)
+  else
+    Lib:LogErrFormat("ShenBingPuSeed: InitStarLevel falied, unexist nTemplateId = %d, nSeedTemplateId = %d", nItemTemplate, pSeed.dwTemplateId)
+    return
+  end
+end
+
+function tbSeedItem:DoIdentify(pPlayer, nSeedTemplateId, tbSeedRandAttr)
+  if not pPlayer then
+    return
+  end
+  local nItemTemplate = KItem.GetItemExtParam(nSeedTemplateId, self.EXTPARAM_IDENTTEMPLATE)
+  local pNewWeapon = pPlayer.AddItemEx(nItemTemplate, 1, nil, Env.LogWay_ShenBingPuIdentify)
+  local nRandGroupId = ShenBingPu.tbItemCfg[nItemTemplate].nRandAttrGroupId
+  for _, tbRandAttr in ipairs(tbSeedRandAttr) do
+    local nAttrId = tbRandAttr.nAttrId
+    local tbRealRandAttr = ShenBingPu:CalcNewRandAttr(nAttrId, nRandGroupId)
+    if tbRealRandAttr then
+      ShenBingPu:SetRandAttr(pNewWeapon, tbRealRandAttr)
+    else
+      Lib:LogErrFormat("ShenBingPuSeed: DoIdentify failed, tbRealRandAttr is nil, nPlayerId = %d, nSeedTemplateId = %d, nAttrId = %d", pPlayer.dwID, nSeedTemplateId, nAttrId)
+    end
+  end
+  return pNewWeapon
+end
+
+function tbSeedItem:GetRandomAttrib(pSeed)
+  local tbTip = {}
+  local tbAllRandAttrib
+  local nItemTemplate = KItem.GetItemExtParam(pSeed.dwTemplateId, self.EXTPARAM_IDENTTEMPLATE)
+  if pSeed then
+    local szQualityColor = Item:GetQualityColor(pSeed.nQuality)
+    tbAllRandAttrib = ShenBingPu:GetAllRandAttrForSeed(me, pSeed)
+    for nIndex, tbMA in ipairs(tbAllRandAttrib) do
+      tbTip[nIndex] = {}
+      local szMinValue, szMaxValue = ShenBingPu:GetRandAttrValRange(nItemTemplate, tbMA.nAttrId, true)
+      szMinValue = string.gsub(szMinValue, "+", "")
+      szMaxValue = string.gsub(szMaxValue, "+", "")
+      local szAttribDesc, _ = FightSkill:GetMagicDescSplit(tbMA.szAttrType, {
+        tbMA.nAttrValue1,
+        tbMA.nAttrValue2,
+        tbMA.nAttrValue3
+      })
+      if szAttribDesc and "" ~= szAttribDesc then
+        table.insert(tbTip[nIndex], string.format("<color=#%s>%s</color> ", Ui.tbColor:GetColorHexByDefineName(szQualityColor), szAttribDesc))
+        table.insert(tbTip[nIndex], string.format("<color=#%s>(%s - %s)</color>", Ui.tbColor:GetColorHexByDefineName("Gray"), szMinValue, szMaxValue))
+      end
+    end
+    return tbTip
+  else
+    return nil
+  end
+end
+
+function tbSeedItem:GetChatLinkInfo(pEquip)
+  if pEquip.szClass ~= "ShenBingPuSeed" then
+    return
+  end
+  local tbInfo = {}
+  tbInfo.szClass = pEquip.szClass
+  tbInfo.tbFixAttr = self:GetFixAttrib(pEquip)
+  tbInfo.tbRandomAttr = self:GetRandomAttrib(pEquip)
+  tbInfo.nFightPower = ShenBingPu:GetWeaponFightPowerForSeed(me, pEquip)
+  return tbInfo
+end
+
+function tbSeedItem:GetTip(tbParam)
+  if type(tbParam) == "table" then
+    return
+  else
+    return self:GetFixAttrib(tbParam), self:GetRandomAttrib(tbParam)
+  end
+end
+
+function tbSeedItem:GetTipByTemplate(tbLinkInfo)
+  return tbLinkInfo.tbFixAttr, tbLinkInfo.tbRandomAttr
+end
+
+function tbSeedItem:GetFixAttrib(pSeed)
+  local tbTip = {}
+  local tbBaseAttr, tbAttrRange
+  if pSeed then
+    local nItemTemplate = KItem.GetItemExtParam(pSeed.dwTemplateId, self.EXTPARAM_IDENTTEMPLATE)
+    tbAttrRange = ShenBingPu:GetAllFixedAttrValRange(nItemTemplate)
+    tbBaseAttr = ShenBingPu:GetAllFixedAttrForSeed(me, pSeed, 1) or {}
+    local tbAttrDiff = ShenBingPu:GetWeaponAttrDiffByBatch(tbBaseAttr) or {}
+    for i, tbDiff in ipairs(tbAttrDiff) do
+      tbTip[i] = {}
+      if tbDiff.szAttrDesc and tbDiff.szAttrDesc ~= "" then
+        local szQualityColor = Item:GetQualityColor(pSeed.nQuality)
+        table.insert(tbTip[i], string.format("<color=#%s>%s</color> ", Ui.tbColor:GetColorHexByDefineName(szQualityColor), tbDiff.szAttrDesc))
+        table.insert(tbTip[i], string.format("<color=#%s>(%s - %s)</color>", Ui.tbColor:GetColorHexByDefineName("Gray"), tbAttrRange[i].nMinValue, tbAttrRange[i].nMaxValue))
+      end
+    end
+  end
+  return tbTip
+end
+
+function tbSeedItem:GetRecyclePrice(nSeedTemplate)
+  local nMaterialId = KItem.GetItemExtParam(nSeedTemplate, self.EXTPARAM_RECYCLE_MATERIAL_ID)
+  local nMaterialNum = KItem.GetItemExtParam(nSeedTemplate, self.EXTPARAM_RECYCLE_MATERIAL_NUM)
+  if nMaterialId > 0 and nMaterialNum > 0 then
+    return nMaterialId, nMaterialNum
+  end
+end
+
+function tbSeedItem:GetSlot(nSeedTemplate)
+  local nWeaponTemplate = KItem.GetItemExtParam(nSeedTemplate, self.EXTPARAM_IDENTTEMPLATE)
+  local tbBaseInfo = Item:GetItemBaseProp(nWeaponTemplate)
+  if tbBaseInfo then
+    return tbBaseInfo.nDetailType
+  end
+end

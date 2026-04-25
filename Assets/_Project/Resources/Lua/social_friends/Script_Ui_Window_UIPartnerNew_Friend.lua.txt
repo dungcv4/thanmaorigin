@@ -1,0 +1,690 @@
+local tbWnd = Ui:CreateClass("UIPartnerNew_Friend", "UIPanel")
+local tbImgQualityBgEffectList = {
+  [1] = "/Effect_SSS",
+  [2] = "/Effect_SS",
+  [3] = "/Effect_S"
+}
+local tbQualitySetting = {
+  [1] = "SSS",
+  [2] = "SS",
+  [3] = "S",
+  [4] = "A",
+  [5] = "B"
+}
+local tbFriendPanelStateIndex = {
+  PANEL_FRIEND = 1,
+  PANEL_GALLERY = 2,
+  PANEL_DECOMPOSE = 3
+}
+local tbImgQualityBgList = {
+  [1] = "UI/atlas/partner/img_partner_dismiss_listbg_sss.png",
+  [2] = "UI/atlas/partner/img_partner_dismiss_listbg_ss.png",
+  [3] = "UI/atlas/partner/img_partner_dismiss_listbg_s.png",
+  [4] = "UI/atlas/partner/img_partner_dismiss_listbg_a.png",
+  [5] = "UI/atlas/partner/img_partner_dismiss_listbg_b.png"
+}
+local tbImgListQualityBgList = {
+  [1] = "UI/atlas/partnernew/img_partnerNew_listbg_sss.png",
+  [2] = "UI/atlas/partnernew/img_partnerNew_listbg_ss.png",
+  [3] = "UI/atlas/partnernew/img_partnerNew_listbg_s.png",
+  [4] = "UI/atlas/partnernew/img_partnerNew_listbg_a.png",
+  [5] = "UI/atlas/partnernew/img_partnerNew_listbg_b.png"
+}
+local tbControls = {
+  goFriendSubPanelFriend = "FriendPanel",
+  goFriendSubPanelGalleryPanel = "GalleryPanel",
+  goFriendSubPanelDecomposePanel = "DecomposePanel",
+  toggleFriendFriend = "FriendToggleList/ToggleFriend",
+  toggleFriendGallery = "FriendToggleList/ToggleGallery",
+  toggleFriendDecompose = "FriendToggleList/ToggleDecompose",
+  goFriendListTemplate = "FriendPanel/DecomposeList/Viewport/Content/Template",
+  txtInfoTitle = "FriendPanel/Right/panelInfo/LevelUp/txtInfoTitle",
+  goAttribListTemplate = "FriendPanel/Right/panelInfo/LevelUp/AttribList/Template",
+  btnLevelUp = "FriendPanel/Right/panelInfo/LevelUp/btnLevelUp",
+  txtLevelUp = "FriendPanel/Right/panelInfo/LevelUp/btnLevelUp/Text",
+  goPartner = "FriendPanel/Right/Partner/Partner%d",
+  txtPartnerName = "FriendPanel/Right/Partner/Partner%d/txtName",
+  imgPartnerNameBg = "FriendPanel/Right/Partner/Partner%d/imgNameBg",
+  txtTips = "FriendPanel/Right/panelInfo/LevelUp/txtTips",
+  FriendEffect = "FriendPanel/DecomposeList/Viewport/Content/Element%d/Effect_Activate",
+  FriendElement = "FriendPanel/DecomposeList/Viewport/Content/Element%d",
+  PartnerGalleryTemplatePath = "GalleryPanel/List/Viewport/Content/%s/PartnerGroup/Template",
+  PartnerGalleryGroupPath = "GalleryPanel/List/Viewport/Content/%s",
+  partnerDecomposeListPath = "DecomposePanel/Content/List/Viewport/Content/Element",
+  dropDownQuality = "DecomposePanel/Content/DropdownQuality",
+  btnDecompose = "DecomposePanel/Content/btnDecompose",
+  togToggleAll = "DecomposePanel/Content/ToggleAll",
+  txtToggleAll = "DecomposePanel/Content/ToggleAll/LabelAll",
+  partnerDecomposeList = "DecomposePanel/Content/List/Viewport/Content/Template",
+  txtDecomposeDesc = "DecomposePanel/Content/txtDescTitle"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnLevelUp = function(self)
+    self:CheckLevelUp()
+  end,
+  btnDecompose = function(self)
+    local tbDecompose = self:DecomposeCurQualityOnly(self.tbSelectedPartnerList)
+    local nCount, needConfirm = Partner:CheckCanComposePartner(tbDecompose)
+    if 0 == nCount then
+      me.CenterMsg(i18n.EasyGet("\232\175\183\233\128\137\230\139\169\232\166\129\233\129\163\230\149\163\231\154\132\229\144\140\228\188\180"))
+    elseif needConfirm then
+      local szMsg = i18n.EasyGet("\233\129\163\230\149\163\228\184\173\229\140\133\229\144\171\231\143\141\229\147\129\228\187\165\228\184\138\229\144\140\228\188\180\239\188\140\230\130\168\230\152\175\229\144\166\231\161\174\232\174\164\233\129\163\230\149\163\239\188\159")
+      Ui:OpenWindow("UIMessageBoxBig", szMsg, {
+        function()
+          RemoteServer.CallPartnerFunc("DecomposePartner", tbDecompose)
+        end,
+        function()
+        end
+      })
+    else
+      RemoteServer.CallPartnerFunc("DecomposePartner", tbDecompose)
+    end
+  end
+}
+tbWnd.tbOnToggleClick = {
+  toggleFriendFriend = function(self, isOn)
+    if isOn then
+      self:FriendToggleGroupSelect(tbFriendPanelStateIndex.PANEL_FRIEND)
+    end
+  end,
+  toggleFriendGallery = function(self, isOn)
+    if isOn then
+      self:FriendToggleGroupSelect(tbFriendPanelStateIndex.PANEL_GALLERY)
+    end
+  end,
+  toggleFriendDecompose = function(self, isOn)
+    if isOn then
+      self:FriendToggleGroupSelect(tbFriendPanelStateIndex.PANEL_DECOMPOSE)
+    end
+  end,
+  togToggleAll = function(self, isOn)
+    self:SetAllPartnerDecompose(isOn)
+  end
+}
+
+function tbWnd:OnCreateFriend()
+  self.tbFriendScrollView = Ui:NewScrollView(self, tbControls.goFriendListTemplate, function(self, nIndex, tbElement)
+    local nFetterId = self.tbFetterIndex2Id[nIndex]
+    self.nCurFetterId = nFetterId
+    self:SetFriendMoreInfo(nFetterId, tbElement)
+  end, false, true)
+  self.tbAttribListScrollView = Ui:NewScrollView(self, tbControls.goAttribListTemplate, nil, false, true)
+  self.nCurFetterId = 0
+end
+
+function tbWnd:OnCreateGallery()
+  self.tbPartnerInfoList = {}
+  for i = 1, #tbQualitySetting do
+    self.tbPartnerInfoList[i] = Ui:NewScrollView(self, string.format(tbControls.PartnerGalleryTemplatePath, tbQualitySetting[i]), function(tbOwner, nIndex, element)
+      Ui:OpenWindow("UIPartnerGalleryDetail", self.tbPartnerQualityInfoList[i][nIndex])
+    end, false, true)
+  end
+end
+
+function tbWnd:OnCreateDecompose()
+  self.nMaxElements = 0
+  self.tbDecomposePartnerView = Ui:NewScrollView(self, tbControls.partnerDecomposeList, function(tbOwner, nIndex, element)
+    local nHaveCount = 0
+    if self.tbSelectedPartnerList[self.tbPartnerList[nIndex].nTemplateId] ~= nil then
+      nHaveCount = self.tbSelectedPartnerList[self.tbPartnerList[nIndex].nTemplateId]
+    end
+    Ui:OpenWindow("UIPartnerDecomposeSetting", self.tbPartnerList[nIndex].nTemplateId, self.tbPartnerList[nIndex].nCount, nHaveCount)
+    element.pPanel:Button_SetEnable("", true)
+  end, false, false)
+  self.pPanel:Dropdown_BindEvent(self.dropDownQuality, function(value)
+    self.nCurSelectQuality = value
+    self:HideParterInfo()
+    if self:CheckNowIsAllToggle() then
+      self.pPanel:Toggle_SetChecked(self.togToggleAll, true)
+    else
+      self.pPanel:Toggle_SetChecked(self.togToggleAll, false)
+    end
+  end)
+end
+
+function tbWnd:OnCreate()
+  self:OnCreateFriend()
+  self:OnCreateGallery()
+  self:OnCreateDecompose()
+end
+
+function tbWnd:SetActive(bActive, nPanel)
+  self.pPanel:SetActive("Main", bActive)
+  if bActive then
+    self:OnOpen(nPanel)
+  else
+    self:OnClose()
+  end
+end
+
+function tbWnd:OnOpenFriend()
+  self.nRedPointIndexPos = -1
+  self.nSelecttbElementIndex = 0
+  self.tbFetterId2Index = {}
+  self.tbFetterIndex2Id = {}
+  self.tbSelecttbElement = nil
+  self.tbAllMainPartner = Partner:GetAllPartnersDetailInfoForFetters()
+  self.tbFriendScrollView:Clear()
+  local nListIndex = 0
+  for nFetterId = 1, #Partner.tbPartnerFetterSetting do
+    if Partner:CheckFetterCanShow(nFetterId) then
+      nListIndex = nListIndex + 1
+      self.tbFetterId2Index[nFetterId] = nListIndex
+      self.tbFetterIndex2Id[nListIndex] = nFetterId
+      if 0 == self.nSelecttbElementIndex then
+        self.nSelecttbElementIndex = nListIndex
+      end
+      self.tbFriendScrollView:SetElement(nListIndex, function(tbElement)
+        self:SetFriendInfo(tbElement, nFetterId)
+      end)
+    end
+  end
+  if self.nRedPointIndexPos > 0 then
+    self.nSelecttbElementIndex = self.nRedPointIndexPos
+  end
+  self.tbFriendScrollView:ScrollToIndex(self.nSelecttbElementIndex, true)
+end
+
+function tbWnd:OnOpenGallery()
+  self.tbPartnerQualityInfoList = self:GetPartnerQualityInfoList()
+  self.tbOwnPartnerList = self:GetOwnPartnerList()
+  self:InitPartnerGallery()
+  self:UpdatePartnerGallery()
+end
+
+function tbWnd:OnOpenDecompose()
+  self.tbPartnerList = {}
+  self.tbSelectedPartnerList = {}
+  self.tbHashTable = {}
+  self.tbPartnerList, self.tbHashTable = Partner:GetCanDecomposePartnersList()
+  self:InitDecomposePartnerList()
+  self.nCurSelectQuality = 0
+  local tbQualityOptions = {
+    i18n.EasyGet("\229\133\168\233\131\168"),
+    i18n.EasyGet("\231\187\157\229\147\129"),
+    i18n.EasyGet("\230\158\129\229\147\129"),
+    i18n.EasyGet("\231\143\141\229\147\129"),
+    i18n.EasyGet("\232\137\175\229\147\129"),
+    i18n.EasyGet("\231\180\160\229\147\129")
+  }
+  self.pPanel:Dropdown_ResetOptions(self.dropDownQuality, tbQualityOptions)
+  self.pPanel:Dropdown_SetValue(self.dropDownQuality, 0)
+  if self:CheckNowIsAllToggle() then
+    self.pPanel:Toggle_SetChecked(self.togToggleAll, true)
+  else
+    self.pPanel:Toggle_SetChecked(self.togToggleAll, false)
+  end
+  self.pPanel:Label_SetText(self.txtToggleAll, i18n.EasyGet("\229\133\168\233\128\137"))
+  if PartnerZhenFa:CanShowUIEntrance() then
+    self.pPanel:SetActive(self.txtDecomposeDesc, true)
+    local nWuYinShuiDegree = DegreeCtrl:GetDegree(me, "WuYinShuiWeekDecompose")
+    nWuYinShuiDegree = math.max(nWuYinShuiDegree, 0)
+    if 0 == nWuYinShuiDegree then
+      self.pPanel:Label_SetText(self.txtDecomposeDesc, i18n.EasyGet("\230\156\172\229\145\168\232\191\152\229\143\175\232\142\183\229\190\151\230\151\160\229\158\160\230\176\180\239\188\154<color=#c50505>0</color>/{0}", Partner.nMaxWuYinShuiWeekDecompose))
+    else
+      self.pPanel:Label_SetText(self.txtDecomposeDesc, i18n.EasyGet("\230\156\172\229\145\168\232\191\152\229\143\175\232\142\183\229\190\151\230\151\160\229\158\160\230\176\180\239\188\154{0}/{1}", nWuYinShuiDegree, Partner.nMaxWuYinShuiWeekDecompose))
+    end
+  else
+    self.pPanel:SetActive(self.txtDecomposeDesc, false)
+  end
+end
+
+function tbWnd:OnOpen(nPanel)
+  self:OnOpenFriend()
+  self:OnOpenGallery()
+  self:OnOpenDecompose()
+  self:FriendToggleGroupSelect(nPanel or tbFriendPanelStateIndex.PANEL_FRIEND)
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:FriendToggleGroupSelect(nPanelType)
+  self.nCurSelectedFriendPanelToggleIndex = nPanelType
+  self.pPanel:Toggle_SetEnable(tbControls.toggleFriendFriend, nPanelType ~= tbFriendPanelStateIndex.PANEL_FRIEND)
+  self.pPanel:Toggle_SetEnable(tbControls.toggleFriendGallery, nPanelType ~= tbFriendPanelStateIndex.PANEL_GALLERY)
+  self.pPanel:Toggle_SetEnable(tbControls.toggleFriendDecompose, nPanelType ~= tbFriendPanelStateIndex.PANEL_DECOMPOSE)
+  self.pPanel:ToggleGroup_SetSelect(tbControls.toggleFriendFriend, nPanelType == tbFriendPanelStateIndex.PANEL_FRIEND)
+  self.pPanel:ToggleGroup_SetSelect(tbControls.toggleFriendGallery, nPanelType == tbFriendPanelStateIndex.PANEL_GALLERY)
+  self.pPanel:ToggleGroup_SetSelect(tbControls.toggleFriendDecompose, nPanelType == tbFriendPanelStateIndex.PANEL_DECOMPOSE)
+  self.pPanel:SetActive(tbControls.toggleFriendFriend .. "/Selected", nPanelType == tbFriendPanelStateIndex.PANEL_FRIEND)
+  self.pPanel:SetActive(tbControls.toggleFriendGallery .. "/Selected", nPanelType == tbFriendPanelStateIndex.PANEL_GALLERY)
+  self.pPanel:SetActive(tbControls.toggleFriendDecompose .. "/Selected", nPanelType == tbFriendPanelStateIndex.PANEL_DECOMPOSE)
+  self.pPanel:SetActive(tbControls.goFriendSubPanelFriend, nPanelType == tbFriendPanelStateIndex.PANEL_FRIEND)
+  self.pPanel:SetActive(tbControls.goFriendSubPanelGalleryPanel, nPanelType == tbFriendPanelStateIndex.PANEL_GALLERY)
+  self.pPanel:SetActive(tbControls.goFriendSubPanelDecomposePanel, nPanelType == tbFriendPanelStateIndex.PANEL_DECOMPOSE)
+end
+
+function tbWnd:SetFriendMoreInfo(nIndex, tbElement)
+  self.nSelecttbElementIndex = self.tbFetterId2Index[nIndex]
+  if self.tbSelecttbElement then
+    self.tbSelecttbElement.pPanel:SetActive("imgSelected", false)
+  end
+  self.tbSelecttbElement = tbElement
+  tbElement.pPanel:SetActive("imgSelected", true)
+  local tbPartnerList = {}
+  for i = 1, 4 do
+    local nPartnerId = 0
+    if 1 == i then
+      nPartnerId = Partner.tbPartnerFetterSetting[nIndex].nPartnerId1
+    elseif 2 == i then
+      nPartnerId = Partner.tbPartnerFetterSetting[nIndex].nPartnerId2
+    elseif 3 == i then
+      nPartnerId = Partner.tbPartnerFetterSetting[nIndex].nPartnerId3
+    elseif 4 == i then
+      nPartnerId = Partner.tbPartnerFetterSetting[nIndex].nPartnerId4
+    end
+    if nPartnerId <= 0 then
+      self.pPanel:SetActive(string.format(tbControls.goPartner, i), false)
+    else
+      self.pPanel:SetActive(string.format(tbControls.goPartner, i), true)
+      local szPartnerName = Partner.tbAllPartnerTemplateInfo[nPartnerId].szName
+      self.pPanel:Label_SetText(string.format(tbControls.txtPartnerName, i), i18n.Parse(szPartnerName))
+    end
+    for j = 1, 3 do
+      self.pPanel:SetActive(string.format(tbControls.goPartner .. tbImgQualityBgEffectList[j], i), false)
+    end
+    if nPartnerId > 0 then
+      local pCurPartner = self:GetFetterPartner(nPartnerId)
+      if pCurPartner then
+        table.insert(tbPartnerList, pCurPartner)
+        self.pPanel:SetActive(string.format(tbControls.imgPartnerNameBg, i), true)
+        local nQualityLevel = Partner.tbAllPartnerInfo[pCurPartner.nTemplateId].nQualityLevel
+        self.pPanel:Sprite_SetSprite(string.format(tbControls.imgPartnerNameBg, i), Partner.tbPartnerNameBg[nQualityLevel])
+        if nQualityLevel <= 3 then
+          self.pPanel:SetActive(string.format(tbControls.goPartner .. tbImgQualityBgEffectList[nQualityLevel], i), true)
+        end
+      else
+        self.pPanel:SetActive(string.format(tbControls.imgPartnerNameBg, i), false)
+      end
+    end
+  end
+  local nFriendLevel = 0
+  nFriendLevel = self:CalcFriendLevel(tbPartnerList, nIndex)
+  nFriendLevel = Partner:GetPartnerFetterLevel(me, self.nCurFetterId)
+  self.pPanel:Label_SetText(tbControls.txtInfoTitle, i18n.EasyGet("\228\190\160\231\188\152{0}\231\186\167", nFriendLevel))
+  if 0 == nFriendLevel then
+    self.pPanel:Label_SetText(tbControls.txtLevelUp, i18n.EasyGet("\230\191\128\230\180\187"))
+  else
+    tbElement.pPanel:SetActive("Activate", true)
+    self.pPanel:Label_SetText(tbControls.txtLevelUp, i18n.EasyGet("\229\141\135\231\186\167"))
+  end
+  local bFetterFull, bFetterMaxLevel = Partner:CheckPartnerFetterFull(me, self.nCurFetterId)
+  if not bFetterFull then
+    self.pPanel:SetActive(tbControls.btnLevelUp, false)
+  elseif bFetterMaxLevel then
+    self.pPanel:SetActive(tbControls.btnLevelUp, false)
+  else
+    self.pPanel:SetActive(tbControls.btnLevelUp, true)
+  end
+  self:CheckRedPoint(nIndex)
+end
+
+function tbWnd:SetFriendInfo(tbElement, nIndex)
+  tbElement.pPanel:SetActive("Effect_Activate", false)
+  local tbOneFriendList = Partner.tbPartnerFetterSetting[nIndex]
+  local nPartnerNum = 0
+  local nPartnerWeHave = 0
+  local tbPartnerList = {}
+  for i = 1, 4 do
+    local nPartnerNpcTemplateId = 0
+    nPartnerNpcTemplateId = Partner.tbPartnerFetterSetting[tbOneFriendList.nId][string.format("nPartnerId%d", i)]
+    local pCurPartner = self:GetFetterPartner(nPartnerNpcTemplateId)
+    if pCurPartner then
+      table.insert(tbPartnerList, pCurPartner)
+    end
+    if nPartnerNpcTemplateId > 0 then
+      nPartnerNum = nPartnerNum + 1
+      if self.tbAllMainPartner[nPartnerNpcTemplateId] then
+        nPartnerWeHave = nPartnerWeHave + 1
+      end
+    end
+  end
+  self.nCurFetterId = nIndex
+  local nFriendLevel = self:CalcFriendLevel(tbPartnerList, nIndex)
+  if nFriendLevel > 0 then
+    tbElement.pPanel:SetActive("Activate", true)
+    tbElement.pPanel:Label_SetText("txtDecomposeLevel", i18n.EasyGet("{0}\231\186\167", nFriendLevel))
+  else
+    tbElement.pPanel:Label_SetText("txtDecomposeLevel", i18n.EasyGet("\230\148\182\233\155\134\232\191\155\229\186\166 {0}/{1}", nPartnerWeHave, nPartnerNum))
+  end
+  tbElement.pPanel:Label_SetText("txtDecomposeName", i18n.Parse(tbOneFriendList.szName))
+  local nPartner1Id = Partner.tbPartnerFetterSetting[nIndex].nPartnerId1
+  local nQualityLevel = Partner.tbAllPartnerTemplateInfo[nPartner1Id].nQualityLevel
+  tbElement.pPanel:Sprite_SetSprite("imgQualityBg", tbImgListQualityBgList[nQualityLevel])
+  self:CheckRedPoint(nIndex)
+end
+
+function tbWnd:CheckLevelUp()
+  local bFetterFull, bFetterMaxLevel = Partner:CheckPartnerFetterFull(me, self.nCurFetterId)
+  if not bFetterFull then
+    me.CenterMsg(i18n.EasyGet("\229\144\140\228\188\180\230\149\176\233\135\143\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\230\191\128\230\180\187\228\190\160\231\188\152\229\177\158\230\128\167"))
+    return
+  end
+  if bFetterMaxLevel then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\229\144\140\228\188\180\230\136\152\229\138\155\229\128\188\228\184\141\232\182\179\228\187\165\229\141\135\231\186\167\232\175\165\228\190\160\231\188\152\229\177\158\230\128\167"))
+    return
+  end
+  RemoteServer.CallPartnerFunc("PartnerFetterLevelUpReq", self.nCurFetterId)
+end
+
+function tbWnd:GetFetterPartner(nNpcPartnerId)
+  local pCurPartner
+  for nCount, pPartner in pairs(self.tbAllMainPartner) do
+    local nNpcTemplateId = Partner.tbAllPartnerInfo[pPartner.nTemplateId].nNpcTemplateId
+    if nNpcTemplateId == nNpcPartnerId then
+      pCurPartner = pPartner
+      break
+    end
+  end
+  return pCurPartner
+end
+
+function tbWnd:CalcFriendLevel(tbPartnerList, nFriendCount)
+  local nFriendLevel = 0
+  self.tbAttribListScrollView:Clear()
+  local nFriendCountEnoughFightPower = 0
+  local nFriendPartnerCount = 0
+  if 0 ~= Partner.tbPartnerFetterSetting[nFriendCount].nPartnerId5 then
+    nFriendPartnerCount = 5
+  elseif 0 ~= Partner.tbPartnerFetterSetting[nFriendCount].nPartnerId4 then
+    nFriendPartnerCount = 4
+  elseif 0 ~= Partner.tbPartnerFetterSetting[nFriendCount].nPartnerId3 then
+    nFriendPartnerCount = 3
+  elseif 0 ~= Partner.tbPartnerFetterSetting[nFriendCount].nPartnerId2 then
+    nFriendPartnerCount = 2
+  else
+    nFriendPartnerCount = 1
+  end
+  local nRequireFightPower = Partner.tbPartnerFetterSetting[nFriendCount].nRequireFightPower
+  nFriendLevel = Partner:GetPartnerFetterLevel(me, self.nCurFetterId)
+  for _, pPartner in pairs(tbPartnerList) do
+    local nFightPowerNeed = nRequireFightPower * nFriendLevel
+    if nFightPowerNeed <= pPartner.nFightPower then
+      nFriendCountEnoughFightPower = nFriendCountEnoughFightPower + 1
+    end
+  end
+  local nImproveType1 = Partner.tbPartnerFetterSetting[nFriendCount].nImproveType1
+  local nImproveType2 = Partner.tbPartnerFetterSetting[nFriendCount].nImproveType2
+  local nImproveType3 = Partner.tbPartnerFetterSetting[nFriendCount].nImproveType3
+  local nImproveValue1 = Lib:SplitStr2Num(Partner.tbPartnerFetterSetting[nFriendCount].nImproveValue1, "|")
+  local nImproveValue2 = Lib:SplitStr2Num(Partner.tbPartnerFetterSetting[nFriendCount].nImproveValue2, "|")
+  local nImproveValue3 = Lib:SplitStr2Num(Partner.tbPartnerFetterSetting[nFriendCount].nImproveValue3, "|")
+  local bShowUpdateInfo = true
+  if nImproveType1 and "" ~= nImproveType1 then
+    local a, b = FightSkill:GetMagicDescSplit(nImproveType1, nImproveValue1)
+    self.tbAttribListScrollView:SetElement(1, function(tbElement)
+      tbElement.pPanel:Label_SetText("txtAttrib", a)
+      tbElement.pPanel:Label_SetText("txtAttribNum", "+" .. tonumber(b) * nFriendLevel)
+      if bShowUpdateInfo then
+        tbElement.pPanel:SetActive("imgArrows", true)
+        tbElement.pPanel:SetActive("txtNum", true)
+        tbElement.pPanel:Label_SetText("txtNum", b)
+      else
+        tbElement.pPanel:SetActive("imgArrows", false)
+        tbElement.pPanel:SetActive("txtNum", false)
+      end
+    end)
+  end
+  if nImproveType2 and "" ~= nImproveType2 then
+    local a, b = FightSkill:GetMagicDescSplit(nImproveType2, nImproveValue2)
+    self.tbAttribListScrollView:SetElement(2, function(tbElement)
+      tbElement.pPanel:Label_SetText("txtAttrib", a)
+      tbElement.pPanel:Label_SetText("txtAttribNum", "+" .. tonumber(b) * nFriendLevel)
+      if bShowUpdateInfo then
+        tbElement.pPanel:SetActive("imgArrows", true)
+        tbElement.pPanel:SetActive("txtNum", true)
+        tbElement.pPanel:Label_SetText("txtNum", b)
+      else
+        tbElement.pPanel:SetActive("imgArrows", false)
+        tbElement.pPanel:SetActive("txtNum", false)
+      end
+    end)
+  end
+  if nImproveType3 and "" ~= nImproveType3 then
+    local a, b = FightSkill:GetMagicDescSplit(nImproveType3, nImproveValue3)
+    self.tbAttribListScrollView:SetElement(3, function(tbElement)
+      tbElement.pPanel:Label_SetText("txtAttrib", a)
+      tbElement.pPanel:Label_SetText("txtAttribNum", "+" .. tonumber(b) * nFriendLevel)
+      if bShowUpdateInfo then
+        tbElement.pPanel:SetActive("imgArrows", true)
+        tbElement.pPanel:SetActive("txtNum", true)
+        tbElement.pPanel:Label_SetText("txtNum", b)
+      else
+        tbElement.pPanel:SetActive("imgArrows", false)
+        tbElement.pPanel:SetActive("txtNum", false)
+      end
+    end)
+  end
+  self.pPanel:SetActive(tbControls.txtTips, true)
+  if nFriendPartnerCount == #tbPartnerList and nFriendLevel >= 1 then
+    self.pPanel:Label_SetText(tbControls.txtTips, i18n.EasyGet("\229\144\132\229\144\140\228\188\180\230\136\152\229\138\155\232\190\190\229\136\176{0}\229\143\175\229\141\135\231\186\167 ({1}/{2})", nRequireFightPower * nFriendLevel, nFriendCountEnoughFightPower, nFriendPartnerCount))
+  else
+    self.pPanel:Label_SetText(tbControls.txtTips, i18n.EasyGet("\233\155\134\233\189\144\230\137\128\230\156\137\229\144\140\228\188\180\229\143\175\230\191\128\230\180\187 ({0}/{1})", tostring(#tbPartnerList), nFriendPartnerCount))
+  end
+  return nFriendLevel
+end
+
+function tbWnd:UpdateSingleFetter()
+  local nIndex = self.tbFetterId2Index[self.nCurFetterId]
+  self.tbFriendScrollView:SetElement(nIndex, function(tbElement)
+    self:SetFriendInfo(tbElement, self.nCurFetterId)
+  end)
+  self.tbFriendScrollView:SelectElement(nIndex)
+end
+
+function tbWnd:ShowFriendEffect()
+  if not self.nSelecttbElementIndex then
+    return
+  end
+  self.pPanel:SetActive(string.format(tbControls.FriendEffect, self.nSelecttbElementIndex), false)
+  self.pPanel:SetActive(string.format(tbControls.FriendEffect, self.nSelecttbElementIndex), true)
+end
+
+function tbWnd:CheckRedPoint(nIndex)
+  local nId = Partner.tbPartnerFetterSetting[nIndex].nId
+  local bFetterFull, bFetterMaxLevel, _, nCurLevel = Partner:CheckPartnerFetterFull(me, nId)
+  local szPath = string.format(tbControls.FriendElement, self.tbFetterId2Index[nIndex])
+  if 0 == nCurLevel and bFetterFull then
+    if -1 == self.nRedPointIndexPos then
+      self.nRedPointIndexPos = self.tbFetterId2Index[nIndex]
+    end
+    self.pPanel:SetActive(szPath .. "/RedPoint", true)
+    self.pPanel:SetActive(tbControls.btnLevelUp .. "/RedPoint", true)
+  elseif bFetterFull and not bFetterMaxLevel then
+    if -1 == self.nRedPointIndexPos then
+      self.nRedPointIndexPos = self.tbFetterId2Index[nIndex]
+    end
+    self.pPanel:SetActive(szPath .. "/RedPoint", true)
+    self.pPanel:SetActive(tbControls.btnLevelUp .. "/RedPoint", true)
+  else
+    self.pPanel:SetActive(szPath .. "/RedPoint", false)
+    self.pPanel:SetActive(tbControls.btnLevelUp .. "/RedPoint", false)
+  end
+end
+
+function tbWnd:InitPartnerGallery()
+  for i = 1, #tbQualitySetting do
+    for j = 1, #self.tbPartnerQualityInfoList[i] do
+      self.tbPartnerInfoList[i]:SetElement(j, function(tbElement)
+        self:SetPartnerInfo(tbElement.pPanel, self.tbPartnerQualityInfoList[i][j])
+      end)
+    end
+  end
+end
+
+function tbWnd:UpdatePartnerGallery()
+  for i = 1, #tbQualitySetting do
+    for j = 1, #self.tbPartnerQualityInfoList[i] do
+      self.tbPartnerInfoList[i]:SetElement(j, function(tbElement)
+        local nTemplateId = self.tbPartnerQualityInfoList[i][j]
+        if self.tbOwnPartnerList[nTemplateId] == nil then
+          tbElement.pPanel:SetActive("imgNameBg", false)
+          if i <= 3 then
+            tbElement.pPanel:SetActive("Effect", false)
+          end
+        else
+          tbElement.pPanel:SetActive("imgNameBg", true)
+          if i <= 3 then
+            tbElement.pPanel:SetActive("Effect", true)
+          end
+        end
+      end)
+    end
+  end
+end
+
+function tbWnd:SetPartnerInfo(pPanel, nTemplateId)
+  if self.tbOwnPartnerList[nTemplateId] == nil then
+    pPanel:Label_SetText("txtName", string.format("<color=#4e5758>%s</color>", i18n.Parse(Partner.tbAllPartnerInfo[nTemplateId].szName)))
+  else
+    pPanel:Label_SetText("txtName", i18n.Parse(Partner.tbAllPartnerInfo[nTemplateId].szName))
+  end
+end
+
+function tbWnd:GetPartnerQualityInfoList()
+  local tbPartnerQualityInfoList = {
+    [1] = {},
+    [2] = {},
+    [3] = {},
+    [4] = {},
+    [5] = {}
+  }
+  for nIndex, tbPartner in pairs(Partner.tbAllPartnerInfo) do
+    local nQuality = tbPartner.nQualityLevel
+    local nTemplateId = tbPartner.nId
+    if nil ~= nTemplateId then
+      local szTimeFrame = Partner.tbAllPartnerInfo[nTemplateId].szTimeFrame
+      if nil ~= nQuality and ("" == szTimeFrame or 0 ~= GetTimeFrameState(szTimeFrame)) then
+        table.insert(tbPartnerQualityInfoList[nQuality], nIndex)
+      end
+    end
+  end
+  return tbPartnerQualityInfoList
+end
+
+function tbWnd:GetOwnPartnerList()
+  local tbOwnPartnerList = {}
+  local tbAllPartner = me.GetAllPartner()
+  for nPartnerId in pairs(tbAllPartner) do
+    local pPartner = me.GetPartnerObj(nPartnerId)
+    if Partner.tbAllPartnerInfo[pPartner.nTemplateId].szTimeFrame == "" or 0 ~= GetTimeFrameState(Partner.tbAllPartnerInfo[pPartner.nTemplateId].szTimeFrame) then
+      tbOwnPartnerList[pPartner.nTemplateId] = true
+    end
+  end
+  return tbOwnPartnerList
+end
+
+function tbWnd:InitDecomposePartnerList()
+  self.nMaxElements = math.max(self.nMaxElements, #self.tbPartnerList)
+  for i = 1, #self.tbPartnerList do
+    self.tbDecomposePartnerView:SetElement(i, function(tbElement)
+      self:SetDecomposePartnerInfo(tbElement.pPanel, self.tbPartnerList[i].nTemplateId, self.tbPartnerList[i].nCount)
+      tbElement.pPanel:SetActive("imgSelected", false)
+    end)
+  end
+  self.tbDecomposePartnerView:ResetFrom(#self.tbPartnerList + 1)
+end
+
+function tbWnd:SetDecomposePartnerInfo(pPanel, nTemplateId, nCount)
+  local nQualityLevel = Partner.tbAllPartnerInfo[nTemplateId].nQualityLevel
+  pPanel:Label_SetText("txtName", i18n.Parse(Partner.tbAllPartnerInfo[nTemplateId].szName))
+  pPanel:Label_SetText("txtNum", "0/" .. nCount)
+  pPanel:Sprite_SetSprite("imgBg", tbImgQualityBgList[nQualityLevel])
+end
+
+function tbWnd:SetAllPartnerDecompose(bIsOn)
+  for _, tbPartnerInfo in pairs(self.tbPartnerList) do
+    local nQualityLevel = Partner.tbAllPartnerInfo[tbPartnerInfo.nTemplateId].nQualityLevel
+    if 0 == self.nCurSelectQuality or self.nCurSelectQuality == nQualityLevel then
+      if bIsOn then
+        self:UpdateSelectedDecomposePartnerList(tbPartnerInfo.nTemplateId, tbPartnerInfo.nCount)
+      else
+        self:UpdateSelectedDecomposePartnerList(tbPartnerInfo.nTemplateId, 0)
+      end
+    end
+  end
+end
+
+function tbWnd:DecomposeCurQualityOnly(tbSelectedPartnerList)
+  local tbDecompose = {}
+  if 0 == self.nCurSelectQuality then
+    return tbSelectedPartnerList
+  end
+  for nPartnerTemplateId, v in pairs(tbSelectedPartnerList) do
+    if Partner.tbAllPartnerInfo[nPartnerTemplateId].nQualityLevel == self.nCurSelectQuality then
+      tbDecompose[nPartnerTemplateId] = v
+    end
+  end
+  return tbDecompose
+end
+
+function tbWnd:CheckNowIsAllToggle()
+  local nNowQuality = self.nCurSelectQuality
+  local tbAllPartner = self.tbPartnerList
+  local tbAllSelectPartner = self.tbSelectedPartnerList
+  if nNowQuality > 0 then
+    local nPartnerCount = 0
+    local nSelectCount = 0
+    for nIndex, tbPartnerInfo in pairs(tbAllPartner) do
+      local nPartnerQuality = Partner.tbAllPartnerInfo[tbPartnerInfo.nTemplateId].nQualityLevel
+      if nPartnerQuality == nNowQuality then
+        nPartnerCount = nPartnerCount + tbPartnerInfo.nCount
+      end
+    end
+    for nTemplateId, nHaveCount in pairs(tbAllSelectPartner) do
+      local nPartnerQuality = Partner.tbAllPartnerInfo[nTemplateId].nQualityLevel
+      if nPartnerQuality == nNowQuality then
+        nSelectCount = nSelectCount + nHaveCount
+      end
+    end
+    if nPartnerCount == nSelectCount then
+      return true
+    else
+      return false
+    end
+  else
+    local nPartnerCount = 0
+    local nSelectCount = 0
+    for nIndex, tbPartnerInfo in pairs(tbAllPartner) do
+      nPartnerCount = nPartnerCount + tbPartnerInfo.nCount
+    end
+    for nTemplateId, nHaveCount in pairs(tbAllSelectPartner) do
+      nSelectCount = nSelectCount + nHaveCount
+    end
+    if nPartnerCount == nSelectCount then
+      return true
+    else
+      return false
+    end
+  end
+end
+
+function tbWnd:UpdateSelectedDecomposePartnerList(nTemplateId, nHaveCount)
+  self.tbSelectedPartnerList[nTemplateId] = nHaveCount
+  local nIndex = self.tbHashTable[nTemplateId]
+  self.tbDecomposePartnerView:SetElement(nIndex, function(tbElement)
+    tbElement.pPanel:SetActive("imgSelected", 0 ~= self.tbSelectedPartnerList[nTemplateId])
+    tbElement.pPanel:Label_SetText("txtNum", nHaveCount .. "/" .. self.tbPartnerList[nIndex].nCount)
+  end)
+end
+
+function tbWnd:HideParterInfo()
+  for nIndex = 1, #self.tbPartnerList do
+    local nQualityLevel = Partner.tbAllPartnerInfo[self.tbPartnerList[nIndex].nTemplateId].nQualityLevel
+    self.tbDecomposePartnerView.tbElementList[nIndex].pPanel:SetActive("Main", 0 == self.nCurSelectQuality or self.nCurSelectQuality == nQualityLevel)
+  end
+end
+
+function tbWnd:UpdateData(szType, value1, value2)
+  if "Friend" == szType then
+    self:UpdateSingleFetter()
+    self:ShowFriendEffect()
+  elseif "Decompose" == szType then
+    me.CenterMsg(i18n.EasyGet("\229\144\140\228\188\180\233\129\163\230\149\163\230\136\144\229\138\159"))
+    self:OnOpenDecompose()
+  elseif "DecomposeSync" == szType then
+    self:UpdateSelectedDecomposePartnerList(value1, value2)
+  end
+end

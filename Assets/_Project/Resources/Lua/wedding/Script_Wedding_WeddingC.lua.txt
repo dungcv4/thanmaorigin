@@ -1,0 +1,188 @@
+Require("Script/Fuben/FubenUIController.lua")
+
+function Wedding:GetFubenMsg(nState, tbParams)
+  local function GetWitnessName(nLevel)
+    local nMapTID = self.Cfg.tbMap[nLevel]
+    
+    local nWitnessTID = Wedding.tbMapCfg[nMapTID].WitnessTID
+    local szWitnessName = ""
+    if nWitnessTID then
+      szWitnessName = Npc:GetNameByTemplateId(nWitnessTID)
+    end
+    return szWitnessName
+  end
+  
+  if nState == self.Cfg.PREPARE.nID then
+    local nWeddingLevel = tbParams[1]
+    local szWitnessName = GetWitnessName(nWeddingLevel)
+    return i18n.Get(self.Cfg.PREPARE.szMsg, szWitnessName), i18n.Get(self.Cfg.WITNESS.szName)
+  elseif nState == self.Cfg.WITNESS.nID then
+    return i18n.Get(self.Cfg.WITNESS.szMsg), i18n.Get(self.Cfg.INTERACTION.szName)
+  elseif nState == self.Cfg.INTERACTION.nID then
+    return i18n.Get(self.Cfg.INTERACTION.szMsg), i18n.Get(self.Cfg.REDPACKET.szName)
+  elseif nState == self.Cfg.REDPACKET.nID then
+    local nWeddingLevel = tbParams[1]
+    local szWitnessName = GetWitnessName(nWeddingLevel)
+    return i18n.Get(self.Cfg.REDPACKET.szMsg, szWitnessName), i18n.Get(self.Cfg.LUCKYRABBIT.szName)
+  elseif nState == self.Cfg.LUCKYRABBIT.nID then
+    return i18n.Get(self.Cfg.LUCKYRABBIT.szMsg), i18n.Get(self.Cfg.DINNER.szName)
+  elseif nState == self.Cfg.DINNER.nID then
+    return i18n.Get(self.Cfg.DINNER.szMsg), i18n.Get(self.Cfg.END.szName)
+  elseif nState == self.Cfg.END.nID then
+    return i18n.Get(self.Cfg.END.szMsg), i18n.EasyGet("\229\169\154\229\174\180\229\156\186\229\156\176\229\133\179\233\151\173")
+  else
+    return "", ""
+  end
+end
+
+function Wedding:OnSynFubenUI(nState, nStartTime, nStateEndTime, tbParams, bShowLeave)
+  Wedding.nStateEndTime = nStateEndTime
+  Wedding.nStartTime = nStartTime
+  Wedding.bShowLeave = bShowLeave
+  local szMsg, szNext = self:GetFubenMsg(nState, tbParams)
+  Ui:OpenHudFubenCustomWithTeam("UIHudLeftPanelWedding", "", szMsg, szNext)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function Wedding:OnSynCashMoney(tbData)
+  self.tbCashMoneyRank = self.tbCashMoneyRank or {}
+  self.tbCashMoneyRank.Data = tbData
+  self.tbCashMoneyRank.nCashSum = 0
+  for index, info in pairs(tbData) do
+    self.tbCashMoneyRank.nCashSum = self.tbCashMoneyRank.nCashSum + info.nCashMoney
+  end
+  local tbWnd = Ui:GetWindow("UIGiftMoney")
+  if tbWnd and tbWnd:Visible() then
+    tbWnd:UpdateRank()
+  end
+end
+
+function Wedding:TryReqCashMoneyData()
+  if self.tbCashMoneyRank then
+    return
+  end
+  RemoteServer.OnWeddingRequest("RequestCashGiftData")
+end
+
+function Wedding:ClearCashMoney()
+  self.tbCashMoneyRank = nil
+end
+
+function Wedding:RequestActivityStatus()
+  if self:CheckInFubenMap(me.nMapTemplateId) then
+    RemoteServer.OnWeddingRequest("RequestFubenLeftInfo")
+    RemoteServer.OnWeddingRequest("RequestCashMoneyRank")
+    RemoteServer.OnWeddingRequest("RequestRedPacketInfo")
+  end
+end
+
+function Wedding:OnSyncRedPacketInfo(tbRedPacketInfo, nOpenId)
+  if not self:CheckInFubenMap(me.nMapTemplateId) then
+    return
+  end
+  self.nOpenId = nOpenId
+  self.tbRedPacketInfo = tbRedPacketInfo
+  self:UpdateFubenRegPacketBtn()
+end
+
+function Wedding:UpdateFubenRegPacketBtn()
+  local bShow = false
+  if self.nOpenId and self.tbRedPacketInfo and self.nOpenId <= #self.tbRedPacketInfo and self.tbRedPacketInfo[self.nOpenId] then
+    bShow = true
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_FUBEN_REDPACKET_BUTTON, bShow)
+end
+
+function Wedding:OpenRedPacket()
+  RemoteServer.OnWeddingRequest("RequestOpenRedPacket", self.nOpenId)
+  self.nOpenId = self.nOpenId or 1
+  self.nOpenId = self.nOpenId + 1
+  self:UpdateFubenRegPacketBtn()
+end
+
+function Wedding:ClearRedPacketData()
+  self.nOpenId = 1
+  self.tbRedPacketInfo = {}
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_FUBEN_REDPACKET_BUTTON, false)
+end
+
+Wedding.Fuben = Wedding.Fuben or {}
+local WeddingFuben = Wedding.Fuben
+
+function WeddingFuben:IsNeedFuncScoreButton()
+  if 1 == IsAlone() then
+    return false
+  else
+    return true, {
+      Ui.OpenWindow,
+      Ui,
+      "UIGiftMoney"
+    }
+  end
+end
+
+function WeddingFuben:OnFubenMapLoaded(pPlayer)
+  if Wedding.tbMapCfg[pPlayer.nMapTemplateId] and 1 == IsAlone() then
+    FubenUIController:OpenDefaultFuBenUI("WeddingHelp", {
+      {
+        Wedding.Cfg.nMapPreviewTime,
+        i18n.EasyGet("\229\169\154\231\164\188\229\156\176\229\155\190\233\162\132\232\167\136\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154<color=#28ff28>%s</color>")
+      }
+    })
+    Timer:Register(Env.GAME_FPS * Wedding.Cfg.nMapPreviewTime, function()
+      if 1 == IsAlone() and Wedding.tbMapCfg[me.nMapTemplateId] then
+        RemoteServer.OnWeddingRequest("RequestLeavePreviewMap")
+      end
+    end)
+  end
+end
+
+function WeddingFuben:IsNeedExitFubenButton()
+  if 1 == IsAlone() then
+    return true, {
+      function()
+        me.MsgBox(i18n.EasyGet("\230\152\175\229\144\166\231\161\174\229\174\154\233\128\128\229\135\186\229\189\147\229\137\141\233\162\132\232\167\136\229\156\176\229\155\190\239\188\159"), {
+          {
+            i18n.szOk,
+            function()
+              RemoteServer.OnWeddingRequest("RequestLeavePreviewMap")
+            end
+          },
+          {
+            i18n.szCancel
+          }
+        })
+      end
+    }
+  else
+    return Wedding.bShowLeave, {
+      function()
+        me.MsgBox(i18n.EasyGet("\230\152\175\229\144\166\231\161\174\229\174\154\233\128\128\229\135\186\229\189\147\229\137\141\229\156\176\229\155\190\239\188\159"), {
+          {
+            i18n.szOk,
+            function()
+              Dungeon:ExitDungeon()
+            end
+          },
+          {
+            i18n.szCancel
+          }
+        })
+      end
+    }
+  end
+end
+
+function WeddingFuben:IsShowTipWhenQuit()
+  return false
+end
+
+function WeddingFuben:RegisterFubenUIChecker()
+  local tbMap = {}
+  for _, nMapTID in ipairs(Wedding.Cfg.tbMap) do
+    table.insert(tbMap, nMapTID)
+  end
+  FubenUIController:RegisterChecker(tbMap, self)
+end
+
+WeddingFuben:RegisterFubenUIChecker()

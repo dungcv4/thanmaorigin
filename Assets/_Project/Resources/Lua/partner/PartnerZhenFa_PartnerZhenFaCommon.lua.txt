@@ -1,0 +1,832 @@
+PartnerZhenFa.CommonSaveGroup = GetGroupKey("PartnerZhenFa")
+PartnerZhenFa.tbCommonSaveKey = {
+  nZFLevel = 1,
+  nEyePartnerId = 2,
+  nZFPos = 3,
+  nSwitchCDTime = 4,
+  nActivateState = 5
+}
+PartnerZhenFa.nFixAttrCount = 2
+PartnerZhenFa.FixAttrLevelSaveGroup = GetGroupKey("PartnerZhenFaFixAttrLevel")
+PartnerZhenFa.nMaxRandomAttrCount = 10
+PartnerZhenFa.RandomAttrSaveGroup = GetGroupKey("PartnerZhenFaRandomAttr")
+PartnerZhenFa.RandomAttrWashSaveGroup = GetGroupKey("PartnerZhenFaRandomAttrWash")
+PartnerZhenFa.RandomAttrLevelSaveGroup = GetGroupKey("PartnerZhenFaRandomAttrLevel")
+PartnerZhenFa.WashValCountSaveGroup = GetGroupKey("PartnerZhenFaWashAttrValCount")
+PartnerZhenFa.nDefaultZFPos = 1
+PartnerZhenFa.Protocol = {
+  ReqActivateZF = "ReqActivateZF",
+  SyncActivateState = "SyncActivateState",
+  ReqChangeZF = "ReqChangeZF",
+  RspChangeZF = "RspChangeZF",
+  ReqZFLevelUp = "ReqZFLevelUp",
+  RspZFLevelUp = "RspZFLevelUp",
+  ReqChangeEye = "ReqChangeEye",
+  RspChangeEye = "RspChangeEye",
+  ReqFixAttrEnhance = "ReqFixAttrEnhance",
+  RspFixAttrEnhance = "RspFixAttrEnhance",
+  ReqWashRandomAttrType = "ReqWashRandomAttrType",
+  RspWashRandomAttrType = "RspWashRandomAttrType",
+  ReqReplaceRandomAttrType = "ReqReplaceRandomAttrType",
+  RspReplaceRandomAttrType = "RspReplaceRandomAttrType",
+  ReqWashRandomAttrVal = "ReqWashRandomAttrVal",
+  RspWashRandomAttrVal = "RspWashRandomAttrVal",
+  ResetAttr = "ResetAttr"
+}
+
+function PartnerZhenFa:LoadConfig()
+  local szFixAttrPoolPath = "Setting/PartnerZhenFa/FixAttrPool.tab"
+  local szFixAttrLevelUpPath = "Setting/PartnerZhenFa/FixAttrLevelUp.tab"
+  local szZhenFaGroupPath = "Setting/PartnerZhenFa/PartnerZhenFaGroup.tab"
+  local szZhenFaLevelPath = "Setting/PartnerZhenFa/PartnerZhenFaLevel.tab"
+  local szRandomAttrPoolPath = "Setting/PartnerZhenFa/RandomAttrPool.tab"
+  local szRandomAttrWeightPath = "Setting/PartnerZhenFa/RandomAttrWeight.tab"
+  local szMaterialGetWayPath = "Setting/PartnerZhenFa/PartnerZFMaterialGetWay.tab"
+  self.tbZFGroup = Lib:EasyLoadTabFile(szZhenFaGroupPath, {"nQuality", "nPos"})
+  if not self.tbZFGroup then
+    Lib:LogErrFormat("PartnerZhenFa:LoadConfig Error, EasyLoadTabFile %s is nil", szZhenFaGroupPath)
+    return
+  end
+  self.tbZFLevel = Lib:EasyLoadTabFile(szZhenFaLevelPath, {"nLevel"})
+  if not self.tbZFLevel then
+    Lib:LogErrFormat("PartnerZhenFa:LoadConfig Error, EasyLoadTabFile %s is nil", szZhenFaLevelPath)
+    return
+  end
+  self.tbFixAttrPool = Lib:EasyLoadTabFile(szFixAttrPoolPath, {"nGroup", "nLevel"})
+  if not self.tbFixAttrPool then
+    Lib:LogErrFormat("PartnerZhenFa:LoadConfig Error, EasyLoadTabFile %s is nil", szFixAttrPoolPath)
+    return
+  end
+  self.tbFixAttrLevelUp = Lib:EasyLoadTabFile(szFixAttrLevelUpPath, {"nLevel"})
+  if not self.tbFixAttrLevelUp then
+    Lib:LogErrFormat("PartnerZhenFa:LoadConfig Error, EasyLoadTabFile %s is nil", szFixAttrLevelUpPath)
+    return
+  end
+  self.tbRandomAttrPool = Lib:EasyLoadTabFile(szRandomAttrPoolPath, {"nGroup", "nLevel"})
+  if not self.tbRandomAttrPool then
+    Lib:LogErrFormat("PartnerZhenFa:LoadConfig Error, EasyLoadTabFile %s is nil", szRandomAttrPoolPath)
+    return
+  end
+  local tbWeightCfg = Lib:EasyLoadTabFile(szRandomAttrWeightPath, {"nGroup"})
+  if not tbWeightCfg then
+    Lib:LogErrFormat("PartnerZhenFa:LoadConfig Error, EasyLoadTabFile %s is nil", szRandomAttrWeightPath)
+    return
+  end
+  self.tbRandomAttrWeight = {}
+  for nGroup, tbWeight in pairs(tbWeightCfg) do
+    self.tbRandomAttrWeight[nGroup] = tbWeight.nWeight
+  end
+  self.tbMaterialGetWayCfg = Lib:EasyLoadTabFile(szMaterialGetWayPath, {
+    "nTemplateId",
+    "nIndex"
+  })
+  if not self.tbMaterialGetWayCfg then
+    Lib:LogErrFormat("PartnerZhenFa:LoadConfig Error, EasyLoadTabFile %s is nil", szMaterialGetWayPath)
+    return
+  end
+  Validator:Register(self.CheckConfig, self)
+  self:InitFixGroup2AttrType()
+  self:InitRandomAttrQuality()
+end
+
+function PartnerZhenFa:CheckConfig()
+  local tbPosGroup = {}
+  for _, tbPosCfg in pairs(self.tbZFGroup) do
+    tbPosGroup = tbPosCfg
+    break
+  end
+  for nQuality, tbPosCfg in pairs(self.tbZFGroup) do
+    for nPos, tbCfg in pairs(tbPosCfg) do
+      if not tbPosGroup[nPos] then
+        Lib:LogErrFormat("PartnerZhenFa:CheckConfig fail. nQuality %d, ZhenFa %d is error cfg in PartnerZhenFaGroup.tab", nQuality, nPos)
+        return false
+      end
+      if tbCfg.nAttrGroup1 ~= tbPosGroup[nPos].nAttrGroup1 then
+        Lib:LogErrFormat("PartnerZhenFa:CheckConfig fail. nQuality %d, ZhenFa %d nAttrGroup1 is Illegal, %d, %d", nQuality, nPos, tbCfg.nAttrGroup1, tbPosGroup[nPos].nAttrGroup1)
+        return false
+      end
+      if tbCfg.nAttrGroup2 ~= tbPosGroup[nPos].nAttrGroup2 then
+        Lib:LogErrFormat("PartnerZhenFa:CheckConfig fail. nQuality %d, ZhenFa %d nAttrGroup2 is Illegal, %d, %d", nQuality, nPos, tbCfg.nAttrGroup2, tbPosGroup[nPos].nAttrGroup2)
+        return false
+      end
+    end
+  end
+  for nPos, tbGroup in ipairs(tbPosGroup) do
+    local tbFixAttr = self.tbFixAttrPool[tbGroup.nAttrGroup1]
+    if not tbFixAttr then
+      Lib:LogErrFormat("PartnerZhenFa:CheckConfig fail. ZhenFa %d, nAttrGroup1 %d not in FixAttrPool", nPos, tbGroup.nAttrGroup1)
+      return false
+    end
+    tbFixAttr = self.tbFixAttrPool[tbGroup.nAttrGroup2]
+    if not tbFixAttr then
+      Lib:LogErrFormat("PartnerZhenFa:CheckConfig fail. ZhenFa %d, nAttrGroup2 %d not in FixAttrPool", nPos, tbGroup.nAttrGroup2)
+      return false
+    end
+  end
+  for nLevel, _ in ipairs(self.tbFixAttrLevelUp) do
+    for nGroup, tbAttrCfg in pairs(self.tbFixAttrPool) do
+      if not tbAttrCfg[nLevel] then
+        Lib:LogErrFormat("PartnerZhenFa:CheckConfig fail. nGroup %d, nLevel %d not in FixAttrPool", nGroup, nLevel)
+        return false
+      end
+    end
+  end
+  for nGroup, _ in pairs(self.tbRandomAttrWeight) do
+    local nWeight = self.tbRandomAttrPool[nGroup]
+    if not nWeight then
+      Lib:LogErrFormat("PartnerZhenFa:CheckConfig fail. nGroup %d not in RandomAttrPool", nGroup)
+      return false
+    end
+  end
+  for _, tbCfg in pairs(self.tbZFLevel) do
+    if tbCfg.nNewRandomAttr > 0 and (not tbCfg.nNewRandomAttrLevel or tbCfg.nNewRandomAttrLevel <= 0) then
+      Lib:LogErrFormat("PartnerZhenFa:CheckConfig fail. nNewRandomAttrLevel %d is illegal in the nLevel %d PartnerZhenFaLevel", tbCfg.nNewRandomAttrLevel, tbCfg.nLevel)
+      return true
+    end
+  end
+  local nTotalWeight = 0
+  for _, nWeight in pairs(self.tbRandomAttrValWeight) do
+    nTotalWeight = nTotalWeight + nWeight
+  end
+  if nTotalWeight < 1000000 then
+    Lib:LogErrFormat("PartnerZhenFa:CheckConfig fail. The total weight %d of tbRandomAttrValWeight is less than 10000000", nTotalWeight)
+    return false
+  end
+  nTotalWeight = 0
+  for _, nWeight in pairs(self.tbRandomAttrWeight) do
+    nTotalWeight = nTotalWeight + nWeight
+  end
+  if nTotalWeight < 1000000 then
+    Lib:LogErrFormat("PartnerZhenFa:CheckConfig fail. The total weight %d of tbRandomAttrWeight is less than 10000000", nTotalWeight)
+    return false
+  end
+  return true
+end
+
+function PartnerZhenFa:InitFixGroup2AttrType()
+  self.tbFixGroup2AttrType = {}
+  for nGroup, tbLevelCfg in pairs(self.tbFixAttrPool) do
+    for _, tbAttrCfg in pairs(tbLevelCfg) do
+      self.tbFixGroup2AttrType[nGroup] = tbAttrCfg.szAttrType
+      break
+    end
+  end
+end
+
+function PartnerZhenFa:InitRandomAttrQuality()
+  for _, tbCfg in pairs(self.tbZFLevel) do
+    local tbQuality = tbCfg.tbszRandomAttrQuality
+    if tbQuality then
+      tbCfg.tbRandomAttrQuality = {}
+      for _, szQuality in pairs(tbQuality) do
+        table.insert(tbCfg.tbRandomAttrQuality, Lib:SplitStr2Num(szQuality, ","))
+      end
+    end
+  end
+end
+
+PartnerZhenFa:LoadConfig()
+
+function PartnerZhenFa:IsSysOpen()
+  if not self.Cfg.szOpenTimeframe then
+    return false
+  end
+  return 1 == GetTimeFrameState(self.Cfg.szOpenTimeframe)
+end
+
+function PartnerZhenFa:IsZFActivate(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  return 1 == pPlayer.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nActivateState)
+end
+
+function PartnerZhenFa:IsInSwitchCD(pPlayer)
+  local nSwitchCDTime = self:GetSwitchCDTime(pPlayer)
+  if nSwitchCDTime > 0 and nSwitchCDTime > GetTime() then
+    return true
+  end
+  return false
+end
+
+function PartnerZhenFa:CheckPlayerLevel(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  local nLevel = pPlayer.nLevel
+  if nLevel < self.Cfg.nPlayerLevelLimit then
+    return false
+  end
+  return true
+end
+
+function PartnerZhenFa:CheckCanChangeEye(pPlayer, nPartnerId)
+  if not pPlayer then
+    return false, i18n.Get(self.tbText.PlayerNotExist)
+  end
+  local nCurEyeId = self:GetEyePartnerId(pPlayer)
+  if nCurEyeId == nPartnerId then
+    return false, i18n.EasyGet("\229\183\178\233\128\137\228\184\173\232\175\165\229\144\140\228\188\180\228\184\186\233\152\181\231\156\188")
+  end
+  if not Partner:CheckPartnerInPos(pPlayer, nPartnerId) then
+    return false, i18n.EasyGet("\230\151\160\230\179\149\233\128\137\230\139\169\229\183\178\228\184\139\233\152\181\229\144\140\228\188\180\228\184\186\233\152\181\231\156\188")
+  end
+  return true
+end
+
+function PartnerZhenFa:CheckCanActivate(pPlayer, nZFPos)
+  if not pPlayer then
+    return false, i18n.Get(self.tbText.PlayerNotExist)
+  end
+  if not self:IsSysOpen() then
+    return false, i18n.Get(self.tbText.SysNotOpen)
+  end
+  if not self:CheckPlayerLevel(pPlayer) then
+    return false, i18n.Get(self.tbText.PlayerLevelLimit)
+  end
+  local nEyePartnerId = self:GetEyePartnerId(pPlayer)
+  local nEyeQuality = self:GetEyeQuality(pPlayer)
+  if nEyePartnerId <= 0 or not nEyeQuality then
+    return false, i18n.Get(self.tbText.NotSelectEye)
+  end
+  if not self.tbZFGroup[nEyeQuality] or not self.tbZFGroup[nEyeQuality][nZFPos] then
+    return false, i18n.Get(self.tbText.ZhenFaNotExist)
+  end
+  local nCount = self:GetUsefulPartnerCount(pPlayer)
+  if nCount < self.Cfg.nActivatePartnerCount then
+    return false, i18n.Get(self.tbText.PartnerLimit, self.Cfg.nActivatePartnerCount, i18n.Get(self.Cfg.szPartnerQualityDesc))
+  end
+  return true
+end
+
+function PartnerZhenFa:CheckCanChangeZF(pPlayer, nPos)
+  if not self:IsZFActivate(pPlayer) then
+    return false, i18n.Get(self.tbText.NotActivate)
+  end
+  if self:IsInSwitchCD(pPlayer) then
+    return false, i18n.Get(self.tbText.InSwitchCD)
+  end
+  local nEyeQuality = self:GetEyeQuality(pPlayer)
+  if not nEyeQuality then
+    return false, i18n.Get(self.tbText.NotSelectEye)
+  end
+  if not self.tbZFGroup[nEyeQuality] or not self.tbZFGroup[nEyeQuality][nPos] then
+    return false, i18n.Get(self.tbText.ZhenFaNotExist)
+  end
+  return true
+end
+
+function PartnerZhenFa:CheckCanZFLevelUp(pPlayer)
+  if not self:IsSysOpen() then
+    return false, i18n.Get(self.tbText.SysNotOpen)
+  end
+  if not self:IsZFActivate(pPlayer) then
+    return false, i18n.Get(self.tbText.NotActivate)
+  end
+  local nCurLevel = pPlayer.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nZFLevel)
+  if nCurLevel >= #self.tbZFLevel then
+    return false, i18n.Get(self.tbText.MaxLevelLimit)
+  end
+  local nNextLevel = nCurLevel + 1
+  local tbNextLevelCfg = self.tbZFLevel[nNextLevel]
+  if not tbNextLevelCfg then
+    return false, i18n.Get(self.tbText.MaxLevelLimit)
+  end
+  if 1 ~= GetTimeFrameState(tbNextLevelCfg.szOpenTimeFrame) then
+    return false, i18n.Get(self.tbText.SysNotOpen)
+  end
+  local nHasCount = pPlayer.GetItemCountByTypeInBag(tbNextLevelCfg.nLevelUpCostId)
+  if nHasCount < tbNextLevelCfg.nLevelUpCostCount then
+    return false, i18n.Get(self.tbText.ItemNotEnough)
+  end
+  return true
+end
+
+function PartnerZhenFa:CheckCanFixAttrEnhance(pPlayer, nIndex)
+  if not self:IsSysOpen() then
+    return false, i18n.Get(self.tbText.SysNotOpen)
+  end
+  if not self:IsZFActivate(pPlayer) then
+    return false, i18n.Get(self.tbText.NotActivate)
+  end
+  local nCurLevel = pPlayer.GetUserValue(self.FixAttrLevelSaveGroup, nIndex)
+  if nCurLevel >= self:GetCurMaxFixAttrLevel(pPlayer) then
+    return false, i18n.Get(self.tbText.MaxLevelLimit)
+  end
+  local nNextLevel = nCurLevel + 1
+  local tbLevelCfg = self.tbFixAttrLevelUp[nNextLevel]
+  if not tbLevelCfg then
+    return false, i18n.Get(self.tbText.MaxLevelLimit)
+  end
+  local nHasCount = pPlayer.GetItemCountByTypeInBag(tbLevelCfg.nLevelUpCostId)
+  if nHasCount < tbLevelCfg.nLevelUpCostCount then
+    return false, i18n.Get(self.tbText.ItemNotEnough)
+  end
+  return true
+end
+
+function PartnerZhenFa:CheckCanReplaceRandomAttr(pPlayer)
+  if not self:IsZFActivate(pPlayer) then
+    return false, i18n.Get(self.tbText.NotActivate)
+  end
+  local nAttrCount = self:GetCurRandomAttrCount(pPlayer)
+  local nWashAttrCount = self:GetCurWashRandomAttrCount(pPlayer)
+  if nWashAttrCount ~= nAttrCount then
+    return false, i18n.Get(self.tbText.NotWashType)
+  end
+  return true
+end
+
+function PartnerZhenFa:CheckCanWashRandomAttrType(pPlayer)
+  if not self:IsSysOpen() then
+    return false, i18n.Get(self.tbText.SysNotOpen)
+  end
+  if not self:IsZFActivate(pPlayer) then
+    return false, i18n.Get(self.tbText.NotActivate)
+  end
+  local nZFLevel = pPlayer.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nZFLevel)
+  local tbZFCfg = self.tbZFLevel[nZFLevel]
+  if not tbZFCfg then
+    return false, i18n.Get(self.tbText.ZhenFaNotExist)
+  end
+  local nHasCount = pPlayer.GetItemCountByTypeInBag(tbZFCfg.nWashTypeCostId)
+  if nHasCount < tbZFCfg.nWashTypeCostCount then
+    return false, i18n.Get(self.tbText.ItemNotEnough)
+  end
+  return true
+end
+
+function PartnerZhenFa:CheckCanWashRandomAttrVal(pPlayer, nIndex)
+  if not self:IsSysOpen() then
+    return false, i18n.Get(self.tbText.SysNotOpen)
+  end
+  if not self:IsZFActivate(pPlayer) then
+    return false, i18n.Get(self.tbText.NotActivate)
+  end
+  if not nIndex then
+    return false, i18n.Get(self.tbText.NotSelectAttr)
+  end
+  local nZFLevel = pPlayer.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nZFLevel)
+  local tbZFCfg = self.tbZFLevel[nZFLevel]
+  if not tbZFCfg then
+    return false, i18n.Get(self.tbText.ZhenFaNotExist)
+  end
+  local nHasCount = pPlayer.GetItemCountByTypeInBag(tbZFCfg.nWashValueCostId)
+  if nHasCount < tbZFCfg.nWashValueCostCount then
+    return false, i18n.Get(self.tbText.ItemNotEnough)
+  end
+  local nRandomAttrLevel = pPlayer.GetUserValue(self.RandomAttrLevelSaveGroup, nIndex)
+  if nRandomAttrLevel >= self:GetCurMaxRandomAttrLevel(pPlayer) then
+    return false, i18n.Get(self.tbText.MaxLevelLimit)
+  end
+  return true
+end
+
+function PartnerZhenFa:GetUsefulPartnerCount(pPlayer)
+  local nCount = 0
+  local tbPosInfo = pPlayer.GetPartnerPosInfo()
+  for _, nPartnerId in pairs(tbPosInfo) do
+    if nPartnerId > 0 then
+      local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+      local nQualityLevel = Partner.tbAllPartnerInfo[pPartner.nTemplateId].nQualityLevel
+      if self.tbPartnerQuality[nQualityLevel] >= self.Cfg.nPartnerQuality then
+        nCount = nCount + 1
+      end
+    end
+  end
+  return nCount
+end
+
+function PartnerZhenFa:GetPosGroupCfg(pPlayer, nPos, nEyeQuality)
+  if not pPlayer and not nPos and not nEyeQuality then
+    return
+  end
+  nEyeQuality = nEyeQuality or self:GetEyeQuality(pPlayer)
+  if not nEyeQuality then
+    LogErr("PartnerZhenFa:GetPosGroupCfg Error, GetEyeQuality is nil", pPlayer.dwID, nPos)
+    return
+  end
+  nPos = nPos or pPlayer.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nZFPos)
+  if not (not (nPos <= 0) and self.tbZFGroup[nEyeQuality]) or not self.tbZFGroup[nEyeQuality][nPos] then
+    return
+  end
+  return self.tbZFGroup[nEyeQuality][nPos]
+end
+
+function PartnerZhenFa:GetCurMaxFixAttrLevel(pPlayer)
+  local nMaxLevel = 0
+  local nZFLevel = pPlayer.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nZFLevel)
+  local tbZFCfg = self.tbZFLevel[nZFLevel]
+  if tbZFCfg then
+    nMaxLevel = tbZFCfg.nMaxFixAttrLevel
+  end
+  local nMaxStar = 0
+  local tbPosInfo = pPlayer.GetPartnerPosInfo()
+  for _, nPartnerId in pairs(tbPosInfo) do
+    if nPartnerId > 0 then
+      local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+      local nStar = pPartner.GetStar()
+      if nMaxStar < nStar then
+        nMaxStar = nStar
+      end
+    end
+  end
+  nMaxLevel = nMaxLevel + nMaxStar
+  local nMaxLimit = #self.tbFixAttrLevelUp
+  if nMaxLevel > nMaxLimit then
+    nMaxLevel = nMaxLimit
+  end
+  return nMaxLevel
+end
+
+function PartnerZhenFa:GetCurMaxRandomAttrLevel(pPlayer)
+  local nMaxLevel = 0
+  local nZFLevel = pPlayer.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nZFLevel)
+  local tbZFCfg = self.tbZFLevel[nZFLevel]
+  if tbZFCfg then
+    local tbQuality = tbZFCfg.tbRandomAttrQuality
+    if tbQuality then
+      for _, tbLevelCfg in pairs(tbQuality) do
+        local nEndLevel = tonumber(tbLevelCfg[2])
+        if nEndLevel and nMaxLevel < nEndLevel then
+          nMaxLevel = nEndLevel
+        end
+      end
+    end
+  end
+  return nMaxLevel
+end
+
+function PartnerZhenFa:GetCurRandomAttrCount(pPlayer)
+  local nCount = 0
+  for nIndex = 1, self.nMaxRandomAttrCount do
+    local nGroup = pPlayer.GetUserValue(self.RandomAttrSaveGroup, nIndex)
+    if nGroup > 0 and self.tbRandomAttrPool[nGroup] then
+      nCount = nCount + 1
+    end
+  end
+  return nCount
+end
+
+function PartnerZhenFa:GetCurWashRandomAttrCount(pPlayer)
+  local nCount = 0
+  for nIndex = 1, self.nMaxRandomAttrCount do
+    local nGroup = pPlayer.GetUserValue(self.RandomAttrWashSaveGroup, nIndex)
+    if nGroup > 0 and self.tbRandomAttrPool[nGroup] then
+      nCount = nCount + 1
+    end
+  end
+  return nCount
+end
+
+function PartnerZhenFa:GetZFRandomAttr(pPlayer, nIndex)
+  local nAttrCount = self:GetCurRandomAttrCount(pPlayer)
+  if nIndex < 1 or nIndex > nAttrCount then
+    return
+  end
+  local nGroup = pPlayer.GetUserValue(self.RandomAttrSaveGroup, nIndex)
+  local nLevel = pPlayer.GetUserValue(self.RandomAttrLevelSaveGroup, nIndex)
+  if nGroup > 0 and nLevel > 0 then
+    local tbAttrCfg = self.tbRandomAttrPool[nGroup][nLevel]
+    if tbAttrCfg then
+      return {
+        tbAttrCfg.szAttrType,
+        tbAttrCfg.nAttrVal1,
+        tbAttrCfg.nAttrVal2,
+        tbAttrCfg.nAttrVal3
+      }
+    end
+  end
+end
+
+function PartnerZhenFa:GetZFWashRandomAttr(pPlayer, nIndex)
+  local nAttrCount = self:GetCurRandomAttrCount(pPlayer)
+  if nIndex < 1 or nIndex > nAttrCount then
+    return
+  end
+  local nGroup = pPlayer.GetUserValue(self.RandomAttrWashSaveGroup, nIndex)
+  local nLevel = pPlayer.GetUserValue(self.RandomAttrLevelSaveGroup, nIndex)
+  if nGroup > 0 and nLevel > 0 then
+    local tbAttrCfg = self.tbRandomAttrPool[nGroup][nLevel]
+    if tbAttrCfg then
+      return {
+        tbAttrCfg.szAttrType,
+        tbAttrCfg.nAttrVal1,
+        tbAttrCfg.nAttrVal2,
+        tbAttrCfg.nAttrVal3
+      }
+    end
+  end
+end
+
+function PartnerZhenFa:GetRandomAttrQuality(pPlayer, nIndex, nZFLevel)
+  if not pPlayer then
+    return
+  end
+  nZFLevel = nZFLevel or pPlayer.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nZFLevel)
+  local tbZFCfg = self.tbZFLevel[nZFLevel]
+  if not tbZFCfg then
+    return
+  end
+  local nLevel = me.GetUserValue(self.RandomAttrLevelSaveGroup, nIndex)
+  for nQuality, tbLevel in ipairs(tbZFCfg.tbRandomAttrQuality) do
+    if nLevel < tbLevel[1] or nLevel >= tbLevel[1] and nLevel <= tbLevel[2] then
+      return nQuality
+    end
+  end
+end
+
+function PartnerZhenFa:GetZFBaseFixAttr(pPlayer, nPos, nIndex)
+  if nIndex < 1 or nIndex > self.nFixAttrCount then
+    LogErr("PartnerZhenFa:GetZFBaseFixAttr Error. nIndex is illegal", pPlayer.dwID, nPos, nIndex)
+    return
+  end
+  local tbZFGroup = self:GetPosGroupCfg(pPlayer, nPos)
+  if not tbZFGroup then
+    LogErr("PartnerZhenFa:GetZFBaseFixAttr Error. GetCurPosGroupCfg is nil", pPlayer.dwID, nPos, nIndex)
+    return
+  end
+  local nGroup = tbZFGroup["nAttrGroup" .. nIndex]
+  local szAttrType = self.tbFixGroup2AttrType[nGroup]
+  local nAttrVal1 = tbZFGroup["nAttrVal" .. nIndex .. "1"]
+  local nAttrVal2 = tbZFGroup["nAttrVal" .. nIndex .. "2"]
+  local nAttrVal3 = tbZFGroup["nAttrVal" .. nIndex .. "3"]
+  return {
+    szAttrType,
+    nAttrVal1,
+    nAttrVal2,
+    nAttrVal3
+  }
+end
+
+function PartnerZhenFa:GetZFEnhanceFixAttr(pPlayer, nPos, nLevel, nIndex)
+  if nIndex < 1 or nIndex > self.nFixAttrCount then
+    return
+  end
+  local tbZFGroup = self:GetPosGroupCfg(pPlayer, nPos)
+  if not tbZFGroup then
+    LogErr("PartnerZhenFa:GetZFEnhanceFixAttr Error. GetCurPosGroupCfg is nil", pPlayer.dwID, nPos, nIndex)
+    return
+  end
+  nLevel = nLevel or pPlayer.GetUserValue(self.FixAttrLevelSaveGroup, nIndex)
+  if nLevel > 0 then
+    local nGroup = tbZFGroup["nAttrGroup" .. nIndex]
+    local tbAttrCfg = self.tbFixAttrPool[nGroup][nLevel]
+    if tbAttrCfg then
+      local nAttrVal1 = tbAttrCfg.nAttrVal1
+      local nAttrVal2 = tbAttrCfg.nAttrVal2
+      local nAttrVal3 = tbAttrCfg.nAttrVal3
+      local szAttrType = self.tbFixGroup2AttrType[nGroup]
+      return {
+        szAttrType,
+        nAttrVal1,
+        nAttrVal2,
+        nAttrVal3
+      }
+    end
+  end
+end
+
+function PartnerZhenFa:GetEyeQuality(pPlayer)
+  local nPartnerId = self:GetEyePartnerId(pPlayer)
+  if nPartnerId > 0 then
+    local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+    local nQualityLevel = Partner:GetPartnerQualityLevel(pPartner.nTemplateId)
+    local nQuality = self.tbPartnerQuality[nQualityLevel]
+    return nQuality
+  end
+end
+
+function PartnerZhenFa:GetEyePartnerId(pPlayer)
+  local nPartnerId = pPlayer.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nEyePartnerId)
+  if nPartnerId > 0 and Partner:CheckPartnerInPos(pPlayer, nPartnerId) then
+    return nPartnerId
+  end
+  return 0
+end
+
+function PartnerZhenFa:GetSwitchCDTime(pPlayer)
+  if not pPlayer then
+    LogErr("PartnerZhenFa:GetSwitchCDTime fail. pPlayer is nil")
+    return 0
+  end
+  return pPlayer.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nSwitchCDTime)
+end
+
+function PartnerZhenFa:GetZFEyeFightPower(pPlayer)
+  local nFightPower = 0
+  local tbGroupCfg = self:GetPosGroupCfg(pPlayer)
+  if tbGroupCfg then
+    nFightPower = tbGroupCfg.nFightPower
+  end
+  return nFightPower
+end
+
+function PartnerZhenFa:GetZFLevelFightPower(pPlayer)
+  local nFightPower = 0
+  local nZFLevel = pPlayer.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nZFLevel)
+  if nZFLevel > 0 then
+    local tbLevelCfg = self.tbZFLevel[nZFLevel]
+    if tbLevelCfg then
+      nFightPower = tbLevelCfg.nFightPower
+    end
+  end
+  return nFightPower
+end
+
+function PartnerZhenFa:GetFixAttrFightPower(pPlayer)
+  local nFightPower = 0
+  local tbGroupCfg = self:GetPosGroupCfg(pPlayer)
+  if tbGroupCfg then
+    for nIndex = 1, self.nFixAttrCount do
+      local nLevel = pPlayer.GetUserValue(self.FixAttrLevelSaveGroup, nIndex)
+      if nLevel > 0 then
+        local nGroup = tbGroupCfg["nAttrGroup" .. nIndex]
+        local tbAttrCfg = self.tbFixAttrPool[nGroup][nLevel]
+        if tbAttrCfg then
+          nFightPower = nFightPower + tbAttrCfg.nFightPower
+        end
+      end
+    end
+  end
+  return nFightPower
+end
+
+function PartnerZhenFa:GetRandomAttrFightPower(pPlayer)
+  local nFightPower = 0
+  for nIndex = 1, self.nMaxRandomAttrCount do
+    local nGroup = pPlayer.GetUserValue(self.RandomAttrSaveGroup, nIndex)
+    local nLevel = pPlayer.GetUserValue(self.RandomAttrLevelSaveGroup, nIndex)
+    if nGroup > 0 and nLevel > 0 then
+      local tbAttrCfg = self.tbRandomAttrPool[nGroup][nLevel]
+      if tbAttrCfg then
+        nFightPower = nFightPower + tbAttrCfg.nFightPower
+      end
+    end
+  end
+  return nFightPower
+end
+
+function PartnerZhenFa:CalcFightPower(pPlayer, szType)
+  local nFightPower = 0
+  if self:IsZFActivate(pPlayer) then
+    local nEyeQuality = self:GetZFEyeFightPower(pPlayer)
+    local nZFFightPower = self:GetZFLevelFightPower(pPlayer)
+    local nFixAttrFightPower = self:GetFixAttrFightPower(pPlayer)
+    local nRandomAttrFightPower = self:GetRandomAttrFightPower(pPlayer)
+    nFightPower = nEyeQuality + nZFFightPower + nFixAttrFightPower + nRandomAttrFightPower
+  end
+  return nFightPower
+end
+
+FightPower:RegisterFPSystemModule({
+  "PartnerZhenFa"
+}, PartnerZhenFa)
+
+function PartnerZhenFa:OperateFixAttr(pPlayer, nPos, nIndex, bApply)
+  if not pPlayer then
+    LogErr("PartnerZhenFa:OperateFixAttr Error. pPlayer is nil", pPlayer, nPos, nIndex, bApply)
+    return
+  end
+  local tbBaseFixAttr = self:GetZFBaseFixAttr(pPlayer, nPos, nIndex)
+  if tbBaseFixAttr then
+    if bApply then
+      self:ApplyAttribute(pPlayer, tbBaseFixAttr)
+    else
+      self:RemoveAttribute(pPlayer, tbBaseFixAttr)
+    end
+  end
+  local tbLevelFixAttr = self:GetZFEnhanceFixAttr(pPlayer, nPos, nil, nIndex)
+  if tbLevelFixAttr then
+    if bApply then
+      self:ApplyAttribute(pPlayer, tbLevelFixAttr)
+    else
+      self:RemoveAttribute(pPlayer, tbLevelFixAttr)
+    end
+  end
+end
+
+function PartnerZhenFa:ApplyAttribute(pPlayer, tbAttr)
+  if pPlayer and tbAttr then
+    pPlayer.ApplyMagicAttrib(table.unpack(tbAttr))
+  end
+end
+
+function PartnerZhenFa:RemoveAttribute(pPlayer, tbAttr)
+  if pPlayer and tbAttr then
+    pPlayer.RemoveMagicAttrib(table.unpack(tbAttr))
+  end
+end
+
+function PartnerZhenFa:ActivateZFAttr(pPlayer)
+  for nIndex = 1, self.nFixAttrCount do
+    self:OperateFixAttr(pPlayer, nil, nIndex, true)
+  end
+  for nIndex = 1, self.nMaxRandomAttrCount do
+    local tbRandomAttr = self:GetZFRandomAttr(pPlayer, nIndex)
+    if tbRandomAttr then
+      self:ApplyAttribute(pPlayer, tbRandomAttr)
+    end
+  end
+end
+
+function PartnerZhenFa:RemoveZFAttr(pPlayer, nEyeId)
+  local pPartner = pPlayer.GetPartnerObj(nEyeId)
+  local nQualityLevel = Partner:GetPartnerQualityLevel(pPartner.nTemplateId)
+  local nQuality = self.tbPartnerQuality[nQualityLevel]
+  if not self.tbZFGroup[nQuality] then
+    LogErr("PartnerZhenFa:RemoveZFAttr Error. tbZFGroup not have nQuality", pPlayer.dwID, nQuality, nEyeId)
+    return
+  end
+  local nZFPos = pPlayer.GetUserValue(self.CommonSaveGroup, self.tbCommonSaveKey.nZFPos)
+  local tbGroupCfg = self.tbZFGroup[nQuality][nZFPos]
+  if not tbGroupCfg then
+    LogErr("PartnerZhenFa:RemoveZFAttr Error. tbZFGroup not have nZFPos", pPlayer.dwID, nQuality, nZFPos, nEyeId)
+    return
+  end
+  for nIndex = 1, self.nFixAttrCount do
+    local nGroup = tbGroupCfg["nAttrGroup" .. nIndex]
+    local szType = self.tbFixGroup2AttrType[nGroup]
+    local nAttr1 = tbGroupCfg["nAttrVal" .. nIndex .. "1"]
+    local nAttr2 = tbGroupCfg["nAttrVal" .. nIndex .. "2"]
+    local nAttr3 = tbGroupCfg["nAttrVal" .. nIndex .. "3"]
+    local tbAttr = {
+      szType,
+      nAttr1,
+      nAttr2,
+      nAttr3
+    }
+    self:RemoveAttribute(pPlayer, tbAttr)
+    local nLevel = pPlayer.GetUserValue(self.FixAttrLevelSaveGroup, nIndex)
+    local tbEnhanceCfg = self.tbFixAttrPool[nGroup][nLevel]
+    if tbEnhanceCfg then
+      local tbEnhanceAttr = {
+        szType,
+        tbEnhanceCfg.nAttrVal1,
+        tbEnhanceCfg.nAttrVal2,
+        tbEnhanceCfg.nAttrVal3
+      }
+      self:RemoveAttribute(pPlayer, tbEnhanceAttr)
+    end
+  end
+  for nIndex = 1, self.nMaxRandomAttrCount do
+    local tbRandomAttr = self:GetZFRandomAttr(pPlayer, nIndex)
+    if tbRandomAttr then
+      self:RemoveAttribute(pPlayer, tbRandomAttr)
+    end
+  end
+end
+
+function PartnerZhenFa:OnEquip(pPlayer)
+  if self:IsZFActivate(pPlayer) then
+    self:ActivateZFAttr(pPlayer)
+  end
+end
+
+function PartnerZhenFa:OnUnEquip(pPlayer)
+  if self:IsZFActivate(pPlayer) then
+    local nEyeId = PartnerZhenFa:GetEyePartnerId(pPlayer)
+    self:RemoveZFAttr(pPlayer, nEyeId)
+  end
+end
+
+function PartnerZhenFa:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  local nState = pPlayerAsync.GetPartnerZFState() or 0
+  if 0 == nState then
+    return
+  end
+  for nIndex = 1, self.nMaxRandomAttrCount do
+    local nGroup = pPlayerAsync.GetPartnerZFRandomAttr(nIndex) or 0
+    local nLevel = pPlayerAsync.GetPartnerZFRandomLevel(nIndex) or 0
+    if nGroup > 0 and nLevel > 0 then
+      local tbAttrCfg = self.tbRandomAttrPool[nGroup][nLevel]
+      if tbAttrCfg then
+        pNpc.ApplyMagicAttrib(tbAttrCfg.szAttrType, tbAttrCfg.nAttrVal1, tbAttrCfg.nAttrVal2, tbAttrCfg.nAttrVal3)
+      end
+    end
+  end
+  local nZFPos = pPlayerAsync.GetPartnerZFPos() or 0
+  local nEyeTemplateId = pPlayerAsync.GetPartnerZFEye() or 0
+  local nQualityLevel = Partner.tbAllPartnerInfo[nEyeTemplateId].nQualityLevel or 0
+  local nEyeQuality = self.tbPartnerQuality[nQualityLevel] or 0
+  local tbZFGroup = self:GetPosGroupCfg(nil, nZFPos, nEyeQuality)
+  if tbZFGroup then
+    for nIndex = 1, self.nFixAttrCount do
+      local nGroup = tbZFGroup["nAttrGroup" .. nIndex]
+      local szAttrType = self.tbFixGroup2AttrType[nGroup]
+      local nAttrV1 = tbZFGroup["nAttrVal" .. nIndex .. "1"]
+      local nAttrV2 = tbZFGroup["nAttrVal" .. nIndex .. "2"]
+      local nAttrV3 = tbZFGroup["nAttrVal" .. nIndex .. "3"]
+      pNpc.ApplyMagicAttrib(szAttrType, nAttrV1, nAttrV2, nAttrV3)
+      local nLevel = pPlayerAsync.GetPartnerZFFixAttrLevel(nIndex) or 0
+      if nLevel > 0 then
+        local tbAttrCfg = self.tbFixAttrPool[nGroup][nLevel]
+        if tbAttrCfg then
+          pNpc.ApplyMagicAttrib(szAttrType, tbAttrCfg.nAttrVal1, tbAttrCfg.nAttrVal2, tbAttrCfg.nAttrVal3)
+        end
+      end
+    end
+  end
+end
+
+AttributeModule:Register("PartnerZhenFa", PartnerZhenFa)

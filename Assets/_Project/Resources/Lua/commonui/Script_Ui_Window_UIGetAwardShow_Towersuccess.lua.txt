@@ -1,0 +1,180 @@
+local tbWnd = Ui:CreateWindow("UIGetAwardShow_Towersuccess")
+local tbControls = {
+  AwardTemplate = "imgBG/ItemPanel/Scroll View/Viewport/Content/Template",
+  LevelName = "imgBG/txt_Name",
+  Grid_LV = "imgBG/Grid_LV",
+  PersonalRank = "imgBG/txt_Rank",
+  AutoExitTime = "imgBG/txt_ExitTime",
+  FirstPassNum = "imgBG/txt_ExitNum",
+  btnExit = "imgBG/btnExit",
+  btnNext = "imgBG/btnNext",
+  OldRewardTittle = "imgBG/txt_RewardTittle",
+  txt_Rank = "imgBG/txt_Rank",
+  NewRewardTittle = "imgBG/txt_RankTittle",
+  ItemPanel = "imgBG/ItemPanel",
+  txt_ScoreTittle = "imgBG/txt_ScoreTittle",
+  txt_Score = "imgBG/txt_Score"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnExit = function(self)
+    self:OnClickExitButton()
+  end,
+  btnNext = function(self)
+    self:OnClickNextButton()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_SWITCH,
+      self.CloseByDefault,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_UPDATE_SETTLEUIBTN,
+      self.RefreshExitBtn,
+      self
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.tbAwardView = Ui:NewScrollView(self, tbControls.AwardTemplate)
+end
+
+function tbWnd:OnOpen(nLevel, bShowExitBtn, bShowNextLevelBtn)
+  self.nLevel = nLevel
+  self.tbPassLevelInfo = LevelTower.LevelTowerC:GetPassLevelInfoByLevelOrder()
+  self.pPanel:SetActive(tbControls.OldRewardTittle, false)
+  self.pPanel:SetActive(tbControls.txt_Rank, false)
+  self.pPanel:SetActive(tbControls.ItemPanel, false)
+  self.pPanel:SetActive(tbControls.NewRewardTittle, false)
+  self.pPanel:SetActive(tbControls.txt_ScoreTittle, false)
+  self.pPanel:SetActive(tbControls.txt_Score, false)
+  self.pPanel:Label_SetText(tbControls.NewRewardTittle, i18n.EasyGet("\233\166\150\233\128\154\229\165\150\229\138\177\239\188\154"))
+  local szMainName, szSubName = LevelTower:GetLevelName(nLevel)
+  self.pPanel:Label_SetText(tbControls.LevelName, string.format("%s\194\183%s", szMainName, szSubName))
+  local nRemainFirstPassCount = LevelTower:GetRemainFirstPassCount(me)
+  if nRemainFirstPassCount > 0 then
+    self.pPanel:Label_SetText(tbControls.FirstPassNum, i18n.EasyGet("\233\166\150\233\128\154\230\172\161\230\149\176\239\188\154{0}", nRemainFirstPassCount))
+  else
+    self.pPanel:Label_SetText(tbControls.FirstPassNum, i18n.EasyGet("\233\166\150\233\128\154\230\172\161\230\149\176\239\188\1540"))
+  end
+  self:__ShowScore()
+  self:__ShowAwards()
+  self:RefreshExitBtn(bShowExitBtn)
+  self:RefreshNextBtn(bShowNextLevelBtn)
+end
+
+function tbWnd:OnClose()
+  if self.nDelayTimer then
+    Timer:Close(self.nDelayTimer)
+    self.nDelayTimer = nil
+  end
+end
+
+function tbWnd:__ShowScore()
+  local szGetScore = LevelTower.LevelTowerC.tbData and LevelTower.LevelTowerC.tbData.szScore or ""
+  for szScore, _ in pairs(LevelTower.ScoreWeight) do
+    self.pPanel:SetActive(tbControls.Grid_LV .. "/txt_LV" .. szScore, szScore == szGetScore)
+  end
+end
+
+function tbWnd:__ShowPersonalRank()
+  local nPersonalRank, _ = RankBoard:GetMyRankInfo("LevelTower")
+  self.pPanel:Label_SetText(tbControls.PersonalRank, nPersonalRank)
+end
+
+function tbWnd:__ShowAwards()
+  if not self.tbPassLevelInfo[self.nLevel] then
+    self.pPanel:SetActive(tbControls.NewRewardTittle, true)
+    self.pPanel:SetActive(tbControls.ItemPanel, true)
+    if LevelTower.tbLevelSetting[self.nLevel] then
+      local nAwardId = LevelTower.tbLevelSetting[self.nLevel].nFirstPassAwardId
+      local nAwardKey = LevelTower.tbLevelSetting[self.nLevel].nFirstPassDisplayAwardKey
+      local tbAwards = Award:GetAward(nAwardId, nAwardKey, {bNotMerge = true})
+      if #tbAwards > 21 then
+        tbAwards = Award:MergetSameTypeAward(tbAwards)
+      end
+      self.tbAwardView:ResetFrom(#tbAwards)
+      for i, tbAward in ipairs(tbAwards) do
+        self.tbAwardView:SetElement(i, function(tbElement)
+          local tbItemGrid = tbElement.tbItemGrid
+          if not tbItemGrid then
+            tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+            tbItemGrid:SetClickEnable(true)
+          end
+          tbElement.pPanel:SetActive("Effect/Quality1", false)
+          tbElement.pPanel:SetActive("Effect/Quality2", false)
+          local szType = tbAward[1]
+          if szType == Player.AwardType2Name[Player.award_type_item] or szType == Player.AwardType2Name[Player.award_type_item_Unsafe] or szType == Player.AwardType2Name[Player.award_type_itemshow] then
+            local szName, nIcon, nView, nQuality = KItem.GetItemShowInfo(tbAward[2], me.nFaction, me.nFactionSect)
+            if nQuality >= 6 then
+              tbElement.pPanel:SetActive("Effect/Quality2", true)
+            elseif nQuality >= 4 then
+              tbElement.pPanel:SetActive("Effect/Quality1", true)
+            end
+            tbItemGrid:SetItemByTemplate(tbAward[2], tbAward[3], nil, nil, nil, nil, nil, tbAward[4])
+          else
+            tbItemGrid:SetDigitalItem(szType, tbAward[2])
+          end
+        end)
+      end
+      self.tbAwardView:PlayItemGridAnimation()
+    end
+  else
+    self.pPanel:SetActive(tbControls.ItemPanel, false)
+    self.pPanel:SetActive(tbControls.NewRewardTittle, false)
+  end
+end
+
+function tbWnd:RefreshExitBtn(bShowExitBtn)
+  self.pPanel:SetActive(tbControls.AutoExitTime, bShowExitBtn or false)
+  self.pPanel:SetActive(tbControls.btnExit, bShowExitBtn or false)
+  self.pPanel:Button_SetEnable(tbControls.btnExit, bShowExitBtn or false)
+  if true == bShowExitBtn then
+    self:__StartDelayTimer()
+  elseif self.nDelayTimer then
+    Timer:Close(self.nDelayTimer)
+  end
+end
+
+function tbWnd:RefreshNextBtn(bShowNextLevelBtn)
+  self.pPanel:SetActive(tbControls.btnNext, bShowNextLevelBtn or false)
+  self.pPanel:Button_SetEnable(tbControls.btnNext, bShowNextLevelBtn or false)
+end
+
+function tbWnd:__StartDelayTimer()
+  if self.nDelayTimer then
+    Timer:Close(self.nDelayTimer)
+  end
+  self.nPassTime = 0
+  self.pPanel:Label_SetText(tbControls.AutoExitTime, i18n.EasyGet("{0}\231\167\146\229\144\142\232\135\170\229\138\168\233\128\128\229\135\186", LevelTower.Cfg.nAutoExitTime))
+  self.nDelayTimer = Timer:Register(Env.GAME_FPS, function()
+    if self.nPassTime >= LevelTower.Cfg.nAutoExitTime then
+      Timer:Close(self.nDelayTimer)
+      self.nDelayTimer = nil
+      self:OnClickExitButton()
+      return false
+    else
+      self.nPassTime = self.nPassTime + 1
+      self.pPanel:Label_SetText(tbControls.AutoExitTime, i18n.EasyGet("{0}\231\167\146\229\144\142\232\135\170\229\138\168\233\128\128\229\135\186", LevelTower.Cfg.nAutoExitTime - self.nPassTime))
+      return true
+    end
+  end)
+end
+
+function tbWnd:OnClickExitButton()
+  if TeamMgr:IsCaptain(me.dwID) then
+    LevelTower.LevelTowerC:DoCaptainConfirm(false)
+  else
+    LevelTower.LevelTowerC:DoRequestExitFuBen()
+  end
+  self:Close()
+end
+
+function tbWnd:OnClickNextButton()
+  LevelTower.LevelTowerC:DoCaptainConfirm(true)
+end

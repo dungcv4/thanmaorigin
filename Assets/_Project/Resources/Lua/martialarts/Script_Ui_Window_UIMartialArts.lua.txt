@@ -1,0 +1,156 @@
+local tbWnd = Ui:CreateWindow("UIMartialArts")
+local tbControls = {
+  btnClose = "node/imgBG02/btnClose",
+  btnHelp = "node/imgBG02/txtTitle/btnInfo",
+  btnTenPick = "node/imgBG02/Content/btnTenPick",
+  txtTenPickValue = "node/imgBG02/Content/IconTenPick/txtTenPickValue",
+  btnPick = "node/imgBG02/Content/btnPick",
+  txtPickValue = "node/imgBG02/Content/IconPick/txtPickValue",
+  txtPickType = "node/imgBG02/Content/btnPick/Text",
+  txtFreeTimeInfo = "node/imgBG02/Content/txtTips1",
+  txtSubsidyInfo = "node/imgBG02/Content/txtTipsTen",
+  txtTimeLeft = "node/imgBG02/Content/txtTime",
+  txtTenPickText = "node/imgBG02/Content/txtTipsTenInfo",
+  goMoneyPanel = "node/UIMoneyPanel",
+  imgTitleSkill = "node/imgBG02/Content/Left/SkillIcon/btnSkill",
+  txtTitleSkill = "node/imgBG02/Content/Left/ImgInfo/txtInfo",
+  goWuXueShowTemplate = "node/imgBG02/Content/Right/Scroll View/Viewport/Content/Template",
+  goPoolItemTemplate = "node/imgBG02/Content/Right/Scroll View/Viewport/Content/Template"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+  end,
+  btnPick = function(self)
+    if self.bCanFreePick then
+      self:StartCardPick("LimitedFreePick")
+      return
+    end
+    if not WuXueCardPicker:CheckCardPickMoney("LimitedPick") then
+      return
+    end
+    self:StartCardPick("LimitedPick")
+  end,
+  btnTenPick = function(self)
+    if not WuXueCardPicker:CheckCardPickMoney("LimitedTenPick") then
+      return
+    end
+    local nLastTime = LocalData:GetRoleNumber("WuXuePartner_CloseCardPickerNoticeTime", 0)
+    local bIsDiffDay = Lib:IsDiffDay(14400, nLastTime)
+    if not bIsDiffDay then
+      self:StartCardPick("LimitedTenPick")
+    else
+      local function fnCardPick()
+        self:StartCardPick("LimitedTenPick")
+      end
+      
+      Ui:OpenWindowAsync("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\231\161\174\232\174\164\229\141\129\232\191\158\230\139\155\229\139\159\230\173\166\229\173\166\239\188\159"), {
+        {fnCardPick},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      }, "WuXueCardPicker", nil, i18n.EasyGet("\228\187\138\230\151\165\228\184\141\229\134\141\230\143\144\233\134\146"))
+    end
+  end,
+  imgTitleSkill = function(self)
+    local tbData = {
+      nTemplate = self.nCurShowWuXueItemId
+    }
+    Item:ShowItemDetail(tbData)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, tbControls.goMoneyPanel)
+  self.tbPoolItemListScrollView = Ui:NewScrollView(self, tbControls.goPoolItemTemplate, nil, false, false)
+end
+
+function tbWnd:OnOpen()
+  local tbPoolData = WuXueCardPicker.tbLimitedPoolUpInfo
+  if tbPoolData then
+    self:UpdatePoolData(tbPoolData)
+    self:OnChangeMoney()
+  end
+  self:UpdateTimer()
+  self:UpdateSubsidySSState()
+end
+
+function tbWnd:StartCardPick(szPickType)
+  WuXueCardPicker:RequestCardPick(szPickType)
+end
+
+function tbWnd:UpdatePoolData(tbPoolData)
+  local szPoolName = tbPoolData.szPoolName
+  local nUpPartnerNum = tbPoolData.nUpPartnerNum
+  local nUpItemId = tbPoolData.nUpItemId
+  local nUpItemCount = tbPoolData.nUpItemCount
+  local nSubUpItemId = tbPoolData.nSubUpItemId
+  local nSubUpItemCount = tbPoolData.nSubUpItemCount
+  local nWuXueId = WuXue.tbWuXueItemTemplateId2WuXueId[nUpPartnerNum]
+  local nActiveSkillId, nPassiveSkillId = WuXue:GetSkillIdByWuXueId(nWuXueId)
+  local nSkillId = nActiveSkillId
+  local szWuXueName = WuXue.tbWuXueSkillInfo[nWuXueId].szWuXueName
+  local szSkillIcon = FightSkill:GetSkillIconAtlas(nSkillId)
+  self.nCurShowWuXueItemId = nUpPartnerNum
+  self.pPanel:Label_SetText(tbControls.txtTitleSkill, i18n.Parse(szWuXueName))
+  self.pPanel:Sprite_SetSprite(tbControls.imgTitleSkill, szSkillIcon)
+  local tbPoolItemList = WuXueCardPicker.tbWuXueCardPickerItemList[szPoolName]
+  local i = 0
+  for _, tbItemData in pairs(tbPoolItemList) do
+    i = i + 1
+    self.tbPoolItemListScrollView:SetElement(i, function(tbElement)
+      local pPanel = tbElement.pPanel
+      local szItemName = Item:GetName(tbItemData[1], me)
+      pPanel:Label_SetText("txtNum", i18n.Parse(szItemName))
+      local grid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      grid:SetItemByTemplate(tbItemData[1], tbItemData[2])
+      grid:SetClickEnable(true)
+    end)
+  end
+end
+
+function tbWnd:UpdateTimer()
+  self:UpdateFreePickButtonState()
+  if self.nFreeTimer then
+    Timer:Close(self.nFreeTimer)
+    self.nFreeTimer = nil
+  end
+  self.nFreeTimer = Timer:Register(Env.GAME_FPS, self.UpdateFreePickButtonState, self)
+end
+
+function tbWnd:UpdateFreePickButtonState()
+  local nGoldFreeTime = me.GetUserValue(WuXueCardPicker.Def.CARD_SAVE_GROUP, WuXueCardPicker.Def.SAVE_FREE_LIMITED_PICK_TIME)
+  local nCurTime = GetTime()
+  local nLeftGoldSecond = 86400 - (nCurTime - nGoldFreeTime)
+  if nLeftGoldSecond > 0 then
+    self.bCanFreePick = false
+    self.pPanel:Label_SetText(tbControls.txtPickType, i18n.EasyGet("\230\138\189\229\143\150\228\184\128\230\172\161"))
+    local nGoldHour, nGoldMin, nGoldSec = Lib:TransferSecond2NormalTime(nLeftGoldSecond)
+    self.pPanel:Label_SetText(tbControls.txtFreeTimeInfo, i18n.EasyGet("{0}:{1}:{2}\229\144\142\229\133\141\232\180\185", nGoldHour, nGoldMin, nGoldSec))
+  else
+    self.bCanFreePick = true
+    self.pPanel:Label_SetText(tbControls.txtPickType, i18n.EasyGet("\229\133\141\232\180\185\230\138\189\229\141\161"))
+    self.pPanel:Label_SetText(tbControls.txtFreeTimeInfo, "")
+  end
+  if WuXueCardPicker.nLimitedPoolActivityEndTime then
+    self.pPanel:Label_SetText(tbControls.txtTimeLeft, i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154{0}", Lib:TimeDesc5(WuXueCardPicker.nLimitedPoolActivityEndTime - GetTime())))
+  end
+  return true
+end
+
+function tbWnd:UpdateSubsidySSState()
+  local nSubsidy = me.GetUserValue(WuXueCardPicker.Def.CARD_SAVE_GROUP, WuXueCardPicker.Def.SAVE_CALC_SUBSIDY_SSS_COUNT)
+  local nSSCount = WuXueCardPicker.Def.nCardPickMustSSSCount - nSubsidy
+  self.pPanel:Label_SetText(tbControls.txtSubsidyInfo, i18n.EasyGet(""))
+  self.pPanel:Label_SetText(tbControls.txtTenPickText, i18n.EasyGet("<color=#F4E219>\229\141\129\232\191\158\230\138\189</color><color=#1FFB24>\229\191\133\229\190\151</color><color=#F6931F>\230\173\166\229\173\166\229\175\187\230\186\144\231\162\142\231\137\135</color>\n<color=#1FFB24>\229\134\141\230\139\155\229\139\159</color><color=#F4E219>{0}</color><color=#1FFB24>\230\172\161\229\191\133\229\190\151</color><color=#F6931F>\229\174\140\230\149\180\230\173\166\229\173\166</color>", nSSCount))
+end
+
+function tbWnd:OnChangeMoney()
+  self.pPanel:Label_SetText(tbControls.txtPickValue, WuXueCardPicker.Def.nGoldCost)
+  self.pPanel:Label_SetText(tbControls.txtTenPickValue, WuXueCardPicker.Def.nGoldTenCost)
+  self.tbMoneyPanel:SetMoneyValue()
+end

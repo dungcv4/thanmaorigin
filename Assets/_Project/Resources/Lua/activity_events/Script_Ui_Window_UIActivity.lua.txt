@@ -1,0 +1,507 @@
+local tbWnd = Ui:CreateWindow("UIActivity")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_ACTIVEPOINT_INFO,
+      self.UpdataActivePoint
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnDaily = "node/imgBG/btnList/btnDaily",
+  btnActDegree = "node/imgBG/btnList/btnActDegree",
+  btnWeekCalendar = "node/imgBG/btnList/btnWeekCalendar",
+  btnRemind = "node/imgBG/Content/Daily/btnRemind",
+  btnPreview = "node/imgBG/Content/Daily/btnPreview",
+  panelDaily = "node/imgBG/Content/Daily",
+  panelActDegree = "node/imgBG/Content/ActDegree",
+  panelWeekCalendar = "node/imgBG/Content/WeekCalendar",
+  panelAward = "node/imgBG/Content/ActDegreeAward",
+  panelAwardPreview = "node/imgBG/Content/AwardPreview",
+  panelAwardPreviewContent = "node/imgBG/Content/AwardPreview/Award",
+  ActivityListTemp = "node/imgBG/Content/Daily/panelActivityList/maskLayer/paneBG/ActivityTemplate",
+  ActivitySeqTemp = "node/imgBG/Content/Daily/panelActDegree/maskLayer/viewport/paneBG/ActivityTemplate",
+  ActivitySeqScrollViewContent = "node/imgBG/Content/Daily/panelActDegree/maskLayer/viewport/paneBG",
+  ItemTemplate = "node/imgBG/Content/Daily/panelActivityDetail/AwardList/Content/ItemTemplate",
+  ActDegreeTemp = "node/imgBG/Content/ActDegree/panelActivityList/maskLayer/paneBG/ActivityTemplate",
+  DayTemp = "node/imgBG/Content/WeekCalendar/ActivityList/Viewport/Content/DayList",
+  TimeTemplate = "node/imgBG/Content/WeekCalendar/TimeList/TimeTemplate",
+  ActDegreeItemTemp = "node/imgBG/Content/AwardPreview/Award/AwardList/Content/ItemTemplate",
+  txtActivityName = "node/imgBG/Content/Daily/panelActivityDetail/txtActivityName",
+  txtActDegreeTip = "node/imgBG/Content/Daily/panelActivityDetail/txtActDegreeTip",
+  txtActDegree = "node/imgBG/Content/Daily/panelActivityDetail/txtActDegree",
+  txtActivityDesc = "node/imgBG/Content/Daily/panelActivityDetail/txtActivityDesc",
+  txtActivityTime = "node/imgBG/Content/Daily/panelActivityDetail/txtActivityTime",
+  txtLevelLimit = "node/imgBG/Content/Daily/panelActivityDetail/txtLevelLimit",
+  imgWeek = "node/imgBG/Content/Daily/panelActivityDetail/txtTitle/imgWeek",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  txtCurActDegree = "node/imgBG/Content/ActDegreeAward/txtCurActDegree",
+  ProgressBar = "node/imgBG/Content/ActDegreeAward/ProgressBar/Progress",
+  imgDonkey = "node/imgBG/Content/ActDegreeAward/ProgressBar/imgDonkey"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("ActivityHelp")
+  end,
+  btnRemind = function(self)
+    local nRet = CS.NotificationModule.GetNotificationPermissionState()
+    if 1 == nRet then
+      Ui:OpenWindow("UIActivityRemind")
+    elseif 0 == nRet then
+      Ui:OpenWindow("UIRequestPermission", i18n.EasyGet("\230\180\187\229\138\168\230\143\144\233\134\146\229\138\159\232\131\189\233\156\128\232\166\129\229\144\175\229\138\168\233\128\154\231\159\165\230\157\131\233\153\144\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\232\174\190\231\189\174\239\188\159"), "Notification")
+    else
+      CS.NotificationModule.RequestNotificationPermission()
+    end
+  end,
+  btnPreview = function(self)
+    Ui:OpenWindow("UIActivityPreview")
+  end
+}
+tbWnd.tbIndex2Panel = {
+  [1] = tbWnd.tbControls.panelDaily,
+  [2] = tbWnd.tbControls.panelActDegree,
+  [3] = tbWnd.tbControls.panelWeekCalendar
+}
+tbWnd.tbIndex2Func = {
+  [1] = "UpdataDailyPanel",
+  [2] = "UpdataActDegreePanel",
+  [3] = "UpdataWeekCalendarPanel"
+}
+
+function tbWnd:OnCreate()
+  self.nCurSelectKind = 1
+  self.pPanel:SetActive(self.panelDaily, false)
+  self.pPanel:SetActive(self.panelActDegree, false)
+  self.pPanel:SetActive(self.panelWeekCalendar, false)
+  self.tbActivityKindGroup = Ui:NewButtonGroup(self, {
+    [1] = self.btnDaily,
+    [2] = self.btnActDegree,
+    [3] = self.btnWeekCalendar
+  }, true, function(self, nIndex)
+    self:OnSwitchActivityPanel(nIndex)
+  end)
+  self.tbActivityScrollView = Ui:NewSuperGridView(self, self.ActivityListTemp, self.SetActivityList, nil, self.OnClickActivityHelper)
+  self.tbActivitySeqScrollView = Ui:NewSuperListView(self, self.ActivitySeqTemp, self.SetActivitySeqList, nil, self.OnClickActivitySeqHelper)
+  self.tbAwardsList = Ui:NewItemGridView(self, self.ItemTemplate)
+  self.tbActDegreeAwardList = Ui:NewItemGridView(self, self.ActDegreeItemTemp)
+  self.tbActDegreeList = Ui:NewScrollView(self, self.ActDegreeTemp)
+  self.tbCalendarList = Ui:NewScrollView(self, self.DayTemp)
+  self.tbCalendarTime = Ui:NewScrollView(self, self.TimeTemplate)
+  self:SetClickEmptyToClose(self.panelAwardPreview)
+  local tbRequireCount = ActivePoint.Def.tbAwardReqCount
+  for i = 1, #tbRequireCount do
+    local szPath = "node/imgBG/Content/ActDegreeAward/Box" .. i .. "/AwardBoxCanOpen"
+    RedPointMgr:DynamicRegisteRedPoint(self.pPanel, szPath, {
+      RedPointMgr.EVENT.ActivePoint
+    })
+  end
+end
+
+function tbWnd:OnOpen(nGroupIndex, nActivityID)
+  self.nSeqIndex = nil
+  self.nActivityIndex = nil
+  self.nActivitySeqIndex = nil
+  self.pPanel:SetActive(self.panelAwardPreview, false)
+  local tbDailyActivity = Calendar:GetDailyActivity()
+  if not tbDailyActivity then
+    print("error no tbDailyActivity")
+    return true
+  end
+  if not next(tbDailyActivity[1]) and not next(tbDailyActivity[2]) then
+    Ui:OpenWindow("UIActivityPreview")
+    return true
+  end
+  self.tbDailyAct = tbDailyActivity[1]
+  self.tbLimitAct = tbDailyActivity[2]
+  self.tbActivePointAct = tbDailyActivity[3]
+  self:UpdataActivePoint(true)
+  self.tbActivityKindGroup:Select(1)
+  if nGroupIndex and nActivityID then
+    self:SelectActivity(nGroupIndex, nActivityID)
+  end
+  self.pPanel:SetActive(self.btnRemind, me.nLevel >= 18)
+  self.pPanel:Label_SetText(self.btnRemind .. "/Text", i18n.EasyGet("\230\142\168\233\128\129"))
+  if RedPointMgr:CheckEvent(RedPointMgr.EVENT.ActivePoint) then
+    Sound:PlaySound("BoxShaking", _)
+  end
+end
+
+function tbWnd:SelectActivity(nGroupIndex, nActivityID)
+  if nGroupIndex == Calendar.DAILY then
+    for i = 1, #self.tbDailyAct do
+      if self.tbDailyAct[i].nId == nActivityID then
+        self.nActivityIndex = i
+        self.tbActivityScrollView:MovePanelToItemIndex(i)
+        local tbElement = self.tbActivityScrollView:GetElement(i)
+        if tbElement then
+          self.tbActivityScrollView:_OnClickElement(i)
+        end
+        return
+      end
+    end
+  else
+    for i = 1, #self.tbLimitAct do
+      if self.tbLimitAct[i].nId == nActivityID then
+        self.nActivitySeqIndex = i
+        self.tbActivitySeqScrollView:MovePanelToItemIndex(i)
+        local tbElement = self.tbActivitySeqScrollView:GetElement(i)
+        if tbElement then
+          self.tbActivitySeqScrollView:_OnClickElement(i)
+        end
+        return
+      end
+    end
+  end
+end
+
+function tbWnd:OnSwitchActivityPanel(nIndex)
+  self[self.tbIndex2Func[nIndex]](self)
+  self.pPanel:SetActive(self.tbIndex2Panel[self.nCurSelectKind], false)
+  self.pPanel:SetActive(self.tbIndex2Panel[nIndex], true)
+  self.nCurSelectKind = nIndex
+end
+
+function tbWnd:SetActivityList(tbElement, tbAct, nIndex)
+  self:ChangeSelectEffect(tbElement, nIndex == self.tbActivityScrollView:GetLastClickIndex(), true)
+  tbElement.actid = tbAct.nId
+  local pPanel = tbElement.pPanel
+  pPanel:Label_SetText("txtName", i18n.Parse(tbAct.szName))
+  pPanel:Sprite_SetSprite("imgActivity", tbAct.szIcon, false)
+  local bComplete = Calendar:IsComplete(tbAct.nId)
+  if not bComplete then
+    Ui:Button_BindEvent(pPanel, "btnJoin", tbWnd.onClickJoin, tbWnd, tbAct.nId)
+  end
+  pPanel:SetActive("btnJoin", not bComplete)
+  pPanel:SetActive("imgComplete", bComplete)
+  local szDegree1, szDegree2, szTitle1, szTitle2 = Calendar:GetDegreeInfo(tbAct.nId)
+  if szTitle1 then
+    pPanel:Label_SetText("Degree1/txtDegreeTitle1", szTitle1)
+  else
+    pPanel:Label_SetText("Degree1/txtDegreeTitle1", i18n.EasyGet("\230\172\161\230\149\176"))
+  end
+  if szTitle2 then
+    pPanel:Label_SetText("Degree2/txtDegreeTitle2", szTitle2)
+  else
+    pPanel:Label_SetText("Degree2/txtDegreeTitle2", i18n.EasyGet("\230\172\161\230\149\176"))
+  end
+  pPanel:Label_SetText("Degree1/txtDegree1", szDegree1)
+  if szDegree2 then
+    pPanel:SetActive("Degree2", true)
+    pPanel:Label_SetText("Degree2/txtDegree2", szDegree2)
+  else
+    pPanel:SetActive("Degree2", false)
+  end
+  pPanel:Label_SetText("imgLabel/Text", i18n.Parse(tbAct.szTag))
+  RedPointMgr:DynamicUnRegist(pPanel, "btnJoin")
+  local tbRedPointEvents = Calendar:GetRedPointEvent(tbAct.nId)
+  if tbRedPointEvents then
+    RedPointMgr:DynamicRegisteRedPoint(pPanel, "btnJoin", tbRedPointEvents)
+  end
+  if self.nActivityIndex == nIndex then
+    self.tbActivityScrollView:_OnClickElement(nIndex)
+  end
+end
+
+function tbWnd:SetActivitySeqList(tbElement, tbAct, nIndex)
+  tbElement.actid = tbAct.nId
+  local pPanel = tbElement.pPanel
+  pPanel:Label_SetText("txtName", i18n.Parse(tbAct.szName))
+  pPanel:Sprite_SetSprite("imgActivity", tbAct.szIcon, false)
+  local szTime = ""
+  local nState = 2
+  local tbOpenTime = Calendar:GetTodayOpenTime(tbAct.nId)
+  local nCurTime = Lib:GetTodaySec()
+  if Calendar:IsActivityInOpenState(tbAct.szKey) then
+    nState = 1
+  elseif next(tbOpenTime) then
+    for _, tbInfo in ipairs(tbOpenTime) do
+      local nOpenTime = tbInfo[1]
+      local nCloseTime = tbInfo[1] < tbInfo[2] and tbInfo[2] or tbInfo[2] + 86400
+      if nCurTime <= nCloseTime then
+        nState = 0
+        local nHour, nMin = Lib:TransferSecond2NormalTime(nOpenTime)
+        szTime = string.format("%d:%02d", nHour, nMin)
+        break
+      end
+    end
+  end
+  local bAlwaysShow = false
+  for _, nId in ipairs(Calendar.tbAlwaysShowJoinBtn) do
+    if nId == tbAct.nId then
+      bAlwaysShow = true
+    end
+  end
+  local bOpen = 1 == nState
+  pPanel:SetActive("imgMarkOpen", bOpen)
+  pPanel:SetActive("btnJoin", bOpen or bAlwaysShow)
+  pPanel:Button_SetEnable("btnJoin", bOpen or bAlwaysShow)
+  if bOpen or bAlwaysShow then
+    Ui:Button_BindEvent(pPanel, "btnJoin", tbWnd.onClickJoin, tbWnd, tbAct.nId, tbAct.szKey)
+  end
+  if not bOpen and 0 == nState then
+    pPanel:Label_SetText("txtTime", szTime)
+  end
+  pPanel:SetActive("txtTime", 0 == nState)
+  pPanel:SetActive("imgCloseBg", 2 == nState)
+  pPanel:SetActive("Effect", false)
+  if self.nActivitySeqIndex == nIndex then
+    self.tbActivitySeqScrollView:_OnClickElement(nIndex)
+  end
+end
+
+function tbWnd:UpdataDailyPanel()
+  if not self.pPanel:IsActive(self.panelAward) then
+    self.pPanel:SetActive(self.panelAward, true)
+  end
+  self.tbActivityScrollView:SetAllElement(self.tbDailyAct)
+  self.tbActivityScrollView:MovePanelToFirstItem()
+  self.tbActivitySeqScrollView:SetAllElement(self.tbLimitAct)
+  self.tbActivitySeqScrollView:MovePanelToFirstItem()
+end
+
+function tbWnd:UpdateActivityDetail(nActivityID, nType)
+  Ui:OpenWindow("UIActivityDetail", nActivityID, nType)
+end
+
+local function funcActDegree(tbElement, tbAct)
+  tbElement.actid = tbAct.nId
+  local pPanel = tbElement.pPanel
+  pPanel:Label_SetText("txtName", i18n.Parse(tbAct.szName))
+  pPanel:Sprite_SetSprite("imgActivity", tbAct.szIcon, false)
+  local bComplete = ActivePoint:CheckActivityFinish(Calendar:GetActivityStringKey(tbAct.nId))
+  if not bComplete then
+    Ui:Button_BindEvent(pPanel, "btnJoin", tbWnd.onClickJoin, tbWnd, tbAct.nId)
+  end
+  pPanel:SetActive("btnJoin", not bComplete)
+  pPanel:SetActive("imgComplete", bComplete)
+  local szDegree1, szDegree2, szTitle1, szTitle2 = Calendar:GetActiveDegreeInfo(tbAct.nId)
+  pPanel:Label_SetText("txtDegreeTitle1/txtDegree1", szDegree1)
+  pPanel:Label_SetText("txtDegreeTitle2/txtDegree2", Calendar:GetActValueInfo(tbAct.nId))
+end
+
+function tbWnd:UpdataActDegreePanel()
+  if not self.pPanel:IsActive(self.panelAward) then
+    self.pPanel:SetActive(self.panelAward, true)
+  end
+  for i = 1, #self.tbActivePointAct do
+    self.tbActDegreeList:SetElement(i, function(tbElement)
+      funcActDegree(tbElement, self.tbActivePointAct[i])
+    end)
+  end
+end
+
+function tbWnd:UpdataWeekCalendarPanel()
+  if self.pPanel:IsActive(self.panelAward) then
+    self.pPanel:SetActive(self.panelAward, false)
+  end
+  local tbCalendar = Calendar.tbCalendarShowSetting
+  local tbCalendarTime = Calendar.tbCalendarTime
+  local nLength = #tbCalendarTime
+  for i = 1, nLength do
+    self.tbCalendarTime:SetElement(i, function(tbElement)
+      self.pPanel:Label_SetText(tbElement.szKey, tbCalendarTime[i])
+    end)
+  end
+  local nWeek = Lib:GetLocalWeek(GetTime())
+  local nWeekDay = Lib:GetLocalWeekDay(GetTime())
+  for nDay = Calendar.MONDAY, Calendar.SUNDAY do
+    local bToday = nWeekDay == nDay
+    self.tbCalendarList:SetElement(nDay, function(tbElement)
+      local pPanel = tbElement.pPanel
+      for i = 1, nLength do
+        local szActKey = "btnActivity" .. i
+        local szNewKey = pPanel:IsObjectExist(string.format("layout/%s", szActKey)) and string.format("layout/%s", szActKey) or pPanel:CloneObject("layout/btnActivity", szActKey)
+        local nActivityId
+        local tbSzHourAndMinute = Lib:SplitStr(tbCalendarTime[i], ":")
+        local nActivityTime = Lib:GetTimeByWeek(nWeek, nDay, tonumber(tbSzHourAndMinute[1]), tonumber(tbSzHourAndMinute[2]), 0)
+        local tbIdAndTimeFrameInfo = tbCalendar[tbCalendarTime[i]][nDay]
+        if tbIdAndTimeFrameInfo then
+          for nID, tbInfo in pairs(tbIdAndTimeFrameInfo) do
+            local bTimeFrameStart, bTimeFrameEnd, bCkeckFuncResult, bCanaryResult = true, true, true
+            if not Lib:IsEmptyStr(tbInfo.szStartTimeFrame) and nActivityTime < Lib:CalcTimeFrameOpenTime(tbInfo.szStartTimeFrame) then
+              bTimeFrameStart = false
+            end
+            if not Lib:IsEmptyStr(tbInfo.szEndTimeFrame) and nActivityTime >= Lib:CalcTimeFrameOpenTime(tbInfo.szEndTimeFrame) then
+              bTimeFrameEnd = false
+            end
+            if not Lib:IsEmptyStr(tbInfo.szCheckFunc) then
+              _, bCkeckFuncResult = Lib:StringCallBack(tbInfo.szCheckFunc, nActivityTime)
+            end
+            bCanaryResult = CanaryRelease:IsCalendarActive(tbInfo.nActivityId, nDay)
+            if bTimeFrameStart and bTimeFrameEnd and bCkeckFuncResult and bCanaryResult then
+              nActivityId = tbInfo.nActivityId
+              break
+            end
+          end
+        end
+        if nil ~= nActivityId and 0 ~= nActivityId then
+          pPanel:Label_SetText(szNewKey .. "/txtName", i18n.Parse(Calendar.tbCalendarSetting[nActivityId].szName))
+        else
+          pPanel:Label_SetText(szNewKey .. "/txtName", "")
+        end
+        pPanel:SetActive(szNewKey .. "/imgGridBg", not bToday)
+        pPanel:SetActive(szNewKey .. "/imgGridTodayBg", bToday)
+        pPanel:SetActive(szNewKey, true)
+      end
+    end)
+  end
+end
+
+function tbWnd:UpdataActivePoint(bShowMove)
+  local nCount = ActivePoint:GetCount(me)
+  self.pPanel:Label_SetText(self.txtCurActDegree, ActivePoint:GetCount(me))
+  local nValue = nCount / ActivePoint.Def.nMaxCount
+  local tbRequireCount = ActivePoint.Def.tbAwardReqCount
+  for i = 1, #tbRequireCount do
+    local szPath = "node/imgBG/Content/ActDegreeAward/Box" .. i
+    local bGet = ActivePoint:CheckAward(me, i)
+    if bGet then
+      Ui:Button_BindEvent(self.pPanel, szPath .. "/AwardBoxOpen", self.UpdataActDegreeAwardPanel, self, i)
+      self.pPanel:SetActive(szPath .. "/AwardBoxClose", false)
+      self.pPanel:SetActive(szPath .. "/AwardBoxOpen", true)
+      self.pPanel:SetActive(szPath .. "/AwardBoxCanOpen", false)
+    elseif nCount >= tbRequireCount[i] then
+      Ui:Button_BindEvent(self.pPanel, szPath .. "/AwardBoxCanOpen", self.OnGetAward, self, i)
+      self.pPanel:SetActive(szPath .. "/AwardBoxClose", false)
+      self.pPanel:SetActive(szPath .. "/AwardBoxOpen", false)
+      self.pPanel:SetActive(szPath .. "/AwardBoxCanOpen", true)
+    else
+      Ui:Button_BindEvent(self.pPanel, szPath .. "/AwardBoxClose", self.UpdataActDegreeAwardPanel, self, i)
+      self.pPanel:SetActive(szPath .. "/AwardBoxClose", true)
+      self.pPanel:SetActive(szPath .. "/AwardBoxOpen", false)
+      self.pPanel:SetActive(szPath .. "/AwardBoxCanOpen", false)
+    end
+  end
+  if bShowMove then
+    self:MoveDonkey(nCount)
+    self.pPanel:Sprite_SetFillAmount(self.ProgressBar, 0, nValue, 1, true)
+  else
+    self.pPanel:Sprite_SetFill(self.ProgressBar, nValue)
+  end
+  if not RedPointMgr:CheckEvent(RedPointMgr.EVENT.ActivePoint) then
+    Sound:StopSound("BoxShaking")
+  end
+end
+
+function tbWnd:MoveDonkey(nCount)
+  local nBegin, nEnd = -500, 400
+  self.pPanel:Object_SetLocalPosition(self.imgDonkey, Ui.Vector3(nBegin, 50, 0))
+  local DonkeyObj = self.pPanel:GetObject(self.imgDonkey)
+  if not DonkeyObj:GetComponent(Ui.UIDoTweenAnimation) then
+    DonkeyObj:AddComponent(Ui.UIDoTweenAnimation)
+  end
+  local effect = DonkeyObj:GetComponent(Ui.UIDoTweenAnimation)
+  local rt = self.pPanel:GetTransform(self.imgDonkey)
+  effect:Init(rt, false, false)
+  local tweener = effect:DOLocalMove(nCount / 100 * (nEnd - nBegin) + nBegin, 50, 1, 0.3)
+  effect:Append(tweener)
+end
+
+function tbWnd:UpdataActDegreeAwardPanel(nIndex)
+  if not self.pPanel:IsActive(self.panelAwardPreview) then
+    self.pPanel:SetActive(self.panelAwardPreview, true)
+  end
+  local tbPosition = self.pPanel:Object_GetPosition("node/imgBG/Content/ActDegreeAward/Box" .. nIndex)
+  self.pPanel:Object_SetPosition(self.panelAwardPreviewContent, Ui.Vector3(tbPosition.x, tbPosition.y + 2.1, tbPosition.z))
+  local tbRewards = Award:GetAward(ActivePoint.tbActAwardSetting[nIndex].AwardSettingId, ActivePoint.tbActAwardSetting[nIndex].AwardSettingKey)
+  for i = 1, #tbRewards do
+    self.tbActDegreeAwardList:SetItem(i, tbRewards[i], true)
+  end
+  self.tbActDegreeAwardList:ResetFrom(#tbRewards + 1)
+end
+
+function tbWnd:OnGetAward(nIndex)
+  if ActivePoint:CheckAward(me, nIndex) then
+    return
+  end
+  ActivePoint:TryGetAward(nIndex)
+end
+
+function tbWnd:onClickJoin(nActId)
+  local nLevelLimit = Calendar:GetActivityLevelMin(nActId)
+  if nLevelLimit and nLevelLimit > me.nLevel then
+    me.CenterMsg(i18n.EasyGet("\229\176\145\228\190\160\233\152\133\229\142\134\229\176\154\230\181\133\239\188\140\232\190\190\229\136\176\231\173\137\231\186\167{0}\230\150\185\229\143\175\229\143\130\228\184\142\239\188\129", nLevelLimit))
+    return
+  end
+  local tbActInfo = Calendar:GetActInfo(nActId)
+  local tbParams = Lib:SplitStr(tbActInfo.szParams, "|")
+  Calendar.tbButtonFuncs[tbActInfo.szFuncName](table.unpack(tbParams))
+end
+
+function tbWnd:ClearSelect()
+  local nLastSeqClickIndex = self.tbActivitySeqScrollView:GetLastClickIndex()
+  if nLastSeqClickIndex then
+    local tbPrevElement = self.tbActivitySeqScrollView:GetElement(nLastSeqClickIndex)
+    if tbPrevElement then
+      self:ChangeSelectEffect(tbPrevElement, false)
+    end
+  end
+  self.tbActivitySeqScrollView:ClearSelected()
+  self.nActivitySeqIndex = nil
+  local nLastClickIndex = self.tbActivityScrollView:GetLastClickIndex()
+  if nLastClickIndex then
+    local tbPrevElement = self.tbActivityScrollView:GetElement(nLastClickIndex)
+    if tbPrevElement then
+      self:ChangeSelectEffect(tbPrevElement, false)
+    end
+  end
+  self.tbActivityScrollView:ClearSelected()
+  self.nActivityIndex = nil
+end
+
+function tbWnd:OnClose()
+  Sound:StopSound("BoxShaking")
+end
+
+function tbWnd:ChangeSelectEffect(tbElement, bstatus, bInit)
+  tbElement.pPanel:SetActive("Effect", bstatus and not bInit)
+  tbElement.pPanel:Animator_SetEnable("Main", bstatus)
+  if not bstatus then
+    tbElement.pPanel:SetScale("Main", 1)
+  end
+end
+
+function tbWnd:OnClickActivityHelper(tbElement, tbMsg, nIndex)
+  self.nActivitySeqIndex = nil
+  self.nActivityIndex = nIndex
+  self:UpdateActivityDetail(tbElement.actid, 1)
+  local nLastClickIndex = self.tbActivityScrollView:GetLastClickIndex()
+  if nLastClickIndex == nIndex then
+    return
+  end
+  if nLastClickIndex then
+    self.tbActivityScrollView:DoItemHightLight(nLastClickIndex, false)
+    local tbLastElement = self.tbActivityScrollView:GetElement(nLastClickIndex)
+    if tbLastElement then
+      self:ChangeSelectEffect(tbLastElement, false)
+      tbLastElement.pPanel:SetScale("Main", 1)
+    end
+  end
+  self:ChangeSelectEffect(tbElement, true)
+end
+
+function tbWnd:OnClickActivitySeqHelper(tbElement, tbMsg, nIndex)
+  self.nActivitySeqIndex = nIndex
+  self.nActivityIndex = nil
+  self:UpdateActivityDetail(tbElement.actid, 2)
+  local nLastClickIndex = self.tbActivitySeqScrollView:GetLastClickIndex()
+  if nLastClickIndex == nIndex then
+    return
+  end
+  if nLastClickIndex then
+    self.tbActivitySeqScrollView:DoItemHightLight(nLastClickIndex, false)
+    local tbLastElement = self.tbActivitySeqScrollView:GetElement(nLastClickIndex)
+    if tbLastElement then
+      self:ChangeSelectEffect(tbLastElement, false)
+      tbLastElement.pPanel:SetScale("Main", 1)
+    end
+  end
+  self:ChangeSelectEffect(tbElement, true)
+  self.nSeqIndex = nIndex
+end

@@ -1,0 +1,149 @@
+Require("CommonScript/AttributeModule/AttributeModule.lua")
+KinSkill.SaveKey = GetGroupKey("KinSkill")
+KinSkill.Protocol = {C2SUpGrade = 1}
+KinSkill.ErrCode = {
+  SKILL_NOT_EXIST = 1,
+  HAS_BEEN_MAX_LEVEL = 2,
+  KINCONTRIB_IS_NOT_ENOUGH = 3,
+  NOT_IN_KIN = 4,
+  HAS_BEEN_LIMITED_BY_BUILDING_LEVEL = 5,
+  COIN_IS_NOT_ENOUGH = 6,
+  KinSkillPermissionDenied = 7
+}
+
+function KinSkill:LoadKinSkillSetting()
+  local szFilePath = "Setting/KinSkill/KinSkill.tab"
+  local tbField = {
+    "nSkillID",
+    "nSortInUI",
+    "szName",
+    "szDesc",
+    "szIconAtlas",
+    "nSaveKeyIndex",
+    "nRedPointLevel"
+  }
+  self.tbKinSkill = Lib:LoadTabFileEx(szFilePath, "ddsssdd", "nSkillID", tbField) or {}
+end
+
+KinSkill:LoadKinSkillSetting()
+
+function KinSkill:LoadKinSkillUpGradeSetting()
+  local szFilePath = "Setting/KinSkill/KinSkillUpGrade.tab"
+  local tbField = {
+    "nSkillID",
+    "nLevel",
+    "nCoin",
+    "nFightPower",
+    "nKinContrib",
+    "tbAttr"
+  }
+  local tbUpGrade = Lib:LoadTabFileEx(szFilePath, "ddddds", nil, tbField)
+  self.tbUpGrade = {}
+  self.tbMaxLevel = {}
+  for _, tbInfo in ipairs(tbUpGrade) do
+    tbInfo.tbAttr = load("return " .. tbInfo.tbAttr)()
+    self.tbUpGrade[tbInfo.nSkillID] = self.tbUpGrade[tbInfo.nSkillID] or {}
+    self.tbUpGrade[tbInfo.nSkillID][tbInfo.nLevel] = tbInfo
+    if not self.tbMaxLevel[tbInfo.nSkillID] or self.tbMaxLevel[tbInfo.nSkillID] < tbInfo.nLevel then
+      self.tbMaxLevel[tbInfo.nSkillID] = tbInfo.nLevel
+    end
+  end
+end
+
+KinSkill:LoadKinSkillUpGradeSetting()
+
+function KinSkill:GetKinSkillCfg()
+  return self.tbKinSkill
+end
+
+function KinSkill:GetSkillMaxLevel(nSkillID)
+  return self.tbMaxLevel[nSkillID] or 0
+end
+
+function KinSkill:GetSkillLevel(pPlayer, nSkillID)
+  if not self.tbKinSkill[nSkillID] then
+    return 0
+  end
+  return pPlayer.GetUserValue(self.SaveKey, self.tbKinSkill[nSkillID].nSaveKeyIndex)
+end
+
+function KinSkill:GetUpGradeCfg()
+  return self.tbUpGrade
+end
+
+function KinSkill:GetUpGradeCfgBySkillID(nSkillID)
+  return self.tbUpGrade[nSkillID]
+end
+
+function KinSkill:RemoveMagicAttrib(pNpc, nSkillID, nLevel, nPlayerId)
+  local tbUpGrade = self:GetUpGradeCfgBySkillID(nSkillID)
+  if not tbUpGrade or not tbUpGrade[nLevel] then
+    return
+  end
+  for _, tbInfo in ipairs(tbUpGrade[nLevel].tbAttr) do
+    pNpc.RemoveMagicAttrib(table.unpack(tbInfo))
+    if nPlayerId then
+      AttributeHelp:LogAttrRemove(nPlayerId, "KinSkill", table.unpack(tbInfo))
+    end
+  end
+end
+
+function KinSkill:ApplyMagicAttrib(pNpc, nSkillID, nLevel, nPlayerId)
+  local tbUpGrade = self:GetUpGradeCfgBySkillID(nSkillID)
+  if not tbUpGrade or not tbUpGrade[nLevel] then
+    return
+  end
+  for _, tbInfo in ipairs(tbUpGrade[nLevel].tbAttr) do
+    pNpc.ApplyMagicAttrib(table.unpack(tbInfo))
+    if nPlayerId then
+      AttributeHelp:LogAttrApply(nPlayerId, "KinSkill", table.unpack(tbInfo))
+    end
+  end
+end
+
+function KinSkill:RefreshMagicalAttrib(pPlayer, nSkillID, nOriginalLevel, nNewLevel)
+  if pPlayer.IsMaskPlayerAttr() then
+    return
+  end
+  self:RemoveMagicAttrib(pPlayer.GetNpc(), nSkillID, nOriginalLevel, pPlayer.dwID)
+  self:ApplyMagicAttrib(pPlayer.GetNpc(), nSkillID, nNewLevel, pPlayer.dwID)
+end
+
+function KinSkill:ApplyAllMagicalAttrib(pPlayer)
+  local tbCfg = self:GetKinSkillCfg()
+  local nLevel
+  for nSkillId, tbInfo in pairs(tbCfg) do
+    nLevel = pPlayer.GetUserValue(self.SaveKey, tbInfo.nSaveKeyIndex)
+    self:ApplyMagicAttrib(pPlayer.GetNpc(), nSkillId, nLevel, pPlayer.dwID)
+  end
+end
+
+function KinSkill:RemoveAllMagicalAttrib(pPlayer)
+  local tbCfg = self:GetKinSkillCfg()
+  local nLevel
+  for nSkillId, tbInfo in pairs(tbCfg) do
+    nLevel = pPlayer.GetUserValue(self.SaveKey, tbInfo.nSaveKeyIndex)
+    self:RemoveMagicAttrib(pPlayer.GetNpc(), nSkillId, nLevel, pPlayer.dwID)
+  end
+end
+
+function KinSkill:OnEquip(pPlayer)
+  self:ApplyAllMagicalAttrib(pPlayer)
+end
+
+function KinSkill:OnUnEquip(pPlayer)
+  self:RemoveAllMagicalAttrib(pPlayer)
+end
+
+AttributeModule:Register("KinSkill", KinSkill)
+
+function KinSkill:OnCreatePlayerRobotNpc(pPlayerAsync, pNpc)
+  local tbCfg = KinSkill:GetKinSkillCfg()
+  local nLevel
+  for nSkillId, tbInfo in pairs(tbCfg) do
+    nLevel = pPlayerAsync.GetKinSkill(tbInfo.nSaveKeyIndex)
+    if nLevel > 0 then
+      KinSkill:ApplyMagicAttrib(pNpc, nSkillId, nLevel)
+    end
+  end
+end

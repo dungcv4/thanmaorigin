@@ -1,0 +1,114 @@
+local tbWnd = Ui:CreateWindow("UITongDomainShop")
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  uiMoneyPanel = "node/UIMoneyPanel",
+  goGoodsTemplate = "node/imgBG/Content/ShopGoods/GoodsList/pnlMask/pnlContant/ElementTemplate"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_CHANGE_MONEY,
+      self.OnChangeMoney
+    },
+    {
+      EventNotify.emNOTIFY_SHOP_BUY_RESULT,
+      self.OnResponseBuy
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.tbMoneyPanel = Ui:NewExistMoneyPanel(self, self.uiMoneyPanel)
+  self.tbMoneyPanel:SetDynamicCurrencyType("TongFund", true)
+  self.tbWareScroll = Ui:NewScrollView(self, self.goGoodsTemplate, self.OnClickGoods, nil, true)
+end
+
+function tbWnd:OnOpen()
+  self.tbMoneyPanel:SetMoneyValue(true)
+  RemoteServer.OnTongRequest("TongShopLimitReq")
+  Tong:UpdateBaseInfo()
+end
+
+function tbWnd:UpdateShopSV(tbTongShopLimit)
+  self.tbTongShopLimit = tbTongShopLimit or {}
+  self:UpdateShow()
+end
+
+function tbWnd:UpdateShow()
+  self.tbWareScroll:Reset()
+  for nIndex, tbInfo in pairs(Shop:GetTongWares()) do
+    self.tbWareScroll:SetElement(nIndex, function(tbElement)
+      local tbWare = Shop:GetAWare(tbInfo.nWareId)
+      local pPanel = tbElement.pPanel
+      if not tbElement.tbItemGrid then
+        tbElement.tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbElement.tbItemGrid:SetClickEnable(true)
+      end
+      tbElement.tbItemGrid:SetItemByTemplate(tbWare.nItemId)
+      local nPrice = Shop:GetPrice(tbWare)
+      pPanel:Label_SetText("txtTitle", i18n.Parse(KItem.GetItemShowInfo(tbWare.nItemId, me.nFaction, me.nFactionSect, me.nSex)))
+      pPanel:Label_SetText("txtMoneyNum", nPrice)
+      pPanel:Sprite_SetSprite("imgMoney", Currency:GetIcon(tbWare.szCurrencyType))
+      local nDiscount = math.floor(nPrice * 100 / tbWare.nPrice)
+      if nDiscount > 0 and nDiscount < 100 then
+        pPanel:Label_SetText("imgZK/txtZK", string.format("%s%%off", nDiscount))
+        pPanel:SetActive("imgZK", true)
+      else
+        pPanel:SetActive("imgZK", false)
+      end
+      local nHadBuyNum = self.tbTongShopLimit[tbWare.nId] or 0
+      if tbInfo.nDayLimit > 0 then
+        pPanel:SetActive("Limit", true)
+        local nRemainCount = tbInfo.nDayLimit - nHadBuyNum
+        tbElement.nRemainCount = nRemainCount
+        pPanel:Label_SetText("Limit/txtLimitNum", nRemainCount)
+        if 0 == nRemainCount then
+          pPanel:SetActive("imgSoldOutBg", true)
+          pPanel:SetActive("imgSoldOutMark", true)
+        else
+          pPanel:SetActive("imgSoldOutBg", false)
+          pPanel:SetActive("imgSoldOutMark", false)
+        end
+      else
+        pPanel:SetActive("Limit", false)
+        pPanel:SetActive("imgSoldOutBg", false)
+        pPanel:SetActive("imgSoldOutMark", false)
+      end
+      pPanel:SetActive("imgHighlight", false)
+      tbElement.tbData = tbWare
+    end)
+  end
+end
+
+function tbWnd:OnChangeMoney(szType)
+  if not Ui:WindowVisible(self.ClassName) then
+    return
+  end
+  self.tbMoneyPanel:SetDynamicCurrencyValue()
+end
+
+function tbWnd:OnResponseBuy(bSuccess, nItemId)
+  if not Ui:WindowVisible(self.ClassName) then
+    return
+  end
+  if not bSuccess then
+    return
+  end
+  self:UpdateShow()
+  Tong:UpdateBaseInfo()
+end
+
+function tbWnd:OnClickGoods(nIndex, tbElement)
+  local tbWare = tbElement.tbData
+  if tbElement.nRemainCount and 0 == tbElement.nRemainCount then
+    me.CenterMsg(i18n.Get(Shop.Terms.InsufficientRemainInventory))
+    return
+  end
+  Ui:OpenWindow("UIShopBuy", tbWare, true, tbElement.nRemainCount)
+end

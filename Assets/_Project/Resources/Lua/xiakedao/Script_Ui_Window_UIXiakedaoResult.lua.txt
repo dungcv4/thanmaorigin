@@ -1,0 +1,183 @@
+local tbWnd = Ui:CreateWindow("UIXiakedaoResult")
+local tbControls = {
+  Defeat = "imgBG/Defeat",
+  btnFirstRecharge = "imgBG/Defeat/LoseEffect/imgBG/BtnGroup/btnFirstRecharge",
+  btnStronger = "imgBG/Defeat/LoseEffect/imgBG/BtnGroup/btnStronger",
+  btnBattlepass = "imgBG/Defeat/LoseEffect/imgBG/BtnGroup/btnBattlepass",
+  btnGongLue = "imgBG/Defeat/LoseEffect/imgBG/BtnGroup/btnGongLue",
+  btnZaiChong = "imgBG/Defeat/LoseEffect/imgBG/BtnGroup/btnZaiChong",
+  Victory = "imgBG/Victory",
+  btnClose = "imgBG/Victory/VictoryEffect/imgBG/btnClose",
+  VictoryEffect = "imgBG/Victory/VictoryEffect",
+  AwardTemplate = "imgBG/Victory/VictoryEffect/imgBG/ContReward/Scroll View/Viewport/Content/Template",
+  PlayerTemplate = "imgBG/Victory/VictoryEffect/imgBG/ContMainlist/Viewport/Content/Template"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self.tbAwardList = Ui:NewItemGridView(self, tbControls.AwardTemplate)
+  self.tbPlayerScrollView = Ui:NewScrollView(self, tbControls.PlayerTemplate, nil)
+  self.tbPortraitObj = {}
+end
+
+function tbWnd:OnOpen(bResult, tbAward, tbPlayerList, nCloseTime)
+  self.nCloseTime = nCloseTime
+  if 2 == bResult then
+    self:UpdateDefeatInfo()
+  else
+    self:OnSortPlayerList(tbPlayerList)
+    self:UpdateVictoryInfo(tbAward)
+    self:UpdateCloseBtn()
+  end
+end
+
+function tbWnd:OnSortPlayerList(tbPlayerList)
+  self.tbPlayerList = {}
+  for index, tbPlayerInfo in ipairs(tbPlayerList) do
+    if me.dwID == tbPlayerInfo.dwId then
+      table.insert(self.tbPlayerList, tbPlayerInfo)
+    end
+  end
+  for index, tbPlayerInfo in ipairs(tbPlayerList) do
+    if me.dwID ~= tbPlayerInfo.dwId then
+      table.insert(self.tbPlayerList, tbPlayerInfo)
+    end
+  end
+end
+
+function tbWnd:UpdateDefeatInfo()
+  self.pPanel:SetActive(tbControls.Victory, false)
+  self.pPanel:SetActive(tbControls.Defeat, true)
+  local nHasGet = RechargeGift:IsFirstRGRecharged(me)
+  if not nHasGet then
+    self.pPanel:SetActive(tbControls.btnFirstRecharge, true)
+    self.pPanel:SetActive(tbControls.btnZaiChong, false)
+    Ui:Button_BindEvent(self.pPanel, tbControls.btnFirstRecharge, self.OnFirstRechargeClick, self)
+  elseif not RechargeGift:IsSecondRGRecharged(me) then
+    self.pPanel:SetActive(tbControls.btnFirstRecharge, false)
+    self.pPanel:SetActive(tbControls.btnZaiChong, true)
+    Ui:Button_BindEvent(self.pPanel, tbControls.btnZaiChong, self.OnZaiChongClick, self)
+  else
+    self.pPanel:SetActive(tbControls.btnFirstRecharge, false)
+    self.pPanel:SetActive(tbControls.btnZaiChong, false)
+  end
+  self.pPanel:SetActive(tbControls.btnStronger, true)
+  Ui:Button_BindEvent(self.pPanel, tbControls.btnStronger, self.OnStrongerClick, self)
+  local nBattlePassPlayerType = BattlePassNew:GetBattlePassPlayerType()
+  local bIsUnlockElite = nBattlePassPlayerType >= BattlePassNew.AwardTag.Elite
+  self.pPanel:SetActive(tbControls.btnBattlepass, not bIsUnlockElite)
+  if not bIsUnlockElite then
+    Ui:Button_BindEvent(self.pPanel, tbControls.btnBattlepass, self.OnBattlepassClick, self)
+  end
+  self.pPanel:SetActive(tbControls.btnGongLue, true)
+  Ui:Button_BindEvent(self.pPanel, tbControls.btnGongLue, self.OnGongLueClick, self)
+end
+
+function tbWnd:UpdateVictoryInfo(tbAward)
+  self.pPanel:SetActive(tbControls.Victory, true)
+  self.pPanel:SetActive(tbControls.Defeat, false)
+  self.pPanel:SetActive(tbControls.VictoryEffect, true)
+  for j = 1, #tbAward or {} do
+    self.tbAwardList:SetItem(j, tbAward[j], true)
+  end
+  self.tbPortraitObj = {}
+  for nIndex, tbPlayerInfo in ipairs(self.tbPlayerList) do
+    self.tbPlayerScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:SetActive("txtWin", tbPlayerInfo.nResult == XiaKeDao.tbResultDef.nWin)
+      pPanel:SetActive("txtHelpWin", tbPlayerInfo.nResult == XiaKeDao.tbResultDef.nAssist)
+      local bSelf = me.dwID == tbPlayerInfo.dwId
+      if bSelf then
+        pPanel:SetActive("txtHelp", true)
+        if tbPlayerInfo.nResult == XiaKeDao.tbResultDef.nWin then
+          pPanel:Label_SetText("txtHelp", i18n.EasyGet("\230\140\145\230\136\152\230\172\161\230\149\176"))
+          pPanel:Label_SetText("txtHelp/txtHelpNum", i18n.EasyGet("({0}/{1})", DegreeCtrl:GetDegree(me, "XiaKeDaoJoinNum"), XiaKeDao.Cfg.nChallengeCnt))
+        elseif tbPlayerInfo.nResult == XiaKeDao.tbResultDef.nAssist then
+          pPanel:Label_SetText("txtHelp", i18n.EasyGet("\229\141\143\229\138\169\230\172\161\230\149\176"))
+          pPanel:Label_SetText("txtHelp/txtHelpNum", i18n.EasyGet("({0}/{1})", DegreeCtrl:GetDegree(me, "XiaKeDaoAssistNum"), XiaKeDao.Cfg.nChallengeCnt))
+        end
+        pPanel:SetActive("ContMine", true)
+        pPanel:SetActive("ContFriend", false)
+        pPanel:Label_SetText("ContMine/txtName", tbPlayerInfo.szName)
+        pPanel:SetActive("btnJoin", false)
+        pPanel:SetActive("txtFriend", false)
+      elseif FriendShip:IsFriend(me.dwID, tbPlayerInfo.dwId) then
+        pPanel:SetActive("txtHelp", false)
+        pPanel:SetActive("ContMine", false)
+        pPanel:SetActive("ContFriend", true)
+        pPanel:Label_SetText("ContFriend/txtName", tbPlayerInfo.szName)
+        pPanel:SetActive("txtFriend", true)
+        pPanel:SetActive("btnJoin", false)
+      else
+        pPanel:SetActive("txtHelp", false)
+        pPanel:SetActive("ContMine", false)
+        pPanel:SetActive("ContFriend", true)
+        pPanel:Label_SetText("ContFriend/txtName", tbPlayerInfo.szName)
+        pPanel:SetActive("btnJoin", true)
+        pPanel:SetActive("txtFriend", false)
+      end
+      Ui:Button_BindEvent(pPanel, "btnJoin", self.OnJoinFriend, self, tbPlayerInfo.dwId, tbPlayerInfo.szName)
+      self.tbPortraitObj[nIndex] = Ui:NewExistPortraitObjPanel(tbElement, "PortraitObj")
+      self.tbPortraitObj[nIndex]:SetRoleIcon(tbPlayerInfo.nPortrait)
+      self.tbPortraitObj[nIndex]:SetFactionIcon(tbPlayerInfo.nFaction)
+      self.tbPortraitObj[nIndex]:SetLevel(tbPlayerInfo.nLevel)
+      self.tbPortraitObj[nIndex]:SetPortraitFrame(tbPlayerInfo.nPortraitFrameID or 0)
+    end)
+  end
+end
+
+function tbWnd:UpdateCloseBtn()
+  local nSec = self.nCloseTime - GetTime()
+  if nSec > 0 then
+    self.pPanel:Label_SetText(tbControls.btnClose .. "/Text", i18n.EasyGet("\229\133\179\233\151\173\239\188\136{0}\231\167\146\239\188\137", nSec))
+    self.nCloseTimer = Timer:Register(Env.GAME_FPS, function()
+      nSec = self.nCloseTime - GetTime()
+      if nSec > 0 then
+        self.pPanel:Label_SetText(tbControls.btnClose .. "/Text", i18n.EasyGet("\229\133\179\233\151\173\239\188\136{0}\231\167\146\239\188\137", nSec))
+        return true
+      else
+        self:Close()
+        return false
+      end
+    end)
+  end
+end
+
+function tbWnd:OnFirstRechargeClick()
+  Ui:OpenWindow("UIFirstRechargeGift", 1)
+  self:Close()
+end
+
+function tbWnd:OnJoinFriend(dwID, szName)
+  FriendShip:AddOrDelFriend(dwID, szName)
+end
+
+function tbWnd:OnStrongerClick()
+  Ui:OpenWindow("UIStronger")
+  self:Close()
+end
+
+function tbWnd:OnBattlepassClick()
+  Ui:OpenWindow("UIBattlePassNew")
+  self:Close()
+end
+
+function tbWnd:OnZaiChongClick()
+  Ui:OpenWindow("UIFirstRechargeGift", 2)
+  self:Close()
+end
+
+function tbWnd:OnGongLueClick()
+end
+
+function tbWnd:OnClose()
+  if self.nCloseTimer then
+    Timer:Close(self.nCloseTimer)
+    self.nCloseTimer = nil
+  end
+end

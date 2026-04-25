@@ -1,0 +1,96 @@
+local tbWnd = Ui:CreateWindow("UITemporaryActivitySignIn")
+local tbControls = {
+  AwardTemplate = "node/imgBG/Content/List/Viewport/Content/Template",
+  txtTips = "node/imgBG/txtTips",
+  btnClose = "node/imgBG/btnClose"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseByDefault()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_SWITCH,
+      self.CloseByDefault
+    },
+    {
+      EventNotify.emNOTIFY_UPDATE_DAILY_AWARD_WND,
+      self.UpdateListView
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.tbListView = Ui:NewScrollView(self, tbControls.AwardTemplate)
+end
+
+function tbWnd:OnOpen(nDailyAwardActivityId)
+  if not Lib:IsInteger(nDailyAwardActivityId) then
+    return 0
+  end
+  self.pInstance = ActivityMgr:GetInstanceById(nDailyAwardActivityId)
+  if not self.pInstance or not self.pInstance:IsOpen() then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return 0
+  end
+  self.pPanel:Label_SetText(tbControls.txtTips, i18n.Parse(self.pInstance.tbConfig.szTips))
+  self:UpdateListView()
+end
+
+function tbWnd:UpdateListView()
+  if not self.pInstance or not self.pInstance:IsOpen() then
+    return
+  end
+  self.tbListView:Clear()
+  self.tbListInfo = self.pInstance:GetAwardInfo(true)
+  for i = 1, #self.tbListInfo do
+    self.tbListView:SetElement(i, function(tbElement)
+      self:UpdateListElement(tbElement, self.tbListInfo[i])
+    end, true)
+  end
+end
+
+function tbWnd:UpdateListElement(tbElement, tbAwardInfo)
+  local pPanel = tbElement.pPanel
+  pPanel:Label_SetText("txtDay", tbAwardInfo.szTitle)
+  if tbAwardInfo.nGetStatus == self.pInstance.AwardStatus.HasGet then
+    pPanel:SetActive("imgComplete", true)
+  elseif tbAwardInfo.bCanGetAsSignAward then
+    pPanel:SetActive("btnGet", true)
+    RedPointMgr:DynamicRegisteRedPoint(pPanel, "btnGet", {
+      RedPointMgr.EVENT.DailyAwardSignIn
+    })
+    Ui:Button_BindEvent(pPanel, "btnGet", function()
+      self.pInstance:ReqGetDailyAward(tbAwardInfo.nIndex, self.pInstance.GetType.SignIn)
+      if RedPointMgr:CheckEvent(RedPointMgr.EVENT.DailyAwardSignIn) then
+        RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.DailyAwardSignIn)
+      end
+    end)
+  elseif tbAwardInfo.bCanGetAsReSignAward then
+    pPanel:SetActive("btnBuLing", true)
+    RedPointMgr:DynamicRegisteRedPoint(pPanel, "btnBuLing", {
+      RedPointMgr.EVENT.DailyAwardReSignIn
+    })
+    Ui:Button_BindEvent(pPanel, "btnBuLing", function()
+      self.pInstance:ReqGetDailyAward(tbAwardInfo.nIndex, self.pInstance.GetType.ReSign)
+    end)
+  else
+    pPanel:SetActive("btnLock", true)
+    pPanel:Button_SetEnable("btnLock", false)
+  end
+  tbElement.tbItemView = Ui:NewItemGridView(tbElement, "ItemList/item")
+  for nIndex2, tbAward in ipairs(tbAwardInfo.tbAwards) do
+    tbElement.tbItemView:SetItem(nIndex2, tbAward, true)
+  end
+end
+
+function tbWnd:CloseByDefault()
+  if RedPointMgr:CheckEvent(RedPointMgr.EVENT.DailyAwardReSignIn) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.DailyAwardReSignIn)
+  end
+  self:Close()
+end

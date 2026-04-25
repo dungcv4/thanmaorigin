@@ -1,0 +1,179 @@
+Require("CommonScript/LouLanMiZong/LouLanMiZongCfg.lua")
+LouLanMiZong.nMaxLevel = 1
+LouLanMiZong.nMaxDeath = 10000
+LouLanMiZong.NPC_TYPE = {
+  eNormal = 1,
+  eElite = 2,
+  eLeader = 3,
+  eBoss = 4
+}
+LouLanMiZong.BUFF_TYPE = {
+  eBasic = 1,
+  eAttack = 2,
+  eControl = 3,
+  eRandom1 = 4,
+  eBuff = 5,
+  eRandom2 = 6
+}
+LouLanMiZong.AREA_TYPE = {
+  eUnexplore = 0,
+  eExplore = 1,
+  eClear = 2
+}
+LouLanMiZong.SERIES_TO_IMAGE_BG = {
+  [1] = "UI/atlas/hanwuyiji/img_hanwu_series_metal.png",
+  [2] = "UI/atlas/hanwuyiji/img_hanwu_series_wood.png",
+  [3] = "UI/atlas/hanwuyiji/img_hanwu_series_water.png",
+  [4] = "UI/atlas/hanwuyiji/img_hanwu_series_fire.png",
+  [5] = "UI/atlas/hanwuyiji/img_hanwu_series_earth.png"
+}
+LouLanMiZong.RATING = {
+  [1] = "AwardD",
+  [2] = "AwardC",
+  [3] = "AwardB",
+  [4] = "AwardA",
+  [5] = "AwardS",
+  [6] = "AwardSS"
+}
+LouLanMiZong.nSaveGroupId = 403
+LouLanMiZong.nRatingSaveGroupKey = 7
+
+function LouLanMiZong:IsInFubenMap(pPlayer)
+  return pPlayer.nMapTemplateId == self.MAPSETTING.nMapId
+end
+
+function LouLanMiZong:GetRandomSkillList(nType, nNpcTemplateId)
+  if nType ~= LouLanMiZong.NPC_TYPE.eElite and nType ~= LouLanMiZong.NPC_TYPE.eLeader then
+    return
+  end
+  local tbSkillSetting
+  local tbAddSkillList = {}
+  local nEnhanceCount = 0
+  local nControlCount = 0
+  local nDamageCount = 0
+  if LouLanMiZong.REMOTENPC[nNpcTemplateId] then
+    tbSkillSetting = LouLanMiZong.REMOTESKILLSETTING
+  else
+    tbSkillSetting = LouLanMiZong.CLOSESKILLSETTING
+  end
+  if nType == LouLanMiZong.NPC_TYPE.eElite then
+    nEnhanceCount = 1
+  elseif nType == LouLanMiZong.NPC_TYPE.eLeader then
+    nEnhanceCount = 1
+    nControlCount = 1
+  end
+  for i = 1, 2 do
+    local nRan = math.random(1, 3)
+    if 1 == nRan then
+      nEnhanceCount = nEnhanceCount + 1
+    elseif 2 == nRan then
+      nControlCount = nControlCount + 1
+    else
+      nDamageCount = nDamageCount + 1
+    end
+  end
+  local tbEnhanceSkillList = self:GetNoRepeatRans(#tbSkillSetting.Enhance, nEnhanceCount)
+  local tbControlSkillList = self:GetNoRepeatRans(#tbSkillSetting.Control, nControlCount)
+  local tbDamageSkillList = self:GetNoRepeatRans(#tbSkillSetting.Damage, nDamageCount)
+  for nIndex, _ in pairs(tbEnhanceSkillList) do
+    table.insert(tbAddSkillList, {
+      nSkillId = tbSkillSetting.Enhance[nIndex],
+      szType = "Enhance"
+    })
+  end
+  for nIndex, _ in pairs(tbControlSkillList) do
+    table.insert(tbAddSkillList, {
+      nSkillId = tbSkillSetting.Control[nIndex],
+      szType = "Control"
+    })
+  end
+  for nIndex, _ in pairs(tbDamageSkillList) do
+    table.insert(tbAddSkillList, {
+      nSkillId = tbSkillSetting.Damage[nIndex],
+      szType = "Damage"
+    })
+  end
+  return tbAddSkillList
+end
+
+function LouLanMiZong:GetNoRepeatRans(nRange, nCount)
+  local tbRans = {}
+  if nRange <= nCount then
+    for i = 1, nRange do
+      tbRans[i] = 1
+    end
+  else
+    local tbNums = {}
+    for i = 1, nRange do
+      tbNums[i] = i
+    end
+    for i = 1, nCount do
+      local nIndex = math.random(nRange - i + 1)
+      tbRans[tbNums[nIndex]] = 1
+      table.remove(tbNums, nIndex)
+    end
+  end
+  return tbRans
+end
+
+function LouLanMiZong:GetNpcTypeByTemplateId(nTemplateId)
+  for nType, tbGroup in pairs(self.NPCSETTING) do
+    for nIndex, tbInfo in pairs(tbGroup) do
+      if tbInfo.nTemplateId == nTemplateId then
+        return nType
+      end
+    end
+  end
+end
+
+local tbRatingToLevel = {
+  [6] = 1,
+  [5] = 2,
+  [4] = 3,
+  [3] = 4,
+  [2] = 5,
+  [1] = 6
+}
+
+function LouLanMiZong:RatingToLevel(nRating)
+  return tbRatingToLevel[nRating]
+end
+
+function LouLanMiZong:CreateRecommendList()
+  local tbRecommendList = {}
+  for nIndex, tbGroup in pairs(self.RECOMMENDSETTING or {}) do
+    for _, nSkillGroup in pairs(tbGroup) do
+      tbRecommendList[nSkillGroup] = tbRecommendList[nSkillGroup] or {}
+      for _, nRecommendSkillGroup in pairs(tbGroup) do
+        if nSkillGroup ~= nRecommendSkillGroup then
+          tbRecommendList[nSkillGroup][nRecommendSkillGroup] = nRecommendSkillGroup
+        end
+      end
+    end
+  end
+  self.tbRecommendList = tbRecommendList
+end
+
+LouLanMiZong:CreateRecommendList()
+
+function LouLanMiZong:LoadRankAwardSetting()
+  local szFilepath = "Setting/Activity/RankingAward/PermanantRankingAward.tab"
+  local tbFile = Lib:EasyLoadTabFile(szFilepath)
+  if not tbFile then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  local tbRankingAward = {}
+  for _, tbInfo in pairs(tbFile) do
+    if 1 == tbInfo.nConfigId then
+      table.insert(tbRankingAward, {
+        nRankStart = tbInfo.nRankStart,
+        nRankEnd = tbInfo.nRankEnd,
+        nAwardKey = tbInfo.nAwardKey
+      })
+    end
+  end
+  self.tbRankingAward = SetReadOnly(tbRankingAward)
+end
+
+LouLanMiZong:LoadRankAwardSetting()

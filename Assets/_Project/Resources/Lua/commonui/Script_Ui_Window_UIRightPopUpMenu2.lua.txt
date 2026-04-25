@@ -1,0 +1,188 @@
+Require("Script/Ui/Logic/MenuSettingDef.lua")
+local tbWnd = Ui:CreateWindow("UIRightPopUpMenu2")
+local tbAllGroups = {
+  team = {
+    Ui.MenuItem.RecallAMember,
+    Ui.MenuItem.TeamSendCoordinate,
+    Ui.MenuItem.TeamCallMember,
+    Ui.MenuItem.TeamCancelRecall,
+    Ui.MenuItem.TeamFollowFight,
+    Ui.MenuItem.TeamFollowCancel,
+    Ui.MenuItem.TeamTransmit,
+    Ui.MenuItem.TeamApplyCaptain,
+    Ui.MenuItem.TeamChangeCaptain,
+    Ui.MenuItem.TeamKickOut,
+    Ui.MenuItem.TeamQuit
+  },
+  kin = {
+    Ui.MenuItem.KinChatPrivate,
+    Ui.MenuItem.CheckInformation,
+    Ui.MenuItem.FriendApply,
+    Ui.MenuItem.TeamApply,
+    Ui.MenuItem.TeamInvite,
+    Ui.MenuItem.KinGetChuanGong,
+    Ui.MenuItem.KinSendChuanGong,
+    Ui.MenuItem.KinKickOutMember,
+    Ui.MenuItem.KinChatForbid,
+    Ui.MenuItem.KinChatUnforbid
+  },
+  LegionOtherServer = {
+    Ui.MenuItem.TeamApply,
+    Ui.MenuItem.TeamInvite
+  },
+  LegionOtherServerKick = {
+    Ui.MenuItem.TeamApply,
+    Ui.MenuItem.TeamInvite,
+    Ui.MenuItem.LegionKickOutMember
+  },
+  Legion = {
+    Ui.MenuItem.LegionChatPrivate,
+    Ui.MenuItem.CheckInformation,
+    Ui.MenuItem.FriendApply,
+    Ui.MenuItem.TeamApply,
+    Ui.MenuItem.TeamInvite
+  },
+  LegionKick = {
+    Ui.MenuItem.LegionChatPrivate,
+    Ui.MenuItem.CheckInformation,
+    Ui.MenuItem.FriendApply,
+    Ui.MenuItem.TeamApply,
+    Ui.MenuItem.TeamInvite,
+    Ui.MenuItem.LegionKickOutMember
+  },
+  tong = {
+    Ui.MenuItem.TongChatPrivate,
+    Ui.MenuItem.CheckInformation,
+    Ui.MenuItem.FriendApply,
+    Ui.MenuItem.TeamApply,
+    Ui.MenuItem.TeamInvite,
+    Ui.MenuItem.TongGetChuanGong,
+    Ui.MenuItem.TongSendChuanGong,
+    Ui.MenuItem.TongChatForbid,
+    Ui.MenuItem.TongChatUnforbid
+  },
+  tongSetting = {
+    Ui.MenuItem.TongAppoint,
+    Ui.MenuItem.TongQuit,
+    Ui.MenuItem.TongCancelQuit,
+    Ui.MenuItem.TongExile
+  }
+}
+local tbControls = {
+  ButtonListView = "MainPanel/btnList/btnListView",
+  ButtonTemplate = "MainPanel/btnList/btnListView/btnTemplate",
+  mainPanel = "MainPanel"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.ButtonTemplate, function(self, nIndex, tbElement)
+    tbElement.fnOnClick(self)
+  end, false, true)
+  self.mainPanelTransform = self.pPanel:GetRectTransform(tbControls.mainPanel)
+end
+
+function tbWnd:OnOpen(szKind, tbData, parentWindow, anchoredPosX, anchoredPosY)
+  tbData = Lib:CopyTB(tbData)
+  self.tbData = tbData
+  tbData.dwRoleId = tbData.dwRoleId or tbData.nMemberId or tbData.nPlayerID
+  tbData.dwID = tbData.dwRoleId or tbData.dwID
+  tbData.szKind = szKind
+  tbData.parentWindow = parentWindow
+  local gridLayoutGroup = self.pPanel:GetObject(tbControls.ButtonListView):GetComponent(Ui.GridLayoutGroup)
+  self.nButtonHeight = gridLayoutGroup.cellSize.y
+  self.nButtonPad = gridLayoutGroup.spacing.y
+  if anchoredPosX and anchoredPosY then
+    self:SetAnchoredPos(anchoredPosX, anchoredPosY)
+  end
+  local szName = tbData.szName
+  local dwKinId = tbData.dwKinId
+  if tbData.nNpcID then
+    local pNpc = KNpc.GetById(tbData.nNpcID)
+    if pNpc then
+      szName = szName or pNpc.szName
+      dwKinId = dwKinId or pNpc.dwKinId
+      tbData.dwID = 0 ~= pNpc.nPlayerID and pNpc.nPlayerID or nil
+      tbData.dwTeamID = pNpc.dwTeamID
+      tbData.dwRoleId = tbData.dwID
+    end
+  end
+  local tbRoleInfo = FriendShip:GetFriendDataInfo(tbData.dwRoleId) or self:findChatTarget(tbData.dwRoleId)
+  if tbRoleInfo then
+    tbData.nLevel = tbData.nLevel or tbRoleInfo.nLevel
+  end
+  if (not szName or not dwKinId) and tbRoleInfo then
+    dwKinId = dwKinId or tbRoleInfo.dwKinId
+    szName = szName or tbRoleInfo.szName
+    tbData.dwID = tbRoleInfo.dwID
+  end
+  tbData.szName = szName or i18n.EasyGet("\229\175\185\230\150\185")
+  tbData.dwKinId = dwKinId
+  local tbOrginGroup = tbAllGroups[szKind]
+  local tbGroup = {}
+  self.tbGroup = tbGroup
+  self.tbScrollView:Reset()
+  local nButtonCount = 0
+  for i, tbSetting in ipairs(tbOrginGroup) do
+    local bCanShow = tbSetting.fnAvaliable(tbData)
+    if bCanShow then
+      nButtonCount = nButtonCount + 1
+      table.insert(tbGroup, tbSetting)
+      self.tbScrollView:SetElement(nButtonCount, function(tbElement)
+        local pPanel = tbElement.pPanel
+        pPanel:Label_SetText("Text", tbSetting.fnName(tbData))
+        tbElement.fnOnClick = tbSetting.fnOnClick
+      end)
+    end
+  end
+  local nLine = #tbGroup
+  self:SetHeight((self.nButtonHeight + self.nButtonPad) * nLine + self.nButtonPad + 12)
+end
+
+function tbWnd:OnClose()
+  if self.tbData.parentWindow and self.tbData.parentWindow.RightPopUpMenuCloseCallBack then
+    self.tbData.parentWindow:RightPopUpMenuCloseCallBack()
+  end
+end
+
+function tbWnd:findChatTarget(dwRoleId)
+  local tbRecentPrivate = ChatMgr.RecentPrivateList
+  local tbRecentWantTo = ChatMgr.RecentWantToChatList.tbRoleInfo
+  for i, v in ipairs(tbRecentPrivate) do
+    if v.dwID == dwRoleId then
+      return v
+    end
+  end
+  for i, v in ipairs(tbRecentWantTo) do
+    if v.dwID == dwRoleId then
+      return v
+    end
+  end
+end
+
+function tbWnd:SetRectTransform(anchoredPosX, anchoredPosY, width, height)
+  self.mainPanelTransform.anchoredPosition3D = Ui.Vector3(anchoredPosX, anchoredPosY, 0)
+  self.mainPanelTransform.sizeDelta = Ui.Vector2(width, height)
+end
+
+function tbWnd:SetWidth(width)
+  self.mainPanelTransform.sizeDelta = Ui.Vector2(width, self.mainPanelTransform.rect.height)
+end
+
+function tbWnd:SetHeight(height)
+  self.mainPanelTransform.sizeDelta = Ui.Vector2(self.mainPanelTransform.rect.width, height)
+end
+
+function tbWnd:SetWidthAndHeight(width, height)
+  self.mainPanelTransform.sizeDelta = Ui.Vector2(width, height)
+end
+
+function tbWnd:SetAnchoredPos(anchoredPosX, anchoredPosY)
+  self.mainPanelTransform.anchoredPosition3D = Ui.Vector3(anchoredPosX, anchoredPosY, 0)
+end
+
+function tbWnd:SetPos(x, y)
+  local transform = self.pPanel:GetTransform(tbControls.mainPanel)
+  transform.position = Ui.Vector3(x, y, transform.position.z)
+end

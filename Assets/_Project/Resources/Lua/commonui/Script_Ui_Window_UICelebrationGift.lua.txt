@@ -1,0 +1,133 @@
+Require("Script/Activity/CelebrationGift/CelebrationGiftC.lua")
+local tbWnd = Ui:CreateWindow("UIQingDianLiBao")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  txtTitle = "node/imgBG/txtTitle",
+  Content = "node/imgBG/Content",
+  ActivityTime = "node/imgBG/Content/ActivityTime",
+  btnBuy = "node/imgBG/Content/Detail/GiftBag01/imgBg/btnBuy",
+  GiftBag01 = "node/imgBG/Content/Detail/GiftBag01",
+  GiftBag02 = "node/imgBG/Content/Detail/GiftBag02",
+  GiftBag03 = "node/imgBG/Content/Detail/GiftBag03",
+  GiftBag04 = "node/imgBG/Content/Detail/GiftBag04"
+}
+tbWnd.tbControls = tbControls
+local tbGiftBagCtrl = {
+  txtName = "/imgBg/imgTitleBg/txtName",
+  txtWorth = "/imgBg/imgWorthBg/txtWorth",
+  txtValue = "/imgBg/imgWorthBg/txtValue",
+  btnBuy = "/imgBg/btnBuy",
+  Text = "/imgBg/btnBuy/Text",
+  txtTime = "/imgBg/txtTime",
+  MarkRecieved = "/imgBg/MarkRecieved",
+  txtRecieved = "/imgBg/MarkRecieved/txtRecieved",
+  ItemTemplate = "/imgBg/AwardGroup/ItemTemplate"
+}
+tbWnd.ActName = ActivityMgr.szCelebrationGift
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_CELEBRATIONGIFT_RECHARGE_SUCC,
+      self.OnRechargeSuccess
+    },
+    {
+      EventNotify.emNOTIFY_RECHARGE_SUCCESS,
+      self.OnRechargeSuccess
+    }
+  }
+end
+
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:WindowsClose()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.nTimer = 0
+  self.tbItemViews = {}
+  self.bItemViewIsInit = false
+end
+
+function tbWnd:OnOpen(nId)
+  self.tbActivityObj = ActivityMgr:GetInstanceById(nId)
+  self:UpdataInfo()
+  self.tbActivityObj:TryFadeRedPoint()
+end
+
+function tbWnd:WindowsClose()
+  if self.nTimer > 0 then
+    Timer:Close(self.nTimer)
+  end
+  self.nTimer = 0
+  self:Close()
+end
+
+function tbWnd:UpdataInfo(nPurchasedGiftId)
+  local tbConfg = self.tbActivityObj:GetConfig()
+  for nGiftId, tbInfo in pairs(tbConfg.tbGiftAward) do
+    self:SetElement(tbControls["GiftBag0" .. nGiftId], nGiftId, nPurchasedGiftId)
+  end
+  self.pPanel:Label_SetText(tbControls.ActivityTime .. "/txtActivityTimeValue", i18n.Parse(tbConfg.szShowTime))
+  self.bItemViewIsInit = true
+  return true
+end
+
+function tbWnd:SetElement(NodePath, nGiftId, nPurchasedGiftId)
+  local tbConfig = self.tbActivityObj:GetConfig()
+  if not tbConfig.tbGiftAward[nGiftId] then
+    return
+  end
+  local tbGiftAward = tbConfig.tbGiftAward[nGiftId]
+  local nProductId = tbGiftAward.nProductId
+  local nMaxLimitTimes = tbGiftAward.nLimitBuyTimes or 0
+  local nAlreadyBuyTimes = self.tbActivityObj:GetAlreadyBuyTimesByGiftId(me, nGiftId) or 0
+  local szBtnText = Recharge:GetShowPrice(Recharge.tbProductSettings[nProductId])
+  local nWorthCount = self.tbActivityObj:GetTruthAwardKey(tbGiftAward.nAwardLinkKey)
+  local szGiftName = Recharge.tbProductSettings[nProductId].szProductName
+  local bTodayIsBuy = self.tbActivityObj:CheckTodayIsBuy(me, nGiftId)
+  bTodayIsBuy = Lib:IIF(nil ~= bTodayIsBuy, bTodayIsBuy, true)
+  self.pPanel:SetActive(NodePath .. tbGiftBagCtrl.MarkRecieved, false)
+  self.pPanel:SetActive(NodePath .. tbGiftBagCtrl.btnBuy, false)
+  self.pPanel:Label_SetText(NodePath .. tbGiftBagCtrl.txtName, i18n.Parse(szGiftName))
+  self.pPanel:Label_SetText(NodePath .. tbGiftBagCtrl.Text, i18n.Parse(szBtnText))
+  self.pPanel:Label_SetText(NodePath .. tbGiftBagCtrl.txtValue, nWorthCount)
+  self.pPanel:SetActive(NodePath .. tbGiftBagCtrl.txtTime, true)
+  self.pPanel:Label_SetText(NodePath .. tbGiftBagCtrl.txtTime, i18n.EasyGet("\233\153\144\232\180\173 {0}/{1}", nMaxLimitTimes < nAlreadyBuyTimes and nMaxLimitTimes or nAlreadyBuyTimes, nMaxLimitTimes))
+  if nMaxLimitTimes <= nAlreadyBuyTimes then
+    self.pPanel:SetActive(NodePath .. tbGiftBagCtrl.btnBuy, false)
+    self.pPanel:Label_SetText(NodePath .. tbGiftBagCtrl.txtRecieved, i18n.EasyGet("\229\183\178\229\148\174\231\189\132"))
+    self.pPanel:SetActive(NodePath .. tbGiftBagCtrl.MarkRecieved, true)
+    self.pPanel:SetActive(NodePath .. tbGiftBagCtrl.txtTime, false)
+  elseif bTodayIsBuy or nPurchasedGiftId and nPurchasedGiftId == nGiftId then
+    self.pPanel:SetActive(NodePath .. tbGiftBagCtrl.btnBuy, false)
+    self.pPanel:Label_SetText(NodePath .. tbGiftBagCtrl.txtRecieved, i18n.EasyGet("\229\183\178\232\180\173\228\185\176"))
+    self.pPanel:SetActive(NodePath .. tbGiftBagCtrl.MarkRecieved, true)
+  else
+    self.pPanel:SetActive(NodePath .. tbGiftBagCtrl.btnBuy, true)
+    Ui:Button_BindEvent(self.pPanel, NodePath .. tbGiftBagCtrl.btnBuy, function()
+      self:OnClickBtnBuy(self, nGiftId)
+    end)
+  end
+  if not self.bItemViewIsInit then
+    local nShowAwardKey = self.tbActivityObj:GetShowAwardKey(tbGiftAward.nAwardLinkKey)
+    self:SetItems(NodePath .. tbGiftBagCtrl.ItemTemplate, tbGiftAward.nAwardId, nShowAwardKey)
+  end
+end
+
+function tbWnd:OnClickBtnBuy(tbElement, nGiftId)
+  self.tbActivityObj:BuyCelebrationGift(me, nGiftId)
+end
+
+local nRowShowNumber = 2
+
+function tbWnd:SetItems(szPath, nAwardId, nAwardKey)
+  local pItemGrid = Ui:NewItemGridScrollView(self, szPath, nRowShowNumber, 1)
+  local tbAwards = Award:GetAward(nAwardId, nAwardKey)
+  pItemGrid:UpdateGenericItem(tbAwards, true)
+end
+
+function tbWnd:OnRechargeSuccess(nGiftId)
+  self:UpdataInfo(nGiftId)
+end

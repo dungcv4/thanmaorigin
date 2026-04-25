@@ -1,0 +1,485 @@
+function MultiPvP:OpenMatchInfoView(tbData, nCloseTime)
+  local tbTeamDataLeft = tbData.tbTeam[1]
+  
+  local tbTeamDataRight = tbData.tbTeam[2]
+  local nState = tbData.nState
+  Ui:OpenWindow("UITeamBattleResult", tbTeamDataLeft, tbTeamDataRight, nState, nCloseTime)
+end
+
+function MultiPvP:OpenMatchInfoViewArena(tbData, nCloseTime, bCanChangeOrder)
+  local tbTeamDataLeft = tbData.tbTeam[1]
+  local tbTeamDataRight = tbData.tbTeam[2]
+  local nState = tbData.nState
+  Ui:OpenWindow("UIWuLinLianSaiBattle", tbTeamDataLeft, tbTeamDataRight, nState, nCloseTime, bCanChangeOrder)
+end
+
+function MultiPvP:CloseMatchInfoViewArena()
+  if Ui:IsWindowLogicOpen("UIWuLinLianSaiBattle") then
+    Ui:CloseWindow("UIWuLinLianSaiBattle")
+  end
+end
+
+function MultiPvP:SyncBattleTopInfo(tbData, nTeamId)
+  if Ui:WindowVisible("UITeamBattleInfo") == false then
+    Ui:OpenWindow("UITeamBattleInfo", tbData, nTeamId)
+  else
+    Ui:GetWindow("UITeamBattleInfo"):RefreshView(tbData, nTeamId)
+  end
+end
+
+function MultiPvP:ProtocolProcessChkName(bRet, szTeamName)
+  if bRet then
+    local tbSetting = MultiPvP:GetCurBattleSetting()
+    local tbMembers = TeamMgr:GetMembers()
+    local szTeamMember = ""
+    for k, v in pairs(tbMembers) do
+      szTeamMember = i18n.EasyGet("{0}\n{1}    {2}\231\186\167{3}", szTeamMember, v.szName, v.nLevel, Faction:GetName(v.nFaction))
+    end
+    szTeamMember = i18n.EasyGet("{0}\n{1}    {2}\231\186\167{3}", szTeamMember, me.szName, me.nLevel, Faction:GetName(me.nFaction))
+    
+    local function fnCreateTeam()
+      RemoteServer.RequestMultiPvP("CreateTeamNext", {true})
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.Get(MultiPvP.CommonMsg.TIP_CREATE_TEAM, i18n.Get(tbSetting.szDesc), tbSetting.nMemberNeed, szTeamName, szTeamMember), {
+      {fnCreateTeam},
+      {}
+    }, {
+      i18n.EasyGet("\231\161\174\229\174\154"),
+      i18n.EasyGet("\229\143\150\230\182\136")
+    })
+  else
+    me.CenterMsg(i18n.EasyGet("\230\130\168\232\190\147\229\133\165\231\154\132\229\144\141\229\173\151\229\183\178\229\173\152\229\156\168\239\188\140\230\141\162\228\184\128\228\184\139\229\144\167"))
+  end
+  return bRet
+end
+
+function MultiPvP:UpdateCreateMessageBox(szTeamName, tbTeamMembers)
+  local tbSetting = MultiPvP:GetCurBattleSetting()
+  local szMsg = i18n.EasyGet("\230\156\172\229\177\138\230\173\166\230\158\151\232\129\148\232\181\155\228\184\186{0}\n\230\136\152\233\152\159\230\156\128\231\187\136\229\133\129\232\174\184{1}\229\144\141\230\136\144\229\145\152\239\188\140\231\161\174\229\174\154\232\166\129\229\136\155\229\187\186\229\166\130\228\184\139\230\136\152\233\152\159\229\144\151\239\188\159\n\230\136\152\233\152\159\229\144\141\239\188\154{2}\n", i18n.Get(tbSetting.szDesc), tbSetting.nMemberNeed, szTeamName)
+  if Ui:WindowVisible("UIMessageBoxWuLinLianSai") == false then
+    Ui:OpenWindow("UIMessageBoxWuLinLianSai", szMsg, tbTeamMembers)
+  else
+    Ui:GetWindow("UIMessageBoxWuLinLianSai"):UpdateMemberState(tbTeamMembers)
+  end
+end
+
+function MultiPvP:ProtocolProcessLeaveTeam()
+  self.m_tbMyTeam = nil
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MULTIPVP_LEAVE_TEAM)
+end
+
+function MultiPvP:ProtocolProcessTeamInfo(tbData)
+  if tbData then
+    self.m_tbTeamInfo = tbData.tbTeamData
+    self.m_tbBatleInfo = tbData.tbBatleInfo
+    self.nSeasonType = tbData.tbBatleInfo.nSeasonType
+    if self.nSeasonType ~= self:GetCurSeasonType() then
+      MultiPvP:SetSeasonType(self.nSeasonType)
+    end
+    self.nLeftCount = tbData.tbBatleInfo.nLeftCount
+    if self.m_tbTeamInfo and self.m_tbTeamInfo[MPTeam.TEAM_ID] == me.GetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_TEAMID) then
+      self.m_tbMyTeam = self.m_tbTeamInfo
+    end
+  else
+    self.m_tbTeamInfo = nil
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MULTIPVP_SYNC_TEAM)
+end
+
+function MultiPvP:GetMyTeamInfo()
+  return self.m_tbMyTeam
+end
+
+function MultiPvP:ProtocolProcessGetMemberDetail(tbMembers)
+  self.m_tbMembers = tbMembers
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MULTIPVP_SYNC_TEAM_MEMBER)
+end
+
+function MultiPvP:ProtocolProcessGetFinalMatchData(tbMatchList, tbTeamData, tbIndexMapId, bBattleBegin)
+  self.tbMatchList = tbMatchList
+  self.tbTeamData = tbTeamData
+  self.tbIndexMapId = tbIndexMapId
+  self.bBattleBegin = bBattleBegin
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MULTIPVP_SYNC_FINAL_MATCH)
+end
+
+function MultiPvP:SynPreInforRank(tbPreInforRank)
+  self.tbPreInforRank = tbPreInforRank
+end
+
+function MultiPvP:ProtocolProcessGuessTeam()
+  Ui:CloseWindow("UITeamBattleGuessing")
+  Ui:GetWindow("UIWuLinLianSai"):UpdateGuessTeam()
+end
+
+function MultiPvP:OpenGuessUI(nId)
+  local tbDataList = {}
+  for _, tbMatchData in pairs(self.tbMatchList[self.PHASE_INIT]) do
+    local tbTeamData = self.tbTeamData[tbMatchData.nTeamId]
+    if tbTeamData then
+      local tbData = {}
+      tbData.nId = tbTeamData.nTeamId
+      tbData.szName = tbTeamData.szTeamName
+      tbData.nFight = 0
+      tbData.tbMember = {}
+      for key, tbMemberData in pairs(tbTeamData.tbMember) do
+        table.insert(tbData.tbMember, {
+          nId = tbMemberData.nPlayerId,
+          szPlayerName = tbMemberData.szPlayerName,
+          nLevel = tbMemberData.nLevel,
+          nFaction = tbMemberData.nFaction,
+          nPortrait = tbMemberData.nPortrait,
+          nFight = tbMemberData.nFight
+        })
+        tbData.nFight = tbData.nFight + tbMemberData.nFight
+      end
+      table.insert(tbDataList, tbData)
+    end
+  end
+  local tbSetting = {
+    szTitle = i18n.EasyGet("\230\173\166\230\158\151\232\129\148\232\181\155\231\171\158\231\140\156"),
+    szTitle1 = i18n.EasyGet("\229\133\165\229\155\180\230\136\152\233\152\159"),
+    szTitle2 = i18n.EasyGet("\230\136\152\233\152\159\230\136\144\229\145\152"),
+    szTitle3 = i18n.EasyGet("\230\136\152\233\152\159\230\128\187\230\136\152\229\138\155")
+  }
+  local tbCallBack = {
+    MultiPvP.SendProtocolApplyGuess,
+    MultiPvP
+  }
+  Ui:OpenWindow("UITeamBattleGuessing", tbSetting, tbDataList, tbCallBack, nId)
+end
+
+function MultiPvP:ProtocolProcessBattlePartner()
+  local tbWnd = Ui:GetWindow("UIPartnerSettingWuLin")
+  if tbWnd then
+    tbWnd:UpdatePartnerList()
+  end
+  local tbWndLianSai = Ui:GetWindow("UIWuLinLianSai")
+  if tbWndLianSai then
+    tbWndLianSai:UpdateRedPoint()
+  end
+end
+
+function MultiPvP:ProtocolProcessGetAllNoTeamPlayer(tbAllNoTeamPlayer)
+  Ui:GetWindow("UITeamInviteWuLin"):UpdateNoTeamPlayer(tbAllNoTeamPlayer)
+end
+
+function MultiPvP:ApplyChangeOrder(nType, nOrder)
+  if nType == MultiPvP.UP and 1 == nOrder or nType == MultiPvP.DOWN and 3 == nOrder then
+    return
+  end
+  RemoteServer.RequestMultiPvP("ApplyChangeOrder", nType, nOrder)
+end
+
+function MultiPvP:SyncOrder(tbOrder)
+  if not Ui:IsWindowLogicOpen("UIWuLinLianSaiBattle") then
+    return
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MULTIPVP_SYNCORDER, tbOrder)
+end
+
+function MultiPvP:ApplyOpenLianSaiUI()
+  RemoteServer.RequestMultiPvP("ApplyOpenUI")
+end
+
+function MultiPvP:ApplyOpenTeamDataUI(nTeamId)
+  RemoteServer.RequestMultiPvP("OpenTeamDataUI", nTeamId)
+end
+
+function MultiPvP:SendProtocolLeaveTeam()
+  RemoteServer.RequestMultiPvP("LeaveTeam", tonumber(dwPlayerId))
+end
+
+function MultiPvP:SendProtocolSwitchMap()
+  local function fnEndWalk()
+    RemoteServer.RequestMultiPvP("RequestGotoPreMap")
+  end
+  
+  local bRet, szMsg = ActivityCheck:CheckCanEnterActivityEx(me, nil, fnEndWalk, false, false, true, nil, {
+    "UIWuLinLianSai"
+  }, false)
+  if not bRet then
+    me.CenterMsg(szMsg)
+  end
+end
+
+function MultiPvP:SendProtocolLookerLeaveBattleMap()
+  RemoteServer.RequestMultiPvP("LookerLeaveBattleMap")
+end
+
+function MultiPvP:SendProtocolApplyGuess(nTeamId)
+  RemoteServer.RequestMultiPvP("ApplyGuessChampion", nTeamId)
+end
+
+function MultiPvP:SendProtocolSetBattlePartner(nPartnerId)
+  RemoteServer.RequestMultiPvP("SetBattlePartner", nPartnerId)
+end
+
+function MultiPvP:SendProtocolRemoveBattlePartner()
+  RemoteServer.RequestMultiPvP("RemoveBattlePartner")
+end
+
+function MultiPvP:C2SWatchBattle(nPhase, nIndex)
+  RemoteServer.RequestMultiPvP("WatchBattle", nPhase, nIndex)
+end
+
+function MultiPvP:RequestInviteInfo(tbAllFriendID, tbAllNearbyID)
+  RemoteServer.RequestMultiPvP("SynInviteInfo", tbAllFriendID, tbAllNearbyID)
+end
+
+function MultiPvP:RequestSetAutoFight(bAuto)
+  RemoteServer.RequestMultiPvP("SetAutoFight", bAuto)
+end
+
+function MultiPvP:Invite(dwPlayerId)
+  RemoteServer.RequestMultiPvP("InvitePlayer", tonumber(dwPlayerId))
+end
+
+function MultiPvP:RequestInvitePlayer(tbData)
+  local function fnReply(bReply)
+    RemoteServer.RequestMultiPvP("ReplyInvitePlayer", tbData.dwInviterID, bReply)
+  end
+  
+  local szMsg = i18n.EasyGet("{0}\233\130\128\232\175\183\228\189\160\229\138\160\229\133\165<{1}>\230\136\152\233\152\159\239\188\140\229\146\140\232\175\165\230\136\152\233\152\159\230\136\152\230\150\151\229\144\142\229\176\134\230\151\160\230\179\149\233\128\128\233\152\159\239\188\140\230\152\175\229\144\166\231\161\174\232\174\164\229\138\160\229\133\165\239\188\159\n\229\183\178\229\143\130\232\181\155\239\188\154{2}\229\156\186\239\188\140\232\131\156\231\142\135\239\188\154{3}%%", tbData.szInviterName, tbData.szTeamName, tbData.nTotalCount, tbData.nWinRate)
+  Ui:OpenWindow("UIMessageBox", szMsg, {
+    {fnReply, true},
+    {fnReply, false},
+    {fnReply, false}
+  }, {
+    i18n.EasyGet("\229\138\160\229\133\165"),
+    i18n.EasyGet("\230\139\146\231\187\157")
+  }, nil, 30)
+end
+
+function MultiPvP:RequestJoinTeam(nTeamId)
+  RemoteServer.RequestMultiPvP("ApplyJoinTeam", nTeamId)
+end
+
+function MultiPvP:AllowJoinTeam(nPlayerId, szName)
+  if Ui:WindowVisible("UIMessageBox") then
+    return
+  end
+  
+  local function fnReply(bReply)
+    RemoteServer.RequestMultiPvP("ReplyJoinTeam", nPlayerId, bReply)
+  end
+  
+  local szMsg = i18n.EasyGet("{0}\232\175\183\230\177\130\229\138\160\229\133\165\228\189\160\231\154\132\230\136\152\233\152\159\239\188\140\230\152\175\229\144\166\229\144\140\230\132\143\228\187\150\229\138\160\229\133\165\239\188\159\n", szName)
+  Ui:OpenWindow("UIMessageBox", szMsg, {
+    {fnReply, true},
+    {fnReply, false},
+    {fnReply, false}
+  }, {
+    i18n.EasyGet("\229\138\160\229\133\165"),
+    i18n.EasyGet("\230\139\146\231\187\157")
+  }, nil, 30)
+end
+
+function MultiPvP:SendProtocolWatcherExitFightMap()
+  RemoteServer.RequestMultiPvP("WatcherExitFightMap")
+end
+
+function MultiPvP:GetCurTeamInfo()
+  return self.m_tbTeamInfo
+end
+
+function MultiPvP:GetServerBattleState()
+  return self.m_tbBatleInfo
+end
+
+function MultiPvP:GetCurTeamDetail()
+  return self.m_tbMembers
+end
+
+function MultiPvP:GetFinalData()
+  return self.tbMatchList, self.tbTeamData, self.tbIndexMapId, self.bBattleBegin
+end
+
+function MultiPvP:CheckPreInforRank()
+  self.tbPreInforRank = self.tbPreInforRank or {}
+  return not Lib:IsEmptyTB(self.tbPreInforRank)
+end
+
+function MultiPvP:GetPreInforRank()
+  self.tbPreInforRank = self.tbPreInforRank or {}
+  return self.tbPreInforRank
+end
+
+function MultiPvP:IsTeamCaptain()
+  if not self.m_tbMyTeam then
+    return false
+  end
+  return self.m_tbMyTeam[MPTeam.CAPTAIN] == me.dwID
+end
+
+function MultiPvP:InitFubenUIData()
+  self.tbUiData = {}
+  self.tbUiData.nType = 1
+  self.tbUiData.nCurSeconds = 0
+  self.tbUiData.nBattleIdx = 0
+  self.tbUiData.nBattleStage = 0
+end
+
+function MultiPvP:SetLeaveShow(bCanShow)
+  self.bShowLeaveButton = bCanShow
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function MultiPvP:RegisterFubenUIChecker()
+  local tbMatchMapList = {}
+  for _, tbData in ipairs(MultiPvP.BATTLE_SETTING) do
+    table.insert(tbMatchMapList, tbData.MapId)
+  end
+  table.insert(tbMatchMapList, MultiPvP.Cfg.PRE_MAP_ID)
+  FubenUIController:RegisterChecker(tbMatchMapList, self)
+end
+
+function MultiPvP:OnFubenMapLoaded(pPlayer)
+  FubenUIController:OpenFuBenUI()
+end
+
+function MultiPvP:FuncExitFuben()
+  if me.nMapTemplateId ~= MultiPvP.Cfg.PRE_MAP_ID and 1 == me.GetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_WATCH) then
+    self:SendProtocolLookerLeaveBattleMap()
+  elseif self:IsShowTipWhenQuit() then
+    local szTip = i18n.EasyGet("\230\130\168\231\161\174\229\174\154\233\128\128\229\135\186\229\189\147\229\137\141\229\156\176\229\155\190\229\144\151\239\188\159")
+    me.MsgBox(szTip, {
+      {
+        i18n.szOk,
+        function()
+          Dungeon:ExitDungeon()
+        end
+      },
+      {
+        i18n.szCancel
+      }
+    })
+  else
+    Dungeon:ExitDungeon()
+  end
+end
+
+function MultiPvP:IsNeedExitFubenButton()
+  return self.bShowLeaveButton, {
+    MultiPvP.FuncExitFuben,
+    MultiPvP
+  }
+end
+
+function MultiPvP:IsNeedFuncScoreButton()
+  return self.bShowLeaveButton, {
+    MultiPvP.ApplyOpenLianSaiUI,
+    MultiPvP
+  }, {
+    RedPointMgr.EVENT.MultiPvPPartner,
+    RedPointMgr.EVENT.MultiPvPView
+  }
+end
+
+function MultiPvP:IsShowTipWhenQuit()
+  return true
+end
+
+MultiPvP:RegisterFubenUIChecker()
+
+function MultiPvP:__ChangeAutoFightMode(nMode)
+  nMode = nMode or MultiPvP.AUTO_FIGHT_MODE.TotalEnd
+  if nMode == MultiPvP.AUTO_FIGHT_MODE.TotalEnd then
+    if TeamMgr:IsFollowTeammate() then
+      TeamMgr:StopFollowMember()
+    end
+    AFK:Stop()
+  elseif nMode == MultiPvP.AUTO_FIGHT_MODE.FollowMember then
+    LogErr("[MultiPvP:__ChangeAutoFightMode] MultiPvP.AUTO_FIGHT_MODE.FollowMember is not implemented")
+  elseif nMode == MultiPvP.AUTO_FIGHT_MODE.OnlyAFK then
+    if TeamMgr:IsFollowTeammate() then
+      TeamMgr:StopFollowMember()
+    end
+    AFK:Start()
+  end
+end
+
+function MultiPvP:OnS2CEnterReadyMap()
+  self:__ChangeAutoFightMode()
+  Ui:CloseWindow("UIWuLinLianSai")
+  self:SetLeaveShow(true)
+end
+
+function MultiPvP:OnS2CLeaveReadyMap()
+  if 1 ~= me.GetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_WATCH) then
+    self:__ChangeAutoFightMode()
+  end
+  Ui:CloseWindow("UITeamBattleInfo")
+  self:SetLeaveShow(false)
+end
+
+function MultiPvP:OnS2CEnterFightMap(bIsLooker)
+  bIsLooker = bIsLooker or false
+  self:__ChangeAutoFightMode()
+  Ui:CloseWindow("UIWuLinLianSai")
+  self:SetLeaveShow(bIsLooker)
+end
+
+function MultiPvP:OnS2CLeaveFightMap()
+  self:__ChangeAutoFightMode()
+  Ui:CloseWindow("UITeamBattleInfo")
+  self:SetLeaveShow(false)
+end
+
+function MultiPvP:OnS2CFightMapPreparing(tbData, nSec)
+  self:OpenMatchInfoView(tbData, nSec)
+  ClientUtil:StopAutoGoto()
+end
+
+function MultiPvP:OnS2CArenaFightMapPreparing(tbData, nRestTime, bCanChangeOrder)
+  self:OpenMatchInfoViewArena(tbData, nRestTime, bCanChangeOrder)
+  ClientUtil:StopAutoGoto()
+end
+
+function MultiPvP:OnS2CFightMapFighting()
+  if 1 == me.GetUserValue(MultiPvP.SAVE_GROUP, MultiPvP.SAVE_NOT_AUTOFIGHT) then
+    self:__ChangeAutoFightMode()
+  else
+    self:__ChangeAutoFightMode(MultiPvP.AUTO_FIGHT_MODE.OnlyAFK)
+  end
+end
+
+function MultiPvP:OnS2CArenaFightMapStandby()
+  self:__ChangeAutoFightMode()
+end
+
+function MultiPvP:OnS2COpenWuLinLianSaiUI(bShowTeamInfo, bShowViewRedPoint, nTeamId, tbTeamInfo, tbDetail)
+  self:ProtocolProcessTeamInfo(tbTeamInfo)
+  self:ProtocolProcessGetMemberDetail(tbDetail)
+  Ui:OpenWindow("UIWuLinLianSai", bShowTeamInfo, bShowViewRedPoint)
+end
+
+function MultiPvP:OnS2CShowTeamInfo(nTeamId, tbTeamInfo, tbDetail)
+  if nTeamId <= 0 then
+    return
+  end
+  self:ProtocolProcessTeamInfo(tbTeamInfo)
+  self:ProtocolProcessGetMemberDetail(tbDetail)
+  Ui:OpenWindow("UIWuLinLianSai", true)
+end
+
+function MultiPvP:OnS2CSomeoneRejectCreateTeam(szRejectMsg)
+  me.CenterMsg(szRejectMsg)
+  Ui:CloseWindow("UIMessageBoxWuLinLianSai")
+  Ui:CloseWindow("UIMessageBox")
+end
+
+function MultiPvP:OnS2CCreateTeamSuccess(nTeamId, tbTeamInfo, tbDetail)
+  self:ProtocolProcessTeamInfo(tbTeamInfo)
+  self:ProtocolProcessGetMemberDetail(tbDetail)
+  me.CenterMsg(i18n.EasyGet("\229\136\155\229\187\186\230\136\152\233\152\159\230\136\144\229\138\159"))
+  Ui:CloseWindow("UIMessageBoxWuLinLianSai")
+  Ui:CloseWindow("UIMessageBox")
+end
+
+function MultiPvP:OnS2CSomeoneJoinTeam(szMsg, tbTeamInfo, tbDetail)
+  me.CenterMsg(szMsg)
+  self:ProtocolProcessTeamInfo(tbTeamInfo)
+  self:ProtocolProcessGetMemberDetail(tbDetail)
+end

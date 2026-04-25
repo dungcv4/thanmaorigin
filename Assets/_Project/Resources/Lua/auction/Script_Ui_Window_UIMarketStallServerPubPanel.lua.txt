@@ -1,0 +1,217 @@
+local tbWnd = Ui:CreateClass("UIMarketStallServerPubPanel", "UIPanel")
+local tbControls = {
+  uiKindTree = "UITree",
+  txtNoItem = "txtNoItem",
+  goProfilePanel = "TypePanel",
+  goProfileTemplate = "TypePanel/TypeList/Content/ElementTemplate",
+  btnRefreshProfile = "TypePanel/btnRefresh",
+  goDetailPanel = "DetailPanel",
+  goDetailTemplate = "DetailPanel/DetailList/Content/ElementTemplate",
+  btnRefreshDetail = "DetailPanel/btnRefresh",
+  btnBackToProfile = "DetailPanel/btnBack",
+  imgWalletMoney = "TypePanel/panelYuanBao/imgYuanBao",
+  txtWalletValue = "TypePanel/panelYuanBao/txtYuanBaoValue",
+  btnFetchWallet = "TypePanel/btnJie",
+  inSeek = "InputFieldSeek",
+  btnSeek = "btnSeek"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnRefreshProfile = function(self)
+    TreasureShop:QueryPubStallReq(true)
+    TreasureShop:QueryMailboxReq()
+  end,
+  btnRefreshDetail = function(self)
+    TreasureShop:QueryPubStallReq(true)
+    TreasureShop:QueryMailboxReq()
+  end,
+  btnBackToProfile = function(self)
+    self.nWareId = nil
+    if "" == self.szSeekName then
+      self:ShowStall()
+    else
+      self:ShowSeek()
+    end
+  end,
+  btnFetchWallet = function(self)
+    TreasureShop:FetchMoneyReq(self.WALLET_CURRENCY, TreasureShop.tbMailbox.tbWallet[self.WALLET_CURRENCY] or 0)
+  end,
+  btnSeek = function(self)
+    self.szSeekName = self.pPanel:Input_GetText(tbControls.inSeek)
+    if self.szSeekName == "" then
+      self.nWareId = nil
+      self:ShowStall()
+    else
+      self:ShowSeek()
+    end
+  end
+}
+tbWnd.WALLET_CURRENCY = "Gold"
+
+function tbWnd:OnCreate()
+  local tbKindList = {}
+  for _, szKind in pairs(TreasureShop.tbKindSetting) do
+    table.insert(tbKindList, {
+      nType = szKind,
+      szText = szKind,
+      tbInfo = {szKind}
+    })
+  end
+  self.uiKindTree = Ui:NewTree(self, self.uiKindTree, self.OnSelectKind)
+  self.uiKindTree:SetData(tbKindList, {})
+  self.tbStallScrollView = Ui:NewScrollView(self, tbControls.goProfileTemplate, self.OnSelectStall, nil, true)
+  self.pPanel:Sprite_SetSprite(tbControls.imgWalletMoney, Currency:GetIcon(self.WALLET_CURRENCY))
+  self.tbDetailScrollView = Ui:NewScrollView(self, tbControls.goDetailTemplate, self.OnSelectDetail, nil, true)
+end
+
+function tbWnd:OnOpen()
+  TreasureShop:QueryPubStallReq(false)
+  TreasureShop:QueryMailboxReq()
+  self.szKind = nil
+  self.nWareId = nil
+  self.szSeekName = ""
+  self.tbShowList = {}
+  self.uiKindTree:SelectNode(1)
+  self.pPanel:Label_SetText(tbControls.txtWalletValue, TreasureShop.tbMailbox.tbWallet[self.WALLET_CURRENCY] or 0)
+  self.pPanel:Input_SetText(tbControls.inSeek, "")
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:ShowStall()
+  self.tbShowList = {}
+  local tbFlag = {}
+  for nWareId, tbProfile in pairs(TreasureShop.tbPubStallList) do
+    local tbWareSetting = TreasureShop:GetWareSettingByWareId(nWareId)
+    if i18n.Parse(tbWareSetting.szKind) == self.szKind then
+      table.insert(self.tbShowList, nWareId)
+    end
+    tbFlag[nWareId] = true
+  end
+  for nWareId, tbWareSetting in pairs(TreasureShop:GetAllWareSetting()) do
+    if i18n.Parse(tbWareSetting.szKind) == self.szKind and not tbFlag[nWareId] and ("" == tbWareSetting.szTimeFrame or 1 == GetTimeFrameState(tbWareSetting.szTimeFrame)) then
+      table.insert(self.tbShowList, nWareId)
+    end
+    tbFlag[nWareId] = true
+  end
+  self:DoShowStall()
+end
+
+function tbWnd:DoShowStall()
+  for nIndex, nWareId in ipairs(self.tbShowList) do
+    local tbProfile = TreasureShop.tbPubStallList[nWareId]
+    self.tbStallScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      if not tbElement.tbItemGrid then
+        tbElement.tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbElement.tbItemGrid:SetClickEnable(true)
+      end
+      local tbWareSetting = TreasureShop:GetWareSettingByWareId(nWareId)
+      if tbProfile then
+        tbElement.tbItemGrid:SetItemByTemplate(tbWareSetting.nItemTid, tbProfile.nTotalNum)
+        pPanel:Label_SetText("txtName", i18n.Parse(KItem.GetItemShowInfo(tbWareSetting.nItemTid)))
+        pPanel:Label_SetText("txtSale", tostring(tbProfile.nTotalNum))
+        pPanel:Sprite_SetSprite("PriceObj/imgMoney", Currency:GetIcon(tbWareSetting.szCurrency))
+        pPanel:Label_SetText("PriceObj/txtSale", tostring(tbProfile.nLowerPrice))
+        pPanel:SetActive("PriceObj", true)
+        pPanel:SetActive("imgSoldOut", false)
+      else
+        tbElement.tbItemGrid:SetItemByTemplate(tbWareSetting.nItemTid, 1)
+        pPanel:Label_SetText("txtName", i18n.Parse(KItem.GetItemShowInfo(tbWareSetting.nItemTid)))
+        pPanel:Label_SetText("txtSale", "0")
+        pPanel:SetActive("PriceObj", false)
+        pPanel:SetActive("imgSoldOut", true)
+      end
+      tbElement.nData = nWareId
+    end)
+  end
+  local nShowNum = #self.tbShowList
+  self.tbStallScrollView:ResetFrom(nShowNum + 1)
+  self.pPanel:SetActive(tbControls.txtNoItem, 0 == nShowNum)
+  self.pPanel:SetActive(tbControls.goProfilePanel, true)
+  self.pPanel:SetActive(tbControls.goDetailPanel, false)
+end
+
+function tbWnd:ShowDetail()
+  if not TreasureShop.tbPubStallList[self.nWareId] then
+    self.nWareId = nil
+    self:OnUpdateStall()
+    return
+  end
+  local tbPriceList = TreasureShop.tbPubStallList[self.nWareId].tbPriceList or {}
+  local tbWareSetting = TreasureShop:GetWareSettingByWareId(self.nWareId)
+  for nIndex, tbInfo in ipairs(tbPriceList) do
+    self.tbDetailScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      if not tbElement.tbItemGrid then
+        tbElement.tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbElement.tbItemGrid:SetClickEnable(true)
+      end
+      tbElement.tbItemGrid:SetItemByTemplate(tbWareSetting.nItemTid, tbInfo.nNum)
+      pPanel:Label_SetText("txtName", i18n.Parse(KItem.GetItemShowInfo(tbWareSetting.nItemTid)))
+      pPanel:Sprite_SetSprite("PriceObj01/imgMoney", Currency:GetIcon(tbWareSetting.szCurrency))
+      pPanel:Label_SetText("PriceObj01/txtSale", tbInfo.nPrice)
+      pPanel:Sprite_SetSprite("PriceObj/imgMoney", Currency:GetIcon(tbWareSetting.szCurrency))
+      pPanel:Label_SetText("PriceObj/txtSale", tbInfo.nNum * tbInfo.nPrice)
+      pPanel:SetActive("imgSoldOut", false)
+      tbElement.tbData = tbInfo
+    end)
+  end
+  local nPriceNum = #tbPriceList
+  self.tbDetailScrollView:ResetFrom(nPriceNum + 1)
+  self.pPanel:SetActive(tbControls.txtNoItem, 0 == nPriceNum)
+  self.pPanel:SetActive(tbControls.goProfilePanel, false)
+  self.pPanel:SetActive(tbControls.goDetailPanel, true)
+end
+
+function tbWnd:OnSelectKind(tbInfo)
+  self.szKind = table.unpack(tbInfo)
+  if self.szKind then
+    self:ShowStall()
+  end
+end
+
+function tbWnd:OnSelectStall(nIndex, tbElement)
+  self.nWareId = tbElement.nData
+  if self.szKind and self.nWareId then
+    if TreasureShop.tbPubStallList[self.nWareId] then
+      self:ShowDetail()
+    else
+      me.CenterMsg(i18n.EasyGet("\232\175\165\229\136\134\231\177\187\230\154\130\230\151\160\228\184\138\230\158\182\229\149\134\229\147\129"))
+    end
+  end
+end
+
+function tbWnd:OnSelectDetail(nIndex, tbElement)
+  local nPrice, nNum = tbElement.tbData.nPrice, tbElement.tbData.nNum
+  Ui:OpenWindow("UIMarketStallBuyServer", self.nWareId, nPrice, nNum)
+end
+
+function tbWnd:OnUpdateStall()
+  if self.nWareId then
+    self:ShowDetail()
+  elseif "" ~= self.szSeekName then
+    self:ShowSeek()
+  elseif self.szKind then
+    self:ShowStall()
+  end
+end
+
+function tbWnd:OnUpdateMailbox()
+  self.pPanel:Label_SetText(tbControls.txtWalletValue, TreasureShop.tbMailbox.tbWallet[self.WALLET_CURRENCY] or 0)
+end
+
+function tbWnd:ShowSeek()
+  self.tbShowList = {}
+  for nWareId, tbProfile in pairs(TreasureShop.tbPubStallList) do
+    local tbWareSetting = TreasureShop:GetWareSettingByWareId(nWareId)
+    if string.find(i18n.Parse(KItem.GetItemShowInfo(tbWareSetting.nItemTid)), self.szSeekName) then
+      table.insert(self.tbShowList, nWareId)
+    end
+  end
+  self:DoShowStall()
+  if 0 == #self.tbShowList then
+    me.CenterMsg(i18n.EasyGet("\230\151\160\231\155\184\229\133\179\231\187\147\230\158\156"))
+  end
+end

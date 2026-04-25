@@ -1,0 +1,119 @@
+local tbWnd = Ui:CreateWindow("UIActivityDetail")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_WND_CLOSED,
+      self.OnWndClose,
+      self
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  txtActivityName = "imgBG/panelActivityDetail/txtActivityName",
+  txtActDegreeTip = "imgBG/panelActivityDetail/txtActDegreeTip",
+  txtActDegree = "imgBG/panelActivityDetail/txtActDegree",
+  txtActivityTime = "imgBG/panelActivityDetail/txtActivityTime",
+  txtLevelLimit = "imgBG/panelActivityDetail/txtLevelLimit",
+  imgWeek = "imgBG/panelActivityDetail/txtTitle/imgWeek",
+  ItemTemplate = "imgBG/panelActivityDetail/AwardList/Viewport/Content/ItemTemplate",
+  txtActivityDesc = "imgBG/panelActivityDetail/ScrollDesc/Viewport/Content/txtActivityDesc",
+  txtAwardTip = "imgBG/panelActivityDetail/txtAwardTip",
+  btnHelp = "imgBG/panelActivityDetail/btnHelp",
+  AwardList = "imgBG/panelActivityDetail/AwardList"
+}
+tbWnd.tbOnClick = {
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.szHelpKey)
+  end
+}
+tbWnd.tbDynamicActivityDesc = {
+  Darting = function()
+    return Darting:GetDynamicActivityDesc()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbAwardsList = Ui:NewItemGridView(self, self.ItemTemplate)
+  self:SetClickEmptyToClose(nil, true)
+end
+
+function tbWnd:OnOpen(nActivityID, nType)
+  if 1 == nType then
+    self.pPanel:Object_SetLocalPosition("imgBG", Ui.Vector3(360, 0, 0))
+  else
+    self.pPanel:Object_SetLocalPosition("imgBG", Ui.Vector3(0, 0, 0))
+  end
+  self:UpdateActivityDetail(nActivityID)
+end
+
+function tbWnd:OnClose()
+  self.tbAwardsList:Clear()
+  local tbActivityWnd = Ui:GetWindow("UIActivity")
+  if tbActivityWnd then
+    tbActivityWnd:ClearSelect()
+  end
+end
+
+function tbWnd:GoLeft()
+  local scrollView = self.pPanel:GetObject(self.AwardList):GetComponent("ScrollRect")
+  scrollView.horizontalNormalizedPosition = 0
+end
+
+function tbWnd:UpdateActivityDetail(nActivityID)
+  self.nActivityID = nActivityID
+  local szKey, szType, szDesc, szHelpKey = Calendar:GetActivityDetail(nActivityID)
+  local tbActInfo = Calendar:GetActInfo(nActivityID)
+  if not (szKey and szType) or not szDesc then
+    Log("[ActivityTip OnOpen] Error, Not Found This Activity's Tip >>>>", nActivityID)
+    return 0
+  end
+  self.pPanel:Label_SetText(self.txtActivityName, i18n.Parse(tbActInfo.szName))
+  if szHelpKey and "" ~= szHelpKey then
+    self.szHelpKey = szHelpKey
+    self.pPanel:SetActive(self.btnHelp, true)
+  else
+    self.pPanel:SetActive(self.btnHelp, false)
+  end
+  local nValue = Calendar:GetActValueInfo(nActivityID)
+  if nValue > 0 then
+    self.pPanel:SetActive(self.txtActDegreeTip, true)
+    self.pPanel:SetActive(self.txtActDegree, true)
+    self.pPanel:Label_SetText(self.txtActDegree, nValue)
+  else
+    self.pPanel:SetActive(self.txtActDegreeTip, false)
+    self.pPanel:SetActive(self.txtActDegree, false)
+  end
+  local nLevelLimit = Calendar:GetActivityLevelMin(nActivityID)
+  local szLimit = "0"
+  if nLevelLimit and 0 ~= nLevelLimit then
+    szLimit = tostring(nLevelLimit)
+  end
+  self.pPanel:Label_SetText(self.txtLevelLimit, szLimit)
+  local szTimeDesc1, szTimeDesc2 = Calendar:GetActivityTipTimeDesc(szKey)
+  local szTime = i18n.Parse(szTimeDesc1) .. i18n.Parse(szTimeDesc2)
+  self.pPanel:Label_SetText(self.txtActivityTime, szTime)
+  if nActivityID == QinShiHuangLing.nDailyActivityID then
+    local nRemainTime = QinShiHuangLing:GetDailyRemainTime(me)
+    local szRemainTime = i18n.EasyGet("\n\229\137\169\228\189\153\229\129\156\231\149\153\230\151\182\233\151\180\239\188\154{0}\n\229\137\169\228\189\153\232\191\155\229\133\165\230\172\161\230\149\176\239\188\154{1}", Lib:TimeDesc(nRemainTime), DegreeCtrl:GetDegree(me, QinShiHuangLing.Daily.Degree.DailyEnterTimes))
+    szDesc = szDesc .. szRemainTime
+  end
+  if self.tbDynamicActivityDesc[szKey] then
+    szDesc = szDesc .. self.tbDynamicActivityDesc[szKey]()
+  end
+  szDesc = string.gsub(i18n.Parse(szDesc), "\\n", "\n")
+  self.pPanel:Label_SetText(self.txtActivityDesc, szDesc)
+  local tbRewards = Calendar:GetActivityReward(nActivityID)
+  self.pPanel:SetActive(self.txtAwardTip, not Lib:IsEmptyTB(tbRewards))
+  for i = 1, #tbRewards do
+    self.tbAwardsList:SetItem(i, tbRewards[i], true)
+  end
+  self:GoLeft()
+end
+
+function tbWnd:OnWndClose(szUiName)
+  if "UIActivity" == szUiName then
+    self:Close()
+  end
+end

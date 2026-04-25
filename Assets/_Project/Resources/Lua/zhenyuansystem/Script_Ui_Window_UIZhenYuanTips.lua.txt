@@ -1,0 +1,573 @@
+Ui.UIZhenyuanTips = Ui.UIZhenyuanTips or {}
+Ui.UIZhenyuanTips.tbDynamicOperationTypeEnum = {
+  UseEquip = 1,
+  UnuseEquip = 2,
+  ZhenYuanReplace = 3,
+  MarketSell = 4,
+  Deposit = 5,
+  TakeOut = 6
+}
+local tbWnd = Ui:CreateWindow("UIZhenyuanTips")
+tbWnd.tbDynamicButtonsTypeToIndex = {}
+local tbControls = {
+  EquipDetail = "imgBG/EquipDetail",
+  panelRoot = "imgBG",
+  btnShare = "imgBG/btnGroup/btnShare",
+  btnHawk = "imgBG/btnGroup/btnHawk",
+  btnSell = "imgBG/btnGroup/btnSell",
+  btnMoveToBox = "imgBG/btnGroup/btnMoveToBox",
+  btn1 = "imgBG/btnGroup/btn1"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbButtonGroupKey = {
+  [1] = "imgBG/btnGroup/btn1",
+  [2] = "imgBG/btnGroup/btn2",
+  [3] = "imgBG/btnGroup/btn3",
+  [4] = "imgBG/btnGroup/btn4",
+  [5] = "imgBG/btnGroup/btn5",
+  [6] = "imgBG/btnGroup/btn6"
+}
+tbWnd.tbOnClick = {
+  btnShare = function(self)
+    Ui:SetItemToChat(self.nItemId)
+    Ui:CloseWindow("UIBag")
+    Ui:CloseWindow("UICompareTipsZhenyuan")
+    self:Close()
+  end,
+  btnHawk = function(self)
+    self:Hawk()
+  end,
+  btnSell = function(self)
+    self:SellItem()
+  end,
+  btnMoveToBox = function(self)
+    local pItem = KItem.GetItemObj(self.nItemId)
+    if not pItem then
+      return
+    end
+    local tbBaseInfo = Item:GetItemBaseProp(pItem.dwTemplateId)
+    if tbBaseInfo.bForbidToBox and 1 == tbBaseInfo.bForbidToBox then
+      me.CenterMsg(i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\141\229\143\175\229\173\152\229\133\165\228\187\147\229\186\147"))
+      return
+    end
+    if me.GetFreeBoxCount() <= 0 then
+      me.CenterMsg(i18n.EasyGet("\229\176\145\228\190\160\228\187\147\229\186\147\229\183\178\230\187\161\239\188\140\230\151\160\230\179\149\229\173\152\229\133\165\231\137\169\229\147\129"))
+      return
+    end
+    if pItem.nPos ~= Item.EITEMPOS_BAG then
+      me.CenterMsg(i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\141\229\156\168\232\131\140\229\140\133\229\134\133"))
+      return
+    end
+    RemoteServer.MoveItemFromBagToBox(self.nItemId)
+    self:Close()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {}
+end
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.tbButtonOption = {
+    ZhenYuanEquip = {
+      bHideShareButton = false,
+      bHideHawkButton = false,
+      bHideSellButton = true,
+      {
+        self.CanXieXia,
+        i18n.EasyGet("\229\141\184\228\184\139"),
+        self.UnuseEquip,
+        nil,
+        Ui.UIZhenyuanTips.tbDynamicOperationTypeEnum.UnuseEquip
+      },
+      {
+        self.CanReplace,
+        i18n.EasyGet("\230\155\180\230\141\162"),
+        self.ZhenYuanReplace,
+        self.CheckRedPoint_Replace,
+        Ui.UIZhenyuanTips.tbDynamicOperationTypeEnum.ZhenYuanReplace
+      }
+    },
+    ItemBox = {
+      bHideShareButton = false,
+      bHideHawkButton = false,
+      bHideSellButton = false,
+      {
+        self.CanUseEquip,
+        i18n.EasyGet("\231\169\191\228\184\138"),
+        self.UseEquip,
+        nil,
+        Ui.UIZhenyuanTips.tbDynamicOperationTypeEnum.UseEquip
+      },
+      {
+        self.CanMarketSell,
+        i18n.EasyGet("\230\145\134\230\145\138"),
+        self.MarketSell,
+        nil,
+        Ui.UIZhenyuanTips.tbDynamicOperationTypeEnum.UseEquip
+      }
+    },
+    ViewEquip = {
+      bHideShareButton = true,
+      bHideHawkButton = true,
+      bHideSellButton = true
+    },
+    Warehouse_ItemBag = {
+      bHideShareButton = true,
+      bHideHawkButton = true,
+      bHideSellButton = true,
+      {
+        self.CanDeposit,
+        i18n.EasyGet("\229\173\152\229\133\165"),
+        self.MoveItemFromBagToBox,
+        nil,
+        Ui.UIZhenyuanTips.tbDynamicOperationTypeEnum.Deposit
+      }
+    },
+    Warehouse_ItemBox = {
+      bHideShareButton = true,
+      bHideHawkButton = true,
+      bHideSellButton = true,
+      {
+        self.CanDeposit,
+        i18n.EasyGet("\229\143\150\229\135\186"),
+        self.MoveItemFromBoxToBag,
+        nil,
+        Ui.UIZhenyuanTips.tbDynamicOperationTypeEnum.TakeOut
+      }
+    }
+  }
+  self.tbButtonGroup = Ui:NewButtonGroup(self, self.tbButtonGroupKey, false, function(self, nIndex)
+    if self.tbFuncOnButtonClick[nIndex] then
+      self.tbFuncOnButtonClick[nIndex](self)
+    end
+  end)
+  self.tbButtonGroup:SetActiveAll(false)
+  self.tbFuncOnButtonClick = {}
+  self.tbTradePanel = {}
+  self.tbEquipDetail = Ui:CreatePanel("UIZhenyuanEquipDetail", self.EquipDetail, self)
+end
+
+function tbWnd:OnOpen(tbInfo)
+  self.nItemId = tbInfo.nItemId
+  self.nTemplateId = tbInfo.nTemplateId
+  self.nFaction = tbInfo.nFaction or me.nFaction
+  self.nFactionSect = tbInfo.nFactionSect or me.nFactionSect
+  self.nSex = tbInfo.nSex or me.GetNpc().GetBodySex()
+  self.szOpt = tbInfo.szOpt
+  self.nSeries = tbInfo.nSeries
+  self.tbTradeInfo = nil
+  if tbInfo.tbItemExtParams and tbInfo.tbItemExtParams.tbTradeInfo then
+    self.tbTradeInfo = tbInfo.tbItemExtParams.tbTradeInfo
+  end
+  self.pPanel:Object_SetLocalPosition(self.panelRoot, tbInfo.pos)
+  if 0 == self.nItemId then
+    self.nItemId = nil
+  end
+  if self.nItemId then
+    local pItem = KItem.GetItemObj(self.nItemId)
+    self.pItem = pItem
+    self.nTemplateId = pItem.dwTemplateId
+  else
+    self.pItem = nil
+  end
+  self.tbFuncOnButtonClick = {}
+  local tbDetailInfo = {
+    szOpt = self.szOpt,
+    pItem = self.pItem,
+    nItemId = self.nItemId,
+    nTemplateId = self.nTemplateId,
+    nFaction = self.nFaction,
+    nFactionSect = self.nFactionSect,
+    nSex = self.nSex,
+    pAsyncData = tbInfo.pAsyncData,
+    bIsCompare = self.ClassName == "UICompareTipsZhenyuan",
+    tbItemExtParams = tbInfo.tbItemExtParams,
+    tbLinkInfo = tbInfo.tbLinkInfo,
+    nSeries = self.nSeries
+  }
+  self.tbEquipDetail:Update(tbDetailInfo)
+  self:UpdateButton()
+  self:UpdateTradePanel()
+end
+
+function tbWnd:UpdateButton()
+  local pItem = self.pItem
+  local szOpt = self.szOpt
+  if pItem and szOpt and self.tbButtonOption[szOpt] and not self.pAsyncData then
+    self.tbButtonGroup:SetActiveAll(true)
+    self.tbDynamicButtonsTypeToIndex = {}
+    local nIndex = 1
+    for _, tbButton in ipairs(self.tbButtonOption[szOpt]) do
+      local fnVisible, szBtnName, fnCallback, fnCheckRedPoint, nButtonType = table.unpack(tbButton)
+      if fnVisible and fnVisible(self) then
+        local bLightRedPoint = fnCheckRedPoint and fnCheckRedPoint(self, pItem.dwId) or false
+        self.tbButtonGroup:SetActive(nIndex, true)
+        if type(szBtnName) == "string" then
+          self.tbButtonGroup:SetButtonText(nIndex, szBtnName)
+        elseif type(szBtnName) == "function" then
+          self.tbButtonGroup:SetButtonText(nIndex, szBtnName(tbWnd))
+        end
+        self.tbFuncOnButtonClick[nIndex] = fnCallback
+        if bLightRedPoint then
+          self.tbButtonGroup:LightRedPoint(nIndex)
+        else
+          self.tbButtonGroup:FadeRedPoint(nIndex)
+        end
+        self.tbDynamicButtonsTypeToIndex[nButtonType] = nIndex
+        nIndex = nIndex + 1
+      end
+    end
+    for i = nIndex, #self.tbButtonGroupKey do
+      self.tbButtonGroup:SetActive(i, false)
+      self.tbButtonGroup:FadeRedPoint(i)
+      self.tbFuncOnButtonClick[i] = nil
+    end
+    self.pPanel:SetActive(tbControls.btnShare, not self.tbButtonOption[szOpt].bHideShareButton)
+    self.pPanel:SetActive(tbControls.btnHawk, false)
+    local bShowSell = not self.tbButtonOption[szOpt].bHideSellButton
+    local bCanSell, _ = Item.tbItemSell:CheckCanSellItem(pItem.dwTemplateId)
+    bCanSell = bCanSell or HonorLevel:CanSell(me, pItem.dwId)
+    self.pPanel:SetActive(tbControls.btnSell, bCanSell and bShowSell)
+    local nCanMoveToBox = false
+    local nVipState = false
+    if pItem and self.szOpt == "ItemBox" then
+      local tbBaseInfo = Item:GetItemBaseProp(pItem.dwTemplateId)
+      if tbBaseInfo.bForbidToBox and 0 == tbBaseInfo.bForbidToBox then
+        nCanMoveToBox = true
+      end
+      local weekCardLeft = WeekMonthCard:GetWeekCardLeftDay(me)
+      local bMonthCardState = WeekMonthCard:CheckMonthCardState(me)
+      if weekCardLeft > 0 or bMonthCardState then
+        nVipState = true
+      end
+    end
+    self.pPanel:SetActive(self.btnMoveToBox, nCanMoveToBox and nVipState)
+    self.pPanel:Label_SetText(self.btnMoveToBox .. "/Text", i18n.EasyGet("\231\167\187\229\133\165\228\187\147\229\186\147"))
+    return
+  end
+  self.tbButtonGroup:SetActiveAll(false)
+  self.pPanel:SetActive(tbControls.btnShare, false)
+  self.pPanel:SetActive(tbControls.btnHawk, false)
+  self.pPanel:SetActive(tbControls.btnSell, false)
+  self.pPanel:SetActive(tbControls.btnMoveToBox, false)
+end
+
+function tbWnd:UpdateTradePanel()
+  if not self.tbTradeInfo then
+    for _, szWndType in ipairs(self.tbTradePanel) do
+      self.pPanel:SetActive(szWndType, false)
+    end
+    return
+  end
+  local bNotInTBPanel = true
+  local szWndType = self.tbTradeInfo.szWndType
+  for k, v in ipairs(self.tbTradePanel) do
+    if szWndType == v then
+      bNotInTBPanel = false
+      break
+    end
+  end
+  if bNotInTBPanel then
+    local szWnd = Ui:CreatePanel(szWndType, szWndType, self)
+    table.insert(self.tbTradePanel, szWndType)
+    self.tbTradePanelObj = self.tbTradePanelObj or {}
+    self.tbTradePanelObj[szWndType] = szWnd
+  end
+  if "UIMarketStallBuyPanel" == szWndType then
+    self.tbTradePanelObj[szWndType]:OnOpen(self.tbTradeInfo.nStallType, self.tbTradeInfo.nSeTypeId, self.tbTradeInfo.nStallItemTempId, self.tbTradeInfo.tbItem)
+  elseif "UIMarketStallSellPanel" == szWndType then
+    self.tbTradePanelObj[szWndType]:OnOpen(self.tbTradeInfo.nStallType, self.tbTradeInfo.nShowType, self.tbTradeInfo.index, self.tbTradeInfo.bBag, self.tbTradeInfo.tbItem and self.tbTradeInfo.tbItem.nPrice, self.tbTradeInfo.nTimeout)
+  elseif "UITradeItemPanel" == szWndType then
+    self.tbTradePanelObj[szWndType]:OnOpen(self.tbTradeInfo.nItemId, self.tbTradeInfo.nOnTradeCount, self.tbTradeInfo.nMaxCount, self.tbTradeInfo.bOnTrade)
+  end
+  if tbWnd.szlastPanel then
+    self.pPanel:SetActive(tbWnd.szlastPanel, false)
+  end
+  tbWnd.szlastPanel = szWndType
+  self.pPanel:SetActive(szWndType, true)
+end
+
+function tbWnd:CanUseEquip()
+  if not self.nItemId then
+    return false
+  end
+  return true
+end
+
+function tbWnd:CanMarketSell()
+  if not self.nItemId then
+    return false
+  end
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return false
+  end
+  if 1 ~= pItem.dwTradeLimitType then
+    return false
+  end
+  local nCanMarketStall = false
+  self.nMarketType = nil
+  nCanMarketStall, self.nMarketType = MarketStallBase:CheckMarketSellItemTypeSettings(pItem)
+  return nCanMarketStall
+end
+
+function tbWnd:CanDeposit()
+  if not self.nItemId then
+    return false
+  end
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return false
+  end
+  return true
+end
+
+function tbWnd:CanSell()
+  if not self.nItemId then
+    return false
+  end
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return false
+  end
+  if not Shop:CanItemSell(me, pItem.dwTemplateId) then
+    return false
+  end
+  local nPrice, szMoneyType = Shop:GetSellSumPrice(me, self.nTemplateId, pItem and pItem.nCount or 1)
+  self.nPrice = nPrice
+  self.szMoneyType = szMoneyType
+  if not self.szMoneyType then
+    return false
+  end
+  if not self.nPrice then
+    return false
+  end
+  return true
+end
+
+function tbWnd:UseEquip(bIgnoreWeaponLimit)
+  Item.Equip:UseEquip(bIgnoreWeaponLimit, self.nItemId)
+  self:OnClickButtonClose()
+end
+
+function tbWnd:MarketSell()
+  if self.nMarketType and self.nItemId then
+    MarketStallBase:QuickSell(self.nMarketType, self.nItemId)
+  end
+end
+
+function tbWnd:MoveItemFromBagToBox()
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return
+  end
+  local tbBaseInfo = Item:GetItemBaseProp(pItem.dwTemplateId)
+  if tbBaseInfo.bForbidToBox and 1 == tbBaseInfo.bForbidToBox then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\141\229\143\175\229\173\152\229\133\165\228\187\147\229\186\147"))
+    return
+  end
+  if me.GetFreeBoxCount() <= 0 then
+    me.CenterMsg(i18n.EasyGet("\229\176\145\228\190\160\228\187\147\229\186\147\229\183\178\230\187\161\239\188\140\230\151\160\230\179\149\229\173\152\229\133\165\231\137\169\229\147\129"))
+    return
+  end
+  if pItem.nPos ~= Item.EITEMPOS_BAG then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\141\229\156\168\232\131\140\229\140\133\229\134\133"))
+    return
+  end
+  RemoteServer.MoveItemFromBagToBox(self.nItemId)
+  if Ui:WindowVisible("UICompareTipsZhenyuan") then
+    Ui:CloseWindow("UICompareTipsZhenyuan")
+  end
+  self:Close()
+end
+
+function tbWnd:MoveItemFromBoxToBag()
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return
+  end
+  if me.GetFreeBagCount() <= 0 then
+    me.CenterMsg(i18n.EasyGet("\229\176\145\228\190\160\232\131\140\229\140\133\229\183\178\230\187\161\239\188\140\230\151\160\230\179\149\229\143\150\229\135\186\231\137\169\229\147\129"))
+    return
+  end
+  if pItem.nPos ~= Item.EITEMPOS_BOX then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\141\229\156\168\228\187\147\229\186\147\229\134\133"))
+    return
+  end
+  RemoteServer.MoveItemFromBoxToBag(self.nItemId)
+  if Ui:WindowVisible("UICompareTipsZhenyuan") then
+    Ui:CloseWindow("UICompareTipsZhenyuan")
+  end
+  self:Close()
+end
+
+function tbWnd:Hawk()
+  if not ChatMgr:CheckSendMsg(ChatMgr.ChannelType.Public, ChatMgr.ChannelType.Hawk, "check", true) then
+    return
+  end
+  Ui:SetHawkToChat(self.nItemId)
+  Ui:CloseWindow("UIBag")
+  Ui:CloseWindow("UICompareTipsZhenyuan")
+  self:Close()
+end
+
+function tbWnd:SellItem()
+  if not self.nItemId then
+    return
+  end
+  if self:IsSecretBook(self.nItemId) then
+    self:ShowSellSecretBook(self.nTemplateId, self.nItemId, 1)
+    return
+  end
+  if Item.tbItemSell:CheckCanSellItem(self.nTemplateId) then
+    Ui:OpenWindow("UIItemSell", self.nItemId, self.nTemplateId)
+    self:OnClickButtonClose()
+    return
+  end
+  if HonorLevel:CanSell(me, self.nItemId) then
+    HonorLevel:SellReq(self.nItemId)
+    self:OnClickButtonClose()
+    return
+  end
+end
+
+function tbWnd:ShowSellSecretBook(nTemplateId, nItemId, nSellCount)
+  local function fnConfirm()
+    RemoteServer.OnItemSellRequest("SellPer", nItemId, nSellCount)
+    
+    self:Close()
+  end
+  
+  local pItem = KItem.GetItemObj(nItemId)
+  local nXiuWeiNum = Item.SecretBook:GetHuishouXiuweiNum(pItem)
+  local szCurrencyType, nNum = Item.tbItemSell:GetSellCurrencyValue(nTemplateId)
+  local szMsg = i18n.EasyGet("\232\175\165\231\167\152\231\177\141\232\162\171\229\155\158\230\148\182\229\144\142\239\188\140\229\143\175\232\142\183\229\190\151{0}\233\173\130\231\159\179\229\146\140{1}\231\130\185\228\191\174\228\184\186", nNum, nXiuWeiNum)
+  me.MsgBox(szMsg, {
+    {
+      i18n.szOk,
+      fnConfirm
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function tbWnd:IsSecretBook(nItemId)
+  if not nItemId then
+    return false
+  end
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return false
+  end
+  if pItem.szClass == Item.SecretBook.szClass then
+    return true
+  end
+end
+
+function tbWnd:CanXieXia()
+  if not self.nItemId then
+    return false
+  end
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return false
+  end
+  if pItem.szClass == "HorseEquip" then
+    return false
+  end
+  return true
+end
+
+function tbWnd:CanTrade()
+  return P2PTradeManager:CheckItemCanTrade(self.nItemId)
+end
+
+function tbWnd:UnuseEquip()
+  if not self.nItemId then
+    return
+  end
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return
+  end
+  RemoteServer.UnuseEquipById(self.nItemId)
+  self:OnClickButtonClose()
+end
+
+function tbWnd:ZhenYuanReplace()
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return
+  end
+  local nSlot = Item:GetExtEquipSlot(pItem)
+  Ui:OpenWindow("UIZhenyuanEquip", nSlot)
+  self:OnClickButtonClose()
+end
+
+function tbWnd:CanInset()
+  if me.nLevel < Item.Stone.MinInsetRoleLevel then
+    return false
+  end
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return false
+  end
+  local nEquipPos = KItem.GetEquipPos(pItem.dwTemplateId)
+  if nEquipPos < Item.EQUIPPOS_HELM or nEquipPos > Item.EQUIPPOS_PENDANT then
+    return false
+  end
+  if pItem.nHoleCount and pItem.nHoleCount <= 0 then
+    return false
+  end
+  return true
+end
+
+function tbWnd:CloseByDefault()
+  self:OnClickButtonClose()
+end
+
+function tbWnd:OnClickButtonClose()
+  Ui:CloseWindow("UICompareTipsZhenyuan")
+  self:Close()
+end
+
+function tbWnd:OnClickEmptyClose()
+  Ui:CloseWindow("UICompareTipsZhenyuan")
+  self:Close()
+end
+
+function tbWnd:CanReplace()
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return false
+  end
+  local nEquipPos = pItem.nEquipPos
+  if nEquipPos ~= Item.EQUIPPOS_EXTEND then
+    return false
+  end
+  return true
+end
+
+function tbWnd:CheckRedPoint_Replace()
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return false
+  end
+  local nEquipPos = pItem.nEquipPos
+  if nEquipPos ~= Item.EQUIPPOS_EXTEND then
+    return false
+  end
+  local nSlot = Item:GetExtEquipSlot(pItem)
+  if RedPointMgr:CheckEvent(Item.ZhenYuan.tbEquipPosRedPoint[nSlot].nEquipRed) then
+    return true
+  end
+  return false
+end
+
+function tbWnd:OnClose()
+  Ui:CloseWindow("UICompareTipsZhenyuan")
+end

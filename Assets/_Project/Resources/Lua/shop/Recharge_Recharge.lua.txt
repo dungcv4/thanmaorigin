@@ -1,0 +1,667 @@
+Recharge.SAVE_GROUP = GetGroupKey("Recharge")
+Recharge.KEY_TOTAL_RECHARGE_LOW = 1
+Recharge.KEY_THIS_YEAR = 2
+Recharge.KEY_THIS_YEAR_RECHARGE_LOW = 3
+Recharge.KEY_LAST_YEAR_RECHARGE_LOW = 4
+Recharge.KEY_TOTAL_RECHARGE_HIGH = 5
+Recharge.KEY_THIS_YEAR_RECHARGE_HIGH = 6
+Recharge.KEY_LAST_YEAR_RECHARGE_HIGH = 7
+Recharge.KEY_TOTAL_RECHARGE_GROUP = {
+  LOW = Recharge.KEY_TOTAL_RECHARGE_LOW,
+  HIGH = Recharge.KEY_TOTAL_RECHARGE_HIGH
+}
+Recharge.KEY_THIS_YEAR_RECHARGE_GROUP = {
+  LOW = Recharge.KEY_THIS_YEAR_RECHARGE_LOW,
+  HIGH = Recharge.KEY_THIS_YEAR_RECHARGE_HIGH
+}
+Recharge.KEY_LAST_YEAR_RECHARGE_GROUP = {
+  LOW = Recharge.KEY_LAST_YEAR_RECHARGE_LOW,
+  HIGH = Recharge.KEY_LAST_YEAR_RECHARGE_HIGH
+}
+Recharge.BUY_TIMES_SAVE_GROUP = GetGroupKey("RechargeBuyTimes")
+Recharge.LAST_BUY_SAVE_GROUP = GetGroupKey("RechargeLastBuy")
+Recharge.LIMIT_BUY_SAVE_GROUP = GetGroupKey("RechargeLimitBuy")
+Recharge.FIRST_RECHARGE_GROUP = GetGroupKey("FirstRecharge")
+Recharge.KEY_GET_FIRST_RECHARGE = 1
+Recharge.KEY_FIRST_RECHARGE_TIME = 2
+Recharge.KEY_GET_AWARD = 3
+Recharge.nFirstRechargeJoinLevel = 1
+Recharge.nFirstRechargeTotalDay = 3
+Recharge.nFirstRechargeAwardId = 1064
+Recharge.tbFirstRechargeDayBit = {
+  [1] = 1,
+  [2] = 2,
+  [3] = 4,
+  MAX = 8
+}
+Recharge.nMoney2ExpProportion = 1
+Recharge.MON_DAY_LIMIT = 7
+Recharge.WEEK_DAY_LIMIT = 3
+Recharge.SHORTCUT_DAY_GIFT_LIMIT = 21
+Recharge.SINGLE_DAY_GIFT_LIMIT = 27
+Recharge.CARD_BUY_DAY_UPDATE_TIME = 14400
+Recharge.OFFLINE_AWARD_DATA_SKEY = "RechargeOfflineAward"
+Recharge.PRICE_RATE = 100
+Recharge.tbProductClassName = {
+  CLASS_AWARD_GOLD = "AWARD_GOLD",
+  CLASS_AWARD_YUANBAO = "AWARD_YUANBAO",
+  CLASS_AWARD_ITEM = "AWARD_ITEM",
+  CLASS_DAILY_GIFT = "DAILY_GIFT",
+  CLASS_SHORTCUT_DAILY_GIFT = "SHORTCUT_DAILY_GIFT",
+  CLASS_WEEK_CARD = "WEEK_CARD",
+  CLASS_MONTH_CARD = "MONTH_CARD",
+  CLASS_GROWUP_INVEST = "GROWUP_INVEST",
+  CLASS_BATTLE_PASS = "BATTLE_PASS",
+  CLASS_LEVEL_UP_AWARDS = "LEVEL_UP_AWARDS",
+  CLASS_CHEAP_MONTH_GIFT = "CHEAP_MONTH_GIFT",
+  CLASS_RETURNER_FUND = "RETURNER_FUND",
+  CLASS_RENEW_MONTH_CARD = "RENEM_MONTH_CARD",
+  CLASS_RENEW_WEEK_CARD = "RENEW_WEEK_CARD",
+  CLASS_RENEW_DAILY_GIFT = "RENEW_DAILY_GIFT",
+  CLASS_RENEW_SHORTCUT_DAILY_GIFT = "RENEW_SHORTCUT_DAILY_GIFT"
+}
+Recharge.tbCanRechargeChannels = {
+  NONE = 0,
+  CLIENT = 1,
+  WEB = 2,
+  ALL = 3
+}
+Recharge.LIMIT_DIFF_TIME = 14400
+Recharge.LIMIT_TYPE = {
+  DAY = 1,
+  WEEK = 2,
+  MONTH = 3,
+  CUSTOM = 4
+}
+Recharge.tbSortCompare = {
+  [Recharge.tbProductClassName.CLASS_GROWUP_INVEST] = function(a, b)
+    return a.nProductId < b.nProductId
+  end
+}
+Recharge.USER_VALUE_EXT_RATE = 1.0E9
+
+function Recharge:CheckExpMoneyRatio()
+  local nMoney2ExpProportion
+  for _, tbV in pairs(self.tbProductSettings) do
+    if tbV.nVipExp and tbV.nVipExp > 0 and tbV.nPrice and tbV.nPrice > 0 then
+      local nRate1 = tbV.nVipExp / tbV.nPrice
+      nMoney2ExpProportion = nMoney2ExpProportion or nRate1
+      if nMoney2ExpProportion ~= nRate1 then
+        LogErr(string.format("Recharge:CheckExpMoneyRatio Error!! nMoney2ExpProportion:%s tbV.nVipExp:%s, tbV.nPrice:%s", nMoney2ExpProportion, tbV.nVipExp, tbV.nPrice))
+        return false
+      end
+      if tbV.nVipExpFromWeb and tbV.nVipExpFromWeb > 0 and tbV.nWebPrice and tbV.nWebPrice > 0 then
+        local nRate2 = tbV.nVipExpFromWeb / tbV.nWebPrice
+        if nRate1 ~= nRate2 then
+          LogErr(string.format("Recharge:CheckExpMoneyRatio Error  nRate1:%s ~= nRate2:%s!!", nRate1, nRate2))
+          return false
+        end
+      end
+    end
+  end
+  Recharge.nMoney2ExpProportion = nMoney2ExpProportion
+  return true
+end
+
+function Recharge:CheckProductCfg()
+  Log("Recharge:CheckProductCfg")
+  local szAwardType, nCntIdx, nTemplateId
+  
+  local function checkHelper(tbAwards, nProductId)
+    for _, tbAward in ipairs(tbAwards) do
+      szAwardType = tbAward[1]
+      if not Player.AwardType[szAwardType] then
+        LogErr("Recharge:CheckProductCfg fail, award type is invalid ", nProductId, szAwardType)
+        return false
+      end
+      nCntIdx = Player.AwardTypeCountIndex[Player.AwardType[szAwardType]]
+      if not nCntIdx then
+        LogErr("Recharge:CheckProductCfg fail, count index is not found", nProductId, szAwardType)
+        return false
+      end
+      if Player.AwardType[szAwardType] == Player.award_type_money then
+        local nMaxNum = 100000
+        if not tbAward[nCntIdx] or nMaxNum < tbAward[nCntIdx] or tbAward[nCntIdx] <= 0 then
+          LogErr("Recharge:CheckProductCfg fail, money count is invalid", nProductId, tbAward[nCntIdx])
+          return false
+        end
+      elseif Player.AwardType[szAwardType] == Player.award_type_item then
+        if 3 == nCntIdx then
+          local nMaxNum = 1000
+          if not tbAward[nCntIdx] or tbAward[nCntIdx] <= 0 or nMaxNum < tbAward[nCntIdx] then
+            LogErr("Recharge:CheckProductCfg fail, item num is invalid", nProductId, tbAward[nCntIdx])
+            return false
+          end
+          nTemplateId = tbAward[2]
+          if not nTemplateId or type(nTemplateId) ~= "number" then
+            LogErr("Recharge:CheckProductCfg fail, item id is invalid ", nProductId, nTemplateId)
+            return false
+          end
+          local tbBase = nTemplateId and Item:GetItemBaseProp(nTemplateId)
+          if not tbBase then
+            LogErr("Recharge:CheckProductCfg fail, item is not exist ", nProductId, nTemplateId)
+            return false
+          end
+          local nMaxCount = tbBase.nStackMax > 0 and tbBase.nStackMax or 1
+          if nMaxCount < tbAward[nCntIdx] then
+            LogErr("Recharge:CheckProductCfg fail, item num is too big", nProductId, tbAward[nCntIdx], nMaxCount)
+            return false
+          end
+        end
+      else
+        LogErr("Recharge:CheckProductCfg fail, award type is not supported", nProductId, szAwardType)
+        return false
+      end
+    end
+    return true
+  end
+  
+  for _, tbList in pairs(self.tbClassSettings) do
+    for _, tbInfo in ipairs(tbList) do
+      if not checkHelper(tbInfo.tbAwards or {}, tbInfo.nProductId) then
+        return false
+      end
+      if not checkHelper(tbInfo.tbFirstExtraAwards or {}, tbInfo.nProductId) then
+        return false
+      end
+      if not checkHelper(tbInfo.tbVipExtraAwards or {}, tbInfo.nProductId) then
+        return false
+      end
+      if not checkHelper(tbInfo.tbExtraAwards or {}, tbInfo.nProductId) then
+        return false
+      end
+    end
+  end
+  return true
+end
+
+function Recharge:GetProductBuyTimes(pPlayer, nProductId)
+  return pPlayer.GetUserValue(self.BUY_TIMES_SAVE_GROUP, nProductId)
+end
+
+function Recharge:GetProductLastBuy(pPlayer, nProductId)
+  return pPlayer.GetUserValue(self.LAST_BUY_SAVE_GROUP, nProductId)
+end
+
+function Recharge:GetProductIdFromChannelProductId(szChannelProductId)
+  if not szChannelProductId or "" == szChannelProductId then
+    LogErr("Recharge:GetProductIdFromChannelProductId  invaild szChannelProductId!!", szChannelProductId)
+    return nil
+  end
+  local nProductId = self.ChannelProductId2ProductId[szChannelProductId]
+  if not nProductId then
+    LogErr("Recharge:GetProductIdFromChannelProductId  invaild szChannelProductId!!", szChannelProductId)
+    return nil
+  end
+  return nProductId
+end
+
+Recharge.ProductSettingFilePath = "Setting/Recharge/RechargeProducts.tab"
+
+function Recharge:LoadProducts()
+  local tbSettings = Lib:LoadTabFileEx(self.ProductSettingFilePath, "dsssssdddddddsssdssssdddssssssdddddddd", "nProductId", {
+    "nProductId",
+    "szChannelProductId",
+    "szWebProductId",
+    "szProductName",
+    "szProductDesc",
+    "szProductClass",
+    "nPrice",
+    "nWebPrice",
+    "nVipExp",
+    "nVipExpExt",
+    "nVipExpFromWeb",
+    "nVipExpExtFromWeb",
+    "nVipLevelLimit",
+    "szAwards",
+    "szFirstExtraAwards",
+    "nVipExtraLevel",
+    "szVipExtraAwards",
+    "szExtraAwards",
+    "szDoubleBeginTime",
+    "szDoubleEndTime",
+    "szShowAwardId",
+    "nShowPrice",
+    "bCanTriggerFirstRush",
+    "nConditionFailCompensate",
+    "szPriceUnit",
+    "szWebPriceUnit",
+    "szTimeFrameStart",
+    "szTimeFrameEnd",
+    "szTimeSaleStart",
+    "szTimeSaleClose",
+    "nSaleLimitGroupId",
+    "nSaleLimitTaskId",
+    "nSaleLimitCount",
+    "nSaleLimitType",
+    "nIconId",
+    "nSaleLimitVersionGroupId",
+    "nSaleLimitVersionTaskId",
+    "nSaleLimitVersion"
+  }, nil, nil, false)
+  self.tbProductSettings = {}
+  self.tbClassSettings = {}
+  self.ChannelProductId2ProductId = {}
+  for _, tbProductInfo in pairs(tbSettings) do
+    tbProductInfo.nCanRechargeChannels = self.tbCanRechargeChannels.NONE
+    if tbProductInfo.szChannelProductId == "" and tbProductInfo.szWebProductId == "" then
+      LogErr(string.format("Recharge:LoadTabFile:%s  Error szChannelProductId and szWebProductId both empty !!", self.ProductSettingFilePath))
+      return -1
+    end
+    if tbProductInfo.szChannelProductId ~= "" then
+      if self.ChannelProductId2ProductId[tbProductInfo.szChannelProductId] then
+        LogErr(string.format("Recharge:LoadTabFile:%s  Error Duplicate szChannelProductId:%s!!", self.ProductSettingFilePath, tbProductInfo.szChannelProductId))
+        return -1
+      end
+      if tbProductInfo.nPrice <= 0 then
+        LogErr(string.format("Recharge:LoadTabFile:%s  Error nProductId:%d tbProductInfo.nPrice(%d) <= 0!!", self.ProductSettingFilePath, tbProductInfo.nProductId, tbProductInfo.nPrice))
+        return -1
+      end
+      self.ChannelProductId2ProductId[tbProductInfo.szChannelProductId] = tbProductInfo.nProductId
+      tbProductInfo.nCanRechargeChannels = tbProductInfo.nCanRechargeChannels | self.tbCanRechargeChannels.CLIENT
+    end
+    if tbProductInfo.szWebProductId ~= "" then
+      if self.ChannelProductId2ProductId[tbProductInfo.szWebProductId] then
+        LogErr(string.format("Recharge:LoadTabFile:%s  Error Duplicate szWebProductId:%s!!", self.ProductSettingFilePath, tbProductInfo.szWebProductId))
+        return -1
+      end
+      if tbProductInfo.nWebPrice <= 0 then
+        LogErr(string.format("Recharge:LoadTabFile:%s  Error nProductId:%d tbProductInfo.nWebPrice(%d) <= 0!!", self.ProductSettingFilePath, tbProductInfo.nProductId, tbProductInfo.nWebPrice))
+        return -1
+      end
+      self.ChannelProductId2ProductId[tbProductInfo.szWebProductId] = tbProductInfo.nProductId
+      tbProductInfo.nCanRechargeChannels = tbProductInfo.nCanRechargeChannels | self.tbCanRechargeChannels.WEB
+    end
+    if tbProductInfo.szAwards ~= "" then
+      tbProductInfo.tbAwards = Lib:GetAwardFromString(tbProductInfo.szAwards)
+    end
+    tbProductInfo.szAwards = nil
+    if tbProductInfo.szFirstExtraAwards ~= "" then
+      tbProductInfo.tbFirstExtraAwards = Lib:GetAwardFromString(tbProductInfo.szFirstExtraAwards)
+    end
+    tbProductInfo.szFirstExtraAwards = nil
+    if tbProductInfo.szVipExtraAwards ~= "" then
+      tbProductInfo.tbVipExtraAwards = Lib:GetAwardFromString(tbProductInfo.szVipExtraAwards)
+    end
+    tbProductInfo.szVipExtraAwards = nil
+    if tbProductInfo.szExtraAwards ~= "" then
+      tbProductInfo.tbExtraAwards = Lib:GetAwardFromString(tbProductInfo.szExtraAwards)
+    end
+    tbProductInfo.szExtraAwards = nil
+    if tbProductInfo.szDoubleBeginTime ~= "" then
+      tbProductInfo.nDoubleBeginTime = Lib:ParseDateTime(tbProductInfo.szDoubleBeginTime)
+    end
+    tbProductInfo.szDoubleBeginTime = nil
+    if tbProductInfo.szDoubleEndTime ~= "" then
+      tbProductInfo.nDoubleEndTime = Lib:ParseDateTime(tbProductInfo.szDoubleEndTime)
+    end
+    tbProductInfo.szDoubleEndTime = nil
+    if tbProductInfo.szShowAwardId ~= "" then
+      tbProductInfo.tbShowAwardId = load(string.format("return {%s}", tbProductInfo.szShowAwardId))()
+    end
+    tbProductInfo.szShowAwardId = nil
+    tbProductInfo.bCanTriggerFirstRush = tbProductInfo.bCanTriggerFirstRush and tbProductInfo.bCanTriggerFirstRush > 0
+    self.tbClassSettings[tbProductInfo.szProductClass] = self.tbClassSettings[tbProductInfo.szProductClass] or {}
+    table.insert(self.tbClassSettings[tbProductInfo.szProductClass], tbProductInfo)
+    local fnCmp = self.tbSortCompare[tbProductInfo.szProductClass]
+    fnCmp = fnCmp or function(a, b)
+      if 0 ~= a.nPrice and 0 ~= b.nPrice then
+        return a.nPrice < b.nPrice
+      elseif 0 ~= a.nWebPrice and 0 ~= b.nWebPrice then
+        return a.nWebPrice < b.nWebPrice
+      else
+        return a.nProductId < b.nProductId
+      end
+    end
+    table.sort(self.tbClassSettings[tbProductInfo.szProductClass], fnCmp)
+  end
+  if self.tbClassSettings[self.tbProductClassName.CLASS_DAILY_GIFT] then
+    table.insert(self.tbClassSettings[self.tbProductClassName.CLASS_DAILY_GIFT], self.tbClassSettings[self.tbProductClassName.CLASS_SHORTCUT_DAILY_GIFT][1])
+  end
+  self.tbProductSettings = tbSettings
+  self.tbClassSettings = SetReadOnly(self.tbClassSettings)
+  self.tbProductSettings = SetReadOnly(self.tbProductSettings)
+  Validator:Register(Recharge.CheckExpMoneyRatio, Recharge)
+  Recharge:CheckExpMoneyRatio()
+  Validator:Register(Recharge.CheckProductCfg, Recharge)
+end
+
+Recharge:LoadProducts()
+
+function Recharge:GetAllProductSetting()
+  return self.tbProductSettings
+end
+
+function Recharge:GetProductSettingById(nProductId)
+  return self.tbProductSettings[nProductId]
+end
+
+function Recharge:GetAwardGoldSettings()
+  return self.tbClassSettings[self.tbProductClassName.CLASS_AWARD_GOLD]
+end
+
+function Recharge:GetAwardYuanBaoSettings()
+  return self.tbClassSettings[self.tbProductClassName.CLASS_AWARD_YUANBAO]
+end
+
+function Recharge:GetAwardItemSettings()
+  return self.tbClassSettings[self.tbProductClassName.CLASS_AWARD_ITEM]
+end
+
+function Recharge:GetDailyGiftSettings()
+  return self.tbClassSettings[self.tbProductClassName.CLASS_DAILY_GIFT]
+end
+
+function Recharge:GetShortcutDailGiftSetting()
+  local tbSetting = self.tbClassSettings[self.tbProductClassName.CLASS_SHORTCUT_DAILY_GIFT]
+  if not tbSetting then
+    return nil
+  end
+  return tbSetting[1]
+end
+
+function Recharge:IsRenewShortcutDailyGift(nProductId)
+  for _, tbInfo in ipairs(self.tbClassSettings[self.tbProductClassName.CLASS_RENEW_SHORTCUT_DAILY_GIFT] or {}) do
+    if tbInfo.nProductId == nProductId then
+      return true
+    end
+  end
+  return false
+end
+
+function Recharge:GetWeekCardSetting()
+  local tbSetting = self.tbClassSettings[self.tbProductClassName.CLASS_WEEK_CARD]
+  if not tbSetting then
+    return nil
+  end
+  return tbSetting[1]
+end
+
+function Recharge:IsRenewWeekCard(nProductId)
+  for _, tbIfno in ipairs(self.tbClassSettings[self.tbProductClassName.CLASS_RENEW_WEEK_CARD] or {}) do
+    if tbIfno.nProductId == nProductId then
+      return true
+    end
+  end
+  return false
+end
+
+function Recharge:GetMonthCardSetting()
+  local tbSetting = self.tbClassSettings[self.tbProductClassName.CLASS_MONTH_CARD]
+  if not tbSetting then
+    return nil
+  end
+  return tbSetting[1]
+end
+
+function Recharge:IsRenewMonthCard(nProductId)
+  for _, tbInfo in ipairs(self.tbClassSettings[self.tbProductClassName.CLASS_RENEW_MONTH_CARD] or {}) do
+    if tbInfo.nProductId == nProductId then
+      return true
+    end
+  end
+  return false
+end
+
+function Recharge:GetGrowupInvestSettings()
+  return self.tbClassSettings[self.tbProductClassName.CLASS_GROWUP_INVEST]
+end
+
+function Recharge:GetHolidayPackageSettings()
+  return self.tbClassSettings[self.tbProductClassName.CLASS_HOLIDAY_PACKAGE]
+end
+
+function Recharge:GetLevelUpAwardsSetting()
+  return self.tbClassSettings[self.tbProductClassName.CLASS_LEVEL_UP_AWARDS]
+end
+
+function Recharge:GetReturnerFundSetting()
+  local tbSetting = self.tbClassSettings[self.tbProductClassName.CLASS_RETURNER_FUND]
+  if not tbSetting then
+    return nil
+  end
+  return tbSetting[1]
+end
+
+function Recharge:GetCheapMonthGiftSetting()
+  local tbSetting = self.tbClassSettings[self.tbProductClassName.CLASS_CHEAP_MONTH_GIFT]
+  if not tbSetting then
+    return nil
+  end
+  return tbSetting[1]
+end
+
+function Recharge:GetCanDoubleThisTime(pPlayer, tbProductSetting, nCurTime)
+  local nLastBuyTime = self:GetProductLastBuy(pPlayer, tbProductSetting.nProductId)
+  return tbProductSetting.nDoubleBeginTime and tbProductSetting.nDoubleBeginTime > 0 and tbProductSetting.nDoubleEndTime and tbProductSetting.nDoubleEndTime > 0 and nCurTime >= tbProductSetting.nDoubleBeginTime and nCurTime <= tbProductSetting.nDoubleEndTime and nLastBuyTime < tbProductSetting.nDoubleBeginTime
+end
+
+function Recharge:GetTotoalRecharge(pPlayer)
+  return self:GetRechargeUserValue(pPlayer, self.KEY_TOTAL_RECHARGE_GROUP)
+end
+
+function Recharge:GetThisYearRecharge(pPlayer)
+  self:SwitchYearRecharge(pPlayer)
+  return self:GetRechargeUserValue(pPlayer, self.KEY_THIS_YEAR_RECHARGE_GROUP)
+end
+
+function Recharge:GetLastYearRecharge(pPlayer)
+  self:SwitchYearRecharge(pPlayer)
+  return self:GetRechargeUserValue(pPlayer, self.KEY_LAST_YEAR_RECHARGE_GROUP)
+end
+
+function Recharge:SwitchYearRecharge(pPlayer)
+  local nSaveYear = pPlayer.GetUserValue(self.SAVE_GROUP, self.KEY_THIS_YEAR)
+  local nThisYear = Lib:GetLocalYear()
+  if 0 == nSaveYear then
+    pPlayer.SetUserValue(self.SAVE_GROUP, self.KEY_THIS_YEAR, nThisYear)
+    return
+  end
+  if nSaveYear == nThisYear then
+    return
+  end
+  local nThisRecharge = self:GetRechargeUserValue(pPlayer, self.KEY_THIS_YEAR_RECHARGE_GROUP)
+  local nLastRecharge = self:GetRechargeUserValue(pPlayer, self.KEY_LAST_YEAR_RECHARGE_GROUP)
+  pPlayer.SetUserValue(self.SAVE_GROUP, self.KEY_THIS_YEAR, nThisYear)
+  self:SetRechargeUserValue(pPlayer, self.KEY_THIS_YEAR_RECHARGE_GROUP, 0)
+  self:SetRechargeUserValue(pPlayer, self.KEY_LAST_YEAR_RECHARGE_GROUP, nThisRecharge)
+  Log("Recharge:SwitchYearRecharge", pPlayer.szName, string.format("lastRecharge:%d->%d", nLastRecharge, nThisRecharge), string.format("thisRecharge:%d->0", nThisRecharge))
+end
+
+function Recharge:GetRechargeUserValue(pPlayer, tbKeyGroup)
+  local nLowVal = pPlayer.GetUserValue(self.SAVE_GROUP, tbKeyGroup.LOW)
+  local nHighVal = pPlayer.GetUserValue(self.SAVE_GROUP, tbKeyGroup.HIGH)
+  return nLowVal + nHighVal * self.USER_VALUE_EXT_RATE
+end
+
+function Recharge:SetRechargeUserValue(pPlayer, tbKeyGroup, nValue)
+  local nLowVal = nValue % self.USER_VALUE_EXT_RATE
+  local nHighVal = math.floor(nValue / self.USER_VALUE_EXT_RATE)
+  pPlayer.SetUserValue(self.SAVE_GROUP, tbKeyGroup.LOW, nLowVal)
+  pPlayer.SetUserValue(self.SAVE_GROUP, tbKeyGroup.HIGH, nHighVal)
+end
+
+Recharge.szFirstRechargeValuePath = "Setting/Recharge/FirstRechargeValue.tab"
+
+function Recharge:FirstRechargeValue()
+  local tbSettings = Lib:LoadTabFileEx("Setting/Recharge/FirstRechargeValue.tab", "dd", "nDay", {"nDay", "nValue"}, nil, nil, false)
+  return tbSettings
+end
+
+Recharge.tbFirstGold = Recharge:FirstRechargeValue()
+Recharge.tbVipAward = {
+  {
+    nShowPrice = 300,
+    nRealPrice = 10,
+    nGiveItemId = 30072
+  },
+  {
+    nShowPrice = 400,
+    nRealPrice = 16,
+    nGiveItemId = 30073
+  },
+  {
+    nShowPrice = 500,
+    nRealPrice = 25,
+    nGiveItemId = 30074
+  },
+  {
+    nShowPrice = 780,
+    nRealPrice = 50,
+    nGiveItemId = 30075
+  },
+  {
+    nShowPrice = 1280,
+    nRealPrice = 98,
+    nGiveItemId = 30076
+  },
+  {
+    nShowPrice = 1680,
+    nRealPrice = 128,
+    nGiveItemId = 30077
+  },
+  {
+    nShowPrice = 2800,
+    nRealPrice = 168,
+    nGiveItemId = 30078
+  },
+  {
+    nShowPrice = 2800,
+    nRealPrice = 268,
+    nGiveItemId = 30079
+  },
+  {
+    nShowPrice = 5800,
+    nRealPrice = 648,
+    nGiveItemId = 30080
+  },
+  {
+    nShowPrice = 6800,
+    nRealPrice = 888,
+    nGiveItemId = 30081
+  },
+  {
+    nShowPrice = 10800,
+    nRealPrice = 988,
+    nGiveItemId = 30082
+  },
+  {
+    nShowPrice = 10800,
+    nRealPrice = 988,
+    nGiveItemId = 30083
+  },
+  {
+    nShowPrice = 12800,
+    nRealPrice = 1288,
+    nGiveItemId = 30084
+  },
+  {
+    nShowPrice = 13800,
+    nRealPrice = 1688,
+    nGiveItemId = 30085
+  },
+  {
+    nShowPrice = 14800,
+    nRealPrice = 2388,
+    nGiveItemId = 30086
+  },
+  {
+    nShowPrice = 16800,
+    nRealPrice = 2988,
+    nGiveItemId = 30087
+  },
+  {
+    nShowPrice = 18800,
+    nRealPrice = 3688,
+    nGiveItemId = 30088
+  },
+  {
+    nShowPrice = 24000,
+    nRealPrice = 4688,
+    nGiveItemId = 30089
+  },
+  {
+    nShowPrice = 35800,
+    nRealPrice = 6888,
+    nGiveItemId = 30090
+  }
+}
+
+function Recharge:GetShowPrice(tbProductSetting)
+  local szShowPrice = tbProductSetting or "0"
+  if Sdk:GetOsType() == Sdk.eOSType_Windows and Client.EnableWebRecharge == true then
+    szShowPrice = tbProductSetting.szWebPriceUnit
+  else
+    szShowPrice = tbProductSetting.szPriceUnit
+  end
+  return szShowPrice
+end
+
+function Recharge:IsProductOnSale(nProductId)
+  local tbProductSetting = self:GetProductSettingById(nProductId)
+  if not tbProductSetting then
+    return false, i18n.EasyGet("\229\143\130\230\149\176\229\188\130\229\184\184")
+  end
+  local nCurTime = GetTime()
+  if not Lib:IsEmptyStr(tbProductSetting.szTimeSaleStart) then
+    local nSaleStartTime = Lib:ParseDateTime(tbProductSetting.szTimeSaleStart)
+    if nSaleStartTime and nCurTime < nSaleStartTime then
+      return false, i18n.EasyGet("\228\184\141\229\156\168\229\148\174\229\141\150\230\156\159\233\151\180")
+    end
+  end
+  if not Lib:IsEmptyStr(tbProductSetting.szTimeSaleClose) then
+    local nSaleCloseTime = Lib:ParseDateTime(tbProductSetting.szTimeSaleClose)
+    if nSaleCloseTime and nCurTime > nSaleCloseTime then
+      return false, i18n.EasyGet("\228\184\141\229\156\168\229\148\174\229\141\150\230\156\159\233\151\180")
+    end
+  end
+  if not Lib:IsEmptyStr(tbProductSetting.szTimeFrameStart) and 1 ~= GetTimeFrameState(tbProductSetting.szTimeFrameStart) then
+    return false, i18n.EasyGet("\228\184\141\229\156\168\229\148\174\229\141\150\230\156\159\233\151\180")
+  end
+  if not Lib:IsEmptyStr(tbProductSetting.szTimeFrameEnd) and 1 == GetTimeFrameState(tbProductSetting.szTimeFrameEnd) then
+    return false, i18n.EasyGet("\228\184\141\229\156\168\229\148\174\229\141\150\230\156\159\233\151\180")
+  end
+  return true
+end
+
+function Recharge:CheckLimitCount(pPlayer, nProductId)
+  local tbProductSetting = self:GetProductSettingById(nProductId)
+  if not tbProductSetting then
+    return false, i18n.EasyGet("\229\143\130\230\149\176\229\188\130\229\184\184")
+  end
+  local nCurTime = GetTime()
+  local nLastBuyTime = self:GetProductLastBuy(pPlayer, tbProductSetting.nProductId)
+  if nLastBuyTime <= 0 then
+    return true
+  end
+  local nSaleLimitType = tbProductSetting.nSaleLimitType
+  local nLimitTaskGroupId = tbProductSetting.nSaleLimitGroupId
+  local nLimitTaskTaskId = tbProductSetting.nSaleLimitTaskId
+  local nLimitTaskCount = tbProductSetting.nSaleLimitCount
+  if 0 == nSaleLimitType or 0 == not nLimitTaskGroupId or 0 == not nLimitTaskTaskId or 0 == not nLimitTaskCount then
+    return true
+  end
+  local nLimitVersionGroupId = tbProductSetting.nSaleLimitVersionGroupId
+  local nLimitVersionTaskId = tbProductSetting.nSaleLimitVersionTaskId
+  local nSaleLimitVersion = tbProductSetting.nSaleLimitVersion
+  if 0 ~= nLimitVersionGroupId and 0 ~= nLimitVersionTaskId and 0 ~= nSaleLimitVersion and nSaleLimitVersion ~= pPlayer.GetUserValue(nLimitVersionGroupId, nLimitVersionTaskId) then
+    return true
+  end
+  local nCurCount = pPlayer.GetUserValue(nLimitTaskGroupId, nLimitTaskTaskId)
+  local bSameDay = Lib:IsSameDay(self.LIMIT_DIFF_TIME, nCurTime, nLastBuyTime)
+  if nSaleLimitType == self.LIMIT_TYPE.DAY and bSameDay and nLimitTaskCount <= nCurCount then
+    return false, i18n.EasyGet("\232\180\173\228\185\176\230\149\176\233\135\143\232\190\190\229\136\176\228\184\138\233\153\144")
+  end
+  local bSameWeek = Lib:IsSameWeek(self.LIMIT_DIFF_TIME, nCurTime, nLastBuyTime)
+  if nSaleLimitType == self.LIMIT_TYPE.WEEK and bSameWeek and nLimitTaskCount <= nCurCount then
+    return false, i18n.EasyGet("\232\180\173\228\185\176\230\149\176\233\135\143\232\190\190\229\136\176\228\184\138\233\153\144")
+  end
+  local bSameMonth = Lib:IsSameMonth(self.LIMIT_DIFF_TIME, nCurTime, nLastBuyTime)
+  if nSaleLimitType == self.LIMIT_TYPE.MONTH and bSameMonth and nLimitTaskCount <= nCurCount then
+    return false, i18n.EasyGet("\232\180\173\228\185\176\230\149\176\233\135\143\232\190\190\229\136\176\228\184\138\233\153\144")
+  end
+  if nSaleLimitType == self.LIMIT_TYPE.CUSTOM and nLimitTaskCount <= nCurCount then
+    return false, i18n.EasyGet("\232\180\173\228\185\176\230\149\176\233\135\143\232\190\190\229\136\176\228\184\138\233\153\144")
+  end
+  return true
+end

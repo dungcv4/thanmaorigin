@@ -1,0 +1,505 @@
+KeYiMen.C = KeYiMen.C or {}
+
+function KeYiMen.C:GetState()
+  return self.m.nState
+end
+
+function KeYiMen.C:_Init()
+  if self.bInited then
+    return
+  end
+  self.m = {}
+  self:InitMapClass()
+  FubenUIController:RegisterChecker(KeYiMen.Def.tbMapTIDArr, self)
+  self.m.nSelectIndex = 1
+  self.m.tbRargetDuactionRank = {}
+  self.m.nTargetMapTID = nil
+  self.bInited = true
+end
+
+function KeYiMen.C:_Uninit()
+  if not self.bInited then
+    return
+  end
+  self.bInited = false
+  self.m.tbRargetDuactionRank = nil
+  self.m.nTargetMapTID = nil
+  self.m = {}
+end
+
+function KeYiMen.C:GetSelectIndex()
+  return self.m.nSelectIndex or 1
+end
+
+function KeYiMen.C:SetSelectIndex(nIndex)
+  self.m.nSelectIndex = nIndex
+end
+
+function KeYiMen.C:GetTongJoinCamp()
+  return self.m.nTongJoinCamp or 0
+end
+
+function KeYiMen.C:GetTongJoinCampModifyTime()
+  return self.m.nTongJoinCampChangeTime or 0
+end
+
+function KeYiMen.C:OnRespondData(tbSyncData)
+  local szOpenUI = self.m.szOpenUI
+  self.m.szOpenUI = nil
+  self.m.tbSyncData = tbSyncData
+  self.m.nState = tbSyncData.nState
+  self.m.nTongJoinCamp = tbSyncData.nTongJoinCamp
+  self.m.nTongJoinCampChangeTime = tbSyncData.nTongJoinCampChangeTime
+  self.m.bTargetDropped = tbSyncData.bTargetDropped
+  if DEBUG_ZJQ then
+    Assist.PrintDataStyle(tbSyncData, "----> KeYiMen.C:OnSyncMapData: ")
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_KEYIMEN_ON_RESPOND_STATE, tbSyncData.nState)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+  if "UIKeYiMenEntrance" == szOpenUI then
+    if not KeYiMen.Com:IsOpen() then
+      szOpenUI = nil
+      me.CenterMsg(i18n.EasyGet("\232\175\165\230\180\187\229\138\168\229\176\154\230\156\170\229\188\128\229\144\175"))
+    end
+  elseif "UIKeYiMenSelectCamp" == szOpenUI then
+  end
+  if szOpenUI and not Ui:WindowVisible(szOpenUI) then
+    Ui:OpenWindow(szOpenUI)
+  end
+end
+
+function KeYiMen.C:OnPlayerDead(nMapTID, nX, nY)
+  self.m.tbPosWherePlayerDead = {
+    nMapTID = nMapTID,
+    nX = nX,
+    nY = nY
+  }
+end
+
+function KeYiMen.C:OnMapLoaded(nMapTID)
+  if KeYiMen.Com:IsKeYiMenMap(nMapTID) and not AFK:IsFollowFightRunning() then
+    local tbPos = self.m.tbPosWherePlayerDead
+    if tbPos and KeYiMen.Com:IsEntranceMap(nMapTID) then
+      if AFK:IsRunning() and Ui:GetIsAutoBackFightPosAfterRevive() then
+        local AFKFightSetting = AFK:GetSetting():GetFightSetting()
+        local tbLastFightPos = AFKFightSetting:GetFightPos()
+        if tbLastFightPos then
+          self:CheckAndGoto(tbPos.nMapTID, tbPos.nX, tbPos.nY)
+        end
+      end
+    elseif AutoPath:GetLastPathReason() == AutoPath.PathReason.emFuben_GoToTargetPos then
+      self:NextPos()
+    else
+      self:ClearPos()
+    end
+  end
+  self.m.tbPosWherePlayerDead = nil
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_LOADED, KeYiMen.C)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LOADED, KeYiMen.C.OnMapLoaded, KeYiMen.C)
+
+function KeYiMen.C:GetSyncData()
+  return self.m.tbSyncData or {}
+end
+
+function KeYiMen.C:GetBossData(nBossTID)
+  local tbSyncData = self:GetSyncData()
+  if tbSyncData.tbBossDataSet then
+    local tbBossData = tbSyncData.tbBossDataSet[nBossTID]
+    return tbBossData
+  end
+end
+
+function KeYiMen.C:IsBossDead(nBossTID)
+  local tbSyncData = self:GetSyncData()
+  if tbSyncData.tbBossDataSet then
+    local tbBoss = tbSyncData.tbBossDataSet[nBossTID]
+    if tbBoss then
+      return tbBoss.bIsDead == true
+    end
+  end
+  return false
+end
+
+function KeYiMen.C:ShowOrHideRankPanel(bShow)
+  if bShow then
+    Ui:OpenHudFubenCustomWithTeam("UIGoldBossOutputInfo", "KeYiMenHelp")
+  else
+    FubenUIController:OpenDefaultFuBenUI("KeYiMenHelp")
+  end
+end
+
+function KeYiMen.C:GetRankInfo(tbRankInfo)
+  local szMsg = ""
+  local classifyColor = Ui.tbColor:GetColorByType("Classify")
+  for _, tbInfo in ipairs(tbRankInfo) do
+    local szKinOrTongName = ""
+    if not Lib:IsEmptyStr(tbInfo.szTongName) then
+      szKinOrTongName = tbInfo.szTongName
+    else
+      szKinOrTongName = tbInfo.szKinName
+    end
+    szMsg = string.format([[
+%s
+%s	  %d%s]], szMsg, szKinOrTongName, tbInfo.nDuration, i18n.EasyGet("\231\167\146"))
+  end
+  return szMsg
+end
+
+function KeYiMen.C:OnSyncTargetMap(nTargetMapTID)
+  self.m.nTargetMapTID = nTargetMapTID
+end
+
+function KeYiMen.C:ShowNoticByProgress(nProgress, nTime, nMode, nTargetMapTID, tbRankInfo)
+  local classifyColor = Ui.tbColor:GetColorByType("Classify")
+  local introColor = Ui.tbColor:GetColorByType("Intro")
+  self.m.nCurProgress = nProgress
+  if not self.m.nTargetMapTID then
+    self.m.nTargetMapTID = nTargetMapTID
+  end
+  if Lib:CountTB(tbRankInfo) > 0 then
+    self.m.tbRargetDuactionRank = tbRankInfo
+  end
+  if 1 == nProgress then
+    FubenUIController:OpenDefaultFuBenUI("KeYiMenHelp", {
+      {
+        nTime,
+        i18n.EasyGet("<color=#{0}>\232\183\157\231\166\187BOSS\231\142\176\232\186\171\229\137\169\228\189\153</color>\239\188\154%s", classifyColor)
+      }
+    }, {
+      i18n.EasyGet("<color=#{0}>\229\128\146\232\174\161\230\151\182\231\187\147\230\157\159\229\144\142\229\176\134\231\142\176\232\186\171\233\166\150\233\162\134\239\188\140\229\176\134\229\133\182\229\135\187\232\180\165\229\144\142\239\188\140\230\160\185\230\141\174\229\184\174\228\188\154\228\188\164\229\174\179\230\142\146\229\144\141\232\142\183\229\190\151\229\165\150\229\138\177!</color>", introColor)
+    })
+  elseif 2 == nProgress then
+    PushString("")
+    if nMode % 10 > 0 then
+      AppendString(i18n.EasyGet("<color=#{0}>\233\166\150\233\162\134\229\183\178\231\142\176\232\186\171\239\188\129</color>\n", introColor))
+    end
+    if me.nMapTemplateId == self.m.nTargetMapTID and Lib:CountTB(self.m.tbRargetDuactionRank) > 0 then
+      AppendString(i18n.EasyGet("<color=#{0}>\229\184\174\228\188\154\229\141\160\230\156\137\231\165\158\229\153\168\230\151\182\233\151\180\232\182\138\233\149\191\229\165\150\229\138\177\232\182\138\229\164\154\239\188\140\229\141\160\230\156\137\230\151\182\233\149\191\230\142\146\229\144\141\229\166\130\228\184\139</color>\n", introColor))
+      AppendString(self:GetRankInfo(self.m.tbRargetDuactionRank))
+    end
+    if nMode % 100 >= 10 and me.nMapTemplateId ~= self.m.nTargetMapTID then
+      local szMapName = nTargetMapTID and Map:GetMapName(self.m.nTargetMapTID) or i18n.EasyGet("\229\137\175\230\156\172\229\156\176\229\155\190")
+      AppendString(i18n.EasyGet("<color=#{0}>\229\185\184\232\191\144\231\165\158\229\153\168\229\183\178\230\142\137\232\144\189\229\156\168<color=#C56D05>{1}</color>\239\188\140\232\175\183\233\128\159\229\142\187\229\143\130\228\184\142\228\186\137\229\164\186\239\188\129</color>\n", introColor, szMapName))
+    end
+    local szText = PopString()
+    FubenUIController:OpenDefaultFuBenUI("KeYiMenHelp", {
+      {
+        nTime,
+        i18n.EasyGet("<color=#{0}>\232\183\157\231\166\187\230\180\187\229\138\168\231\187\147\230\157\159</color>\239\188\154%s", classifyColor)
+      }
+    }, {szText})
+  elseif 3 == nProgress then
+    FubenUIController:OpenDefaultFuBenUI("KeYiMenHelp", {
+      {
+        nTime,
+        i18n.EasyGet("<color=#{0}>\232\183\157\231\166\187\229\137\175\230\156\172\229\133\179\233\151\173</color>\239\188\154%s", classifyColor)
+      }
+    }, {
+      i18n.EasyGet("<color=#{0}>\230\156\172\229\156\186\229\133\139\229\164\183\233\151\168\231\187\147\230\157\159\239\188\140\232\175\183\228\184\139\228\184\128\229\156\186\229\134\141\230\157\165\229\144\167\227\128\130</color>", introColor)
+    })
+  end
+end
+
+function KeYiMen.C:ShowTargetCountdown(nEndTime)
+  FubenUIController:ShowHudCountdown(nEndTime, i18n.EasyGet("<color=#FFE247>\231\165\158\229\153\168\230\182\136\229\164\177\229\128\146\232\174\161\230\151\182\239\188\154%s</color>"))
+end
+
+function KeYiMen.C:HideTargetCountdown()
+  FubenUIController:ShowHudCountdown()
+end
+
+function KeYiMen.C:CheckCanEnterFuben(nMapTID)
+  if me.nLevel < KeYiMen.Def.nJoinLevel then
+    return false, KeYiMen.Text.JoinLevel(KeYiMen.Def.nJoinLevel)
+  end
+  local nMapLevel = Map:GetEnterLevel(nMapTID)
+  if nMapLevel > me.nLevel then
+    return false, KeYiMen.Text.MapLevel(nMapLevel)
+  end
+  
+  local function fnEnter()
+    RemoteServer.KeYiMenRequestEnterFuben()
+  end
+  
+  local bRet, szMsg = ActivityCheck:CheckCanEnterActivityEx(me, nil, fnEnter, false, false, true, nil, {
+    "UIKeYiMenEntrance"
+  }, false)
+  return bRet, szMsg
+end
+
+function KeYiMen.C:RequestEnterFuben()
+  local nMapTID = KeYiMen.Def.nEntranceMapTID
+  local bRet, szMsg = self:CheckCanEnterFuben(nMapTID)
+  if not bRet then
+    if not Lib:IsEmptyStr(szMsg) then
+      me.CenterMsg(szMsg)
+    end
+    return false
+  end
+  return true
+end
+
+function KeYiMen.C:RequestSetTongJoinCamp(nCamp)
+  RemoteServer:KeYiMenRequestSetTongJoinCamp(nCamp)
+end
+
+function KeYiMen.C:RequestState()
+  RemoteServer:KeYiMenRequestState()
+end
+
+function KeYiMen.C:OnRespondState(nState)
+  Log("KeYiMen.C.OnRespondState: ", nState)
+  self.m.nState = nState
+  EventNotify.OnNotify(EventNotify.emNOTIFY_KEYIMEN_ON_RESPOND_STATE, nState)
+end
+
+function KeYiMen.C:RequestBossDmgRank()
+  if Calendar:IsActivityInOpenState("KeYiMen") then
+    RemoteServer.KeYiMenRequestBossDmgRank()
+  else
+    Ui:FinishHudFuben()
+  end
+end
+
+function KeYiMen.C:GoToBossPosition(nMapID, nX, nY)
+  self:PauseAutoCtrl()
+  AutoPath:DelayGotoAndCallEx(10, nMapID, nX, nY, function()
+    if not self:IsGoingTo() then
+      self:ResumeAutoCtrl()
+    end
+  end, nil, nil, nil, nil, nil, nil, nil, AutoPath.PathReason.emFuben_GoToTargetPos)
+end
+
+function KeYiMen.C:OnJoin()
+  self.m.szOpenUI = "UIKeYiMenEntrance"
+  RemoteServer.KeYiMenRequestData()
+end
+
+function KeYiMen.C:OnChooseTongJoinCamp()
+  self.m.szOpenUI = "UIKeYiMenSelectCamp"
+  RemoteServer.KeYiMenRequestData()
+end
+
+function KeYiMen.C:StopAutoPath()
+  AutoPath:StopGoto()
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+end
+
+function KeYiMen.C:_LoadMapNpcInfo(nMapTID)
+  local tbNpcInfoSet = {}
+  local tbMapCfg = Map:GetMapSetting(nMapTID)
+  if tbMapCfg then
+    local tbFile = Lib:LoadTabFile(string.format("Setting/Map/%s/info/npc_info.txt", tbMapCfg.LogicFilePath)) or {}
+    for _, tbCfg in pairs(tbFile) do
+      tbNpcInfoSet[tonumber(tbCfg.NpcTemplateId)] = tbCfg
+    end
+  end
+  return tbNpcInfoSet
+end
+
+function KeYiMen.C:GetTrapNpcInfoSet()
+  local tbNpcInfoSet = self.m.tbNpcInfoSet
+  if not tbNpcInfoSet then
+    tbNpcInfoSet = {}
+    for _, nMapTID in pairs(KeYiMen.Def.tbMapTIDArr) do
+      local tbNpcInfoOneMap = self:_LoadMapNpcInfo(nMapTID)
+      for _, tbNpcInfo in pairs(tbNpcInfoOneMap) do
+        tbNpcInfoSet[tonumber(tbNpcInfo.NpcTemplateId)] = tbNpcInfo
+      end
+    end
+    self.m.tbNpcInfoSet = tbNpcInfoSet
+  end
+  return tbNpcInfoSet
+end
+
+function KeYiMen.C:GetTrapNpcInfo(nNpcTID)
+  local tbNpcInfoSet = self:GetTrapNpcInfoSet()
+  for k, tbNpc in pairs(tbNpcInfoSet) do
+    if k == nNpcTID then
+      return tbNpc
+    end
+  end
+  LogErr("fail to GetTrapNpcInfo:", nNpcTID)
+end
+
+function KeYiMen.C:PauseAutoCtrl(bOpenAFK)
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  local bAFKRunning = AFK:IsLeadFightRunning()
+  if bAFKRunning then
+    AFK:Stop()
+  end
+  self.m.bOpenAFKAfterGoto = bAFKRunning or bOpenAFK
+end
+
+function KeYiMen.C:ResumeAutoCtrl()
+  AFK:Start()
+end
+
+function KeYiMen.C:CheckAndGoto(nMapTID, nX, nY)
+  if nMapTID and KeYiMen.Com:IsKeYiMenMap(nMapTID) then
+    local nLayerIndex = KeYiMen.Com:MapTID2LayerIndex(nMapTID)
+    KeYiMen.C:GotoLayer(nLayerIndex, {
+      nMapTID = nMapTID,
+      nX = nX,
+      nY = nY
+    })
+    return true
+  end
+  return false
+end
+
+function KeYiMen.C:GotoLayer(nEndLayerIndex, tbBossPos)
+  local nStartLayerIndex = KeYiMen.Com:MapTID2LayerIndex(me.nMapTemplateId)
+  local tbLayerIndexArr = Lib:CreateDijkstraPointArr(KeYiMen.Def.tbReachable, nStartLayerIndex or 1, nEndLayerIndex)
+  local tbPosArr = self:CreateGotoPosArr(tbLayerIndexArr)
+  self.m.tbPosArr = tbPosArr
+  if tbBossPos then
+    table.insert(tbPosArr, 1, tbBossPos)
+  end
+  self:PauseAutoCtrl(nil ~= tbBossPos)
+  if not nStartLayerIndex then
+    self:RequestEnterFuben()
+    AutoPath:SetLastPathReason(AutoPath.PathReason.emFuben_GoToTargetPos)
+  else
+    self:NextPos()
+  end
+end
+
+function KeYiMen.C:CreateGotoPosArr(tbLayerIndexArr)
+  local tbMapTIDArr = {}
+  for _, v in ipairs(tbLayerIndexArr) do
+    local nMapTID = KeYiMen.Com:LayerIndex2MapTID(v)
+    table.insert(tbMapTIDArr, nMapTID)
+  end
+  local tbPosArr = {}
+  for i = 1, #tbMapTIDArr - 1 do
+    local nTo = tbMapTIDArr[i]
+    local nFrom = tbMapTIDArr[i + 1]
+    local tbTrapPos = KeYiMen.Com:GetTrapPosData(nFrom, nTo)
+    local tbNpcInfo = self:GetTrapNpcInfo(tonumber(tbTrapPos.TrapNPC))
+    table.insert(tbPosArr, {
+      nMapTID = nFrom,
+      nX = tonumber(tbNpcInfo.XPos),
+      nY = tonumber(tbNpcInfo.YPos)
+    })
+  end
+  return tbPosArr
+end
+
+function KeYiMen.C:NextPos()
+  if self:IsGoingTo() then
+    local tbPos = table.remove(self.m.tbPosArr)
+    if tbPos and tbPos.nMapTID == me.nMapTemplateId then
+      local nMapID, nX, nY = me.nMapId, tbPos.nX, tbPos.nY
+      Timer:Register(10, function()
+        self:GoToBossPosition(nMapID, nX, nY)
+      end)
+    end
+  end
+end
+
+function KeYiMen.C:ClearPos()
+  self.m.tbPosArr = nil
+end
+
+function KeYiMen.C:IsGoingTo()
+  local tb = self.m.tbPosArr
+  return nil ~= tb and #tb > 0
+end
+
+function KeYiMen.C:ExitFuben()
+  AFK:Stop()
+  FubenUIController:RequireQuit()
+end
+
+function KeYiMen.C:IsNeedExitFubenButton()
+  return true, {
+    function()
+      me.MsgBox(i18n.EasyGet("\230\152\175\229\144\166\231\161\174\229\174\154\231\166\187\229\188\128\229\133\139\229\164\183\233\151\168\230\136\152\229\156\186\239\188\159"), {
+        {
+          i18n.szOk,
+          self.ExitFuben,
+          self
+        },
+        {
+          i18n.szCancel
+        }
+      })
+    end
+  }
+end
+
+function KeYiMen.C:IsNeedFubenBtn()
+  return true, {
+    function()
+      self:OnJoin()
+    end
+  }
+end
+
+function KeYiMen.C:IsShowTipWhenQuit()
+  return false
+end
+
+function KeYiMen.C:GetFubenBtnAImagePathAndText()
+  return "UI/atlas/hud/btn_transfer.png", nil
+end
+
+function KeYiMen.C:HowToSwitchMapAsSrcMap(nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+  local nEndLayerIndex = KeYiMen.Com:MapTID2LayerIndex(nTargetMapTemplateId)
+  if nEndLayerIndex then
+    local nStartLayerIndex = KeYiMen.Com:MapTID2LayerIndex(nFromTemplateId)
+    assert(nStartLayerIndex, "nFromTemplateId = " .. nFromTemplateId)
+    local tbLayerIndexArr = Lib:CreateDijkstraPointArr(KeYiMen.Def.tbReachable, nStartLayerIndex, nEndLayerIndex)
+    local tbPosArr = self:CreateGotoPosArr(tbLayerIndexArr)
+    local tbPos = table.remove(tbPosArr)
+    if tbPos then
+      return true, {
+        nTransPosX = tbPos.nX,
+        nTransPosY = tbPos.nY
+      }
+    end
+  else
+    Dungeon:ExitDungeon()
+    return false, nil
+  end
+end
+
+function KeYiMen.C:HowToSwitchMapAsDstMap(nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+  if ActivityCheck:CheckIsInSafeArea(me, false) then
+    self:RequestEnterFuben()
+  else
+    if TeamMgr:IsFollowTeammate() then
+      TeamMgr:StopFollowMember()
+    end
+    AFK:Stop()
+    me.CenterMsg(i18n.EasyGet("\228\184\141\229\156\168\229\174\137\229\133\168\229\140\186\228\184\141\232\131\189\229\143\130\229\138\160\230\173\164\230\180\187\229\138\168"))
+  end
+end
+
+function KeYiMen.C:InitMapClass()
+  for _, nMapTID in ipairs(KeYiMen.Def.tbMapTIDArr) do
+    local tbMapObj = Map:GetClass(nMapTID)
+    if tbMapObj then
+      function tbMapObj.TransmitTo(tbMapObj, nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+        return self:HowToSwitchMapAsSrcMap(nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+      end
+      
+      function tbMapObj.TransmitFrom(tbMapObj, nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+        return self:HowToSwitchMapAsDstMap(nFromMapId, nFromTemplateId, nTargetMapId, nTargetMapTemplateId)
+      end
+      
+      function tbMapObj.IsNeedTrapPointToSwitchMap(tbMapObj, nFromMapTID, nToMapTID)
+        return KeYiMen.Com:MapTID2LayerIndex(nFromMapTID) ~= nil and KeYiMen.Com:MapTID2LayerIndex(nToMapTID) ~= nil
+      end
+    end
+  end
+end
+
+KeYiMen.C:_Init()

@@ -1,0 +1,185 @@
+local tbWnd = Ui:CreateWindow("UIOBActivity")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_OBACTIVITY_UPDATE,
+      self.UpdateWindow
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBg/btnClose",
+  txtTitle = "node/imgBg/Title/txtTitle",
+  btnHelp = "node/imgBg/Title/btnHelp",
+  txtTime = "node/imgBg/txtTime",
+  btnTemplate = "node/imgBg/btnList/Viewport/Content/btnTemplate",
+  awardPreview = "node/imgBg/awardPreview",
+  AwardList = "node/imgBg/awardPreview/imgBg/AwardList",
+  btnWelfare = "node/imgBg/awardPreview/btnWelfare",
+  wndActivityDetail = "wndActivityDetail",
+  btnJoin = "wndActivityDetail/imgBg/btnJoin",
+  ActivityInfo = "wndActivityDetail/imgBg/ActivityInfo",
+  ItemTemplate = "wndActivityDetail/imgBg/ActivityInfo/AwardList/Viewport/Content/ItemTemplate"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseByDefault()
+  end,
+  btnHelp = function(self)
+  end,
+  btnWelfare = function(self)
+    self:TryGainAward()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbActivityList = ActivityMgr.OBActivity:GetActivityList()
+  self.tbBtnScrollView = Ui:NewScrollView(self, tbControls.btnTemplate, self.OnClickActivity, nil, false)
+  self.tbAwardScrollView = Ui:NewItemGridScrollView(self, tbControls.AwardList .. "/Content/ItemTemplate", 1, 1)
+  self.tbShowAwardScrollView = Ui:NewItemGridScrollView(self, tbControls.ItemTemplate, 1, 1)
+  self:SetClickEmptyCallback(tbControls.wndActivityDetail)
+end
+
+function tbWnd:OnOpen()
+  self.pPanel:Label_SetText(tbControls.txtTitle, i18n.Get(ActivityMgr.OBActivityCfg.szTitle))
+  self.pPanel:Label_SetText(tbControls.txtTime, i18n.Get(ActivityMgr.OBActivityCfg.szSmallTitle))
+  self:UpdateActivityList()
+  self:DealPreviewAward()
+end
+
+function tbWnd:CloseByDefault()
+  self.pPanel:SetActive(tbControls.wndActivityDetail, false)
+  self:Close()
+end
+
+function tbWnd:TryGainAward()
+  if not self.tbObRewardInfo then
+    return
+  end
+  ActivityMgr.OBActivity:TryGainAward(self.tbObRewardInfo.nId)
+end
+
+function tbWnd:UpdateActivedStatus(nActivityId, bStatus)
+  local tbElement = self.tbBtnScrollView:GetElement(nActivityId)
+  tbElement.pPanel:SetActive("txtNormal", not bStatus)
+  tbElement.pPanel:SetActive("txtSelected", bStatus)
+  local obj = tbElement.pPanel:GetObject("Main")
+  local trans = obj:GetComponent(Ui.BGroupTrans)
+  if trans then
+    if bStatus then
+      trans:OnSelected()
+    else
+      tbElement.pPanel:Button_SetEnable("Main", true)
+      trans:OnUnSelected()
+    end
+  end
+end
+
+function tbWnd:DealPreviewAward()
+  if not self.tbObRewardInfo then
+    self.pPanel:SetActive(tbControls.awardPreview, false)
+    return
+  end
+  if not self.tbAwardScrollView then
+    self.tbAwardScrollView = Ui:NewItemGridScrollView(self, tbControls.AwardList .. "/Content/ItemTemplate", 1, 1)
+  end
+  self.tbAwardScrollView:UpdateGenericItem(self.tbObRewardInfo.tbAward, true)
+  local pInstance = ActivityMgr:GetInstanceById(self.tbObRewardInfo.nId)
+  local bShow = pInstance and pInstance:IsOpen() and not pInstance:HasGotten()
+  self.pPanel:Button_SetEnable(tbControls.awardPreview .. "/btnWelfare", bShow)
+  self.pPanel:Label_SetText(tbControls.awardPreview .. "/imgBg/txtTitle", self.tbObRewardInfo.szDesc)
+end
+
+function tbWnd:DealActivityDetail(nActivityId)
+  local tbInfo
+  for _, tbTmpInfo in ipairs(self.tbActivityList) do
+    if tbTmpInfo.nId == nActivityId then
+      tbInfo = tbTmpInfo
+      break
+    end
+  end
+  if not tbInfo then
+    return
+  end
+  self.pPanel:SetActive(tbControls.wndActivityDetail, true)
+  self.pPanel:SetActive(tbControls.ActivityInfo .. "/txtActDegreeTip", true)
+  self.pPanel:SetActive(tbControls.ActivityInfo .. "/txtActDegree", true)
+  self.pPanel:Label_SetText(tbControls.ActivityInfo .. "/txtLevelLimit", tbInfo.nLevel)
+  self.pPanel:Label_SetText(tbControls.ActivityInfo .. "/txtLevelLimit", tbInfo.nLevel)
+  self.pPanel:Label_SetText(tbControls.wndActivityDetail .. "/imgBg/txtActivityName", tbInfo.szName)
+  self.pPanel:Label_SetText(tbControls.ActivityInfo .. "/ActivityDescScroll/Viewport/Content/txtActivityDesc", tbInfo.szDesc)
+  self.pPanel:Label_SetText(tbControls.ActivityInfo .. "/txtActDegreeTip", i18n.EasyGet("\230\180\187\229\138\168\230\151\182\233\151\180"))
+  self.pPanel:Label_SetText(tbControls.ActivityInfo .. "/txtActDegree", tbInfo.szShowTime)
+  self.tbShowAwardScrollView:UpdateGenericItem(tbInfo.tbAward, true)
+  self.tbShowAwardScrollView:ResetParent()
+  if not tbInfo.pFunc then
+    self.pPanel:SetActive(tbControls.btnJoin, false)
+  else
+    self.pPanel:SetActive(tbControls.btnJoin, true)
+    Ui:Button_BindEvent(self.pPanel, tbControls.btnJoin, self.OnClickJoinBtn, self, tbInfo.pFunc)
+  end
+end
+
+function tbWnd:OnClickJoinBtn(func)
+  self:CloseByDefault()
+  func()
+end
+
+function tbWnd:UpdateBtnInfo(tbElement, nId, tbInfo)
+  local pInstance = ActivityMgr:GetInstanceById(nId)
+  local bOpening = (pInstance and pInstance:IsOpen() and {true} or {false})[1]
+  tbElement.pPanel:SetActive("txtNormal", bOpening)
+  tbElement.pPanel:SetActive("imgLock", false)
+  tbElement.pPanel:SetActive("txtSelected", false)
+  tbElement.pPanel:SetActive("txtLock", not bOpening)
+  tbElement.pPanel:Label_SetText("txtNormal", tbInfo.szName)
+  tbElement.pPanel:Label_SetText("txtSelected", tbInfo.szName)
+  tbElement.pPanel:Label_SetText("txtLock", tbInfo.szName)
+end
+
+function tbWnd:UpdateActivityList()
+  self.tbActivityList = ActivityMgr.OBActivity:GetActivityList()
+  self.tbObRewardInfo = nil
+  self.nCurActivityId = nil
+  self.tbBtnScrollView:Reset()
+  for _, tbInfo in ipairs(self.tbActivityList) do
+    if tbInfo.szClassName ~= ActivityMgr.OBActivity.ActivityType.OBReward then
+      self.tbBtnScrollView:SetElement(tbInfo.nId, function(tbElement)
+        self:UpdateBtnInfo(tbElement, tbInfo.nId, tbInfo)
+      end)
+    else
+      self.tbObRewardInfo = tbInfo
+    end
+  end
+end
+
+function tbWnd:OnClickActivity(nId)
+  if nId == self.nCurActivityId then
+    self.pPanel:SetActive(tbControls.wndActivityDetail, false)
+    self:UpdateActivedStatus(self.nCurActivityId, false)
+    self.nCurActivityId = nil
+    return
+  end
+  if self.nCurActivityId then
+    self:UpdateActivedStatus(self.nCurActivityId, false)
+  end
+  self.nCurActivityId = nId
+  self:UpdateActivedStatus(self.nCurActivityId, true)
+  self:DealPreviewAward()
+  self:DealActivityDetail(self.nCurActivityId)
+end
+
+function tbWnd:UpdateWindow()
+  self:UpdateActivityList()
+  self:DealPreviewAward()
+end
+
+function tbWnd:OnClickEmptyClose()
+  if self.nCurActivityId then
+    self:OnClickActivity(self.nCurActivityId)
+  end
+  self.pPanel:SetActive(tbControls.wndActivityDetail, false)
+end

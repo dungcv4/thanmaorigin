@@ -1,0 +1,189 @@
+Gift.tbGiftData = {}
+Gift.tbFlowerBoxPlay = {}
+Gift.nEffectCD = 2
+Gift.tbEffectCD = {
+  [Gift.GiftType.RoseAndGrass] = 3,
+  [Gift.GiftType.FlowerBox] = 9,
+  [Gift.GiftType.GiftBox] = 6,
+  [Gift.GiftType.OBFireWork] = 9,
+  [Gift.GiftType.MarryGift] = 3
+}
+Gift.tbPlayList = {}
+Gift.CheckCanShow = {
+  [Gift.GiftType.MarryGift] = function(dwTargetId)
+    if Marry.tbMarryData.dwLoverID ~= dwTargetId then
+      return false
+    end
+    if Marry.tbMarryData.nTaskState <= Marry.TASK_STATE.SELECTWEDDING then
+      return false
+    end
+    return true
+  end
+}
+
+function Gift:SendGiftSuccess(nGiftType, nItemId, nCount)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SEND_GIFT_SUCCESS, nGiftType, nItemId, nCount)
+end
+
+function Gift:AcceptGiftSuccess(nGiftType, nItemId, szTips, nCount)
+end
+
+function Gift:UpdateGiftData()
+  RemoteServer.SynGiftData()
+end
+
+function Gift:OnSynGiftData(tbData)
+  self.tbGiftData = tbData or {}
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYN_GIFT_DATA_FINISH)
+end
+
+function Gift:OnGetDLCGift(tbData)
+  self.tbDlcAwardData = tbData or {}
+  for nKey, _ in pairs(self.DlcAwardKey) do
+    if (self.tbDlcAwardData[nKey] == nil or 0 == self.tbDlcAwardData[nKey]) and 1 == me.GetUserValue(self.DLC_SAVE_GROUP, self.DLC_SAVE_ID_AWARD_BEGIN + nKey - 1) then
+      self.tbDlcAwardData[nKey] = 1
+    end
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYN_DLC_GIFT_DATA)
+end
+
+function Gift:GetDLCGift()
+  if not self.tbDlcAwardData then
+    self.tbDlcAwardData = {}
+  end
+  return self.tbDlcAwardData
+end
+
+function Gift:IsGetAllDLCGift()
+  local bRet = true
+  if not self.tbDlcAwardData then
+    return true
+  end
+  for i = 1, 4 do
+    if self.tbDlcAwardData[i] and 1 == self.tbDlcAwardData[i] then
+    else
+      return false
+    end
+  end
+  return bRet
+end
+
+function Gift:GetAllCanSendGift(nSex, dwTargetId)
+  local tbGiftList = {}
+  local tbGiftIndex = {}
+  local nIndex = 1
+  if not nSex then
+    return tbGiftList
+  end
+  nSex = Player:GetPlayerRealSex(nSex)
+  local bShow
+  for nGiftType, _ in ipairs(Gift.AllGift) do
+    bShow = true
+    if Gift.LimitedShowList[nGiftType] then
+      local luaItem = me.FindItem(Gift.LimitedShowList[nGiftType])
+      bShow = #luaItem > 0
+    end
+    if bShow and Gift.CheckCanShow[nGiftType] then
+      bShow = Gift.CheckCanShow[nGiftType](dwTargetId)
+    end
+    local nItemId = Gift.AllItem[nGiftType] and Gift.AllItem[nGiftType][nSex]
+    if bShow and nItemId then
+      table.insert(tbGiftList, {nGiftType = nGiftType, nItemId = nItemId})
+      tbGiftIndex[nItemId] = nIndex
+      nIndex = nIndex + 1
+    end
+  end
+  return tbGiftList, tbGiftIndex
+end
+
+function Gift:RemainTimes(nAcceptId, nGiftType)
+  local tbGift = self.tbGiftData
+  if not tbGift[nAcceptId] or not tbGift[nAcceptId][nGiftType] then
+    if Gift.SendTimes[nGiftType] == Gift.Times.Forever then
+      return 0
+    else
+      return Gift.SendTimes[nGiftType]
+    end
+  end
+  return tbGift[nAcceptId][nGiftType]
+end
+
+function Gift:AddEffectTimes(nGiftType, nSex, nCount)
+  if Map:IsFubenMap(me.nMapTemplateId) then
+    return
+  end
+  table.insert(self.tbPlayList, {
+    nGiftType = nGiftType,
+    nCount = Gift.PlayEfftectTime[nGiftType] * nCount,
+    nSex = nSex
+  })
+  self:StartTimer()
+end
+
+Gift.tbEffectUiName = {
+  [0] = {
+    [1] = "UIGiftEffect_0_1",
+    [2] = "UIGiftEffect_0_2",
+    [3] = "UIGiftEffect_0_3",
+    [4] = "UIGiftEffect_0_3",
+    [5] = "UIGiftEffect_0_1"
+  },
+  [1] = {
+    [1] = "UIGiftEffect_1_1",
+    [2] = "UIGiftEffect_1_2",
+    [3] = "UIGiftEffect_1_3",
+    [4] = "UIGiftEffect_1_3",
+    [5] = "UIGiftEffect_1_1"
+  }
+}
+
+function Gift:PlayFristEffect()
+  local tbPlayData = self.tbPlayList[1]
+  if not tbPlayData then
+    return
+  end
+  local szUiName = self.tbEffectUiName[tbPlayData.nSex][tbPlayData.nGiftType]
+  self.szCurEffect = szUiName
+  local nTime = Gift.tbEffectCD[tbPlayData.nGiftType]
+  Ui:OpenWindow(szUiName, nTime)
+  tbPlayData.nCount = tbPlayData.nCount - 1
+  if tbPlayData.nCount <= 0 then
+    table.remove(self.tbPlayList, 1)
+  end
+end
+
+function Gift:StartTimer()
+  if self.nTimer then
+    return
+  end
+  self:PlayFristEffect()
+  self.nTimer = Timer:Register((Gift.nEffectCD + 1) * Env.GAME_FPS, self.OnTimer, self)
+end
+
+function Gift:OnTimer()
+  if Ui:WindowVisible(self.szCurEffect) then
+    return true
+  end
+  if Map:IsFubenMap(me.nMapTemplateId) then
+    self.tbPlayList = {}
+    self.nTimer = nil
+    return false
+  end
+  self:PlayFristEffect()
+  if #self.tbPlayList <= 0 then
+    self.nTimer = nil
+    return false
+  end
+  return true
+end
+
+function Gift:OnReturnLogin()
+  self.tbPlayList = {}
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Gift)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Gift.OnReturnLogin, Gift)

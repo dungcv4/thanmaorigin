@@ -1,0 +1,448 @@
+Require("CommonScript/BeachFight/BeachFightCfg.lua")
+BeachFight.BeachFightC = BeachFight.BeachFightC or {}
+local BeachFightC = BeachFight.BeachFightC
+BeachFightC.PrepareMap = BeachFightC.PrepareMap or {}
+BeachFightC.RaceMap = BeachFightC.RaceMap or {}
+local PrepareMap = BeachFightC.PrepareMap
+local RaceMap = BeachFightC.RaceMap
+BeachFightC.CSZProtocol = {
+  [BeachFight.Def.CZProtocol.SyncAllRollPointStatus] = "OnSyncAllRollStatusResp",
+  [BeachFight.Def.CZProtocol.SyncSingleRollPointStatus] = "OnSyncSingleRollStatusResp",
+  [BeachFight.Def.CZProtocol.SyncAllPlayerHeadInfo] = "OnSyncAllPlayerHeadInfoResp",
+  [BeachFight.Def.CZProtocol.SyncSinglePlayerHeadInfo] = "OnSyncSinglePlayerHeadInfoResp",
+  [BeachFight.Def.CZProtocol.SyncAllRollAndHeadInfo] = "OnSyncAllRollAndHeadInfoResp",
+  [BeachFight.Def.CZProtocol.SyncDebrisInfo] = "UpdateDebrisInfo",
+  [BeachFight.Def.CZProtocol.SyncRaceStatus] = "OnSyncRaceStatusResp",
+  [BeachFight.Def.CZProtocol.SyncSingleRankInfo] = "OnSyncSingleRankInfoResp",
+  [BeachFight.Def.CZProtocol.SyncPrepareStatus] = "OnSyncPrepareStatusResp",
+  [BeachFight.Def.CSProtocol.SyncSignUpInfo] = "OnSyncSignUpInfoResp",
+  [BeachFight.Def.CSProtocol.SyncOpenStatus] = "OnSyncOpenStatusResp"
+}
+
+function BeachFightC:ServerZoneCmd(nProtocol, ...)
+  if self.CSZProtocol[nProtocol] then
+    self[self.CSZProtocol[nProtocol]](self, ...)
+  else
+    Lib:LogErrFormat("BeachFightC: ServerZoneCmd failed, invalid Protocol %s", nProtocol)
+  end
+end
+
+function BeachFightC:CheckOpenLeftPanel()
+  local function func(tbWnd)
+    if not tbWnd then
+      return
+    end
+    local subPanel = tbWnd:GetSubPanel("UIHudLeftPanelFuben")
+    if subPanel.szFubenType == "BeachFight" then
+      return
+    else
+      tbWnd:SetPanelState(tbWnd.panelTaskTeamFuBen, tbWnd.TP_FUBEN)
+      Ui:OpenHudFubenCustomWithTeam("UIHudLeftPanelFunnyPlay", "BeachFight")
+    end
+  end
+  
+  local szWndName = "UIHudLeftFrameExt"
+  if Ui:WindowVisible(szWndName) then
+    return func(Ui:GetWindow(szWndName))
+  end
+  Ui:OpenWindowWithCallback(szWndName, function(_, tbWnd)
+    func(tbWnd)
+  end)
+end
+
+function BeachFightC:RegisterPrepareFubenUIChecker()
+  FubenUIController:RegisterChecker({
+    BeachFight.Cfg.nPrepareMapTemplateId
+  }, self.PrepareMap)
+end
+
+function PrepareMap:OnFubenMapLoaded()
+  BeachFightC:CheckOpenLeftPanel()
+  BeachFightC:ShowTeachDialog(1)
+end
+
+function PrepareMap:OnLeave()
+  FubenUIController:CloseFubenUI()
+  Ui:CloseWindow("UIBeachBrawl")
+end
+
+function PrepareMap:IsNeedExitFubenButton()
+  return true
+end
+
+function BeachFightC:RegisterRaceMapUIChecker()
+  FubenUIController:RegisterChecker({
+    BeachFight.Cfg.nRaceMapTemplateId
+  }, self.RaceMap)
+end
+
+function RaceMap:OnFubenMapLoaded()
+  BeachFightC:CheckOpenLeftPanel()
+end
+
+function RaceMap:OnLeave()
+  FubenUIController:CloseFubenUI()
+  Ui:CloseWindow("UIBeachBrawl")
+end
+
+BeachFightC:RegisterRaceMapUIChecker()
+BeachFightC:RegisterPrepareFubenUIChecker()
+
+function BeachFightC:CallZoneScript(nProtocol, ...)
+  RemoteServer.RequestBeachFightCZ(nProtocol, ...)
+end
+
+function BeachFightC:DoRollPointReq(bAbandon)
+  self:CallZoneScript(BeachFight.Def.CZProtocol.SyncSingleRollPointStatus, bAbandon)
+end
+
+function BeachFightC:DoSignUpInfoReq()
+  if not self.bOpen then
+    return
+  end
+  self:CallServerScript(BeachFight.Def.CSProtocol.SyncSignUpInfo)
+end
+
+function BeachFightC:CallServerScript(nProtocol, ...)
+  RemoteServer.RequestBeachFightCS(nProtocol, ...)
+end
+
+function BeachFightC:DoSignUpReq()
+  if not self.bOpen then
+    return
+  end
+  self:CallServerScript(BeachFight.Def.CSProtocol.SignUp)
+end
+
+function BeachFightC:DoExitRaceReq()
+  self:CallZoneScript(BeachFight.Def.CZProtocol.ExitRace)
+  Ui:CloseWindow("UIBattleRank_Common")
+end
+
+function BeachFightC:OnSyncOpenStatusResp(bOpen, nRestSignUpTime, nJoinPlayerNum)
+  if bOpen ~= self.bOpen and true == bOpen then
+    Ui:SynNotifyMsg({
+      szType = "BeachFight",
+      nTimeOut = GetTime() + BeachFight.Cfg.nSignUpTimePerRound * BeachFight.Cfg.nSignUpRound,
+      szTitle = i18n.Get(BeachFight.Cfg.TermsCfg.szNotifyTitle),
+      szContent = i18n.Get(BeachFight.Cfg.TermsCfg.szNotifyContent),
+      bOpen = bOpen
+    })
+  end
+  self.bOpen = bOpen
+  self.nSignUpRestTime = nRestSignUpTime
+  self.nJoinPlayerNum = nJoinPlayerNum
+end
+
+function BeachFightC:OnSyncSignUpInfoResp(nJoinPlayerNum, nSignUpRestTime)
+  self.nSignUpRestTime = nSignUpRestTime
+  self.nJoinPlayerNum = nJoinPlayerNum
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UI_BATTLEENTRANCE_COMMON_UPDATE, nil, nJoinPlayerNum, nSignUpRestTime)
+end
+
+function BeachFightC:OnSyncAllRollAndHeadInfoResp(tbPlayerRollInfoSet, tbPlayerHeadInfoSet, nRestTime)
+  tbPlayerRollInfoSet = self:ConvertSet2List(tbPlayerRollInfoSet)
+  tbPlayerHeadInfoSet = self:ConvertSet2List(tbPlayerHeadInfoSet)
+  
+  local function func(tbWnd)
+    if not tbWnd then
+      return
+    end
+    tbWnd:UpdateAllRollStatus(tbPlayerRollInfoSet, {
+      self.DoRollPointReq,
+      self,
+      false
+    }, {
+      self.DoRollPointReq,
+      self,
+      true
+    })
+    tbWnd:UpdateAllHeadInfo(tbPlayerHeadInfoSet)
+  end
+  
+  local szWndName = "UIBeachBrawl"
+  if Ui:WindowVisible(szWndName) then
+    return func(Ui:GetWindow(szWndName))
+  end
+  Ui:OpenWindowWithCallback(szWndName, function(_, tbWnd)
+    func(tbWnd)
+  end, nil, i18n.Get(BeachFight.Cfg.TermsCfg.szRollUITopTitle), nRestTime, i18n.Get(BeachFight.Cfg.TermsCfg.szRollUIBottomContent))
+end
+
+function BeachFightC:OnSyncAllRollStatusResp(tbPlayerInfoSet)
+  tbPlayerInfoSet = self:ConvertSet2List(tbPlayerInfoSet)
+  
+  local function func(tbWnd)
+    if not tbWnd then
+      return
+    end
+    tbWnd:UpdateAllRollStatus(tbPlayerInfoSet, {
+      self.DoRollPointReq,
+      self,
+      false
+    }, {
+      self.DoRollPointReq,
+      self,
+      true
+    })
+  end
+  
+  local szWndName = "UIBeachBrawl"
+  if Ui:WindowVisible(szWndName) then
+    return func(Ui:GetWindow(szWndName))
+  end
+  Ui:OpenWindowWithCallback(szWndName, function(_, tbWnd)
+    func(tbWnd)
+  end, nil, i18n.Get(BeachFight.Cfg.TermsCfg.szRollUITopTitle), BeachFight.Cfg.nRollPointTime, i18n.Get(BeachFight.Cfg.TermsCfg.szRollUIBottomContent))
+end
+
+function BeachFightC:OnSyncSingleRollStatusResp(tbPlayerInfo)
+  if tbPlayerInfo and tbPlayerInfo.nPlayerId then
+    local function func(tbWnd)
+      if not tbWnd then
+        return
+      end
+      tbWnd:UpdateSingleRollStatus(tbPlayerInfo, {
+        self.DoRollPointReq,
+        self,
+        false
+      }, {
+        self.DoRollPointReq,
+        self,
+        true
+      })
+    end
+    
+    local szWndName = "UIBeachBrawl"
+    if Ui:WindowVisible(szWndName) then
+      return func(Ui:GetWindow(szWndName))
+    end
+    Ui:OpenWindowWithCallback(szWndName, function(_, tbWnd)
+      func(tbWnd)
+    end, nil, i18n.Get(BeachFight.Cfg.TermsCfg.szRollUITopTitle), BeachFight.Cfg.nRollPointTime, i18n.Get(BeachFight.Cfg.TermsCfg.szRollUIBottomContent))
+  end
+end
+
+function BeachFightC:OnSyncAllPlayerHeadInfoResp(tbPlayerInfoSet)
+  if tbPlayerInfoSet then
+    tbPlayerInfoSet = self:ConvertSet2List(tbPlayerInfoSet)
+    
+    local function func(tbWnd)
+      if not tbWnd then
+        return
+      end
+      tbWnd:UpdateAllHeadInfo(tbPlayerInfoSet)
+    end
+    
+    local szWndName = "UIBeachBrawl"
+    if Ui:WindowVisible(szWndName) then
+      return func(Ui:GetWindow(szWndName))
+    end
+    Ui:OpenWindowWithCallback(szWndName, function(_, tbWnd)
+      func(tbWnd)
+    end, nil, i18n.Get(BeachFight.Cfg.TermsCfg.szRollUITopTitle), BeachFight.Cfg.nRollPointTime, i18n.Get(BeachFight.Cfg.TermsCfg.szRollUIBottomContent))
+  end
+end
+
+function BeachFightC:OnSyncSinglePlayerHeadInfoResp(tbPlayerInfo)
+  if tbPlayerInfo then
+    local function func(tbWnd)
+      if not tbWnd then
+        return
+      end
+      tbWnd:UpdateSingleHeadInfo(tbPlayerInfo)
+    end
+    
+    local szWndName = "UIBeachBrawl"
+    if Ui:WindowVisible(szWndName) then
+      return func(Ui:GetWindow(szWndName))
+    end
+    Ui:OpenWindowWithCallback(szWndName, function(_, tbWnd)
+      func(tbWnd)
+    end, nil, i18n.Get(BeachFight.Cfg.TermsCfg.szRollUITopTitle), BeachFight.Cfg.nRollPointTime, i18n.Get(BeachFight.Cfg.TermsCfg.szRollUIBottomContent))
+  end
+end
+
+function BeachFightC:UpdateLeftPanel(szOpt, ...)
+  self:CheckOpenLeftPanel()
+  local tbWnd = Ui:GetWindow("UIHudLeftFrameExt")
+  if tbWnd then
+    tbWnd:UpdateCustomFubenData("UIHudLeftPanelFunnyPlay", "BeachFight", szOpt, ...)
+  end
+end
+
+function BeachFightC:OnSyncRaceStatusResp(szStatus, nRestTime, tbAllRankDataList, bWin)
+  local tbDecodedAllRankDataList, tbMeRankInfo
+  if tbAllRankDataList then
+    tbDecodedAllRankDataList, tbMeRankInfo = self:DecodeRankDataList(tbAllRankDataList)
+  end
+  if szStatus == BeachFight.Def.RaceFSMStatus.RollPoint then
+    self:UpdateLeftPanel("UpdateTopContent", i18n.EasyGet("\230\145\135\231\130\185\233\152\182\230\174\181\239\188\154"), nRestTime, nil, true, true)
+    self:UpdateLeftPanel("UpdateMiddleContent", i18n.Get(BeachFight.Cfg.TermsCfg.szRollMidText))
+    self:UpdateLeftPanel("UpdateBottomContent", i18n.Get(BeachFight.Cfg.TermsCfg.szRollBottomText))
+    self:UpdateLeftPanel("UpdateAllRank", {})
+  elseif szStatus == BeachFight.Def.RaceFSMStatus.Prepare then
+    self:UpdateLeftPanel("UpdateTopContent", i18n.EasyGet("\229\135\134\229\164\135\233\152\182\230\174\181\239\188\154"), nRestTime, nil, true, true)
+    self:UpdateLeftPanel("UpdateMiddleContent", i18n.Get(BeachFight.Cfg.TermsCfg.szPrepareMidText))
+    self:UpdateLeftPanel("UpdateBottomContent", i18n.Get(BeachFight.Cfg.TermsCfg.szPrepareBottomText))
+    self:UpdateLeftPanel("UpdateAllRank", {})
+    Ui:OpenWindow("UIReadyGo", nRestTime)
+    if self.nShowRollTimer then
+      Timer:Close(self.nShowRollTimer)
+    end
+    self.nShowRollTimer = Timer:Register(Env.GAME_FPS * BeachFight.Cfg.nShowRollDelayTime, function()
+      self:OnSyncAllRollStatusResp({})
+      self:ShowTeachDialog(1)
+      Timer:Close(self.nShowRollTimer)
+      self.nShowRollTimer = nil
+      return false
+    end)
+  elseif szStatus == BeachFight.Def.RaceFSMStatus.Fight then
+    self:UpdateLeftPanel("UpdateTopContent", i18n.EasyGet("\230\175\148\232\181\155\233\152\182\230\174\181\239\188\154"), nRestTime, nil, true, true)
+    self:UpdateLeftPanel("UpdateMiddleContent", i18n.Get(BeachFight.Cfg.TermsCfg.szFightMidText))
+    self:UpdateDebrisInfo()
+    self:UpdateLeftPanel("UpdateAllRank", tbDecodedAllRankDataList)
+  elseif szStatus == BeachFight.Def.RaceFSMStatus.Settlement then
+    self:UpdateLeftPanel("UpdateTopContent", i18n.EasyGet("\231\187\147\231\174\151\233\152\182\230\174\181\239\188\154"), nRestTime, nil, true, true)
+    self:UpdateLeftPanel("UpdateMiddleContent", i18n.Get(BeachFight.Cfg.TermsCfg.szSettleMidText))
+    self:UpdateLeftPanel("UpdateBottomContent", i18n.Get(BeachFight.Cfg.TermsCfg.szSettleBottomText))
+    Ui:OpenWindow("UIArenaResult", bWin)
+    table.sort(tbDecodedAllRankDataList or {}, function(tbA, tbB)
+      return tbA.nRankScore > tbB.nRankScore
+    end)
+    local tbUIRankDataList = {}
+    local nMyRank = 0
+    for nRank, tbDecodedRankData in ipairs(tbDecodedAllRankDataList or {}) do
+      if tbDecodedRankData.nId == me.dwID then
+        nMyRank = nRank
+      end
+      table.insert(tbUIRankDataList, {
+        [1] = nRank,
+        [3] = tbDecodedRankData.szName,
+        [4] = tbDecodedRankData.szRoleDesc,
+        [5] = tbDecodedRankData.nRankScore
+      })
+    end
+    Ui:OpenWindow("UIBattleRank_Common", i18n.EasyGet("\231\166\187\229\188\128\230\175\148\232\181\155"), {
+      self.DoExitRaceReq,
+      self
+    }, {
+      [1] = i18n.EasyGet("\230\142\146\229\144\141"),
+      [2] = false,
+      [3] = i18n.EasyGet("\231\142\169\229\174\182\229\144\141\231\167\176"),
+      [4] = i18n.EasyGet("\233\152\181\232\144\165"),
+      [5] = i18n.EasyGet("\229\190\151\229\136\134"),
+      [6] = false,
+      [7] = false
+    }, tbUIRankDataList, {
+      [1] = nMyRank,
+      [3] = me.szName,
+      [4] = tbMeRankInfo and tbMeRankInfo.szRoleDesc or "",
+      [5] = tbMeRankInfo and tbMeRankInfo.nRankScore
+    })
+  end
+end
+
+function BeachFightC:OnSyncPrepareStatusResp(nSignUpRestTime, nJoinPlayerNum)
+  self:UpdateLeftPanel("UpdateTopContent", i18n.EasyGet("\229\135\134\229\164\135\233\152\182\230\174\181\239\188\154"), nSignUpRestTime, nil, true, true)
+  self:UpdateLeftPanel("UpdateMiddleContent", i18n.EasyGet("\229\189\147\229\137\141\229\135\134\229\164\135\229\156\186\231\142\169\229\174\182\239\188\154{0}", nJoinPlayerNum))
+  self:UpdateLeftPanel("UpdateAllRank", {})
+  self:UpdateLeftPanel("UpdateBottomContent", i18n.Get(BeachFight.Cfg.TermsCfg.szPrepareFuBenText))
+end
+
+function BeachFightC:OnSyncSingleRankInfoResp(tbSingleRankData)
+  if tbSingleRankData then
+    self:UpdateLeftPanel("UpdateSingleRank", tbSingleRankData.nPlayerId, string.format("%s\t%d", tbSingleRankData.szName, tbSingleRankData.nScore), tbSingleRankData.nScore)
+  end
+end
+
+function BeachFightC:UpdateDebrisInfo(nHasGetNum)
+  if Lib:IsInteger(nHasGetNum) then
+    self.nHasGetDebrisNum = nHasGetNum
+  end
+  self:UpdateLeftPanel("UpdateBottomContent", i18n.EasyGet("\230\181\183\231\165\158\231\162\142\231\137\135\239\188\154{0}", self.nHasGetDebrisNum or 0))
+end
+
+function BeachFightC:DecodeRankDataList(tbAllRankDataList)
+  if not tbAllRankDataList then
+    return
+  end
+  local tb = {}
+  local tbMeInfo = {}
+  local szColor = ""
+  for _, tbInfo in pairs(tbAllRankDataList or {}) do
+    local tbNewInfo = {
+      nId = tbInfo.nPlayerId,
+      szName = tbInfo.szName,
+      nRankScore = tbInfo.nRankScore or 0,
+      Weight = tbInfo.nScore,
+      szContent = string.format("%s\t%d", tbInfo.szName, tbInfo.nScore),
+      szColor = szColor,
+      szRoleDesc = BeachFight.Def.RoleTypeDesc[tbInfo.nRole or BeachFight.Def.RoleType2Index.None]()
+    }
+    if tbInfo.nPlayerId == me.dwID then
+      tbNewInfo.szColor = "#faeb01"
+      tbMeInfo = Lib:CopyTB(tbNewInfo)
+    else
+      tbNewInfo.szColor = "#e0dccd"
+    end
+    table.insert(tb, tbNewInfo)
+  end
+  return tb, tbMeInfo
+end
+
+function BeachFightC:ConvertSet2List(tbSet)
+  local tb = {}
+  for _, v in pairs(tbSet or {}) do
+    table.insert(tb, v)
+  end
+  return tb
+end
+
+function BeachFightC:OpenSignUpWindow()
+  if not self.bOpen then
+    me.CenterMsg(i18n.EasyGet("\230\156\170\229\156\168\230\180\187\229\138\168\230\138\165\229\144\141\230\151\182\233\151\180"))
+    return
+  end
+  local tbData = {
+    szDegreeName = "BeachFight",
+    szOpenTimeDesc = i18n.Parse(i18n.Get(BeachFight.Cfg.TermsCfg.szSignUpDesc)),
+    tbUpdateFn = {
+      self.DoSignUpInfoReq,
+      self
+    },
+    tbSignUpFn = {
+      self.DoSignUpReq,
+      self
+    },
+    szTittle = i18n.EasyGet("\230\178\153\230\187\169\229\164\167\228\189\156\230\136\152"),
+    szStatus = i18n.EasyGet("\230\175\148\232\181\155\230\138\165\229\144\141\228\184\173"),
+    bHidePlus = true,
+    szDesc = i18n.Parse(i18n.Get(BeachFight.Cfg.TermsCfg.szSignUpTimeDesc))
+  }
+  Ui:OpenWindow("UIBattleEntrance_Common", tbData)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UI_BATTLEENTRANCE_COMMON_UPDATE, nil, self.nJoinPlayerNum or 0, self.nSignUpRestTime or 0)
+end
+
+function BeachFightC:ShowTeachDialog(nTeachDialogIndex)
+  if BeachFight.Cfg.TeachDialogCfg[nTeachDialogIndex] then
+    local bEnd = nTeachDialogIndex >= #BeachFight.Cfg.TeachDialogCfg
+    local szOptText = Lib:IIF(bEnd, i18n.EasyGet("\231\187\147\230\157\159\230\149\153\231\168\139"), i18n.EasyGet("\231\187\167\231\187\173"))
+    local tb = {
+      Text = i18n.Get(BeachFight.Cfg.TeachDialogCfg[nTeachDialogIndex]),
+      OptList = {
+        {
+          Text = szOptText,
+          Callback = self.ShowTeachDialog,
+          Param = {
+            self,
+            nTeachDialogIndex + 1
+          }
+        }
+      }
+    }
+    Dialog:ShowNpcDialog(tb, me, BeachFight.Cfg.nTeachDialogNpc)
+  else
+    Ui:CloseWindow("UINpcDialog")
+  end
+end

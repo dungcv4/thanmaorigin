@@ -1,0 +1,298 @@
+local self
+
+function _LuaPlayer.SendBlackBoardMsg(szMsg, bSysMsg, nKeepTime, bShowRedBoard)
+  self.CallClientScript("Ui:ShowBlackMsg", szMsg, bSysMsg, nKeepTime, bShowRedBoard)
+end
+
+function _LuaPlayer.PopUpCenterMsg(szMsg)
+end
+
+function _LuaPlayer.MsgBox(szMsg, tbCallback, szNotTipsType, nTime, fnTimeOut, szUiName, nTimeOutBtnIndex)
+  szUiName = szUiName or "UIMessageBox"
+  GameSetting:SetGlobalObj(self, him, it)
+  Dialog:MsgBox(szMsg, tbCallback, szNotTipsType, nTime, fnTimeOut, szUiName, nTimeOutBtnIndex)
+  GameSetting:RestoreGlobalObj()
+end
+
+function _LuaPlayer.SendAlertMsg(szMsg, nTime, bFormat)
+  if not szMsg then
+    self.CallClientScript("Ui:CloseWindow", "UIAlertTimeMsg")
+    return
+  end
+  self.CallClientScript("Ui:OpenWindow", "UIAlertTimeMsg", szMsg, nTime, bFormat)
+end
+
+function _LuaPlayer.SetTempRevivePos(nMapId, nX, nY)
+  self._TempRevivePos = {
+    nMapId,
+    nX,
+    nY
+  }
+end
+
+function _LuaPlayer.ClearTempRevivePos()
+  self._TempRevivePos = nil
+end
+
+function _LuaPlayer.GetTempRevivePos()
+  if not self._TempRevivePos then
+    return nil
+  end
+  return table.unpack(self._TempRevivePos)
+end
+
+function _LuaPlayer.SetDefaultDeathDisable(bDisable)
+  self._bDefaultDeathDisable = bDisable
+end
+
+function _LuaPlayer.OnEvent(szEventType, ...)
+  GameSetting:SetGlobalObj(self, him, it)
+  PlayerEvent:OnEvent(szEventType, ...)
+  GameSetting:RestoreGlobalObj()
+end
+
+function _LuaPlayer.CheckNeedArrangeBag()
+  local nCurCount = self.GetBagUsedCount()
+  return nCurCount >= self.GetMaxCountInBag()
+end
+
+function _LuaPlayer.GetBagExpandCount()
+  return self.GetUserValue(GetGroupKey("BagExpand"), Item.BAG_EXPAND_SAVEID)
+end
+
+function _LuaPlayer.UpdateBagCount()
+  self.SetBagCount(self.GetBagExpandCount() + GameSetting.MAX_COUNT_IN_BAG)
+end
+
+function _LuaPlayer.GetBoxExpandCount()
+  return self.GetUserValue(GetGroupKey("BagExpand"), Item.BOX_EXPAND_SAVEID)
+end
+
+function _LuaPlayer.UpdateBoxCount()
+  self.SetBoxCount(self.GetBoxExpandCount() + GameSetting.MAX_COUNT_IN_BOX)
+end
+
+function _LuaPlayer.GetMaxCountInBag()
+  local nCount = self.GetBagExpandCount() or 0
+  return GameSetting.MAX_COUNT_IN_BAG + nCount
+end
+
+function _LuaPlayer.GetMaxCountInMedicineBag()
+  local nCount = self.GetBagExpandCount() or 0
+  return GameSetting.MAX_COUNT_IN_BAG + nCount
+end
+
+function _LuaPlayer.GetMaxCountInBox()
+  local nCount = self.GetBoxExpandCount() or 0
+  return GameSetting.MAX_COUNT_IN_BOX + nCount
+end
+
+function _LuaPlayer.GetItemCountByTypeInBag(nItemTemplateId)
+  if not nItemTemplateId or nItemTemplateId < 0 then
+    return 0, {}
+  end
+  local tbItemList = self.GetItemListInBag(nItemTemplateId)
+  if not tbItemList then
+    return 0, {}
+  end
+  local nCount = 0
+  for _, pItem in pairs(tbItemList) do
+    nCount = nCount + pItem.nCount
+  end
+  return nCount, tbItemList
+end
+
+function _LuaPlayer.GetItemCountInBags(nItemTemplateId, nPos, nTradeLimitType)
+  local tbItem = self.GetItemListInBag(nItemTemplateId, nPos)
+  local tbRet = {}
+  if not tbItem then
+    return 0, tbRet
+  end
+  local nCount = 0
+  for _, pItem in pairs(tbItem) do
+    if nTradeLimitType then
+      if pItem.dwTradeLimitType == nTradeLimitType then
+        nCount = nCount + pItem.nCount
+        table.insert(tbRet, pItem)
+      end
+    else
+      nCount = nCount + pItem.nCount
+      table.insert(tbRet, pItem)
+    end
+  end
+  return nCount, tbRet
+end
+
+function _LuaPlayer.GetItemCountInBagsEx(nItemTemplateId, nItemId)
+  local tbItem = self.GetItemListInBag(nItemTemplateId)
+  if not tbItem then
+    return 0, {}
+  end
+  local nCount = 0
+  local tbPItems = {}
+  local tbItemIds = {}
+  for _, pItem in pairs(tbItem) do
+    if pItem.dwId ~= nItemId then
+      nCount = nCount + pItem.nCount
+      table.insert(tbPItems, pItem)
+      table.insert(tbItemIds, pItem.dwId)
+    end
+  end
+  return nCount, tbItem, tbPItems, tbItemIds
+end
+
+function _LuaPlayer.GetItemCountInBoxs(nItemTemplateId)
+  if not nItemTemplateId or nItemTemplateId < 0 then
+    return 0, {}
+  end
+  local tbItem = self.GetItemListInBox(nItemTemplateId)
+  if not tbItem then
+    return 0, {}
+  end
+  local nCount = 0
+  for _, pItem in pairs(tbItem) do
+    nCount = nCount + pItem.nCount
+  end
+  return nCount, tbItem
+end
+
+function _LuaPlayer.GetCanAddItemCount(nItemTemplateId)
+  local tbItemBase = Item:GetItemBaseProp(nItemTemplateId)
+  local nMaxCount = tbItemBase.nStackMax
+  local nFreeCount = self.GetFreeBagCount()
+  if nFreeCount < 0 then
+    nFreeCount = 0
+  end
+  if nMaxCount < 1 then
+    nMaxCount = 1
+  end
+  local nCanAddCount = nMaxCount * nFreeCount
+  return nCanAddCount
+end
+
+function _LuaPlayer.CallClientScriptWhithPlayer(...)
+  self.CallClientScript("Client:CallClientScriptWhithPlayer", ...)
+end
+
+function _LuaPlayer.GetMoney(szType)
+  if not Currency:Valid(szType) then
+    return 0
+  end
+  return Currency:GetMoney(self, szType)
+end
+
+function _LuaPlayer.GetSkillPoint()
+  local nSkillPoint = self.GetUserValue(FightSkill.SKILL_SAVE_GROUP, 1)
+  return nSkillPoint
+end
+
+function _LuaPlayer.CanTeamOpt()
+  local tbMapSetting = Map:GetMapSetting(self.nMapTemplateId)
+  return tbMapSetting.TeamForbidden ~= TeamMgr.forbidden_make_and_operation_team and tbMapSetting.TeamForbidden ~= TeamMgr.forbidden_operation_team_in_client and not self.bForbitTeam
+end
+
+function _LuaPlayer.CanTranOpt(bStatus)
+  if nil == bStatus then
+    bStatus = true
+  end
+  local nMapTId = self.nMapTemplateId
+  if self.nState == Player.emPLAYER_STATE_ALONE and self.nClientMapTemplateId then
+    nMapTId = self.nClientMapTemplateId
+  end
+  if not bStatus then
+    local tbMapSetting = Map:GetMapSetting(nMapTId)
+    return 1 ~= tbMapSetting.TransForbidden, i18n.EasyGet("\229\189\147\229\137\141\229\156\176\229\155\190\228\184\141\229\143\175\228\188\160\233\128\129")
+  end
+  return true
+end
+
+function _LuaPlayer.CanTranOptEx(bStatus)
+  local bRet, szMsg = self:CanTranOpt(bStatus)
+  if not bRet then
+    self.CenterMsg(szMsg)
+  end
+  return bRet
+end
+
+function _LuaPlayer.GetCamp()
+  local pNpc = self.GetNpc()
+  if not pNpc then
+    return Npc.CampTypeDef.camp_type_newbie
+  end
+  return pNpc.nCamp
+end
+
+function _LuaPlayer.RestoreCamp(nCamp)
+  local pNpc = self.GetNpc()
+  if not pNpc then
+    return
+  end
+  if not nCamp then
+    if self.nLevel > Player.nNewbieLevel then
+      nCamp = Npc.CampTypeDef.camp_type_none
+    else
+      nCamp = Npc.CampTypeDef.camp_type_newbie
+    end
+  end
+  Log("_LuaPlayer.RestoreCamp", nCamp)
+  pNpc.SetCamp(nCamp)
+end
+
+function _LuaPlayer.GetVipLevel()
+  if not self.nVipLevel then
+    self.UpdateVipLevel()
+  end
+  return self.nVipLevel
+end
+
+function _LuaPlayer.UpdateVipLevel()
+  local nTotalExp = Vip:GetTotoalExp(self)
+  self.nVipLevel = Vip:CalcLevel(nTotalExp)
+end
+
+function _LuaPlayer.IsInFightMap()
+  local c = Map:GetClassDesc(self.nMapTemplateId)
+  return "fight" == c
+end
+
+function _LuaPlayer.ModifyUserValue(nGroup, nIndex, nValue)
+  local nCur = self.GetUserValue(nGroup, nIndex)
+  self.SetUserValue(nGroup, nIndex, nValue + nCur)
+end
+
+function _LuaPlayer.HasFaction()
+  return self.nFaction > 0
+end
+
+function _LuaPlayer.HasLegion()
+  return self.dwLegionId and self.dwLegionId > 0
+end
+
+function _LuaPlayer.IsDead()
+  local pNpc = self.GetNpc()
+  if not pNpc then
+    return true
+  end
+  return Npc:IsDead(pNpc.nId)
+end
+
+function _LuaPlayer.IsMaskPlayerAttr()
+  if 1 == self.nMaskPlayerAttrState then
+    return true
+  end
+  return false
+end
+
+function _LuaPlayer.IsMaskPlayerFactSkill()
+  if 1 == self.nMaskFactSkillState then
+    return true
+  end
+  return false
+end
+
+function _LuaPlayer.IsMaskPlayerPotential()
+  if 1 == self.nMaskPotentialState then
+    return true
+  end
+  return false
+end

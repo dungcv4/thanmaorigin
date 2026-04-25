@@ -1,0 +1,113 @@
+local tbWnd = Ui:CreateWindow("UIItemExchangeJiNengTuPo")
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  UIConsumeItemGrid = "node/imgBG/Content/ItemInfo/UIItemGrid",
+  txtGoodName = "node/imgBG/Content/ItemInfo/txtGoodName",
+  txtGoodNum = "node/imgBG/Content/ItemInfo/txtGoodNum",
+  txtDetail = "node/imgBG/Content/ItemInfo/panelDetail/txtDetail",
+  UIItemAGrid = "node/imgBG/Content/ItemExchange/Jinengtupo/UIItemGrid",
+  itemATxtName = "node/imgBG/Content/ItemExchange/Jinengtupo/txtName",
+  btnItemAExchange = "node/imgBG/Content/ItemExchange/Jinengtupo/btnExchange",
+  txtTipsA = "node/imgBG/Content/ItemExchange/Jinengtupo/txtTips"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnItemAExchange = function(self)
+    self:OnExchangeItem(self.dwTemplateId, self.tbExchangeList[3], self.tbExchangeShowList[3])
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbConsumeItem = Ui:NewExistItemGrid(self, self.UIConsumeItemGrid)
+  self.tbConsumeItem:SetClickEnable(false)
+  self.tbExchangeItemA = Ui:NewExistItemGrid(self, self.UIItemAGrid)
+  self.tbExchangeItemA:SetClickEnable(false)
+end
+
+function tbWnd:OnOpen(dwTemplateId, tbExchangeList)
+  self.tbInfo = Item:GetItemBaseProp(dwTemplateId)
+  tbExchangeList = {}
+  for i = 1, 10, 2 do
+    local nExchangeItemId = KItem.GetItemExtParam(dwTemplateId, i)
+    local nExchangeItemConsumeNum = KItem.GetItemExtParam(dwTemplateId, i + 1)
+    if 0 ~= nExchangeItemId and 0 ~= nExchangeItemConsumeNum then
+      local itemExchangeData = {}
+      itemExchangeData.nTempateId = nExchangeItemId
+      itemExchangeData.nConsumeNum = nExchangeItemConsumeNum
+      table.insert(tbExchangeList, itemExchangeData)
+    else
+      break
+    end
+  end
+  self.dwTemplateId = dwTemplateId
+  self.tbExchangeList = tbExchangeList
+  self.tbExchangeShowList = Lib:CopyTB(tbExchangeList)
+  self.tbConsumeItem:SetItem(nil, dwTemplateId, {bBigIcon = true})
+  self.pPanel:Label_SetText(self.txtGoodName, i18n.Parse(self.tbInfo.szName))
+  self.pPanel:Label_SetText(self.txtGoodNum, i18n.EasyGet("\229\189\147\229\137\141\230\139\165\230\156\137\239\188\154{0}", me.GetItemCountByTypeInBag(dwTemplateId)))
+  self.pPanel:Label_SetText(self.txtDetail, i18n.EasyGet("\229\133\145\230\141\162\230\138\128\232\131\189\231\170\129\231\160\180\229\141\183\233\156\128\232\166\129500\229\144\141\230\141\149\228\187\164"))
+  self:UpdateExchangeTimes()
+end
+
+function tbWnd:RefreshView()
+  if self.nRefreshTimer then
+    Timer:Close(self.nRefreshTimer)
+  end
+  self.nRefreshTimer = Timer:Register(Env.GAME_FPS / 2, function()
+    self.tbConsumeItem:SetItem(nil, self.dwTemplateId, {bBigIcon = true})
+    self.pPanel:Label_SetText(self.txtGoodNum, i18n.EasyGet("\229\189\147\229\137\141\230\139\165\230\156\137\239\188\154{0}", me.GetItemCountByTypeInBag(self.dwTemplateId)))
+    self:UpdateExchangeTimes()
+  end)
+end
+
+function tbWnd:OnExchangeItem(dwTemplateId, tbExchangeData, tbExchangeShowData)
+  local nConsumeNum = tbExchangeShowData.nConsumeNum
+  local nExchangeItemTempateId = tbExchangeShowData.nTempateId
+  local szExchangItemName, _, _, _ = KItem.GetItemShowInfo(nExchangeItemTempateId)
+  local nHaveConsumeItemNum = me.GetItemCountByTypeInBag(dwTemplateId)
+  
+  local function funcOK()
+    local nMaxExchangeCount = Item.StrengthItem:GetMaxExchangeCount(nExchangeItemTempateId)
+    local nExchangeCount = Item.StrengthItem:GetExchangeCount(me, nExchangeItemTempateId)
+    if nMaxExchangeCount <= nExchangeCount then
+      me.CenterMsg(i18n.EasyGet("\232\175\165\231\137\169\229\147\129\229\133\145\230\141\162\230\172\161\230\149\176\229\183\178\229\136\176\232\190\190\228\184\138\233\153\144\227\128\130"))
+      return 0
+    end
+    RemoteServer.UseManyItemByTemplated(dwTemplateId, nConsumeNum, tbExchangeData.nTempateId)
+  end
+  
+  local function funcCancel()
+  end
+  
+  if nConsumeNum <= nHaveConsumeItemNum then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\230\182\136\232\128\151{0}\228\184\170{1}\229\133\145\230\141\162\228\184\128\230\156\172{2}", nConsumeNum, i18n.Parse(self.tbInfo.szName), i18n.Parse(szExchangItemName)), {
+      {funcOK},
+      {funcCancel}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  else
+    me.CenterMsg(i18n.EasyGet("\229\144\141\230\141\149\228\187\164\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\229\133\145\230\141\162"), true)
+  end
+end
+
+function tbWnd:UpdateExchangeTimes()
+  local tbData = Item.StrengthItem:GetCurExchangeData(me, self.tbExchangeShowList[3].nTempateId)
+  if tbData then
+    self.tbExchangeShowList[3].nTempateId = tbData.nTempateId
+    self.tbExchangeShowList[3].nConsumeNum = tbData.nConsumeNum
+  end
+  local nMaxExchangeCountA = Item.StrengthItem:GetMaxExchangeCount(self.tbExchangeShowList[3].nTempateId)
+  local nExchangeCountA = Item.StrengthItem:GetExchangeCount(me, self.tbExchangeShowList[3].nTempateId)
+  if nMaxExchangeCountA < nExchangeCountA then
+    nExchangeCountA = nMaxExchangeCountA
+  end
+  local szUseA = i18n.EasyGet("\231\148\168\228\186\142\231\170\129\231\160\180\231\137\185\229\174\154\230\138\128\232\131\189\231\154\132\229\138\160\231\130\185\228\184\138\233\153\144\227\128\130\228\189\160\229\183\178\228\189\191\231\148\168\230\136\150\230\139\165\230\156\137{0}\228\184\170\232\175\165\231\177\187\231\170\129\231\160\180\229\141\183\239\188\140\232\191\152\229\143\175\228\187\165\229\133\145\230\141\162{1}\228\184\170", nExchangeCountA, nMaxExchangeCountA - nExchangeCountA)
+  self.pPanel:Label_SetText(self.txtTipsA, szUseA)
+  self.tbExchangeItemA:SetItem(nil, self.tbExchangeShowList[3].nTempateId)
+  local szItemAName, _, _, _ = KItem.GetItemShowInfo(self.tbExchangeShowList[3].nTempateId)
+  self.pPanel:Label_SetText(self.itemATxtName, i18n.Parse(szItemAName))
+end

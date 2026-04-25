@@ -1,0 +1,188 @@
+local tbWnd = Ui:CreateClass("UIActivityTemplate", "UIFestivalBase")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  txtTitle = "node/imgBG/Content/Main/Tex/txtTitle",
+  txtTime = "node/imgBG/Content/Main/Tex/txtCell/txtTime01",
+  wndJumpTo = "wndJumpTo",
+  MapTemplate = "wndJumpTo/imgBG/List/Viewport/Content/Template",
+  timeWaringRed = "wndJumpTo/imgBG/List/timeWaringRed",
+  timeWaringGreen = "wndJumpTo/imgBG/List/timeWaringGreen"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyCallback(tbControls.wndJumpTo)
+end
+
+function tbWnd:OnOpen(nEntranceIndex, nActivityId)
+  local tbEntranceScheduleCfg = ActivityMgr.EntranceScheduleCfg[nEntranceIndex]
+  self.nMainCommonEntryID = tbEntranceScheduleCfg.nMainActId
+  self.szActivityBGName = tbEntranceScheduleCfg.szActivityBGName or "ActivityBG01"
+  self.szOrnamentPath = tbEntranceScheduleCfg.szOrnamentPath or ""
+  self.tbBtnPath = {}
+  self.tbBtnTextPath = {}
+  self.tbBtnTextList = {}
+  self.tbBtnEffectPath = {}
+  if not Lib:IsEmptyStr(self.szOrnamentPath) then
+    self.pPanel:SetActive(string.format("node/ActivityOrnament/%s", self.szOrnamentPath), true)
+  end
+  if self.nPrevBg and self.nPrevBg ~= self.szActivityBGName then
+    self.pPanel:SetActive(string.format("node/ActivityBG/%s", self.nPrevBg), false)
+  end
+  self.pPanel:SetActive(string.format("node/ActivityBG/%s", self.szActivityBGName), true)
+  self.nPrevBg = self.szActivityBGName
+  local szTemp = "node/ActivityBG/%s/node/BG/btnList/Viewport/Content/State_UnOpened%d"
+  for i = 1, self.nMaxButton do
+    self.tbBtnPath[i] = string.format(szTemp .. "/btnTemplate", self.szActivityBGName, i)
+    self.tbBtnTextPath[i] = string.format(szTemp .. "/Text", self.szActivityBGName, i)
+    self.tbBtnEffectPath[i] = string.format(szTemp .. "/btnPitchOn", self.szActivityBGName, i)
+  end
+  self.tbBtnPath[self.nMainCommonEntryID] = string.format("node/ActivityBG/%s/node/BG/btnMain", self.szActivityBGName)
+  self.tbBtnTextPath[self.nMainCommonEntryID] = string.format("node/ActivityBG/%s/node/BG/btnMain/Text", self.szActivityBGName)
+  self.tbBtnEffectPath[self.nMainCommonEntryID] = string.format("node/ActivityBG/%s/node/BG/btnMain/BtnPitchOn", self.szActivityBGName)
+  self.tbCommonEntryID2SubPanel = {}
+  self.tbCommonEntryID2UiName = {}
+  for _, tbInfo in ipairs(tbEntranceScheduleCfg.ActivityListV2) do
+    self.tbCommonEntryID2SubPanel[tbInfo.nActId] = tbInfo.szSubPanel
+    self.tbCommonEntryID2UiName[tbInfo.nActId] = tbInfo.szUiName
+  end
+  if self.nEntranceIndex ~= nEntranceIndex then
+    self:InitPanelSetting(nEntranceIndex)
+    self.tbTabControl = Ui:NewTabControl(self, self.PANEL_SETTING)
+    self.nEntranceIndex = nEntranceIndex
+    self:InitColorCfg()
+  else
+    self:InitPanelSetting(nEntranceIndex)
+    self.tbTabControl:UpdateData(self.PANEL_SETTING)
+  end
+  for index, szPath in pairs(self.tbCommonEntryID2SubPanel) do
+    self.pPanel:SetActive(szPath, false)
+  end
+  for index, szPath in pairs(self.tbBtnEffectPath) do
+    self.pPanel:SetActive(szPath, false)
+  end
+  self.pPanel:SetActive(tbControls.wndJumpTo, false)
+  local nIndex = self.tbCommonEntryID2BtnId[nActivityId or self.nMainCommonEntryID]
+  self.nCurLightIndex = nIndex
+  self.tbTabControl:OnOpen(nIndex, nEntranceIndex, self.tbBtnId2ActListId[self.nCurLightIndex], self.ClassName)
+  if self.PANEL_SETTING[self.nCurLightIndex].EFFECT then
+    self.pPanel:SetActive(self.PANEL_SETTING[self.nCurLightIndex].EFFECT, true)
+  end
+  for nActivityIndex, tbInfo in pairs(tbEntranceScheduleCfg.ActivityListV2) do
+    if tbInfo.szUiName == "UIActivityTemplateMain" then
+      self.tbBtnTextList[nActivityIndex] = self.pPanel:GetObject(self.tbBtnTextPath[self.nMainCommonEntryID])
+      self.nMainActivityIndex = nActivityIndex
+    else
+      self.tbBtnTextList[nActivityIndex] = self.pPanel:GetObject(self.tbBtnTextPath[nActivityIndex])
+    end
+  end
+  if self.SetMainOutline then
+    self:SetMainOutline()
+  end
+end
+
+function tbWnd:OnOpenWndJumpTo(nActId)
+  self.pPanel:SetActive(tbControls.wndJumpTo, true)
+  local pInstance = ActivityMgr:GetInstanceById(nActId)
+  if pInstance and pInstance:IsShowOpen() then
+    self.pPanel:SetActive(tbControls.timeWaringGreen, true)
+    self.pPanel:SetActive(tbControls.timeWaringRed, false)
+  else
+    self.pPanel:SetActive(tbControls.timeWaringGreen, false)
+    self.pPanel:SetActive(tbControls.timeWaringRed, true)
+  end
+  local tbJumpMapList = pInstance:GetJumpMapList()
+  self:InitMapListScorllView(nActId, tbJumpMapList)
+end
+
+function tbWnd:InitMapListScorllView(nActId, tbJumpMapList)
+  if not tbJumpMapList or not next(tbJumpMapList) then
+    return
+  end
+  if self.pMapListScorllView then
+    self.pMapListScorllView:Clear()
+  else
+    self.pMapListScorllView = Ui:NewScrollView(self, tbControls.MapTemplate, function(_, nIndex, tbElement)
+      self:OnClickArrowBtn(tbElement.tbJumpMapInfo)
+    end, false, false)
+  end
+  for nIndex, tbJumpMapInfo in ipairs(tbJumpMapList) do
+    self.pMapListScorllView:SetElement(nIndex, function(tbElement)
+      self:SetMapListScorllViewElementInfo(tbElement, nIndex, tbJumpMapInfo)
+    end)
+  end
+end
+
+function tbWnd:SetMapListScorllViewElementInfo(tbElement, nIndex, tbJumpMapInfo)
+  if tbJumpMapInfo.nMapId then
+    if not tbJumpMapInfo.szMapName then
+      tbElement.pPanel:Label_SetText("txtMapName", i18n.EasyGet("{0}", i18n.Parse(Map:GetMapSetting(tbJumpMapInfo.nMapId).MapName)))
+    else
+      tbElement.pPanel:Label_SetText("txtMapName", i18n.EasyGet(tbJumpMapInfo.szMapName))
+    end
+  end
+  tbElement.tbJumpMapInfo = tbJumpMapInfo
+end
+
+function tbWnd:OnClickArrowBtn(tbJumpMapInfo)
+  if tbJumpMapInfo.nMapId then
+    if not tbJumpMapInfo.nPosX and not tbJumpMapInfo.nPosY and not tbJumpMapInfo.nNpcTemplateId then
+      FieldPractice:GoToMap(me, tbJumpMapInfo.nMapId)
+    elseif tbJumpMapInfo.nPosX and tbJumpMapInfo.nPosY and not tbJumpMapInfo.nNpcTemplateId then
+      ActivityMgr:DoCommonJump(ActivityMgr.tbJumpType.GotoPos2, nil, tbJumpMapInfo.nMapId, tbJumpMapInfo.nPosX, tbJumpMapInfo.nPosY)
+    else
+      ActivityMgr:DoCommonJump(ActivityMgr.tbJumpType.GotoPos, nil, tbJumpMapInfo.nNpcTemplateId, tbJumpMapInfo.nMapId, tbJumpMapInfo.nPosX, tbJumpMapInfo.nPosY)
+    end
+  end
+end
+
+function tbWnd:OnClickEmptyClose()
+  self.pPanel:SetActive(tbControls.wndJumpTo, false)
+end
+
+function tbWnd:SetMainOutline()
+  for i = 1, #self.tbBtnTextList do
+    local obj = self.tbBtnTextList[i]
+    if obj then
+      local outLineComp = obj:GetComponent("Outline")
+      local txtComp = obj:GetComponent("Text")
+      if self.nCurLightIndex == i then
+        if i == self.nMainActivityIndex then
+          outLineComp.effectColor = self.tbMainOutLineSelectedColor
+          txtComp.color = self.tbMainTextSelectedColor
+        else
+          outLineComp.effectColor = self.tbOutLineSelectedColor
+          txtComp.color = self.tbTextSelectedColor
+        end
+      elseif i == self.nMainActivityIndex then
+        outLineComp.effectColor = self.tbMainOutLineUnSelectedColor
+        txtComp.color = self.tbMainTextUnSelectedColor
+      else
+        outLineComp.effectColor = self.tbOutLineUnSelectedColor
+        txtComp.color = self.tbTextUnSelectedColor
+      end
+    end
+  end
+end
+
+function tbWnd:OnClose()
+  if self.pMapListScorllView then
+    self.pMapListScorllView:Clear()
+    self.pMapListScorllView = nil
+  end
+  self.tbTabControl:OnClose()
+  if not Lib:IsEmptyStr(self.szOrnamentPath) then
+    self.pPanel:SetActive(string.format("node/ActivityOrnament/%s", self.szOrnamentPath), false)
+  end
+end
+
+function tbWnd:InitColorCfg()
+  self.tbOutLineSelectedColor = Ui.tbColor:GetUnityColorByDefineName(self.szActivityBGName .. "OutLineSelected")
+  self.tbOutLineUnSelectedColor = Ui.tbColor:GetUnityColorByDefineName(self.szActivityBGName .. "OutLineUnSelected")
+  self.tbMainOutLineSelectedColor = Ui.tbColor:GetUnityColorByDefineName(self.szActivityBGName .. "MainOutLineSelected")
+  self.tbMainOutLineUnSelectedColor = Ui.tbColor:GetUnityColorByDefineName(self.szActivityBGName .. "MainOutLineUnSelected")
+  self.tbTextSelectedColor = Ui.tbColor:GetUnityColorByDefineName(self.szActivityBGName .. "TextSelected")
+  self.tbTextUnSelectedColor = Ui.tbColor:GetUnityColorByDefineName(self.szActivityBGName .. "TextUnSelected")
+  self.tbMainTextSelectedColor = Ui.tbColor:GetUnityColorByDefineName(self.szActivityBGName .. "MainTextSelected")
+  self.tbMainTextUnSelectedColor = Ui.tbColor:GetUnityColorByDefineName(self.szActivityBGName .. "MainTextUnSelected")
+end

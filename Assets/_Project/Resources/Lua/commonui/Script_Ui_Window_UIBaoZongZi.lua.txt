@@ -1,0 +1,250 @@
+local tbWnd = Ui:CreateWindow("UIBaoZongZi")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_JINGWANGJIUXI_DATA_SYNC,
+      self.UpdateAllShow
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  ShangdengTemplate = "node/imgBG/Content/ShangDeangZongZi/Materials/Template",
+  btnShangdengMake = "node/imgBG/Content/ShangDeangZongZi/btnMake",
+  txtShangdengRemainingValue = "node/imgBG/Content/ShangDeangZongZi/Remaining/txtRemainingValue",
+  btnShangdengExtraAward = "node/imgBG/Content/ShangDeangZongZi/btnExtraAward",
+  imgAward_Shangdeng = "node/imgBG/Content/ShangDeangZongZi/btnExtraAward/imgAward",
+  imgAward_ShangdengRecieve = "node/imgBG/Content/ShangDeangZongZi/btnExtraAward/imgAward_Recieve",
+  imgAward_ShangdengOpen = "node/imgBG/Content/ShangDeangZongZi/btnExtraAward/imgAwardOpen",
+  LvZongziTemplate = "node/imgBG/Content/LvDouZongZi/Materials/Template",
+  btnLvZongziMake = "node/imgBG/Content/LvDouZongZi/btnMake",
+  txtLvZongziRemainingValue = "node/imgBG/Content/LvDouZongZi/Remaining/txtRemainingValue",
+  btnLvZongziExtraAward = "node/imgBG/Content/LvDouZongZi/btnExtraAward",
+  imgAward_LvZongzi = "node/imgBG/Content/LvDouZongZi/btnExtraAward/imgAward",
+  imgAward_LvZongziRecieve = "node/imgBG/Content/LvDouZongZi/btnExtraAward/imgAward_Recieve",
+  imgAward_LVzongziOpen = "node/imgBG/Content/LvDouZongZi/btnExtraAward/imgAwardOpen",
+  wndExtraAwardDetail = "wndExtraAwardDetail",
+  extraAwardItemTemplate = "wndExtraAwardDetail/imgBg/GetAwards/AwardList/Viewport/Content/ItemTemplate"
+}
+tbWnd.tbControls = tbControls
+tbWnd.ZongziType = {ShangdengZongzi = 1, LvZongzi = 2}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnShangdengMake = function(self)
+    if not self.pInstance then
+      LogErr("UIBaoZongZi pInstance nil")
+      return
+    end
+    local nMaxNum = self.pInstance:GetPlayerCanMakeZongziNum(me, tbWnd.ZongziType.ShangdengZongzi)
+    if 1 == nMaxNum then
+      self.pInstance:MakeShangdengZongzi(nMaxNum)
+    else
+      Ui:OpenWindow("UIBaoZongZiSetting", self.nId, tbWnd.ZongziType.ShangdengZongzi, nMaxNum, 1)
+    end
+  end,
+  btnLvZongziMake = function(self)
+    if not self.pInstance then
+      LogErr("UIBaoZongZi pInstance nil")
+      return
+    end
+    local nMaxNum = self.pInstance:GetPlayerCanMakeZongziNum(me, tbWnd.ZongziType.LvZongzi)
+    if 1 == nMaxNum then
+      self.pInstance:MakeLvZongzi(nMaxNum)
+    else
+      Ui:OpenWindow("UIBaoZongZiSetting", self.nId, tbWnd.ZongziType.LvZongzi, nMaxNum, 1)
+    end
+  end,
+  btnShangdengExtraAward = function(self)
+    self:ShowExtraAward(self.ZongziType.ShangdengZongzi)
+    self.pPanel:SetActive(tbControls.wndExtraAwardDetail, true)
+  end,
+  btnLvZongziExtraAward = function(self)
+    self:ShowExtraAward(self.ZongziType.LvZongzi)
+    self.pPanel:SetActive(tbControls.wndExtraAwardDetail, true)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbShangdengItemScrollView = Ui:NewScrollView(self, tbControls.ShangdengTemplate)
+  self.tbLvZongziItemScrollView = Ui:NewScrollView(self, tbControls.LvZongziTemplate)
+  self.tbExtraAwardScrollView = Ui:NewScrollView(self, tbControls.extraAwardItemTemplate)
+  self:SetClickEmptyCallback(tbControls.wndExtraAwardDetail)
+end
+
+function tbWnd:OnOpen(nId)
+  self.nId = nId
+  self.pInstance = ActivityMgr:GetInstanceById(self.nId)
+  if not self.pInstance then
+    me.CenterMsg(i18n.EasyGet("\228\184\141\229\156\168\230\180\187\229\138\168\230\156\159"))
+    self:Close()
+    return
+  end
+  self:RegRedPoint()
+  self:UpdateAllShow()
+end
+
+function tbWnd:UpdateAllShow()
+  self:InitShangdengRewardShow()
+  self:InitLvZongziRewardShow()
+  self:ShowExtraAward(self.nZongziType or 1)
+end
+
+function tbWnd:OnClose()
+  self:UnRegRedPoint()
+end
+
+function tbWnd:RegRedPoint()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnShangdengMake, {
+    RedPointMgr.EVENT.JingWangJiuxiShangdengMake
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnLvZongziMake, {
+    RedPointMgr.EVENT.JingWangJiuxiLvZongziMake
+  })
+end
+
+function tbWnd:UnRegRedPoint()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnShangdengMake)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnLvZongziMake)
+end
+
+function tbWnd:ShowExtraAward(nZongziType)
+  self.nZongziType = nZongziType
+  local tbAllExtraAward = self.pInstance:GetExtraAwardList(nZongziType)
+  if not tbAllExtraAward then
+    LogErr("ShowExtraAward tbExtraAward error ")
+    return
+  end
+  self.tbExtraAwardScrollView:Clear()
+  for nIndex, tbInfo in ipairs(tbAllExtraAward) do
+    self.tbExtraAwardScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("AwardTips/txtAwardTip1", tbInfo.szInfo)
+      pPanel:SetActive("AwardTips/txtAwardTip2", false)
+      local tbItemGrid = tbElement.tbItemGrid
+      if not tbItemGrid then
+        tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbItemGrid:SetClickEnable(true)
+        tbElement.tbItemGrid = tbItemGrid
+      end
+      tbItemGrid:SetGenericItem(tbInfo.tbAward[1])
+      pPanel:SetActive("btnGet", not tbInfo.bSuccess)
+      pPanel:SetActive("MarkRecieved", tbInfo.bSuccess)
+      Ui:Button_BindEvent(pPanel, "btnGet", self.OnGetExtraAward, self, nZongziType, nIndex)
+      pPanel:Button_SetEnable("btnGet", not tbInfo.bSuccess and tbInfo.nNeedNum <= tbInfo.nCurNum)
+    end)
+  end
+end
+
+function tbWnd:OnGetExtraAward(nZongziType, nIndex)
+  if not self.pInstance then
+    LogErr("UIBaoZongZi pInstance nil")
+    return
+  end
+  self.pInstance:GetExtraAward(nZongziType, nIndex)
+end
+
+function tbWnd:InitShangdengRewardShow()
+  self.tbShangdengItemScrollView:Clear()
+  local tbCfg = ActivityMgr.XiongWangActivity:GetActivityCfg("JingWangJiuXiActivity")
+  if not tbCfg then
+    LogErr("InitShangdengRewardShow tbCfg nil ")
+    return
+  end
+  local ShangdengZongziFormula = tbCfg.JingWangJiuXiShangdengFormula
+  if not ShangdengZongziFormula then
+    LogErr("InitShangdengRewardShow ShangdengZongziFormala nil ")
+    return
+  end
+  for i, tbFormula in ipairs(ShangdengZongziFormula) do
+    self.tbShangdengItemScrollView:SetElement(i, function(tbElement)
+      local tbItemGrid = tbElement.tbItemGrid
+      if not tbItemGrid then
+        tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbItemGrid:SetClickEnable(true)
+      end
+      tbItemGrid:SetItemByTemplate(tbFormula.nTemplateID, 1)
+      local nNeedNum = tbFormula.nCount
+      local nHaveNum = me.GetItemCountByTypeInBag(tbFormula.nTemplateID)
+      local szShowText = string.format("%d/%d", nHaveNum, nNeedNum)
+      tbItemGrid:LabelSuffix_SetText(szShowText)
+      if nNeedNum <= nHaveNum then
+        tbItemGrid:LabelSuffix_SetColor("Green")
+      else
+        tbItemGrid:LabelSuffix_SetColor("Red")
+      end
+    end)
+  end
+  local nLeftShangdengZongziMakeCount, nLeftLvZongziMakeCount = self.pInstance:GetLeftZongziMakeCount()
+  self.pPanel:Label_SetText(tbControls.txtShangdengRemainingValue, nLeftShangdengZongziMakeCount)
+  self.pPanel:SetActive(tbControls.imgAward_Shangdeng, false)
+  self.pPanel:SetActive(tbControls.imgAward_ShangdengRecieve, false)
+  self.pPanel:SetActive(tbControls.imgAward_ShangdengOpen, false)
+  local bCanGetExtraAward = self.pInstance:ZongziCanGetExtraAward(self.ZongziType.ShangdengZongzi)
+  local bHasGetExtraAward = self.pInstance:ZongziAllExtraAwardHasGet(self.ZongziType.ShangdengZongzi)
+  if bCanGetExtraAward then
+    self.pPanel:SetActive(tbControls.imgAward_ShangdengRecieve, true)
+  elseif bHasGetExtraAward then
+    self.pPanel:SetActive(tbControls.imgAward_ShangdengOpen, true)
+  else
+    self.pPanel:SetActive(tbControls.imgAward_Shangdeng, true)
+  end
+  local bCanMakeZongzi = self.pInstance:HaveZongziMakeTime(me, self.ZongziType.ShangdengZongzi, 1)
+  self.pPanel:Button_SetEnable(tbControls.btnShangdengMake, bCanMakeZongzi)
+end
+
+function tbWnd:InitLvZongziRewardShow()
+  self.tbLvZongziItemScrollView:Clear()
+  local tbCfg = ActivityMgr.XiongWangActivity:GetActivityCfg("JingWangJiuXiActivity")
+  if not tbCfg then
+    LogErr("InitShangdengRewardShow tbCfg nil ")
+    return
+  end
+  local LvZongziZongziFormula = tbCfg.JingWangJiuXiLvZongziFormula
+  if not LvZongziZongziFormula then
+    LogErr("InitShangdengRewardShow ShangdengZongziFormala nil ")
+    return
+  end
+  for i, tbFormula in ipairs(LvZongziZongziFormula) do
+    self.tbLvZongziItemScrollView:SetElement(i, function(tbElement)
+      local tbItemGrid = tbElement.tbItemGrid
+      if not tbItemGrid then
+        tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbItemGrid:SetClickEnable(true)
+      end
+      tbItemGrid:SetItemByTemplate(tbFormula.nTemplateID, 1)
+      local nNeedNum = tbFormula.nCount
+      local nHaveNum = me.GetItemCountByTypeInBag(tbFormula.nTemplateID)
+      local szShowText = string.format("%d/%d", nHaveNum, nNeedNum)
+      tbItemGrid:LabelSuffix_SetText(szShowText)
+      if nNeedNum <= nHaveNum then
+        tbItemGrid:LabelSuffix_SetColor("Green")
+      else
+        tbItemGrid:LabelSuffix_SetColor("Red")
+      end
+    end)
+  end
+  local nLeftShangdengZongziMakeCount, nLeftLvZongziMakeCount = self.pInstance:GetLeftZongziMakeCount()
+  self.pPanel:Label_SetText(tbControls.txtLvZongziRemainingValue, nLeftLvZongziMakeCount)
+  self.pPanel:SetActive(tbControls.imgAward_LvZongzi, false)
+  self.pPanel:SetActive(tbControls.imgAward_LvZongziRecieve, false)
+  self.pPanel:SetActive(tbControls.imgAward_LVzongziOpen, false)
+  local bCanGetExtraAward = self.pInstance:ZongziCanGetExtraAward(self.ZongziType.LvZongzi)
+  local bHasGetExtraAward = self.pInstance:ZongziAllExtraAwardHasGet(self.ZongziType.LvZongzi)
+  if bCanGetExtraAward then
+    self.pPanel:SetActive(tbControls.imgAward_LvZongziRecieve, true)
+  elseif bHasGetExtraAward then
+    self.pPanel:SetActive(tbControls.imgAward_LVzongziOpen, true)
+  else
+    self.pPanel:SetActive(tbControls.imgAward_LvZongzi, true)
+  end
+  local bCanMakeZongzi = self.pInstance:HaveZongziMakeTime(me, self.ZongziType.LvZongzi, 1)
+  self.pPanel:Button_SetEnable(tbControls.btnLvZongziMake, bCanMakeZongzi)
+end
+
+function tbWnd:OnClickEmptyClose()
+  self.pPanel:SetActive(tbControls.wndExtraAwardDetail, false)
+end

@@ -1,0 +1,224 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.ActivityNpcMgr)
+local DEFUALT_MAX_GOURP = 10
+
+function tbActivity:InitNpcMgr()
+  if self.tbNpcGroupList then
+    self:UnInitNpcMgr()
+  end
+  self.tbNpcGroupList = self.tbNpcGroupList or {}
+  self.tbDeathTimerList = self.tbDeathTimerList or {}
+  self.tbDoFuncTimerList = self.tbDoFuncTimerList or {}
+  self.tbTimerTick = self.tbTimerTick or {}
+  self.nOverGroupPtr = DEFUALT_MAX_GOURP + 1
+end
+
+function tbActivity:UnInitNpcMgr()
+  if self.tbNpcGroupList then
+    for nGroupId, _ in pairs(self.tbNpcGroupList) do
+      self:DeleteGroup(nGroupId)
+    end
+  end
+  self.tbDeathTimerList = nil
+  self.tbDoFuncTimerList = nil
+  self.tbTimerTick = nil
+  self.tbNpcGroupList = nil
+end
+
+function tbActivity:CreateGroup(bForceCreate)
+  for i = 1, DEFUALT_MAX_GOURP do
+    if not self.tbNpcGroupList[i] then
+      self.tbNpcGroupList[i] = {}
+      return i
+    end
+  end
+  if bForceCreate then
+    local nNewGroupId = self.nOverGroupPtr
+    self.tbNpcGroupList[self.nOverGroupPtr] = {}
+    self.nOverGroupPtr = self.nOverGroupPtr + 1
+    return nNewGroupId
+  else
+    return -1
+  end
+end
+
+function tbActivity:CreateNpc2Group(nGroupId, nNpcTemplateId, nMapId, nLocX, nLocY, tbExtraParam)
+  if not self:__CheckGroupExist(nGroupId) then
+    Lib:LogFormat("ActivityNpcMgr: CreateNpc2Group failed, Group not exist, nGroupId=%d", nGroupId or -1)
+    return
+  end
+  if nNpcTemplateId and nMapId and nLocX and nLocY then
+    local pNpc = KNpc.Add(nNpcTemplateId, 1, -1, nMapId, nLocX, nLocY, 0, 0, 0)
+    if pNpc then
+      pNpc.tbExtraParam = tbExtraParam or {}
+      self.tbNpcGroupList[nGroupId][pNpc.nId] = pNpc.nTemplateId
+      return pNpc.nId, nGroupId
+    end
+  end
+end
+
+function tbActivity:AddNpc2Group(nGroupId, pNpc)
+  if not self:__CheckGroupExist(nGroupId) then
+    Lib:LogFormat("ActivityNpcMgr: AddNpc2Group failed, Group not exist, nGroupId=%d", nGroupId or -1)
+    return
+  end
+  if not pNpc then
+    Log("ActivityNpcMgr: AddNpc2Group failed, Npc instance is nil")
+    return
+  end
+  self.tbNpcGroupList[nGroupId][pNpc.nId] = pNpc.nTemplateId
+end
+
+function tbActivity:SetGroupDeathTime(nGroupId, nSec, tbCallBack)
+  if not self:__CheckGroupExist(nGroupId) then
+    Lib:LogFormat("ActivityNpcMgr: SetGroupDeathTime failed, Group not exist, nGroupId=%d", nGroupId or -1)
+    return
+  end
+  if self.tbDeathTimerList[nGroupId] then
+    Timer:Close(self.tbDeathTimerList[nGroupId])
+    self.tbDeathTimerList[nGroupId] = nil
+  end
+  local nDeathTimer = Timer:Register(Env.GAME_FPS * nSec, self.__DoDeleteGroup, self, nGroupId, tbCallBack)
+  self.tbDeathTimerList[nGroupId] = nDeathTimer
+end
+
+function tbActivity:DeleteGroup(nGroupId)
+  if not self:__CheckGroupExist(nGroupId) then
+    Lib:LogFormat("ActivityNpcMgr: DeleteGroup failed, Group not exist, nGroupId=%d", nGroupId or -1)
+    return
+  end
+  if self.tbDeathTimerList[nGroupId] then
+    Timer:Close(self.tbDeathTimerList[nGroupId])
+    self.tbDeathTimerList[nGroupId] = nil
+  end
+  if self.tbDoFuncTimerList[nGroupId] then
+    Timer:Close(self.tbDoFuncTimerList[nGroupId])
+    self.tbDoFuncTimerList[nGroupId] = nil
+    self.tbTimerTick[nGroupId] = nil
+  end
+  self:__DoDeleteGroup(nGroupId)
+end
+
+function tbActivity:DoFuncWithTimer(nGroupId, nSec, tbCallBack, bOnceRun)
+  if not self:__CheckGroupExist(nGroupId) then
+    Lib:LogFormat("ActivityNpcMgr: DoFuncWithTimer failed, Group not exist, nGroupId=%d", nGroupId or -1)
+    return false
+  end
+  if self.tbDoFuncTimerList[nGroupId] then
+    Timer:Close(self.tbDoFuncTimerList[nGroupId])
+  end
+  self.tbTimerTick[nGroupId] = 0
+  self.tbDoFuncTimerList[nGroupId] = Timer:Register(Env.GAME_FPS * nSec, self.__DoFuncInGroupByTimer, self, nGroupId, tbCallBack, bOnceRun)
+end
+
+function tbActivity:__DoFuncInGroupByTimer(nGroupId, tbCallback, __bOnceRun)
+  if not __bOnceRun then
+    if self.tbTimerTick[nGroupId] then
+      self.tbTimerTick[nGroupId] = self.tbTimerTick[nGroupId] + 1
+    end
+    self:DoFuncInGroup(nGroupId, tbCallback)
+    return true
+  else
+    if self.tbDoFuncTimerList[nGroupId] then
+      Timer:Close(self.tbDoFuncTimerList[nGroupId])
+      self.tbDoFuncTimerList[nGroupId] = nil
+      self.tbTimerTick[nGroupId] = nil
+    end
+    self:DoFuncInGroup(nGroupId, tbCallback)
+    return false
+  end
+end
+
+function tbActivity:DoFuncInGroup(nGroupId, tbCallback)
+  if not self:__CheckGroupExist(nGroupId) then
+    Lib:LogFormat("ActivityNpcMgr: DoFuncInGroup failed, Group not exist, nGroupId=%d", nGroupId or -1)
+    return false
+  end
+  for nNpcId, nTemplateId in pairs(self.tbNpcGroupList[nGroupId]) do
+    local pNpc = KNpc.GetById(nNpcId)
+    if pNpc and pNpc.nTemplateId == nTemplateId then
+      local tbTmpCallBack = {
+        table.unpack(tbCallback)
+      }
+      table.insert(tbTmpCallBack, pNpc)
+      if Lib:IsInteger(self.tbTimerTick[nGroupId]) then
+        table.insert(tbTmpCallBack, self.tbTimerTick[nGroupId])
+      end
+      Lib:CallBack(tbTmpCallBack)
+    end
+  end
+  return true
+end
+
+function tbActivity:__DoDeleteGroup(nGroupId, tbCallBack)
+  if not self:__CheckGroupExist(nGroupId) then
+    Lib:LogFormat("ActivityNpcMgr: __DoDeleteGroup failed, Group not exist, nGroupId=%d", nGroupId or -1)
+    return false
+  end
+  local pNpc
+  for nNpcId, nNpcTemplateId in pairs(self.tbNpcGroupList[nGroupId]) do
+    pNpc = KNpc.GetById(nNpcId)
+    if pNpc and pNpc.nTemplateId == nNpcTemplateId then
+      pNpc.Delete()
+    end
+  end
+  if self.tbDoFuncTimerList[nGroupId] then
+    Timer:Close(self.tbDoFuncTimerList[nGroupId])
+    self.tbDoFuncTimerList[nGroupId] = nil
+    self.tbTimerTick[nGroupId] = nil
+  end
+  self.tbNpcGroupList[nGroupId] = nil
+  self.tbDeathTimerList[nGroupId] = nil
+  if tbCallBack then
+    Lib:CallBack(tbCallBack)
+  end
+  return false
+end
+
+function tbActivity:__CheckGroupExist(nGroupId)
+  return nGroupId and self.tbNpcGroupList and self.tbNpcGroupList[nGroupId]
+end
+
+function tbActivity:GetGroupNpcNum(nGroupId)
+  if not self:__CheckGroupExist(nGroupId) then
+    return 0
+  else
+    return Lib:CountTB(self.tbNpcGroupList[nGroupId])
+  end
+end
+
+function tbActivity:GetGroupById(nGroupId)
+  if not self:__CheckGroupExist(nGroupId) then
+    return {}
+  else
+    return Lib:CopyTB(self.tbNpcGroupList[nGroupId])
+  end
+end
+
+function tbActivity:GetAllNpcByGroupId(nGroupId)
+  local tbAllNpc = {}
+  if not self:__CheckGroupExist(nGroupId) then
+    return tbAllNpc
+  end
+  for nNpcId, _ in pairs(self.tbNpcGroupList[nGroupId]) do
+    local pNpc = KNpc.GetById(nNpcId)
+    if pNpc then
+      table.insert(tbAllNpc, pNpc)
+    end
+  end
+  return tbAllNpc
+end
+
+function tbActivity:RemoveNpcFromGroup(nGroupId, nNpcId, bNotDelGroup)
+  if not self:__CheckGroupExist(nGroupId) then
+    return
+  else
+    if self.tbNpcGroupList[nGroupId][nNpcId] then
+      self.tbNpcGroupList[nGroupId][nNpcId] = nil
+      if not bNotDelGroup and Lib:CountTB(self.tbNpcGroupList[nGroupId]) <= 0 then
+        self:DeleteGroup(nGroupId)
+        return true
+      end
+    end
+    return false
+  end
+end

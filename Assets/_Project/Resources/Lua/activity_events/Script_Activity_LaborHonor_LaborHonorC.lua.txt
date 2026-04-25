@@ -1,0 +1,174 @@
+Require("CommonScript/Activity/LaborHonor/LaborHonor.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.LaborHonor)
+tbActivity.tbCacheData = {}
+local QuickUseItemWindowName = "UIQuickItemLaoDong"
+local Protocol = {
+  [tbActivity.Protocol.SubmitResp] = "SubmitResp",
+  [tbActivity.Protocol.OnDialog] = "OnDialog"
+}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    LogErr("[LaborHonor] ServerRequest protocol is wrong", nProtocol)
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:OnOpen()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_QUICKITEMLAODONG_SUBMIT, self.OnSubmitting, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.OnSyncItem, self)
+end
+
+function tbActivity:OnClose()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_QUICKITEMLAODONG_SUBMIT, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+  self:FadeRedPoint(RedPointMgr.EVENT.LaborHonor)
+end
+
+function tbActivity:LoadSyncData(tbData)
+  self.tbCacheData = tbData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_LABORHONOR_DATA_SYNC)
+  self:CheckRedPoint()
+end
+
+function tbActivity:GetCacheData()
+  return self.tbCacheData or {}
+end
+
+function tbActivity:SubmitC(nTemplateId, nNum)
+  if nTemplateId ~= self.tbConfig.nTemplateId then
+    return
+  end
+  ActivityMgr:CallServerScript(self.nId, self.Protocol.Submit, nTemplateId, nNum)
+end
+
+function tbActivity:SubmitResp()
+end
+
+function tbActivity:ReqSyncData()
+  ActivityMgr:CallServerScript(self.nId, self.Protocol.SyncData)
+end
+
+function tbActivity:OnDialog()
+  local pNpc = ActivityMgr:GetNearestNpc(self.tbConfig.nNpcTemplateId, self.tbConfig.nMapTemplateId)
+  if pNpc and pNpc.nId then
+    Operation:SimpleTap(pNpc.nId, false)
+  end
+  local nCount = me.GetItemCountInBags(self.tbConfig.nTemplateId)
+  if nCount <= 0 then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\151\160\229\143\175\228\187\165\230\143\144\228\186\164\233\129\147\229\133\183"))
+    return
+  end
+  local tbInfo = self:GetShowInfo()
+  Ui:OpenWindow(QuickUseItemWindowName, self.tbConfig.nTemplateId, nil, tbInfo.nCanSubmitValue)
+end
+
+function tbActivity:OnSubmitting(nTemplateId, nNum)
+  self:SubmitC(nTemplateId, nNum)
+end
+
+function tbActivity:OnSyncItem(nItemId)
+  local pItem = me.GetItemInAllSpace(nItemId)
+  if not pItem then
+    return
+  end
+  if pItem.dwTemplateId == self.tbConfig.nTemplateId then
+    self:CheckRedPoint()
+  end
+end
+
+function tbActivity:GenBarRatio()
+  local tbRatioList = {
+    0.25,
+    0.25,
+    0.25,
+    0.25
+  }
+  local fRatio = 0
+  local nLevel = self.tbCacheData.nLevel or 0
+  local nCostNum = 0
+  for i = 1, nLevel - 1 do
+    fRatio = fRatio + (tbRatioList[i] or 0)
+    nCostNum = nCostNum + self:GenNeedSubmissionNum(i)
+  end
+  if nCostNum >= (self.tbCacheData.nTotalSubNum or 0) then
+    return fRatio
+  end
+  if not self.tbConfig.tbLevel[nLevel] then
+    return fRatio
+  end
+  local nNum = self.tbCacheData.nTotalSubNum - nCostNum
+  local nMin = self.tbConfig.tbLevel[nLevel - 1] or 0
+  local nMax = self.tbConfig.tbLevel[nLevel] or 0
+  local nTotal = nMax - nMin
+  if nTotal <= 0 then
+    return fRatio
+  end
+  fRatio = fRatio + math.min(1, nNum / nTotal) * (tbRatioList[nLevel] or 0)
+  return fRatio
+end
+
+function tbActivity:GetShowInfo()
+  local nLevel = self.tbCacheData.nLevel or 1
+  local nMin = self.tbConfig.tbLevel[nLevel - 1] or 0
+  local nMax = self.tbConfig.tbLevel[nLevel] or 0
+  if 0 == nLevel and self.tbConfig.tbLevel[nLevel + 1] then
+    nMax = self.tbConfig.tbLevel[nLevel + 1]
+  end
+  local nTotalMax = self.tbConfig.tbLevel[#self.tbConfig.tbLevel]
+  local nTotalNum = self.tbCacheData.nTotalSubNum or 0
+  local tbAward = Award:GetAward(self.tbConfig.nShowAwardId, self.tbConfig.nShowAwardKey)
+  return {
+    nCanSubmitValue = self.tbConfig.nMaxSubmission - (self.tbCacheData.nSubNum or 0),
+    nCurNum = self.tbCacheData.nCurNum or 0,
+    nMin = nMin,
+    nMax = nMax,
+    nTotalNum = nTotalNum,
+    nTotalMax = nTotalMax,
+    tbLevel = self.tbConfig.tbLevel,
+    tbAward = Lib:CopyTB(tbAward),
+    fBarRatio = self:GenBarRatio(),
+    szShowTime = i18n.Parse(self.tbConfig.szShowTime)
+  }
+end
+
+function tbActivity:FadeRedPoint(nEventId)
+  if RedPointMgr:CheckEvent(nEventId) then
+    RedPointMgr:FadeRedPoint(nEventId)
+  end
+end
+
+function tbActivity:CheckRedPoint()
+  if not self:CanJoin(me.nLevel) then
+    return
+  end
+  local nEventId = RedPointMgr.EVENT.LaborHonor
+  if not self:HasTong(me) then
+    return self:FadeRedPoint(nEventId)
+  end
+  local nCanSubmitValue = self.tbConfig.nMaxSubmission - (self.tbCacheData.nSubNum or 0)
+  if nCanSubmitValue <= 0 then
+    self:FadeRedPoint(nEventId)
+    return
+  end
+  if not self:HasSubmissionItem(me) then
+    return self:FadeRedPoint(nEventId)
+  end
+  if not RedPointMgr:CheckEvent(nEventId) then
+    RedPointMgr:LightRedPoint(nEventId)
+  end
+end
+
+function tbActivity:OnCrossDay()
+  if not (self:CanJoin(me.nLevel) and self:HasTong(me)) or not self:HasSubmissionItem(me) then
+    return
+  end
+  self:ReqSyncData()
+end
+
+function tbActivity:GetRedPointEventId()
+  return {
+    RedPointMgr.EVENT.LaborHonor
+  }
+end

@@ -1,0 +1,122 @@
+Notification.UserInfoKey = "NewMySysNotify"
+
+function Notification:Send(szTitle, szDescript, nDelaySeconds)
+end
+
+function Notification:AnalziseWeekDay(szWeekFlag)
+  local tbWeekDays = {}
+  for i = 1, string.len(szWeekFlag) do
+    local nWeekDay = tonumber(string.sub(szWeekFlag, i, i))
+    if nWeekDay then
+      table.insert(tbWeekDays, nWeekDay)
+    end
+  end
+  return tbWeekDays
+end
+
+function Notification:SendActivityNotification()
+  CS.NotificationModule.OnPause(false)
+  if not me then
+    return
+  end
+  local nCurSeconds = Lib:GetLocalDayTime()
+  local nWeekDay = Lib:GetLocalWeekDay(GetTime())
+  local nCurWeekSeconds = (nWeekDay - 1) * 3600 * 24 + nCurSeconds
+  local tbSysNotify = Calendar:GetSysNotiyTable()
+  local tbMySysNotify = LocalData:GetRoleTable(Notification.UserInfoKey, {})
+  for i = 1, #tbSysNotify do
+    local tbData = tbSysNotify[i]
+    local bSendNotify = tbMySysNotify[tbData.szKey].bLineSel
+    local bCanaryActive = CanaryRelease:IsSysNotifyActive(tbData.szKey)
+    if bSendNotify and tbData.tbTimeGroup and bCanaryActive then
+      local tbSetting = Calendar:GetActInfo(tbData.nActivityId)
+      if tbSetting then
+        if not tbSetting.bWeek then
+          if CanaryRelease:IsCalendarActive(tbData.nActivityId) then
+            for nIndex, tbTimeGroup in ipairs(tbData.tbTimeGroup) do
+              local bSubSel = true
+              local tbSubSel = tbMySysNotify[tbData.szKey].tbSubSel
+              local nSeconds = tbTimeGroup.nShowSec
+              if tbSubSel and #tbSubSel > 0 then
+                if tbSubSel[nIndex] and 1 == tbSubSel[nIndex] then
+                  bSubSel = true
+                else
+                  bSubSel = false
+                end
+              end
+              if bSubSel then
+                if nCurSeconds < nSeconds then
+                  CS.NotificationModule.Send(i18n.Parse(tbData.szName), i18n.Parse(tbData.szMsg), nSeconds - nCurSeconds)
+                  Log("SendActivityNotification-1", i18n.Parse(tbData.szName), Lib:TimeDesc11(GetTime() + nSeconds - nCurSeconds))
+                else
+                  CS.NotificationModule.Send(i18n.Parse(tbData.szName), i18n.Parse(tbData.szMsg), nSeconds - nCurSeconds + 86400)
+                  Log("SendActivityNotification-2", i18n.Parse(tbData.szName), Lib:TimeDesc11(GetTime() + nSeconds - nCurSeconds + 86400))
+                end
+              end
+            end
+          end
+        else
+          for nIndex, tbTimeGroup in ipairs(tbData.tbTimeGroup) do
+            local tbWeekDays = self:AnalziseWeekDay(tbTimeGroup.szWeekFlag)
+            local nShowSec = tbTimeGroup.nShowSec
+            local bSubSel = true
+            local tbSubSel = tbMySysNotify[tbData.szKey].tbSubSel
+            if tbSubSel and #tbSubSel > 0 then
+              if tbSubSel[nIndex] and 1 == tbSubSel[nIndex] then
+                bSubSel = true
+              else
+                bSubSel = false
+              end
+            end
+            if bSubSel then
+              for _, nDay in ipairs(tbWeekDays) do
+                if CanaryRelease:IsCalendarActive(tbData.nActivityId, nDay) then
+                  local nWeekSeconds = (nDay - 1) * 3600 * 24 + nShowSec
+                  if nCurWeekSeconds < nWeekSeconds then
+                    CS.NotificationModule.Send(i18n.Parse(tbData.szName), i18n.Parse(tbData.szMsg), nWeekSeconds - nCurWeekSeconds)
+                    Log("SendActivityNotification-3", i18n.Parse(tbData.szName), Lib:TimeDesc11(GetTime() + nWeekSeconds - nCurWeekSeconds))
+                  else
+                    CS.NotificationModule.Send(i18n.Parse(tbData.szName), i18n.Parse(tbData.szMsg), nWeekSeconds - nCurWeekSeconds + 604800)
+                    Log("SendActivityNotification-4", i18n.Parse(tbData.szName), Lib:TimeDesc11(GetTime() + nWeekSeconds - nCurWeekSeconds + 604800))
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+function Notification:OnMapLoaded()
+  local nFirstTime = Ui.PlayerPrefs.GetInt("reqNotificaitonPermission", 1)
+  if 1 == nFirstTime then
+    Ui.PlayerPrefs.SetInt("reqNotificaitonPermission", 0)
+    if Sdk:GetOsType() ~= Sdk.eOSType_Android then
+      CS.NotificationModule.RequestNotificationPermission()
+    end
+  end
+end
+
+function Notification:RequestAndroidNotificationPermission()
+  local nFirstTime = Ui.PlayerPrefs.GetInt("reqAndroidNotificationPermission", 0)
+  if 1 == nFirstTime then
+    return
+  end
+  Ui.PlayerPrefs.SetInt("reqAndroidNotificationPermission", 1)
+  local nRet = CS.NotificationModule.GetNotificationPermissionState()
+  if 1 == nRet then
+  else
+    CS.NotificationModule.RequestNotificationPermission()
+  end
+end
+
+function Notification:OnStartup()
+  Log("Notification:OnStartup")
+  if Sdk:GetOsType() == Sdk.eOSType_Android then
+    self:RequestAndroidNotificationPermission()
+  end
+end
+
+EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LOADED, Notification.OnMapLoaded, Notification)

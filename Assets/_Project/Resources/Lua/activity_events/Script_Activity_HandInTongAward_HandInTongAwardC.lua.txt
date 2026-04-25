@@ -1,0 +1,124 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.HandInTongAward)
+
+function tbActivity:LoadSyncData(tbData)
+  self.tbCacheData = tbData
+end
+
+function tbActivity:GetTotalCount()
+  if not self.tbCacheData or not self.tbCacheData.nTotalCount then
+    return 0
+  end
+  return self.tbCacheData.nTotalCount
+end
+
+function tbActivity:GetMyCount()
+  if not self.tbCacheData or not self.tbCacheData.nMyCount then
+    return 0
+  end
+  return self.tbCacheData.nMyCount
+end
+
+local tbSrotWeight = {NoCompelete = 0, Compelete = 1}
+
+function tbActivity:GetSortLevel()
+  local nCount = self:GetTotalCount()
+  local tbLevel = self:GetLevel(self.nConfigId)
+  local tbResult = {}
+  local nSortWeight = tbSrotWeight.NoCompelete
+  for nLevel, nNums in pairs(tbLevel) do
+    nSortWeight = nNums <= nCount and tbSrotWeight.Compelete or tbSrotWeight.NoCompelete
+    table.insert(tbResult, {
+      nLevel = nLevel,
+      nNums = nNums,
+      nSortWeight = nSortWeight
+    })
+  end
+  table.sort(tbResult, function(tb1, tb2)
+    if tb1.nSortWeight ~= tb2.nSortWeight then
+      return tb1.nSortWeight < tb2.nSortWeight
+    end
+    return tb1.nLevel < tb2.nLevel
+  end)
+  return tbResult
+end
+
+function tbActivity:UpdateLevelList(tbWnd)
+  local nCount = self:GetTotalCount()
+  local tbLevel = self:GetSortLevel()
+  tbWnd.tbLevelList:Clear()
+  for nIndex, tbInfo in ipairs(tbLevel) do
+    tbWnd.tbLevelList:SetElement(tbInfo.nLevel, function(tbElement)
+      local tbAward = self:GetAward(self.nConfigId, tbInfo.nLevel)
+      local tbShowAwardScrollView = Ui:NewItemGridScrollView(tbElement, tbWnd.tbTemplateElement.reward, 1, 1)
+      tbShowAwardScrollView:UpdateGenericItem(tbAward, true)
+      tbElement.pPanel:Label_SetText(tbWnd.tbTemplateElement.txtNumber, i18n.EasyGet("\230\156\172\229\184\174\231\180\175\232\174\161{0}\230\172\161", tbInfo.nNums))
+      local bCompleted = nCount >= tbInfo.nNums
+      tbElement.pPanel:SetActive(tbWnd.tbTemplateElement.Prg, not bCompleted)
+      tbElement.pPanel:SetActive(tbWnd.tbTemplateElement.imgBar, not bCompleted)
+      tbElement.pPanel:SetActive(tbWnd.tbTemplateElement.txtPrg, not bCompleted)
+      tbElement.pPanel:SetActive(tbWnd.tbTemplateElement.imgComplete, bCompleted)
+      tbElement.pPanel:Label_SetText(tbWnd.tbTemplateElement.CompleteText, i18n.EasyGet("\229\183\178\232\190\190\230\136\144"))
+      if not bCompleted then
+        tbElement.pPanel:Label_SetText(tbWnd.tbTemplateElement.txtPrg, string.format("%d/%d", nCount, tbInfo.nNums))
+        tbElement.pPanel:Sprite_SetFillAmount(tbWnd.tbTemplateElement.imgBar, 0, nCount / tbInfo.nNums, 1, true)
+      end
+    end)
+  end
+end
+
+function tbActivity:UpdateOtherInfo(tbWnd)
+  local nMyCount = self:GetMyCount()
+  local nTotalCount = self:GetTotalCount()
+  tbWnd.pPanel:Label_SetText(tbWnd.szMineNumber, i18n.EasyGet("\230\136\145\231\180\175\232\174\161\230\143\144\228\186\164\230\149\176\233\135\143\239\188\154{0}", nMyCount))
+  tbWnd.pPanel:Label_SetText(tbWnd.szTongNumber, i18n.EasyGet("\229\184\174\228\188\154\229\183\178\230\143\144\228\186\164\230\149\176\233\135\143\239\188\154{0}", nTotalCount))
+  local tbMaterials = Compose:GetMaterialsByFormulaId(self.tbConfig.nFormulaID)
+  local tbGrid = Ui:NewExistItemGrid(tbWnd, tbWnd.szItemGrid)
+  tbGrid:SetGenericItem(tbMaterials[1])
+  local szType, nItemTemplateId = table.unpack(tbMaterials[1])
+  tbWnd.pPanel:Label_SetText(tbWnd.szItemName, Item:GetName(nItemTemplateId, me))
+  local nHave = me.GetItemCountByTypeInBag(nItemTemplateId)
+  tbWnd.pPanel:Label_SetText(tbWnd.szItemNums, i18n.EasyGet("\230\139\165\230\156\137\239\188\154{0}", nHave))
+  tbWnd.pPanel:SetActive(tbWnd.btnHelp, false)
+  local nAwardTime = Lib:GetDate2Time(self.tbConfig.nAwardTime)
+  tbWnd.pPanel:Label_SetText(tbWnd.txtInfo, i18n.EasyGet("\229\165\150\229\138\177\229\176\134\229\156\168<color=#138446>{0}</color>\233\128\154\232\191\135\233\130\174\228\187\182\229\143\145\230\148\190", Lib:TimeDesc13(nAwardTime)))
+end
+
+function tbActivity:OnClickAdd(tbWnd)
+  local tbMaterials = Compose:GetMaterialsByFormulaId(self.tbConfig.nFormulaID)
+  local szType, nItemTemplateId = table.unpack(tbMaterials[1])
+  Ui:OpenWindow("UIAccess_Tip", nil, nItemTemplateId)
+end
+
+function tbActivity:OnClickbtnGo(tbWnd)
+  local pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.AddMonster)
+  local tbMapPos = pInstance and pInstance.tbConfig and pInstance.tbConfig.tbMapPos
+  if tbMapPos then
+    for nMapId, tbInfo in pairs(tbMapPos) do
+      for key, tbPos in pairs(tbInfo) do
+        AutoPath:GotoAndCallEx(nMapId, tbPos.nPosX, tbPos.nPosY)
+        tbWnd:Close()
+        break
+      end
+    end
+  end
+end
+
+function tbActivity:OnUiEvent(tbWnd, szEvent, ...)
+  if tbWnd.ClassName ~= "UIReward_Newyear" then
+    return
+  end
+  if "OnOpen" == szEvent then
+    self:UpdateLevelList(tbWnd)
+    self:UpdateOtherInfo(tbWnd)
+  end
+  if "OnClick" == szEvent then
+    local tbParam = {
+      ...
+    }
+    if "btnAdd" == tbParam[1] then
+      self:OnClickAdd(tbWnd)
+    elseif "btnGo" == tbParam[1] then
+      self:OnClickbtnGo(tbWnd)
+    end
+  end
+end

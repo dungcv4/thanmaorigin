@@ -1,0 +1,275 @@
+local tbWnd = Ui:CreateWindow("UIWuShuangHaoJieGuessSet")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.UpdateItem
+    },
+    {
+      EventNotify.emNOTIFY_WULINDAHUI_SYNC_GUESS,
+      self.Update
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnOK = "node/imgBG/Content/btnOK",
+  Tips = "node/imgBG/Content/Tips",
+  TipsSetNum = "node/imgBG/Content/TipsSetNum",
+  Template = "node/imgBG/Content/TeamList/Viewport/Content/Template",
+  item = "node/imgBG/Content/SetNum/item",
+  UIItemGrid = "node/imgBG/Content/SetNum/item/UIItemGrid",
+  UIAddAndSubGroup = "node/imgBG/Content/SetNum/UIAddAndSubGroup"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  item = function(self)
+    self:ClickItem()
+  end,
+  btnOK = function(self)
+    if Ui.bInZone then
+      me.CenterMsg(i18n.EasyGet("\232\183\168\230\156\141\228\184\173\230\151\160\230\179\149\232\191\155\232\161\140\229\189\147\229\137\141\230\147\141\228\189\156"))
+      return
+    end
+    self:Guess()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.Template)
+  self.tbItemGrid = Ui:NewExistItemGrid(self, tbControls.UIItemGrid)
+  self.AddAndSubGroup = Ui:NewExistAddAndSubGroup(self, tbControls.UIAddAndSubGroup)
+  self.AddAndSubGroup:BindEvent(function(nValue)
+    self:SetNum(nValue)
+  end)
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:OnOpen()
+  self.nWarZone = WuLinDaHui:GetWarZone()
+  local tbGuessTime, tbGuessCfg = WuLinDaHui:GetGuessTimeCfg()
+  if not (tbGuessTime and tbGuessCfg) or tbGuessTime.WAR_ZONE and tbGuessTime.WAR_ZONE ~= self.nWarZone then
+    self:Close()
+    return
+  end
+  self.tbGuessTime = tbGuessTime
+  self.tbGuessCfg = tbGuessCfg
+  if not WuLinDaHui.tbFinalMatchList or not WuLinDaHui.tbFinalMatchList[self.tbGuessCfg.PHASE] then
+    self:Close()
+    return
+  end
+  self:Update()
+end
+
+function tbWnd:Update()
+  if not WuLinDaHui.tbFinalMatchList or not WuLinDaHui.tbFinalMatchList[self.tbGuessCfg.PHASE] then
+    self:Close()
+    return
+  end
+  self.nNum = 0
+  self.tbMatchList = WuLinDaHui.tbFinalMatchList[self.tbGuessCfg.PHASE]
+  self.tbTeamFightPower = WuLinDaHui.tbTeamFightPower
+  self.tbMyGuessData = WuLinDaHui.tbMyGuessData
+  self.tbGuess = {}
+  self.nBettedPay = 0
+  self.nBettedFree = 0
+  if self.tbMyGuessData and self.tbMyGuessData[self.tbGuessCfg.PHASE] then
+    local tbGuessData = self.tbMyGuessData[self.tbGuessCfg.PHASE]
+    self.nBettedPay = tbGuessData.nBettedPay
+    self.nBettedFree = tbGuessData.nBettedFree
+    for _, nTeamId in ipairs(tbGuessData.tbGuess) do
+      self.tbGuess[nTeamId] = true
+    end
+  end
+  self:UpdateMatch()
+  self:UpdateItem()
+end
+
+function tbWnd:UpdateMatch()
+  self.tbTeamIndex = {}
+  self.tbScrollView:Reset()
+  for i = 1, self.tbGuessCfg.PHASE / 2 do
+    local nA, nB = i, self.tbGuessCfg.PHASE - i + 1
+    self.tbScrollView:SetElement(i, function(tbElement)
+      self.tbTeamIndex[i] = {}
+      if self.tbMatchList[nA] then
+        self.tbTeamIndex[i][1] = self.tbMatchList[nA].nTeamId
+        tbElement.pPanel:Label_SetText("Team1/txtName", self.tbMatchList[nA].szTeamName)
+        tbElement.pPanel:Label_SetText("Team1/txtFightPower", self.tbTeamFightPower[self.tbMatchList[nA].nTeamId] or 0)
+        tbElement.pPanel:Toggle_SetChecked("Team1/ToggleSelect", self.tbGuess[self.tbMatchList[nA].nTeamId])
+        tbElement.pPanel:Toggle_SetEnable("Team1/ToggleSelect", true)
+        Ui:Toggle_BindEvent(tbElement.pPanel, "Team1/ToggleSelect", function(self, isOn)
+          if isOn then
+            self:onClickToggle(i, 2)
+          end
+        end, self)
+      else
+        tbElement.pPanel:Label_SetText("Team1/txtName", i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+        tbElement.pPanel:Label_SetText("Team1/txtFightPower", "-")
+        tbElement.pPanel:Toggle_SetChecked("Team1/ToggleSelect", false)
+        tbElement.pPanel:Toggle_SetEnable("Team1/ToggleSelect", false)
+      end
+      if self.tbMatchList[nB] then
+        self.tbTeamIndex[i][2] = self.tbMatchList[nB].nTeamId
+        tbElement.pPanel:Label_SetText("Team2/txtName", self.tbMatchList[nB].szTeamName)
+        tbElement.pPanel:Label_SetText("Team2/txtFightPower", self.tbTeamFightPower[self.tbMatchList[nB].nTeamId] or 0)
+        tbElement.pPanel:Toggle_SetChecked("Team2/ToggleSelect", self.tbGuess[self.tbMatchList[nB].nTeamId])
+        tbElement.pPanel:Toggle_SetEnable("Team2/ToggleSelect", true)
+        Ui:Toggle_BindEvent(tbElement.pPanel, "Team2/ToggleSelect", function(self, isOn)
+          if isOn then
+            self:onClickToggle(i, 1)
+          end
+        end, self)
+      else
+        tbElement.pPanel:Label_SetText("Team2/txtName", i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+        tbElement.pPanel:Label_SetText("Team2/txtFightPower", "-")
+        tbElement.pPanel:Label_SetText("Team2/txtFightPower", "-")
+        tbElement.pPanel:Toggle_SetChecked("Team2/ToggleSelect", false)
+        tbElement.pPanel:Toggle_SetEnable("Team2/ToggleSelect", false)
+      end
+    end)
+  end
+end
+
+function tbWnd:onClickToggle(i, nOther)
+  local tbElement = self.tbScrollView:GetElement(i)
+  tbElement.pPanel:Toggle_SetChecked("Team" .. nOther .. "/ToggleSelect", false)
+end
+
+function tbWnd:GetItemCount()
+  local nHaveNum1 = me.GetItemCountByTypeInBag(WuLinDaHui.GuessCfg.FREE_ITEM_ID)
+  local nHaveNum2 = me.GetItemCountByTypeInBag(WuLinDaHui.GuessCfg.PAY_ITEM_ID)
+  return nHaveNum1 + nHaveNum2
+end
+
+function tbWnd:ClickItem()
+  Shop:OpenShopBuyWidDefault(WuLinDaHui.GuessCfg.PAY_ITEM_ID)
+end
+
+function tbWnd:UpdateItem()
+  self.tbItemGrid:SetItemByTemplate(WuLinDaHui.GuessCfg.PAY_ITEM_ID)
+  self.tbItemGrid:SetLabelSuffixText(self:GetItemCount())
+  if self:GetItemCount() <= 0 then
+    self.tbItemGrid:SetClickEnable(true, function()
+      Shop:OpenShopBuyWidDefault(WuLinDaHui.GuessCfg.PAY_ITEM_ID)
+    end)
+    self.tbItemGrid:Plus_SetActive(true)
+    self.tbItemGrid:CDLabyer_SetActive(true)
+  else
+    self.tbItemGrid:SetClickEnable(true)
+    self.tbItemGrid:CDLabyer_SetActive(false)
+    self.tbItemGrid:Plus_SetActive(false)
+  end
+  self:InitNum()
+end
+
+function tbWnd:InitNum()
+  local nHaveNum1 = me.GetItemCountByTypeInBag(WuLinDaHui.GuessCfg.FREE_ITEM_ID)
+  local nHaveNum2 = me.GetItemCountByTypeInBag(WuLinDaHui.GuessCfg.PAY_ITEM_ID)
+  local nCanCostPay = math.min(WuLinDaHui.GuessCfg.ONCE_COUNT_MAX - self.nBettedPay, nHaveNum2)
+  local nCanCostFree = math.min(WuLinDaHui.GuessCfg.ONCE_COUNT_MAX_FREE - self.nBettedFree, nHaveNum1)
+  if nCanCostPay > 0 then
+    self.AddAndSubGroup:SetNumRange(1, nCanCostPay)
+  else
+    self.AddAndSubGroup:SetNumRange(1, nCanCostFree)
+  end
+  self.AddAndSubGroup:SetInputValue(self.nNum)
+  local nAllBetted = self.nBettedPay + self.nBettedFree
+  self.pPanel:Label_SetText(tbControls.TipsSetNum, i18n.EasyGet("\229\189\147\229\137\141\229\183\178\228\184\139\230\179\168{0}\239\188\140\230\156\172\229\156\186\231\171\158\231\140\156\229\143\175\228\184\139\230\179\168\233\135\145\229\184\129\232\180\173\228\185\176\231\154\132\231\171\158\231\140\156\229\136\184{1}", nAllBetted, WuLinDaHui.GuessCfg.ONCE_COUNT_MAX))
+  local tbCfg = WuLinDaHui.GuessAwardCfg[self.tbGuessTime.GUESS_INDEX]
+  local nMin = tbCfg[0] * nAllBetted
+  local nGuessTeamNum = Lib:CountTB(self.tbGuess)
+  local nMax = tbCfg[nGuessTeamNum] * nAllBetted
+  self.pPanel:Label_SetText(tbControls.Tips, i18n.EasyGet("\228\184\139\230\179\168\229\144\142\233\162\132\232\174\161\230\156\128\228\189\142\230\148\182\231\155\138{0}\229\133\131\229\174\157,\230\156\128\233\171\152\230\148\182\231\155\138{1}\229\133\131\229\174\157", nMin, nMax))
+end
+
+function tbWnd:SetNum(nNum)
+  if self.nNum == nNum then
+    return
+  end
+  self.nNum = nNum
+end
+
+function tbWnd:Guess()
+  local tbGuess = {}
+  for i = 1, self.tbScrollView:GetCount() do
+    local tbElement = self.tbScrollView:GetElement(i)
+    if tbElement then
+      if tbElement.pPanel:Toggle_GetChecked("Team1/ToggleSelect") == true and self.tbTeamIndex[i] and self.tbTeamIndex[i][1] then
+        table.insert(tbGuess, self.tbTeamIndex[i][1])
+      elseif true == tbElement.pPanel:Toggle_GetChecked("Team2/ToggleSelect") and self.tbTeamIndex[i] and self.tbTeamIndex[i][2] then
+        table.insert(tbGuess, self.tbTeamIndex[i][2])
+      end
+    end
+  end
+  if #tbGuess <= 0 then
+    me.CenterMsg(i18n.EasyGet("\230\156\170\233\128\137\230\139\169\228\184\139\230\179\168\233\152\159\228\188\141"))
+    return
+  elseif #tbGuess > self.tbGuessCfg.TEAM_COUNT then
+    me.CenterMsg(i18n.EasyGet("\230\156\128\229\164\154\228\184\139\230\179\168{0}\228\184\170\233\152\159\228\188\141", self.tbGuessCfg.TEAM_COUNT))
+    return
+  end
+  local nAllBetted = self.nBettedPay + self.nBettedFree
+  if self.nNum + nAllBetted <= 0 then
+    me.CenterMsg(i18n.EasyGet("\228\184\139\230\179\168\230\149\176\233\135\143\229\176\143\228\186\1420"))
+    return
+  end
+  local nHaveNum2 = me.GetItemCountByTypeInBag(WuLinDaHui.GuessCfg.PAY_ITEM_ID)
+  local nCanCostPay = math.min(WuLinDaHui.GuessCfg.ONCE_COUNT_MAX - self.nBettedPay, nHaveNum2)
+  local nCostPay = 0
+  if nCanCostPay < self.nNum then
+    nCostPay = nCanCostPay
+  else
+    nCostPay = self.nNum
+  end
+  if self.nNum + nAllBetted <= 0 then
+    me.CenterMsg(i18n.EasyGet("\228\184\139\230\179\168\230\149\176\233\135\143\229\176\143\228\186\1420"))
+    return
+  end
+  if nCostPay + self.nBettedPay > WuLinDaHui.GuessCfg.ONCE_COUNT_MAX then
+    me.CenterMsg(i18n.EasyGet("\230\128\187\230\138\188\230\179\168\230\149\176\233\135\143\228\184\141\232\131\189\232\182\133\232\191\135{0}", WuLinDaHui.GuessCfg.ONCE_COUNT_MAX))
+    return
+  end
+  if self.nNum > self:GetItemCount() then
+    local function funcOK()
+      Ui:CloseWindow("UIItemTips")
+      
+      Shop:OpenShopBuyWidDefault(WuLinDaHui.GuessCfg.PAY_ITEM_ID)
+    end
+    
+    local function funcCancel()
+    end
+    
+    local tbInfo = Item:GetItemBaseProp(WuLinDaHui.GuessCfg.PAY_ITEM_ID)
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\232\180\173\228\185\176\239\188\159", tbInfo.szName), {
+      {funcOK},
+      {funcCancel}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+    return
+  end
+  local szMsg = i18n.EasyGet("\230\152\175\229\144\166\231\161\174\229\174\154\228\184\139\230\179\168\229\144\151")
+  
+  local function fnConfirm()
+    WuLinDaHui:RequestGuess(tbGuess, self.nNum)
+  end
+  
+  me.MsgBox(szMsg, {
+    {
+      i18n.szOk,
+      fnConfirm
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end

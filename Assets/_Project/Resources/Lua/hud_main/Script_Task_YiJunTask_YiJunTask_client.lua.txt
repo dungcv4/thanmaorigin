@@ -1,0 +1,237 @@
+Require("CommonScript/lib.lua")
+Require("CommonScript/Task/YiJunTask/YiJunTask_public.lua")
+YiJunTask.tbTaskData = YiJunTask.tbTaskData or {}
+YiJunTask.tbLogic_KillNpc = YiJunTask.tbLogic_KillNpc or Lib:NewClass(YiJunTask.tbLogic_Default)
+local tbLogic_KillNpc = YiJunTask.tbLogic_KillNpc
+
+function tbLogic_KillNpc:GetTarget(tbInfo)
+  local nGain = 0
+  if YiJunTask.tbTaskData and YiJunTask.tbTaskData.nGain then
+    nGain = YiJunTask.tbTaskData.nGain
+  end
+  local szNpcName = Npc:GetNameByTemplateId(tbInfo.nNpcTemplateId)
+  return i18n.EasyGet("\229\135\187\232\180\165<color=#ffb431>{0}</color> {1}\228\184\170<color=#c5b505>\239\188\136{2}/{3}\239\188\137</color>", szNpcName, tbInfo.nCount, nGain, tbInfo.nCount)
+end
+
+function tbLogic_KillNpc:DoAction_Client(pPlayer, tbInfo)
+  YiJunTask:GotoNpc(tbInfo.nNpcTemplateId, tbInfo.nMapTemplateId, true)
+end
+
+YiJunTask.tbLogic_GiveItem = YiJunTask.tbLogic_GiveItem or Lib:NewClass(YiJunTask.tbLogic_Default)
+local tbLogic_GiveItem = YiJunTask.tbLogic_GiveItem
+
+function tbLogic_GiveItem:GetTarget(tbInfo)
+  local szItemName = i18n.Parse(KItem.GetItemShowInfo(tbInfo.nItemTemplateId))
+  if tbInfo.nGetNpcTemplateId > 0 then
+    local szGetNpcName = Npc:GetNameByTemplateId(tbInfo.nGetNpcTemplateId)
+    return i18n.EasyGet("\228\184\138\228\186\164{0}\228\184\170<color=#60A5FF>{1}</color>\239\188\140\229\137\141\229\190\128<color=#ffb431>{2}</color>\229\164\132\232\180\173\228\185\176", tbInfo.nCount, szItemName, szGetNpcName)
+  else
+    return i18n.EasyGet("\228\184\138\228\186\164{0}\228\184\170<color=#60A5FF>{1}</color>", tbInfo.nCount, szItemName)
+  end
+end
+
+function tbLogic_GiveItem:DoAction_Client(pPlayer, tbInfo)
+  local nNeedNum = tbInfo.nCount
+  local nCurNum = me.GetItemCountInBags(tbInfo.nItemTemplateId)
+  if nNeedNum <= nCurNum then
+    local function funOK(tbParam)
+      RemoteServer.YiJunTaskCmd("CommitItem")
+    end
+    
+    local szColor = nNeedNum <= nCurNum and "orange" or "red"
+    local szNumMsg = string.format("<color=%s>%s</color> / %s", szColor, nCurNum, nNeedNum)
+    Ui:OpenWindow("UIQuickItem", i18n.EasyGet("\228\184\138\228\186\164\231\137\169\229\147\129"), i18n.EasyGet("\230\148\182\233\155\134\228\187\165\228\184\139\231\137\169\229\147\129\229\185\182\228\184\138\228\186\164"), szNumMsg, i18n.EasyGet("\230\143\144\228\186\164"), function(tbItemGrid)
+      tbItemGrid:SetItemByTemplate(tbInfo.nItemTemplateId, nil, nil, nil, {bShowTip = true})
+      tbItemGrid:SetClickEnable(true)
+    end, function(tbUIQuickItem)
+      if not tbInfo or not funOK then
+        return
+      end
+      if nCurNum < nNeedNum then
+        me.CenterMsg(i18n.EasyGet("\231\137\169\229\147\129\230\149\176\233\135\143\228\184\141\232\182\179"))
+        return
+      end
+      funOK(tbInfo)
+      tbUIQuickItem:Close()
+    end, true)
+  elseif tbInfo.nGetNpcTemplateId > 0 then
+    YiJunTask:GotoNpc(tbInfo.nGetNpcTemplateId, tbInfo.nGetMapTemplateId, false)
+  else
+    local szItemName = i18n.Parse(KItem.GetItemShowInfo(tbInfo.nItemTemplateId))
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\229\134\133<color=#60A5FF>{0}</color>\230\149\176\233\135\143\228\184\141\232\182\179{1}\228\184\170", szItemName, tbInfo.nCount))
+  end
+end
+
+function YiJunTask:GotoNpc(nNpcTemplateId, nMapTemplateId, bAutoFight)
+  local nPosX, nPosY, nWalkNearLength = Npc:GetNpcPos(nNpcTemplateId, nMapTemplateId, true)
+  
+  local function fnCallback()
+    local function __timer_Callback()
+      if bAutoFight then
+        AFK:Start()
+      elseif Shop:IsExistShop(nNpcTemplateId) then
+        local nNeedItemId = YiJunTask:QueryNeedItem(me)
+        Ui:OpenWindow("UINpcShop", nNpcTemplateId, nMapTemplateId, nNeedItemId, true)
+      else
+        local nNpcId = KNpc.GetNpcIdByTemplateId(nNpcTemplateId)
+        if nNpcId then
+          YiJunTask:CloseToNpc(nNpcTemplateId)
+          Operation:SimpleTap(nNpcId)
+        else
+          YiJunTask:GotoNpc(nNpcTemplateId, nMapTemplateId, bAutoFight)
+        end
+      end
+    end
+    
+    AFK:Stop()
+    Timer:Register(5, __timer_Callback)
+  end
+  
+  AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, fnCallback, nWalkNearLength, nil, nNpcTemplateId)
+end
+
+function YiJunTask:CloseToNpc(nNpcTemplateId)
+  RemoteServer.YiJunTaskCmd("CloseToNpc_GS")
+end
+
+function YiJunTask:GetTitle()
+  return i18n.EasyGet("\228\185\137\229\134\155\228\187\187\229\138\161")
+end
+
+function YiJunTask:GetTitleWithPrefix()
+  return i18n.EasyGet("[\229\184\184] \228\185\137\229\134\155\228\187\187\229\138\161")
+end
+
+function YiJunTask:GetStepText()
+  if not self:IsFinishStartTask(me) then
+    return ""
+  else
+    if not self.tbTaskData then
+      return ""
+    end
+    local nCurNum = self.tbTaskData.nFinishCount + 1
+    nCurNum = nCurNum > self.DAILY_TASKNUM and self.DAILY_TASKNUM or nCurNum
+    return string.format("(%s/%s)", nCurNum, self.DAILY_TASKNUM)
+  end
+end
+
+function YiJunTask:GetTarget()
+  if not self.tbTaskData then
+    return ""
+  end
+  if not self:IsFinishStartTask(me) then
+    local szTargetNpcName = Npc:GetNameByTemplateId(self.nTaskNpcTemplate)
+    return i18n.EasyGet("\229\137\141\229\190\128<color=#ffb431>{0}</color>\229\164\132\230\142\165\229\143\150\228\185\137\229\134\155\228\187\187\229\138\161", szTargetNpcName)
+  else
+    local tbInfo = self:GetTaskCfg(self.tbTaskData.nCurTaskId, self.tbTaskData.nCurStep)
+    if not tbInfo then
+      return ""
+    end
+    local szAction = tbInfo.szAction
+    local tbLogic = self:GetLogic(szAction)
+    return tbLogic:GetTarget(tbInfo)
+  end
+end
+
+function YiJunTask:IsDoingTask()
+  if not self:IsTimeFrameOpen() then
+    return
+  end
+  if me.nLevel < self.LevelLimit then
+    return
+  end
+  if not self:IsFinishStartTask(me) then
+    return true
+  else
+    if not self.tbTaskData then
+      return false
+    end
+    if self.tbTaskData.nCurTaskId <= 0 or self.tbTaskData.nCurStep <= 0 then
+      return false
+    end
+    if self.tbTaskData.nFinishCount >= self.DAILY_TASKNUM then
+      return false
+    end
+    return true
+  end
+end
+
+function YiJunTask:DoAction_Client()
+  if not self:IsFinishStartTask(me) then
+    TeamMgr:StopFollowMember()
+    AFK:Stop()
+    YiJunTask:GotoNpc(self.nTaskNpcTemplate, self.nTaskNpcMapTemplate, false)
+  else
+    if not self.tbTaskData then
+      return
+    end
+    local tbInfo = self:GetTaskCfg(self.tbTaskData.nCurTaskId, self.tbTaskData.nCurStep)
+    if not tbInfo then
+      return
+    end
+    TeamMgr:StopFollowMember()
+    AFK:Stop()
+    local szAction = tbInfo.szAction
+    local tbLogic = self:GetLogic(szAction)
+    return tbLogic:DoAction_Client(me, tbInfo)
+  end
+end
+
+function YiJunTask:OnSyncData(tbData)
+  self.tbTaskData = tbData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_YIJUNTASK_DATA, tbData)
+end
+
+function YiJunTask:GetShowTarget()
+  if not self.tbTaskData or not self:IsFinishStartTask(me) then
+    return {}
+  end
+  local szCurAward = YiJunTask.tbAwardSetting[me.nLevel][self.tbTaskData.nFinishCount + 1]
+  local tbYiJunTaskAwards = Lib:GetAwardFromString(szCurAward)
+  return tbYiJunTaskAwards
+end
+
+function YiJunTask:OnBuyItem(bSuccess, nTemplateId)
+  if not bSuccess or not nTemplateId then
+    return
+  end
+  if self:IsFinishStartTask(me) then
+    if not self.tbTaskData then
+      return
+    end
+    local tbInfo = self:GetTaskCfg(self.tbTaskData.nCurTaskId, self.tbTaskData.nCurStep)
+    if not tbInfo then
+      return
+    end
+    if tbInfo.szAction ~= "giveitem" then
+      return
+    end
+    if tbInfo.nItemTemplateId == nTemplateId then
+      Ui:CloseWindow("UINpcShop")
+      YiJunTask:CloseToNpc()
+    end
+  end
+end
+
+function YiJunTask:OnDailog()
+  local pNpc = KNpc.GetNearestNpcByTemplateId(me.GetNpc(), self.nTaskNpcTemplate, Lib:Map2Logic(125))
+  if pNpc then
+    Dialog:Show({
+      Text = "<auto_next>" .. pNpc.szDefaultDialogInfo,
+      OptList = {
+        {
+          Text = i18n.EasyGet("\228\185\137\229\134\155\228\187\187\229\138\161"),
+          Callback = self.OnStart,
+          Param = {self}
+        }
+      }
+    }, me, pNpc)
+    Ui:SetIsDlgAutoNext(true)
+  end
+end
+
+function YiJunTask:OnStart()
+  RemoteServer.YiJunTaskCmd("BeginDialog_StartTask")
+end
+
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SHOP_BUY_RESULT, YiJunTask.OnBuyItem, YiJunTask)

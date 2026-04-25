@@ -1,0 +1,201 @@
+MasterPrentice.Def = {
+  PlayerScriptTableKey = "MasterPrenticeCtrl",
+  MAX_MASTER_COUNT = 2,
+  MAX_PRENTICE_COUNT = 2,
+  MIN_LEVEL_DIFF = 3,
+  MAX_SEARCH_REGISTER_COUNT = 10,
+  MAX_SYNC_APPLIES = 10,
+  TIME_DISMISS1 = 86400,
+  DAY_DISMISS2 = 7,
+  DAY_DISMISS3 = 3,
+  STATUS_NONE = 0,
+  STATUS_BEFORE_APPRENTICE = 1,
+  STATUS_APPRENTICE = 2,
+  STATUS_AFTER_APPENTICE = 3,
+  szMoneyKey = "MingWang",
+  nGroupKey = GetGroupKey("MasterPrentice"),
+  nNoShowId = 1,
+  nLastTimeId = 2,
+  nNotRegisterPretice = 3,
+  nNotRegisterMaster = 4,
+  TaskStatus = {
+    Unfinish = 0,
+    Finished = 1,
+    Reported = 2,
+    Expired = 3
+  },
+  LOGWAY = Env.LogWay_MasterPrentice,
+  Relation_Master = 1,
+  Relation_Prentice = 2,
+  Relation_Graduated = 3,
+  tbGraduateAward = {
+    {
+      30600,
+      30601,
+      30602,
+      30603
+    },
+    {
+      1,
+      1,
+      1,
+      1
+    }
+  },
+  tbTitleID = {
+    3100,
+    3101,
+    3102,
+    3103
+  }
+}
+MasterPrentice.RegisterInfo = MasterPrentice.RegisterInfo or {
+  tbMasters = {},
+  tbPrentices = {}
+}
+
+function MasterPrentice:IsOpen()
+  if 1 ~= GetTimeFrameState(self.Cfg.TIME_FRAME_KEY) then
+    return false, i18n.EasyGet("\229\184\136\229\190\146\231\179\187\231\187\159\230\154\130\230\156\170\229\188\128\230\148\190")
+  end
+  return true
+end
+
+function MasterPrentice:GetMPData(masterId, prenticeId)
+  if self.MPData[masterId] then
+    return self.MPData[masterId][prenticeId]
+  else
+    return false
+  end
+end
+
+function MasterPrentice:NotifyFail(szMsg)
+  me.CenterMsg(szMsg)
+end
+
+function MasterPrentice:GetPlayerName(nPlayerId)
+  local pStayData = KPlayer.GetRoleStayInfo(nPlayerId)
+  return pStayData and pStayData.szName or ""
+end
+
+function MasterPrentice:GetRelation(me, hisId)
+  local masterCtrl = self:GetMPInfo(me)
+  if not masterCtrl then
+    return 0
+  end
+  if masterCtrl.tbMyMaster then
+    for k, masterId in pairs(masterCtrl.tbMyMaster) do
+      if hisId == masterId then
+        return self.Def.Relation_Master
+      end
+    end
+  end
+  if masterCtrl.tbMyPrentices then
+    for k, prenticeId in pairs(masterCtrl.tbMyPrentices[1]) do
+      if hisId == prenticeId then
+        return self.Def.Relation_Prentice
+      end
+    end
+    for k, prenticeId in pairs(masterCtrl.tbMyPrentices[2]) do
+      if hisId == prenticeId then
+        return self.Def.Relation_Graduated
+      end
+    end
+  end
+  return -3
+end
+
+function MasterPrentice:GetPrenticeExpByLevel(nLevel)
+  local nExp = 0
+  for index, tbValue in ipairs(self.Cfg.PRENTICE_EXP) do
+    if nLevel <= tbValue[1] then
+      nExp = tbValue[2]
+      break
+    end
+  end
+  return nExp
+end
+
+function MasterPrentice:GetMinLevelDiff(nVipLevel)
+  local tbVipSetting = Vip.tbSetting[nVipLevel]
+  if tbVipSetting then
+    return self.Def.MIN_LEVEL_DIFF - tbVipSetting.nApprenticeLevelMinus
+  else
+    return self.Def.MIN_LEVEL_DIFF
+  end
+end
+
+function MasterPrentice:GetMinLevelDiff2(nMasterVip, nPrenticeVip)
+  local nMasterDiffLevel = self:GetMinLevelDiff(nMasterVip)
+  local nPrenticeDiffLevel = self:GetMinLevelDiff(nPrenticeVip)
+  if nMasterDiffLevel > nPrenticeDiffLevel then
+    return nPrenticeDiffLevel
+  else
+    return nMasterDiffLevel
+  end
+end
+
+function MasterPrentice:GMSetPuTongGraducateGoal(nGoal)
+  MasterPrentice.Cfg.GRADUATE_GOAL_COUNT1 = nGoal
+end
+
+function MasterPrentice:GMSetJieChuGraducateGoal(nGoal)
+  MasterPrentice.Cfg.GRADUATE_GOAL_COUNT2 = nGoal
+end
+
+function MasterPrentice:GMClearGraducateTime()
+  MasterPrentice.Cfg.TIME_GRADUATE = 0
+end
+
+function MasterPrentice:GMSetWeekTaskCount(nCount)
+  MasterPrentice.Cfg.MAX_WEEK_TASK_COUNT = nCount
+end
+
+function MasterPrentice:GMClearDayDismiss()
+  MasterPrentice.Def.DAY_DISMISS2 = 0
+  MasterPrentice.Def.TIME_DISMISS1 = 0
+end
+
+function MasterPrentice:GMOpenZhouChang(nPrenticesID)
+  local tbMPData = MasterPrentice:GetMPData(me.dwID, nPrenticesID)
+  tbMPData.nLastTaskWeek = 0
+  tbMPData.tbTaskList = {}
+end
+
+function MasterPrentice:GMFinishGoal(nPrenticesID, nGoal)
+  local tbMPData = MasterPrentice:GetMPData(nPrenticesID, me.dwID)
+  if not tbMPData then
+    me.CenterMsg(i18n.EasyGet("\229\184\136\229\190\146\229\133\179\231\179\187\228\184\141\229\173\152\229\156\168"))
+    return
+  end
+  tbMPData.nFinishedGoalCount = nGoal
+  me.CenterMsg(i18n.EasyGet("\232\174\190\231\189\174\230\136\144\229\138\159"))
+end
+
+function MasterPrentice:GMFinishOneGoal(nGoalID)
+  local tbGoal = MasterPrentice.MPTask.tbGoalSetting
+  local nCount = tbGoal[nGoalID].Count
+  local nSubKindID = tbGoal[nGoalID].AchievementSubKindID
+  Achievement:AddCountById(me.dwID, nSubKindID, nCount)
+end
+
+function MasterPrentice:GMFinishOneTask(nTaskID)
+  local tbGoal = MasterPrentice.MPTask.tbTaskSetting
+  local nCount = tbGoal[nTaskID].Count
+  local nSubKindID = tbGoal[nTaskID].AchievementSubKindID
+  Achievement:AddCountById(me.dwID, nSubKindID, nCount)
+end
+
+function MasterPrentice:GMAddChuangongCount(nPlayerId, nCount)
+  local tbMPData = MasterPrentice:GetMPData(me.dwID, nPlayerId)
+  if not tbMPData then
+    tbMPData = MasterPrentice:GetMPData(nPlayerId, me.dwID)
+    if not tbMPData then
+      me.CenterMsg(i18n.EasyGet("\229\184\136\229\190\146\229\133\179\231\179\187\228\184\141\229\173\152\229\156\168"))
+      return
+    end
+  end
+  tbMPData.nGMAddChuangongCount = nCount
+  tbMPData.nLastChuangongDate = Lib:GetLocalDay(GetTime() - 14400)
+  me.CenterMsg(i18n.EasyGet("\232\174\190\231\189\174\230\136\144\229\138\159"))
+end

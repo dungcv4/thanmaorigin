@@ -1,0 +1,136 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.HandInActivity)
+local Protocol = {
+  [tbActivity.Protocol.OnDialog] = "OnDialog"
+}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not Protocol or not Protocol[nProtocol] then
+    LogErr("[handInActivity ] ServerRequest error", nProtocol)
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:MakeByFormula(nFormulaType, nMakeNum)
+end
+
+function tbActivity:OnDialog(nIndex)
+  local tbNPCCfg = self:GetNPCCfg()[nIndex]
+  local nFormulaID = tbNPCCfg.nFormulaID
+  local bHasExtraAward = tbNPCCfg.bHasExtraAward
+  local nOnceMaxHandInCount = tbNPCCfg.nOnceMaxHandInCount
+  local pNpc = ActivityMgr:GetNearestNpc(self.tbConfig.nNPCID, me.nMapTemplateId)
+  if pNpc and pNpc.nId then
+    Operation:SimpleTap(pNpc.nId, false)
+  end
+  local nCount = Compose:GetMaxCanComposeInBag(me.dwID, nFormulaID)
+  if nCount <= 0 then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\151\160\229\143\175\228\187\165\230\143\144\228\186\164\233\129\147\229\133\183"))
+    local nSourceFormulaId = Compose:GetSourceFormulaId(nFormulaID)
+    if not nSourceFormulaId or nSourceFormulaId <= 0 then
+      return
+    end
+    local tbHandinMaterial = Compose:GetMaterialsByFormulaId(nFormulaID)
+    local tbHandinItem = tbHandinMaterial[1]
+    local _, nHandinItemId = table.unpack(tbHandinItem)
+    local szItemInfo = KItem.GetItemShowInfo(nHandinItemId)
+    local tbSourceMaterial = Compose:GetMaterialsByFormulaId(nSourceFormulaId)
+    local tbSourceItem = tbSourceMaterial[1]
+    local _, nSourceItemId = table.unpack(tbSourceItem)
+    local nSourceActivityId = KItem.GetItemExtParam(nSourceItemId, 1)
+    local pComposeInstance = ActivityMgr:GetInstanceById(nSourceActivityId)
+    local nComposeType = pComposeInstance:GetComposeTypeByFormulaId(nSourceFormulaId)
+    
+    local function funcOK(nSourceActivityId)
+      Ui:OpenWindow("UICompose_Tip", nSourceActivityId, nComposeType)
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\231\188\186\229\176\145{0}\239\188\140\230\152\175\229\144\166\229\137\141\229\142\187\232\142\183\229\143\150\239\188\159", szItemInfo), {
+      {funcOK, nSourceActivityId},
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+    return
+  end
+  nCount = math.min(nCount, nOnceMaxHandInCount)
+  local tbShowMaterial
+  if Compose.FORMULA_CONFIG and Compose.FORMULA_CONFIG[nFormulaID] and Compose.FORMULA_CONFIG[nFormulaID].tbMaterials then
+    tbShowMaterial = Compose.FORMULA_CONFIG[nFormulaID].tbMaterials[1]
+  end
+  if tbShowMaterial[2] then
+    Ui:OpenWindow("UIQuickItemLaoDong", tbShowMaterial[2], nil, nCount, "", self.nId, nFormulaID, bHasExtraAward)
+  else
+    Log("[HandInActivity_client param error ]", nFormulaID)
+  end
+end
+
+function tbActivity:HandIn_ToServer(nFormulaID, nCount)
+  ActivityMgr:CallServerScript(self.nId, tbActivity.Protocol.HandIn, nFormulaID, nCount)
+end
+
+function tbActivity:OnOpen()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.OnSynItem, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_DEL_ITEM, self.OnDelItem, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self.OnDelItem, self)
+end
+
+function tbActivity:OnSynItem(nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  for nIndex, tbNpcInfo in pairs(self.tbConfig.tbNPCCfg) do
+    local tbMaterials = Compose:GetMaterialsByFormulaId(tbNpcInfo.nFormulaID)
+    for key, tbInfo in pairs(tbMaterials) do
+      local szType, nItemTemplateId = table.unpack(tbInfo)
+      if nItemTemplateId == pItem.dwTemplateId and tbNpcInfo.szRedPointEvent and not Lib:IsEmptyStr(tbNpcInfo.szRedPointEvent) then
+        self:CheckLightRedPoint(pItem.dwTemplateId, tbNpcInfo.szRedPointEvent)
+      end
+    end
+  end
+end
+
+function tbActivity:OnDelItem()
+  for nIndex, tbNpcInfo in pairs(self.tbConfig.tbNPCCfg) do
+    local tbMaterials = Compose:GetMaterialsByFormulaId(tbNpcInfo.nFormulaID)
+    for key, tbInfo in pairs(tbMaterials) do
+      local szType, nItemTemplateId = table.unpack(tbInfo)
+      if tbNpcInfo.szRedPointEvent and not Lib:IsEmptyStr(tbNpcInfo.szRedPointEvent) then
+        self:CheckLightRedPoint(nItemTemplateId, tbNpcInfo.szRedPointEvent)
+      end
+    end
+  end
+end
+
+function tbActivity:CheckLightRedPoint(dwTemplateId, szRedPointEvent)
+  local nHave = me.GetItemCountByTypeInBag(dwTemplateId)
+  if nHave > 0 then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT[szRedPointEvent])
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT[szRedPointEvent])
+  end
+end
+
+function tbActivity:OnClose()
+  for nIndex, tbNpcInfo in pairs(self.tbConfig.tbNPCCfg) do
+    if tbNpcInfo.szRedPointEvent and not Lib:IsEmptyStr(tbNpcInfo.szRedPointEvent) then
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT[tbNpcInfo.szRedPointEvent])
+    end
+  end
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_DEL_ITEM, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self)
+end
+
+function tbActivity:GetRedPointEventList()
+  local tbList = {}
+  for nIndex, tbNpcInfo in pairs(self.tbConfig.tbNPCCfg) do
+    local tbMaterials = Compose:GetMaterialsByFormulaId(tbNpcInfo.nFormulaID)
+    for key, tbInfo in pairs(tbMaterials) do
+      local szType, nItemTemplateId = table.unpack(tbInfo)
+      if tbNpcInfo.szRedPointEvent and not Lib:IsEmptyStr(tbNpcInfo.szRedPointEvent) and (not tbNpcInfo.nExtraRedPoint or 1 ~= tbNpcInfo.nExtraRedPoint) then
+        table.insert(tbList, RedPointMgr.EVENT[tbNpcInfo.szRedPointEvent])
+      end
+    end
+  end
+  return tbList
+end

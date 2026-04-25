@@ -1,0 +1,127 @@
+SignInEveryDay.SAVE_GROUP = GetGroupKey("SignInEveryDay")
+SignInEveryDay.SAVE_LAST_SIGNIN = 1
+SignInEveryDay.SAVE_SIGNIN_DAY = 2
+SignInEveryDay.SAVE_CONSECUTIVE_DAYS = 3
+SignInEveryDay.SAVE_RESIGNIN_TIMES = 4
+SignInEveryDay.SAVE_SIGNIN_STAGE1 = 5
+SignInEveryDay.SAVE_SIGNIN_STAGE2 = 6
+SignInEveryDay.SAVE_SIGNIN_STAGE3 = 7
+SignInEveryDay.SAVE_SIGNIN_STAGE4 = 8
+SignInEveryDay.SAVE_SIGNIN_STAGE5 = 9
+SignInEveryDay.SAVE_CONSECUTIVE_AWARD = 10
+SignInEveryDay.SAVE_ROLE_CREATE_TIME = 11
+SignInEveryDay.STAGE_SAVE_SETTING = {
+  SignInEveryDay.SAVE_SIGNIN_STAGE1,
+  SignInEveryDay.SAVE_SIGNIN_STAGE2,
+  SignInEveryDay.SAVE_SIGNIN_STAGE3,
+  SignInEveryDay.SAVE_SIGNIN_STAGE4,
+  SignInEveryDay.SAVE_SIGNIN_STAGE5
+}
+SignInEveryDay.REF_TIME = 14400
+SignInEveryDay.MULTIPLE_NORMAL = 1
+SignInEveryDay.MULTIPLE_DOUBLE = 2
+
+function SignInEveryDay:GetCurMonthOpenDay()
+  local nCreateTime = GetServerCreateTime() - self.REF_TIME
+  local nCurTime = GetTime() - self.REF_TIME
+  local nToday = Lib:GetLocalDay(nCurTime)
+  local nLocalMonthDay = Lib:GetLocalMonthDay(nCurTime)
+  local nCurMonthOpenDay = nToday - nLocalMonthDay + 1 - Lib:GetLocalDay(nCreateTime) + 1
+  if nCurMonthOpenDay < 1 then
+    nCurMonthOpenDay = 1
+  end
+  return nCurMonthOpenDay
+end
+
+function SignInEveryDay:CheckSignUp(pPlayer)
+  local nLastTime = pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_LAST_SIGNIN)
+  local nLastDay = Lib:GetLocalDay(nLastTime - self.REF_TIME)
+  local nToday = Lib:GetLocalDay(GetTime() - self.REF_TIME)
+  if nLastDay == nToday then
+    return false, i18n.EasyGet("\228\187\138\229\164\169\229\183\178\231\187\143\229\174\140\230\136\144\231\173\190\229\136\176\227\128\130")
+  end
+  return true
+end
+
+function SignInEveryDay:CheckReSignIn(pPlayer)
+  local nCurTime = GetTime() - self.REF_TIME
+  local nSignInDay = pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_SIGNIN_DAY)
+  local nOpenDay = Lib:GetServerOpenDay_4AM()
+  local nMonthToday = Lib:GetLocalMonthDay(nCurTime)
+  local nCreateRoleTime = pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_ROLE_CREATE_TIME) - self.REF_TIME
+  local nToday = Lib:GetLocalDay(nCurTime)
+  local nCreateRoleDay = nToday - Lib:GetLocalDay(nCreateRoleTime) + 1
+  if nSignInDay >= nOpenDay or nSignInDay >= nMonthToday or nSignInDay >= nCreateRoleDay then
+    return false, i18n.EasyGet("\228\184\141\233\156\128\232\166\129\232\191\155\232\161\140\232\161\165\231\173\190")
+  end
+  local nResigninTimes = pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_RESIGNIN_TIMES)
+  if nResigninTimes >= self.Cfg.MAX_RESIGNIN then
+    return false, i18n.EasyGet("\230\178\161\230\156\137\232\161\165\231\173\190\230\172\161\230\149\176")
+  end
+  return true
+end
+
+function SignInEveryDay:CheckStageAward(pPlayer, nIndex)
+  local nSaveTask = self.STAGE_SAVE_SETTING[nIndex]
+  if not nSaveTask then
+    return false, i18n.EasyGet("\229\165\150\229\138\177\233\133\141\231\189\174\233\148\153\232\175\175")
+  end
+  local nStageAward = pPlayer.GetUserValue(self.SAVE_GROUP, nSaveTask)
+  if 1 == nStageAward then
+    return false, i18n.EasyGet("\230\173\164\229\165\150\229\138\177\229\183\178\233\162\134\229\143\150")
+  end
+  local tbSetting = self.tbStageAward[nIndex]
+  local nSignInDays = pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_SIGNIN_DAY)
+  if nSignInDays < tbSetting.nDay then
+    return false, i18n.EasyGet("\230\156\172\230\156\136\231\180\175\232\174\161\231\173\190\229\136\176\229\164\169\230\149\176\230\156\170\232\190\190\229\136\176")
+  end
+  return true
+end
+
+function SignInEveryDay:CheckConsecutiveAward(pPlayer)
+  local nConsecutiveAward = pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_CONSECUTIVE_AWARD)
+  if 1 == nConsecutiveAward then
+    return false, i18n.EasyGet("\230\156\172\230\156\136\232\191\158\231\187\173\231\173\190\229\136\176\229\165\150\229\138\177\229\183\178\233\162\134\229\143\150")
+  end
+  local nConsecutiveDays = pPlayer.GetUserValue(self.SAVE_GROUP, self.SAVE_CONSECUTIVE_DAYS)
+  if nConsecutiveDays < self.Cfg.CONSECUTIVE_DAY then
+    return false, i18n.EasyGet("\230\156\172\230\156\136\232\191\158\231\187\173\231\173\190\229\136\176\229\164\169\230\149\176\230\156\170\232\190\190\229\136\176\232\166\129\230\177\130")
+  end
+  return true
+end
+
+function SignInEveryDay:GetCurAwardList()
+  local nCurMonthOpenDay = SignInEveryDay:GetCurMonthOpenDay()
+  local tbAwardList = {}
+  for nId, tbSetting in ipairs(self.tbAwardSetting) do
+    if (not tbSetting.nOpenDayStart or nCurMonthOpenDay >= tbSetting.nOpenDayStart) and (not tbSetting.nOpenDayEnd or nCurMonthOpenDay <= tbSetting.nOpenDayEnd) then
+      tbAwardList[tbSetting.nDay] = {
+        szAward = tbSetting.szAward,
+        nDoubleVip = tbSetting.nDoubleVip or 0,
+        szDoubleTips = tbSetting.szDoubleTips
+      }
+    end
+  end
+  local nCurMonthDays = Lib:GetThisMonthTotalDay(GetTime() - self.REF_TIME)
+  tbAwardList[nCurMonthDays] = tbAwardList[#tbAwardList]
+  for i = nCurMonthDays + 1, #tbAwardList do
+    tbAwardList[i] = nil
+  end
+  return tbAwardList
+end
+
+function SignInEveryDay:LoadSetting()
+  local tbTableSetting = Lib:EasyLoadTabFile("Setting/Welfare/SignInEveryDay.tab", {"nId"}, {
+    "nId",
+    "nOpenDayStart",
+    "nOpenDayEnd",
+    "nDay",
+    "szAward",
+    "nDoubleVip",
+    "szDoubleTips"
+  })
+  assert(tbTableSetting)
+  self.tbAwardSetting = tbTableSetting
+end
+
+SignInEveryDay:LoadSetting()

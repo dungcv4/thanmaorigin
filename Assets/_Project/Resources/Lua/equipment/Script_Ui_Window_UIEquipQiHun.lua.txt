@@ -1,0 +1,345 @@
+local tbWnd = Ui:CreateClass("UIEquipQiHun", "UIPanel")
+local QiHun = Item.QiHun
+local tbControls = {
+  equipTemplate = "panelEquipList/imgList/List/Template",
+  txtValue = "panelQiHunInset/QiHunLv/txtValue",
+  txtLvTip = "panelQiHunInset/txtLvTip",
+  txtEquipName = "panelQiHunInset/txtEquipName",
+  UIEquipItemGrid = "panelQiHunInset/itemEquip/UIItemGrid",
+  UIQiHunItemGrid = "panelQiHunInset/ItemQiHun/UIItemGrid",
+  QiHunInfo = "panelQiHunInset/QiHunInfo",
+  txtQiHunName = "panelQiHunInset/QiHunInfo/txtQiHunName",
+  Attrib = "panelQiHunInset/QiHunInfo/Attrib",
+  Empty = "panelQiHunInset/Empty",
+  Lock = "panelQiHunInset/Lock",
+  txtCost = "panelQiHunInset/Lock/Cost/txtCost",
+  btnCarve = "panelQiHunInset/Lock/btnCarve",
+  TemplateQiHun = "PanelQiHunList/ScrollView/Viewport/Content/TemplateQiHun",
+  btnQihun = "PanelQiHunList/btnQihun",
+  btnRemove = "panelQiHunInset/btnRemove",
+  txtEmpty = "PanelQiHunList/txtEmpty",
+  ScrollView = "PanelQiHunList/ScrollView",
+  btnQiHunInfo = "panelQiHunInset/QiHunLv/btnQiHunInfo",
+  imgLock = "panelQiHunInset/Lock/imgLockBg",
+  TakeOffGroup = "panelQiHunInset/TakeOffGroup",
+  applyCell = "panelQiHunInset/TakeOffGroup/applyCell",
+  txtApplyTime = "panelQiHunInset/TakeOffGroup/applyCell/txtTime",
+  btnCancelBoli = "panelQiHunInset/TakeOffGroup/applyCell/btnCancelBoli",
+  boLiCell = "panelQiHunInset/TakeOffGroup/boLiCell",
+  txtBoLiTime = "panelQiHunInset/TakeOffGroup/boLiCell/txtTime"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnQihun = function(self)
+    self.tbOwner:Close()
+    Ui:OpenWindow("UIQiHun")
+  end,
+  btnRemove = function(self)
+    local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+    QiHun:TakeOffReq(nEquipPos)
+  end,
+  btnCarve = function(self)
+    local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+    QiHun:PunchingReq(nEquipPos)
+  end,
+  btnCancelBoli = function()
+    QiHun:C2SCancelTakeOff()
+  end,
+  imgLock = function(self)
+    local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+    QiHun:PunchingReq(nEquipPos)
+  end,
+  Empty = function(self)
+    local tbTemp = QiHun:GetQiHunItemNum()
+    if Lib:CountTB(tbTemp) > 0 then
+      me.CenterMsg(i18n.EasyGet("\233\128\137\230\139\169\229\143\179\228\190\167\229\153\168\233\173\130\232\191\155\232\161\140\233\149\182\229\181\140"))
+    else
+      self.tbOwner:ShowJumpToInfo(1)
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbEquipScrollView = Ui:NewScrollView(self, self.equipTemplate, self.OnEquipClick, false, true)
+  self.tbQiHunScrollView = Ui:NewScrollView(self, tbControls.TemplateQiHun, function(self, nIndex, tbElement)
+    self:OnSelectQiHun(nIndex, tbElement)
+  end)
+  self.tbEquipGrid = Ui:NewExistItemGrid(self, tbControls.UIEquipItemGrid)
+  self.tbEquipGrid:SetClickEnable(true)
+  self.tbQiHunGrid = Ui:NewExistItemGrid(self, tbControls.UIQiHunItemGrid)
+  self.tbQiHunGrid:SetClickEnable(true)
+end
+
+function tbWnd:OnOpen(nEquipPos)
+  self.tbSVData = {}
+  local tbEquip = me.GetEquips()
+  for k, v in pairs(tbEquip) do
+    if k <= Item.EQUIPPOS_AMULET then
+      local pEquip = KItem.GetItemObj(v)
+      table.insert(self.tbSVData, {
+        k,
+        v,
+        Item.tbEquipSort[pEquip.nEquipPos]
+      })
+    end
+  end
+  if 0 == #self.tbSVData then
+    me.CenterMsg(i18n.EasyGet("\229\176\154\230\156\170\231\169\191\230\136\180\232\163\133\229\164\135"))
+    return 0
+  end
+  
+  local function fnDamageCmp(a, b)
+    return a[3] < b[3]
+  end
+  
+  table.sort(self.tbSVData, fnDamageCmp)
+  self.nEquipIndex = 1
+  if nEquipPos then
+    for k, v in ipairs(self.tbSVData) do
+      if v[1] == nEquipPos then
+        self.nEquipIndex = k
+        break
+      end
+    end
+  end
+  self.tbEquipScrollView:ScrollToIndex(self.nEquipIndex, true)
+  self:UpdateView()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_QIHUN_TAKEOFF_STATUS_CHANGE, self.UpdateTakeOffStatus, self)
+  if self.nUpdateTimer then
+    Timer:Close(self.nUpdateTimer)
+    self.nUpdateTimer = nil
+  end
+  self.nUpdateTimer = Timer:Register(Env.GAME_FPS, self.UpdateTime, self)
+end
+
+function tbWnd:OnClose()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_QIHUN_TAKEOFF_STATUS_CHANGE, self)
+  if self.nUpdateTimer then
+    Timer:Close(self.nUpdateTimer)
+    self.nUpdateTimer = nil
+  end
+end
+
+function tbWnd:NotifyQiHun(szParam, nParam)
+end
+
+function tbWnd:OnEquipClick(nIndex)
+  if self.nEquipIndex == nIndex then
+    return
+  end
+  local tbOldElement = self.tbEquipScrollView:GetElement(self.nEquipIndex)
+  if tbOldElement then
+    tbOldElement.pPanel:SetActive("imgSelected", false)
+  end
+  self.nEquipIndex = nIndex
+  local tbCurElement = self.tbEquipScrollView:GetElement(self.nEquipIndex)
+  tbCurElement.pPanel:SetActive("imgSelected", true)
+  self.nStoneIndex = nil
+  self:UpdateView()
+end
+
+function tbWnd:fnSetItem(i, tbElement)
+  local nEquipPos, nEquipId = self.tbSVData[i][1], self.tbSVData[i][2]
+  local pEquip = KItem.GetItemObj(nEquipId)
+  local pPanel = tbElement.pPanel
+  local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  itemGrid:SetItem(nEquipId, pEquip.dwTemplateId)
+  itemGrid:SetClickEnable(true, function()
+    self:OnEquipClick(i)
+  end)
+  tbElement.pPanel:SetActive("imgSelected", i == self.nEquipIndex)
+  pPanel:Label_SetText("txtEquipName", Item:GetName(pEquip.dwTemplateId, me))
+  local nPutOnQiHunLevel = Item.QiHun:GetPutOnLevel(me, nEquipPos)
+  if nPutOnQiHunLevel > 0 then
+    local tbQiHunItemGrid = Ui:NewExistItemGrid(tbElement, "QiHunList/QiHunTemplate/UIItemGrid")
+    local nQiHunId = Item.QiHun.tbLevelInfo[nPutOnQiHunLevel][1]
+    tbQiHunItemGrid:SetItemByTemplate(nQiHunId)
+    tbQiHunItemGrid:SetClickEnable(true)
+    pPanel:SetActive("QiHunList/QiHunTemplate/UIItemGrid", true)
+  else
+    pPanel:SetActive("QiHunList/QiHunTemplate/UIItemGrid", false)
+  end
+  RedPointMgr:DynamicRegisteRedPoint(pPanel, "Main", {
+    Item.QiHun.tbEquipPos2RedPoint[nEquipPos]
+  })
+end
+
+function tbWnd:UpdateEquipSV()
+  self.tbEquipScrollView:Reset()
+  for i, v in pairs(self.tbSVData) do
+    self.tbEquipScrollView:SetElement(i, function(tbElement)
+      self:fnSetItem(i, tbElement)
+    end)
+  end
+end
+
+function tbWnd:PunchingRsp(nEquipPos)
+  self:UpdateView()
+end
+
+function tbWnd:PutOnRsp(nEquipPos)
+  self:UpdateView()
+end
+
+function tbWnd:TakeOffRsp(nEquipPos)
+  self:UpdateView()
+end
+
+function tbWnd:UpdateQiHunSV()
+  self.nSelectIndex = nil
+  self.tbQiHunItem = {}
+  local tbTemp = QiHun:GetQiHunItemNum()
+  local nMaxPutOnLevel = QiHun:GetMaxPunOnLevel()
+  for _, tbV in ipairs(tbTemp) do
+    if nMaxPutOnLevel >= tbV[3] then
+      table.insert(self.tbQiHunItem, tbV)
+    end
+  end
+  table.sort(self.tbQiHunItem, function(a, b)
+    return a[3] > b[3]
+  end)
+  self.tbQiHunScrollView:Reset()
+  for i = 1, #self.tbQiHunItem do
+    self.tbQiHunScrollView:SetElement(i, function(tbElement)
+      local nTemplate = self.tbQiHunItem[i][1]
+      local nCount = self.tbQiHunItem[i][2]
+      local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      itemGrid:SetItemByTemplate(nTemplate, nCount)
+      itemGrid:SetClickEnable(true)
+      local szName = Item:GetName(nTemplate, me)
+      tbElement.pPanel:Label_SetText("txtName", szName)
+      if self.nSelectIndex == i then
+        tbElement.pPanel:SetActive("imgSelected", true)
+      else
+        tbElement.pPanel:SetActive("imgSelected", false)
+      end
+      Ui:Button_BindEvent(tbElement.pPanel, "btnAdd", function(self)
+        self:PutOnQiHun(nTemplate)
+      end, self)
+    end)
+  end
+  if 0 == #self.tbQiHunItem then
+    self.pPanel:SetActive(tbControls.txtEmpty, true)
+  else
+    self.pPanel:SetActive(tbControls.txtEmpty, false)
+  end
+end
+
+function tbWnd:OnSelectQiHun(nIndex, tbElement)
+end
+
+function tbWnd:UpdateView()
+  self:UpdateEquipSV()
+  self:UpdateQiHunSV()
+  local nLevelCount = QiHun:GetQiHunCountLevel(me)
+  self.pPanel:Label_SetText(tbControls.txtValue, nLevelCount)
+  local nEquipPos = self.tbSVData[self.nEquipIndex] and self.tbSVData[self.nEquipIndex][1]
+  local pEquip = me.GetEquipByPos(nEquipPos)
+  if not pEquip then
+    return
+  end
+  self.tbEquipGrid:SetItem(pEquip.dwId, pEquip.dwTemplateId)
+  local szEquipName = Item:GetName(pEquip.dwTemplateId, me)
+  self.pPanel:Label_SetText(tbControls.txtEquipName, szEquipName)
+  if QiHun:GetPunchState(me, pEquip.nEquipPos) then
+    self.pPanel:SetActive(tbControls.QiHunInfo, true)
+    self.pPanel:SetActive(tbControls.Lock, false)
+    local nPutOnLevel = QiHun:GetPutOnLevel(me, pEquip.nEquipPos)
+    if nPutOnLevel > 0 then
+      self.pPanel:SetActive(tbControls.btnRemove, true)
+      self.pPanel:SetActive(tbControls.QiHunInfo, true)
+      self.pPanel:SetActive(tbControls.Empty, false)
+      local nTemplateId = QiHun.tbLevelInfo[nPutOnLevel][1]
+      self.tbQiHunGrid:SetItemByTemplate(nTemplateId)
+      if nPutOnLevel > QiHun.MAX_DIRECT_TAKEOFF_LEVEL then
+        self.pPanel:SetActive(tbControls.TakeOffGroup, true)
+        local bOk, nLeftTime = QiHun:IsDoTakeOffTime(me)
+        self.pPanel:SetActive(tbControls.boLiCell, bOk)
+        if bOk then
+          self.pPanel:Label_SetText(tbControls.txtBoLiTime, Lib:TimeDesc3(nLeftTime))
+        else
+          local bOk, nLeftTime = QiHun:IsWaitTakeOffTime(me)
+          self.pPanel:SetActive(tbControls.applyCell, bOk)
+          if bOk then
+            self.pPanel:Label_SetText(tbControls.txtApplyTime, Lib:TimeDesc3(nLeftTime))
+          end
+        end
+      else
+        self.pPanel:SetActive(tbControls.TakeOffGroup, false)
+      end
+      local szQiHunName = Item:GetName(nTemplateId, me)
+      self.pPanel:Label_SetText(tbControls.txtQiHunName, szQiHunName)
+      local nSelectLevel = self:GetSelectLevel()
+      if nPutOnLevel then
+        local nPermill = QiHun.tbLevelInfo[nPutOnLevel][2]
+        local szDesc, szValueCur = FightSkill:GetMagicDescSplit("allbasepotential_p", {
+          nPermill / 10,
+          0,
+          0
+        })
+        self.pPanel:Label_SetText(tbControls.Attrib .. "1" .. "/txtTip", szDesc)
+        self.pPanel:Label_SetText(tbControls.Attrib .. "1" .. "/txtValue", szValueCur)
+        self.pPanel:Label_SetText(tbControls.Attrib .. "2" .. "/txtTip", "")
+        self.pPanel:Label_SetText(tbControls.Attrib .. "2" .. "/txtValue", "")
+      else
+        self.pPanel:Label_SetText(tbControls.Attrib .. "1" .. "/txtTip", "")
+        self.pPanel:Label_SetText(tbControls.Attrib .. "1" .. "/txtValue", "")
+        self.pPanel:Label_SetText(tbControls.Attrib .. "2" .. "/txtTip", "")
+        self.pPanel:Label_SetText(tbControls.Attrib .. "2" .. "/txtValue", "")
+      end
+    else
+      self.pPanel:SetActive(tbControls.TakeOffGroup, false)
+      self.tbQiHunGrid:SetEmpty()
+      self.pPanel:SetActive(tbControls.QiHunInfo, false)
+      self.pPanel:SetActive(tbControls.Empty, true)
+      self.pPanel:SetActive(tbControls.btnRemove, false)
+    end
+  else
+    self.pPanel:SetActive(tbControls.TakeOffGroup, false)
+    self.tbQiHunGrid:SetEmpty()
+    self.pPanel:SetActive(tbControls.QiHunInfo, false)
+    self.pPanel:SetActive(tbControls.Lock, true)
+    self.pPanel:SetActive(tbControls.btnRemove, false)
+    self.pPanel:Label_SetText(tbControls.txtCost, QiHun.nPunchingNeedCoin)
+  end
+end
+
+function tbWnd:GetSelectLevel()
+  if not self.nSelectIndex or not self.tbQiHunItem[self.nSelectIndex] then
+    return nil
+  end
+  local nRet = Item.QiHun:GetLevelByTemplateId(self.tbQiHunItem[self.nSelectIndex][1])
+  return nRet
+end
+
+function tbWnd:PutOnQiHun(nTemplateId)
+  local nLevel = QiHun:GetLevelByTemplateId(nTemplateId)
+  if nLevel then
+    local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+    QiHun:PutOnReq(nEquipPos, nLevel)
+  end
+end
+
+function tbWnd:UpdateTakeOffStatus()
+  self:UpdateTime()
+end
+
+function tbWnd:UpdateTime()
+  local nEquipPos = self.tbSVData[self.nEquipIndex] and self.tbSVData[self.nEquipIndex][1]
+  local nPutOnLevel = QiHun:GetPutOnLevel(me, nEquipPos)
+  if nPutOnLevel > 0 and nPutOnLevel > QiHun.MAX_DIRECT_TAKEOFF_LEVEL then
+    local bOk, nLeftTime = QiHun:IsDoTakeOffTime(me)
+    self.pPanel:SetActive(tbControls.boLiCell, bOk)
+    if bOk then
+      self.pPanel:SetActive(tbControls.applyCell, false)
+      self.pPanel:Label_SetText(tbControls.txtBoLiTime, Lib:TimeDesc3(nLeftTime))
+    else
+      local bOk, nLeftTime = QiHun:IsWaitTakeOffTime(me)
+      self.pPanel:SetActive(tbControls.applyCell, bOk)
+      if bOk then
+        self.pPanel:Label_SetText(tbControls.txtApplyTime, Lib:TimeDesc3(nLeftTime))
+      end
+    end
+  end
+  return true
+end

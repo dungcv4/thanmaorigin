@@ -1,0 +1,275 @@
+Require("CommonScript/Item/Other/StoneCfg.lua")
+Require("Script/Ui/Common/RedPointMgr.lua")
+local Stone = Item.Stone
+Stone.tbEquipPos2RedPoint = {
+  [Item.EQUIPPOS_HELM] = RedPointMgr.EVENT.HelmStoneInsert,
+  [Item.EQUIPPOS_ARMOR] = RedPointMgr.EVENT.ArmorStoneInsert,
+  [Item.EQUIPPOS_BELT] = RedPointMgr.EVENT.BeltStoneInsert,
+  [Item.EQUIPPOS_CUFF] = RedPointMgr.EVENT.CuffStoneInsert,
+  [Item.EQUIPPOS_BOOTS] = RedPointMgr.EVENT.BootsStoneInsert,
+  [Item.EQUIPPOS_WEAPON] = RedPointMgr.EVENT.WeaponStoneInsert,
+  [Item.EQUIPPOS_NECKLACE] = RedPointMgr.EVENT.NecklaceStoneInsert,
+  [Item.EQUIPPOS_RING] = RedPointMgr.EVENT.RingStoneInsert,
+  [Item.EQUIPPOS_PENDANT] = RedPointMgr.EVENT.PendantStoneInsert,
+  [Item.EQUIPPOS_AMULET] = RedPointMgr.EVENT.AmuletStoneInsert
+}
+
+function Stone:GetStoneGrade(nTemplateId)
+  if not self.tbStoneInfo[nTemplateId] then
+    return 0
+  end
+  return self.tbStoneInfo[nTemplateId].nGrade
+end
+
+function Stone:GetStoneEquipPos(nItemTemplateId)
+  if not self.tbStoneInfo[nItemTemplateId] then
+    return -1
+  end
+  return self.tbStoneInfo[nItemTemplateId].nTagIcon
+end
+
+function Stone:IsStone(nItemTemplateId)
+  if not self.tbStoneInfo[nItemTemplateId] then
+    return false
+  end
+  return true
+end
+
+function Stone:IsStoneYuanShi(nItemTemplateId)
+  if not nItemTemplateId then
+    return false
+  end
+  local tbBaseCfg = Item:GetItemBaseProp(nItemTemplateId)
+  if not tbBaseCfg then
+    return false
+  end
+  if tbBaseCfg.szClass ~= "StoneMaterialItem" then
+    return false
+  end
+  local nOptType = KItem.GetItemExtParam(nItemTemplateId, 1)
+  return 3 == nOptType
+end
+
+function Stone:PutOnRsp(nEquipPos, nHoleIndex, nTemplateId, nTradeLimitType)
+  if Ui:WindowVisible("UIEquipment") then
+    Ui:GetWindow("UIEquipment"):NotifyEquipStone("puton", nHoleIndex)
+  end
+  self:ApplyPerStoneAttrib(me.GetNpc(), nTemplateId)
+  self:OnCheckRedPoint()
+end
+
+function Stone:TakeOffRsp(nTemplateId)
+  self:RemovePerStoneAttrib(me.GetNpc(), nTemplateId)
+  if Ui:WindowVisible("UIEquipment") then
+    Ui:GetWindow("UIEquipment"):NotifyEquipStone()
+  end
+  self:OnCheckRedPoint()
+end
+
+function Stone:ComposeRsp(nOldTemplateId, nHoleIndex, nTemplateId)
+  if me.IsMaskPlayerAttr() then
+    return
+  end
+  self:RemovePerStoneAttrib(me.GetNpc(), nOldTemplateId)
+  self:ApplyPerStoneAttrib(me.GetNpc(), nTemplateId)
+  if Ui:WindowVisible("UIEquipment") then
+    Ui:GetWindow("UIEquipment"):NotifyEquipStone("Compose", nHoleIndex)
+  end
+  self:OnCheckRedPoint()
+end
+
+function Stone:ForgeRsp()
+  if Ui:WindowVisible("UIStoneCompose") then
+    Ui:GetWindow("UIStoneCompose"):UpdateView("ForgeRsp")
+  end
+end
+
+function Stone:SplitRsp()
+end
+
+function Stone:OnSyncStoneGradeScore(nOldLevel, nGradeScoreLevel)
+  self:RefreshGradeScoreAttrib(me, nOldLevel, nGradeScoreLevel)
+  local tbWnd = Ui:GetWindow("UIBag")
+  if tbWnd then
+    tbWnd:UpdateStoneGradeScore(nGradeScoreLevel)
+  end
+end
+
+function Stone:OnSyncStoneInfo(bIsReConnect)
+  if not bIsReConnect or 1 == bIsReConnect then
+    local nGradeScoreLevel = self:GetStoneGradeScoreLevel(me)
+    if nGradeScoreLevel and nGradeScoreLevel > 0 then
+      self:ApplyGradeScoreAttrib(me.GetNpc(), nGradeScoreLevel)
+    end
+  end
+end
+
+function Stone:OpenForgeCompose(nYuanShiId)
+  if not nYuanShiId then
+    Ui:OpenWindow("UIStoneCompose")
+    return
+  end
+  local bFlag = false
+  local nStoneId = 0
+  for k, v in pairs(self.tbYuanShiInfo) do
+    if v[5] == nYuanShiId then
+      bFlag = true
+      nStoneId = k
+      break
+    end
+  end
+  if not bFlag then
+    return
+  end
+  local nEquipPos = 0
+  for i, v in ipairs(self.tbEquipPos2Stone) do
+    if self.tbEquipPos2Stone[i][nStoneId] then
+      nEquipPos = i
+      break
+    end
+  end
+  Ui:OpenWindow("UIStoneCompose", nEquipPos, nStoneId)
+end
+
+function Stone:CanShowStoneInsertButtonInUIEquipTips(nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return false
+  end
+  local nEquipPos = pItem.nEquipPos
+  if nEquipPos < Item.EQUIPPOS_HELM or nEquipPos > Item.EQUIPPOS_AMULET then
+    return false
+  end
+  local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, nEquipPos)
+  local nMaxHole, _ = Item.Stone:GetMaxHoleAndLevel(nLianHuaLevel, pItem.nLevel, pItem.nEquipPos)
+  if not nMaxHole then
+    return false
+  end
+  if nMaxHole <= 0 then
+    return false
+  end
+  return true
+end
+
+function Stone:CheckRedPointTypeInsert(pPlayer, nPos, tbItemList)
+  local pEquip = pPlayer.GetEquipByPos(nPos)
+  if not pEquip then
+    return false
+  end
+  local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, pEquip.nEquipPos)
+  local nMaxHole, nMaxStoneLevel = self:GetMaxHoleAndLevel(nLianHuaLevel, pEquip.nLevel, pEquip.nEquipPos)
+  if not nMaxHole then
+    return false
+  end
+  local tbStoneKind = {}
+  for nHoleIndex = 1, nMaxHole do
+    local nTemplateId = self:GetStoneHoleTemplateId(pPlayer, nPos, nHoleIndex)
+    if nTemplateId > 0 then
+      local nKind = math.floor(nTemplateId / 100)
+      tbStoneKind[nKind] = nHoleIndex
+    end
+  end
+  for nHoleIndex = 1, nMaxHole do
+    local nTemplateId = self:GetStoneHoleTemplateId(pPlayer, nPos, nHoleIndex)
+    local nCurStoneLevel = -1
+    if nTemplateId and nTemplateId > 0 then
+      nCurStoneLevel = Item:GetItemBaseProp(nTemplateId).nLevel
+    end
+    for _, tbItem in pairs(tbItemList) do
+      if self:CheckStonePos(tbItem.nTemplateId, nPos) and nMaxStoneLevel >= tbItem.nLevel and nCurStoneLevel < tbItem.nLevel then
+        local tbCfgStone = self.tbStoneInfo[tbItem.nTemplateId]
+        if 1 ~= tbCfgStone.Unique then
+          return true
+        else
+          local nKind = math.floor(tbItem.nTemplateId / 100)
+          if not tbStoneKind[nKind] or tbStoneKind[nKind] == nHoleIndex then
+            return true
+          end
+        end
+      end
+    end
+  end
+  return false
+end
+
+function Stone:CheckRedPointTypeCompose(pPlayer, nPos, tbItemList)
+  local pEquip = pPlayer.GetEquipByPos(nPos)
+  if not pEquip then
+    return false
+  end
+  local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, pEquip.nEquipPos)
+  local nMaxHole, nMaxStoneLevel = self:GetMaxHoleAndLevel(nLianHuaLevel, pEquip.nLevel, pEquip.nEquipPos)
+  if not nMaxHole then
+    return false
+  end
+  for nHoleIndex = 1, nMaxHole do
+    local nTemplateId = self:GetStoneHoleTemplateId(pPlayer, nPos, nHoleIndex)
+    if nTemplateId > 0 then
+      local tbCfgStone = self.tbStoneInfo[nTemplateId]
+      if tbCfgStone.ComposeId > 0 and nMaxStoneLevel >= Item:GetItemBaseProp(tbCfgStone.ComposeId).nLevel and tbItemList[nTemplateId] and tbItemList[nTemplateId].nCount >= self.nComposeNeed - 1 then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function Stone:CheckRedPointByEquipPos(pPlayer, nPos)
+  local tbItemBag = pPlayer.GetItemListInBag()
+  local tbItemList = {}
+  for _, pItem in pairs(tbItemBag) do
+    local nTemplateId = pItem.dwTemplateId
+    if not tbItemList[nTemplateId] then
+      tbItemList[nTemplateId] = {
+        nTemplateId = nTemplateId,
+        nLevel = pItem.nLevel,
+        nCount = pItem.nCount
+      }
+    else
+      tbItemList[nTemplateId].nCount = tbItemList[nTemplateId].nCount + pItem.nCount
+    end
+  end
+  if self:CheckRedPointTypeInsert(pPlayer, nPos, tbItemList) or self:CheckRedPointTypeCompose(pPlayer, nPos, tbItemList) then
+    return true
+  else
+    return false
+  end
+end
+
+function Stone:OnCheckRedPoint()
+  local tbItemBag = me.GetItemListInBag()
+  local tbItemList = {}
+  for _, pItem in pairs(tbItemBag) do
+    local nTemplateId = pItem.dwTemplateId
+    if not tbItemList[nTemplateId] then
+      tbItemList[nTemplateId] = {
+        nTemplateId = nTemplateId,
+        nLevel = pItem.nLevel,
+        nCount = pItem.nCount
+      }
+    else
+      tbItemList[nTemplateId].nCount = tbItemList[nTemplateId].nCount + pItem.nCount
+    end
+  end
+  for nPos, nRedPoint in pairs(self.tbEquipPos2RedPoint) do
+    if self:CheckRedPointTypeInsert(me, nPos, tbItemList) or self:CheckRedPointTypeCompose(me, nPos, tbItemList) then
+      RedPointMgr:LightRedPoint(nRedPoint)
+    else
+      RedPointMgr:FadeRedPoint(nRedPoint)
+    end
+  end
+end
+
+function Stone:OnSyncItemLimitTime()
+  if not PlayerEvent.bLogin then
+    return
+  end
+  self:OnCheckRedPoint()
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, Stone)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, Stone.OnCheckRedPoint, Stone)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM_TIME_LIMIT, Stone)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM_TIME_LIMIT, Stone.OnSyncItemLimitTime, Stone)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_DEL_ITEM, Stone)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_DEL_ITEM, Stone.OnCheckRedPoint, Stone)

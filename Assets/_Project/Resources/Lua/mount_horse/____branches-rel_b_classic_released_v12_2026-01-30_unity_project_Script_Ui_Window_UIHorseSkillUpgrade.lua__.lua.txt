@@ -1,0 +1,359 @@
+local tbWnd = Ui:CreateWindow("UIHorseSkillUpgrade")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnSyncItem,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  btnClose = "node/imgBG/btnClose",
+  UITree = "node/imgBG/Content/UITree",
+  txtSkillName = "node/imgBG/Content/imgListBg/txtSkillName",
+  Img_Skill = "node/imgBG/Content/imgListBg/Img_SkillBg/Img_Skill",
+  txtNow = "node/imgBG/Content/imgListBg/LV/txtNow",
+  txtNext = "node/imgBG/Content/imgListBg/LV/txtNext",
+  btnReset = "node/imgBG/Content/imgListBg/btnReset",
+  txtFullLevelTips = "node/imgBG/Content/imgListBg/txtFullLevelTips",
+  UpgradeWid = "node/imgBG/Content/imgListBg/Upgrade",
+  btnUpgrade = "node/imgBG/Content/imgListBg/Upgrade/btnUpgrade",
+  txtCost = "node/imgBG/Content/imgListBg/Upgrade/Cost/txtCost",
+  UIItemGrid = "node/imgBG/Content/imgListBg/Upgrade/Cost/UIItemGrid",
+  btnAdd = "node/imgBG/Content/imgListBg/Upgrade/Cost/btnAdd",
+  wndJumpTo = "wndJumpTo",
+  ObtainTemplate = "wndJumpTo/imgBG/List/Viewport/Content/Template",
+  txtGreatUpradeTips = "node/imgBG/Content/imgListBg/AttribList/txtGreat UpradeTips",
+  txtReset = "node/imgBG/Content/txtReset"
+}
+tbControls.tbSkillAttrNameKey = {}
+tbControls.tbSkillAttrValueNowKey = {}
+tbControls.tbSkillAttrValueNextKey = {}
+tbControls.tbSkillAttrValueAddKey = {}
+for nIndex = 1, HorseSkillMgr.nMaxSkillNum do
+  tbControls.tbSkillAttrNameKey[nIndex] = string.format("node/imgBG/Content/imgListBg/AttribList/Attr%s/new/txtAttrib", nIndex)
+  tbControls.tbSkillAttrValueNowKey[nIndex] = string.format("node/imgBG/Content/imgListBg/AttribList/Attr%s/new/txtValueNow", nIndex)
+  tbControls.tbSkillAttrValueNextKey[nIndex] = string.format("node/imgBG/Content/imgListBg/AttribList/Attr%s/next/value/txtValueNext", nIndex)
+  tbControls.tbSkillAttrValueAddKey[nIndex] = string.format("node/imgBG/Content/imgListBg/AttribList/Attr%s/next/value/txtValueAdd", nIndex)
+end
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("ZuoQiJiNeng")
+  end,
+  btnAdd = function(self)
+    self:UpdateObtainSV(HorseSkillMgr.tbHSPageObtainExplain)
+  end,
+  btnReset = function(self)
+    local bRet, szErr, bNotEnough = HorseSkillMgr:CanResetHorseSkill(me, self.nSkillIndex, self.nGradeIndex)
+    if not bRet then
+      if bNotEnough then
+        local function OnOk()
+          MarketStallBase:OpenWindowByItemTempId(MarketStallBase.tbStallType.Gold, HorseSkillMgr.HorseSkillCfg.nResetItemId)
+        end
+        
+        local function OnCancel()
+        end
+        
+        Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\233\135\141\231\189\174\228\184\185\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\230\145\134\230\145\138\232\180\173\228\185\176\239\188\159"), {
+          {OnOk},
+          {OnCancel}
+        }, {
+          i18n.szOk,
+          i18n.szCancel
+        })
+        return
+      else
+        return me.CenterMsg(szErr)
+      end
+    end
+    local nCurLevel = HorseSkillMgr:GetSkillLevel(me, self.nSkillIndex, self.nGradeIndex)
+    if nCurLevel <= 0 then
+      return me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\138\128\232\131\189\230\151\160\233\156\128\233\135\141\231\189\174"))
+    end
+    
+    local function OnOk()
+      HorseSkillMgr:HorseSkillResetC(self.nSkillIndex, self.nGradeIndex)
+    end
+    
+    local function OnCancel()
+    end
+    
+    local nConsumeCount = 0
+    local nCurLevel = HorseSkillMgr:GetSkillLevel(me, self.nSkillIndex, self.nGradeIndex)
+    local nAttrCfgIndex = HorseSkillMgr:GetSkillAttrCfg(self.nSkillIndex, self.nGradeIndex)
+    if not nAttrCfgIndex then
+      return
+    end
+    for i = 1, nCurLevel do
+      nConsumeCount = nConsumeCount + HorseSkillMgr.tbUpgradeLevelCfg[nAttrCfgIndex][i][1]
+    end
+    local nNeedItemId = HorseSkillMgr.HorseSkillCfg.nResetItemId
+    local nNeedItemNum = HorseSkillMgr.HorseSkillCfg.nResetItemNum
+    local nRetItemId = HorseSkillMgr.HorseSkillCfg.nUpgradeNeedItemId
+    local nRetCount = math.floor(HorseSkillMgr.HorseSkillCfg.nResetReturnPercent * nConsumeCount / 100)
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\233\135\141\231\189\174\230\182\136\232\128\151{0}\228\184\170{1}\239\188\140\233\135\141\231\189\174\229\144\142\232\175\165\229\157\144\233\170\145\230\138\128\232\131\189\231\172\172{2}\229\177\130\229\176\134\230\129\162\229\164\141\229\136\1760\231\186\167\239\188\140\232\191\148\232\191\152{3}\228\184\170{4}\239\188\140\230\152\175\229\144\166\233\135\141\231\189\174\239\188\159", nNeedItemNum, Item:GetName(nNeedItemId, me), self.nGradeIndex, nRetCount, Item:GetName(nRetItemId, me)), {
+      {OnOk},
+      {OnCancel}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  end,
+  btnUpgrade = function(self)
+    HorseSkillMgr:HorseSkillUpgradeReqC(self.nSkillIndex, self.nGradeIndex)
+  end
+}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose(tbControls.wndJumpTo)
+  self.pPanel:SetActive(tbControls.wndJumpTo, false)
+  self.uiTree = Ui:NewTree(self, tbControls.UITree, self.onClickTreeBigBtn, self.onClickTreeSmallBtn)
+  local tbBigData, tbSmallData = self:GetTreeData()
+  self.uiTree:SetData(tbBigData, tbSmallData)
+  self.tbConsumeGrid = Ui:NewExistItemGrid(self, tbControls.UIItemGrid)
+  self.tbConsumeGrid:SetClickEnable(true)
+  self.tbObtainScrollView = Ui:NewScrollView(self, tbControls.ObtainTemplate)
+end
+
+function tbWnd:OnDestroy()
+end
+
+function tbWnd:OnOpen(nSKillIndex)
+  nSKillIndex = nSKillIndex or 1
+  local nOpenGrade = HorseSkillMgr:GetHSOpenGrade()
+  self.uiTree:SelectNode(nSKillIndex, nOpenGrade, true)
+  self.uiTree:GoTop()
+end
+
+function tbWnd:OnClose()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnUpgrade)
+  LocalData:SetRoleNumber(HorseSkillMgr.szHorseSkillUIHadOpen, GetTime())
+  for nSkillIndex = 1, HorseSkillMgr.nMaxSkillNum do
+    for nGrade = 1, HorseSkillMgr.nMaxGrade do
+      local nRedPoint = RedPointMgr.EVENT.HorseSkillLevelBegin + (nSkillIndex - 1) * HorseSkillMgr.nMaxGrade + nGrade - 1
+      RedPointMgr:FadeRedPoint(nRedPoint)
+    end
+  end
+end
+
+function tbWnd:onClickTreeBigBtn(tbInfo)
+  self.nSkillIndex = tbInfo.nOnClickIndex
+  local szSkillName = i18n.Get(HorseSkillMgr.tbHorseSkillName[self.nSkillIndex])
+  self.pPanel:Label_SetText(tbControls.txtSkillName, szSkillName)
+  self.pPanel:Sprite_SetSprite(tbControls.Img_Skill, HorseSkillMgr.tbHorseSkillIconPath[self.nSkillIndex])
+  local nOpenGrade = HorseSkillMgr:GetHSOpenGrade()
+  self.uiTree:SelectSmallByIndex(tbInfo.nOnClickIndex, nOpenGrade)
+  self:UpdateView()
+end
+
+function tbWnd:onClickTreeSmallBtn(tbInfo)
+  if self.nGradeIndex == nil or self.nGradeIndex ~= tbInfo.nOnClickIndex then
+    self.nGradeIndex = tbInfo.nOnClickIndex
+    self:UpdateView()
+  end
+end
+
+function tbWnd:GetTreeData()
+  local tbUITreeBigData = {}
+  for nSkillIndex = 1, HorseSkillMgr.nMaxSkillNum do
+    local tbRedPoint = {}
+    for j = 1, HorseSkillMgr.nMaxGrade do
+      local nEventNum = RedPointMgr.EVENT.HorseSkillLevelBegin + (nSkillIndex - 1) * HorseSkillMgr.nMaxGrade + j - 1
+      table.insert(tbRedPoint, nEventNum)
+    end
+    tbUITreeBigData[nSkillIndex] = {
+      nType = nSkillIndex,
+      szText = i18n.Get(HorseSkillMgr.tbHorseSkillName[nSkillIndex]),
+      tbInfo = {nOnClickIndex = nSkillIndex},
+      tbRedPoint = tbRedPoint
+    }
+  end
+  local tbUITreeSmallData = {}
+  local nOpenGrade = HorseSkillMgr:GetHSOpenGrade()
+  for nSkillIndex = 1, HorseSkillMgr.nMaxSkillNum do
+    for nG = 1, nOpenGrade do
+      local nEventNum = RedPointMgr.EVENT.HorseSkillLevelBegin + (nSkillIndex - 1) * HorseSkillMgr.nMaxGrade + nG - 1
+      local tbRedPoint = {nEventNum}
+      local nCurLevel = HorseSkillMgr:GetSkillLevel(me, nSkillIndex, nG)
+      table.insert(tbUITreeSmallData, {
+        nType = nSkillIndex,
+        szText = i18n.EasyGet("\231\172\172{0}\229\177\130 {1}\231\186\167", nG, nCurLevel),
+        tbInfo = {
+          nOnClickIndex = nG,
+          nBigIndex = nSkillIndex,
+          nGrade = nG
+        },
+        tbRedPoint = tbRedPoint
+      })
+    end
+  end
+  return tbUITreeBigData, tbUITreeSmallData
+end
+
+function tbWnd:UpdateView()
+  self:UpdateTreeBtnText()
+  local nEventNum = RedPointMgr.EVENT.HorseSkillLevelBegin + (self.nSkillIndex - 1) * HorseSkillMgr.nMaxGrade + self.nGradeIndex - 1
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnUpgrade, {nEventNum})
+  local nSkillLevel = HorseSkillMgr:GetSkillLevel(me, self.nSkillIndex, self.nGradeIndex)
+  local nNextLevel
+  local nAttrCfgIndex = HorseSkillMgr:GetSkillAttrCfg(self.nSkillIndex, self.nGradeIndex)
+  if not nAttrCfgIndex then
+    return
+  end
+  if nSkillLevel >= #HorseSkillMgr.tbUpgradeLevelCfg[nAttrCfgIndex] then
+    self.pPanel:SetActive(tbControls.txtFullLevelTips, true)
+    self.pPanel:SetActive(tbControls.UpgradeWid, false)
+    nNextLevel = nSkillLevel
+  else
+    self.pPanel:SetActive(tbControls.txtFullLevelTips, false)
+    self.pPanel:SetActive(tbControls.UpgradeWid, true)
+    nNextLevel = nSkillLevel + 1
+  end
+  self.pPanel:Label_SetText(tbControls.txtNow, i18n.EasyGet("{0}\231\186\167", nSkillLevel))
+  self.pPanel:Label_SetText(tbControls.txtNext, i18n.EasyGet("{0}\231\186\167", nNextLevel))
+  local tbCurAttrInfo = {}
+  local tbNextAttrInfo = {}
+  for nAttrIndex, tbV in pairs(HorseSkillMgr.tbSkillAttrCfg[nAttrCfgIndex]) do
+    tbCurAttrInfo[tbV.szAttrType] = tbCurAttrInfo[tbV.szAttrType] or {}
+    tbCurAttrInfo[tbV.szAttrType].szAttrType = tbV.szAttrType
+    tbCurAttrInfo[tbV.szAttrType].tbValue = {
+      0,
+      0,
+      0
+    }
+    tbNextAttrInfo[tbV.szAttrType] = tbNextAttrInfo[tbV.szAttrType] or {}
+    tbNextAttrInfo[tbV.szAttrType].tbValue = {
+      0,
+      0,
+      0
+    }
+  end
+  HorseSkillMgr:GetSkillPerLevelAttr(self.nSkillIndex, self.nGradeIndex, nSkillLevel, tbCurAttrInfo)
+  HorseSkillMgr:GetSkillPerLevelAttr(self.nSkillIndex, self.nGradeIndex, nNextLevel, tbNextAttrInfo)
+  for nAttrIndex, tbV in pairs(HorseSkillMgr.tbSkillAttrCfg[nAttrCfgIndex]) do
+    local szAttribMsg, szValueCur = FightSkill:GetMagicDescSplit(tbCurAttrInfo[tbV.szAttrType].szAttrType, tbCurAttrInfo[tbV.szAttrType].tbValue)
+    self.pPanel:Label_SetText(tbControls.tbSkillAttrNameKey[nAttrIndex], szAttribMsg)
+    local nQuality = HorseSkillMgr:GetSkillAttrQuality(self.nSkillIndex, self.nGradeIndex, nAttrIndex)
+    self.pPanel:Label_SetColorByName(tbControls.tbSkillAttrNameKey[nAttrIndex], HorseSkillMgr.tbQuality2Color[nQuality])
+    self.pPanel:Label_SetText(tbControls.tbSkillAttrValueNowKey[nAttrIndex], szValueCur)
+    self.pPanel:Label_SetColorByName(tbControls.tbSkillAttrValueNowKey[nAttrIndex], HorseSkillMgr.tbQuality2Color[nQuality])
+    local _, szValueNext = FightSkill:GetMagicDescSplit(tbCurAttrInfo[tbV.szAttrType].szAttrType, tbNextAttrInfo[tbV.szAttrType].tbValue)
+    self.pPanel:Label_SetText(tbControls.tbSkillAttrValueNextKey[nAttrIndex], szValueNext)
+    self.pPanel:Label_SetColorByName(tbControls.tbSkillAttrValueNextKey[nAttrIndex], HorseSkillMgr.tbQuality2Color[nQuality])
+    local szSubValue = FightSkill:StringValueSubResult(szValueCur, szValueNext)
+    if "" == szSubValue then
+      self.pPanel:Label_SetText(tbControls.tbSkillAttrValueAddKey[nAttrIndex], "")
+    else
+      self.pPanel:Label_SetText(tbControls.tbSkillAttrValueAddKey[nAttrIndex], szSubValue)
+    end
+  end
+  if 0 == nNextLevel % HorseSkillMgr.HorseSkillCfg.nPerMaxUpgradeLevel and nSkillLevel < nNextLevel then
+    self.pPanel:SetActive(tbControls.txtGreatUpradeTips, true)
+    for nAttrIndex, tbV in pairs(HorseSkillMgr.tbSkillAttrCfg[nAttrCfgIndex]) do
+      self.pPanel:Label_SetText(tbControls.tbSkillAttrValueNextKey[nAttrIndex], "")
+      self.pPanel:Label_SetText(tbControls.tbSkillAttrValueAddKey[nAttrIndex], "")
+    end
+  else
+    self.pPanel:SetActive(tbControls.txtGreatUpradeTips, false)
+  end
+  local nItemTemplateId = HorseSkillMgr.HorseSkillCfg.nUpgradeNeedItemId
+  self.tbConsumeGrid:SetItemByTemplate(nItemTemplateId)
+  self.tbConsumeGrid:SetClickEnable(true)
+  local nCurNum = me.GetItemCountByTypeInBag(nItemTemplateId)
+  local nNeedItemNum = HorseSkillMgr.tbUpgradeLevelCfg[nAttrCfgIndex][nNextLevel][1]
+  if nCurNum >= nNeedItemNum then
+    self.pPanel:Label_SetColorByName(tbControls.txtCost, "Enough")
+  else
+    self.pPanel:Label_SetColorByName(tbControls.txtCost, "NotEnough")
+  end
+  self.pPanel:Label_SetText(tbControls.txtCost, nCurNum .. "/" .. nNeedItemNum)
+  local nResetItemId = HorseSkillMgr.HorseSkillCfg.nResetItemId
+  local nResetItemNum = HorseSkillMgr.HorseSkillCfg.nResetItemNum
+  local nCurResetNum = me.GetItemCountByTypeInBag(nResetItemId)
+  if nResetItemNum <= nCurResetNum then
+    self.pPanel:Label_SetColorByName(tbControls.txtReset, "Enough")
+  else
+    self.pPanel:Label_SetColorByName(tbControls.txtReset, "NotEnough")
+  end
+  self.pPanel:Label_SetText(tbControls.txtReset, i18n.EasyGet("\233\156\128\232\166\129{0}/{1}\233\135\141\231\189\174\228\184\185", nCurResetNum, nResetItemNum))
+end
+
+function tbWnd:UpdateObtainSV(tbData)
+  self.pPanel:SetActive(tbControls.wndJumpTo, true)
+  
+  local function fnSetItem(tbValue, tbElement)
+    local pPanel = tbElement.pPanel
+    pPanel:Label_SetText("txtName", tbValue.szTitle())
+    pPanel:Label_SetText("txtDesc", tbValue.szDesc())
+    if tbValue.funcObtain then
+      pPanel:SetActive("imgArrow", true)
+      Ui:Button_BindEvent(pPanel, "Main", function()
+        self.pPanel:SetActive(tbControls.wndJumpTo, false)
+        tbValue.funcObtain()
+      end)
+    else
+      pPanel:SetActive("imgArrow", false)
+    end
+  end
+  
+  self.tbObtainScrollView:Reset()
+  for i, tbValue in ipairs(tbData) do
+    self.tbObtainScrollView:SetElement(i, function(tbElement)
+      fnSetItem(tbValue, tbElement)
+    end)
+  end
+end
+
+function tbWnd:OnSyncItem(dwItemId, bNewItem, nAddCount)
+  local nAttrCfgIndex = HorseSkillMgr:GetSkillAttrCfg(self.nSkillIndex, self.nGradeIndex)
+  if not nAttrCfgIndex then
+    return
+  end
+  local nSkillLevel = HorseSkillMgr:GetSkillLevel(me, self.nSkillIndex, self.nGradeIndex)
+  local nNextLevel
+  if nSkillLevel >= #HorseSkillMgr.tbUpgradeLevelCfg[nAttrCfgIndex] then
+    nNextLevel = nSkillLevel
+  else
+    nNextLevel = nSkillLevel + 1
+  end
+  local nItemTemplateId = HorseSkillMgr.HorseSkillCfg.nUpgradeNeedItemId
+  local nCurNum = me.GetItemCountByTypeInBag(nItemTemplateId)
+  local nNeedItemNum = HorseSkillMgr.tbUpgradeLevelCfg[nAttrCfgIndex][nNextLevel][1]
+  if nCurNum >= nNeedItemNum then
+    self.pPanel:Label_SetColorByName(tbControls.txtCost, "Enough")
+  else
+    self.pPanel:Label_SetColorByName(tbControls.txtCost, "NotEnough")
+  end
+  self.pPanel:Label_SetText(tbControls.txtCost, nCurNum .. "/" .. nNeedItemNum)
+end
+
+function tbWnd:UpgradeRsp()
+  self:UpdateView()
+end
+
+function tbWnd:ResetRsp()
+  self:UpdateView()
+end
+
+function tbWnd:UpdateTreeBtnText()
+  local tbBigText, tbSmallText = {}, {}
+  for nSkillIndex = 1, HorseSkillMgr.nMaxSkillNum do
+    tbBigText[nSkillIndex] = i18n.Get(HorseSkillMgr.tbHorseSkillName[nSkillIndex])
+  end
+  local nOpenGrade = HorseSkillMgr:GetHSOpenGrade()
+  for nSkillIndex = 1, HorseSkillMgr.nMaxSkillNum do
+    for nG = 1, nOpenGrade do
+      local nCurLevel = HorseSkillMgr:GetSkillLevel(me, nSkillIndex, nG)
+      table.insert(tbSmallText, i18n.EasyGet("\231\172\172{0}\229\177\130 {1}\231\186\167", nG, nCurLevel))
+    end
+  end
+  self.uiTree:UpdateBtnText(tbBigText, tbSmallText)
+end

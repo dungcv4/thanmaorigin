@@ -1,0 +1,127 @@
+function Partner:InitAllPartnerFetterMagicAttrib(pPlayer)
+  pPlayer = pPlayer or me
+  
+  for nFetterId, _ in pairs(self.tbPartnerFetterSetting) do
+    local nCurFetterLevel = self:GetPartnerFetterLevel(pPlayer, nFetterId)
+    if MODULE_GAMESERVER then
+      local bFetterFull, bFetterMaxLevel, nMaxFetterLevel = self:CheckPartnerFetterFull(pPlayer, nFetterId)
+      if nCurFetterLevel > nMaxFetterLevel then
+        self:SetPartnerFetterLevel(pPlayer, nFetterId, nMaxFetterLevel)
+        nCurFetterLevel = nMaxFetterLevel
+      end
+    end
+    if nCurFetterLevel >= 1 then
+      self:ActiveFetterMagicAttribById(pPlayer.GetNpc(), nFetterId, nCurFetterLevel, true, pPlayer.dwID)
+    end
+  end
+end
+
+function Partner:GetPartnerFetterLevel(pPlayer, nFetterId)
+  pPlayer = pPlayer or me
+  return pPlayer.GetUserValue(GetGroupKey("PartnerFriend"), nFetterId)
+end
+
+function Partner:SetPartnerFetterLevel(pPlayer, nFetterId, nLevel)
+  pPlayer = pPlayer or me
+  pPlayer.SetUserValue(GetGroupKey("PartnerFriend"), nFetterId, nLevel)
+  local pPlayerAsync = KPlayer.GetAsyncData(pPlayer.dwID)
+  if pPlayerAsync then
+    pPlayerAsync.SetPartnerFriend(nFetterId, nLevel)
+  end
+end
+
+function Partner:ActiveFetterMagicAttribById(pNpc, nFetterId, nLevel, bActive, nPlayerId)
+  pNpc = pNpc or me
+  if 0 == nFetterId then
+    return
+  end
+  nLevel = nLevel or 1
+  for i = 1, 3 do
+    local szImproveType, tbImproveValue, tbLevelupSection
+    if 1 == i then
+      szImproveType = self.tbPartnerFetterSetting[nFetterId].nImproveType1
+      tbImproveValue = Lib:SplitStr2Num(self.tbPartnerFetterSetting[nFetterId].nImproveValue1, "|")
+      tbLevelupSection = Lib:SplitStr2Num(self.tbPartnerFetterSetting[nFetterId].szLevelupSection1, ",")
+    elseif 2 == i then
+      szImproveType = self.tbPartnerFetterSetting[nFetterId].nImproveType2
+      tbImproveValue = Lib:SplitStr2Num(self.tbPartnerFetterSetting[nFetterId].nImproveValue2, "|")
+      tbLevelupSection = Lib:SplitStr2Num(self.tbPartnerFetterSetting[nFetterId].szLevelupSection2, ",")
+    elseif 3 == i then
+      szImproveType = self.tbPartnerFetterSetting[nFetterId].nImproveType3
+      tbImproveValue = Lib:SplitStr2Num(self.tbPartnerFetterSetting[nFetterId].nImproveValue3, "|")
+      tbLevelupSection = Lib:SplitStr2Num(self.tbPartnerFetterSetting[nFetterId].szLevelupSection3, ",")
+    end
+    if "" ~= szImproveType then
+      for _, nLevelupSection in pairs(tbLevelupSection) do
+        tbImproveValue[nLevelupSection] = tbImproveValue[nLevelupSection] * nLevel
+      end
+      if bActive then
+        pNpc.ApplyMagicAttrib(szImproveType, table.unpack(tbImproveValue))
+        if nPlayerId then
+          AttributeHelp:LogAttrApply(nPlayerId, "Partner", szImproveType, table.unpack(tbImproveValue))
+        end
+      else
+        pNpc.RemoveMagicAttrib(szImproveType, table.unpack(tbImproveValue))
+        if nPlayerId then
+          AttributeHelp:LogAttrRemove(nPlayerId, "Partner", szImproveType, table.unpack(tbImproveValue))
+        end
+      end
+    end
+  end
+end
+
+function Partner:GetAllPartnersDetailInfoForFetters(pPlayer)
+  pPlayer = pPlayer or me
+  local partnerList = {}
+  local tbAllPartner = pPlayer.GetAllPartner()
+  for nPartnerId in pairs(tbAllPartner) do
+    local pPartner = pPlayer.GetPartnerObj(nPartnerId)
+    local nNpcTemplateId = self.tbAllPartnerInfo[pPartner.nTemplateId].nNpcTemplateId
+    if 1 == pPartner.GetMainDevFlag() then
+      partnerList[nNpcTemplateId] = pPartner
+    end
+  end
+  return partnerList
+end
+
+function Partner:CheckPartnerFetterFull(pPlayer, nFetterId)
+  local bFetterFull = false
+  local bFetterMaxLevel = false
+  pPlayer = pPlayer or me
+  local tbAllPartner = self:GetAllPartnersDetailInfoForFetters(pPlayer)
+  local tbAllPartnerNpcTemplateId = {}
+  tbAllPartnerNpcTemplateId[0] = 1
+  for _, pPartner in pairs(tbAllPartner) do
+    local nNpcTemplateId = self.tbAllPartnerInfo[pPartner.nTemplateId].nNpcTemplateId
+    tbAllPartnerNpcTemplateId[nNpcTemplateId] = pPartner
+  end
+  local nPartner1 = self.tbPartnerFetterSetting[nFetterId].nPartnerId1 or 0
+  local nPartner2 = self.tbPartnerFetterSetting[nFetterId].nPartnerId2 or 0
+  local nPartner3 = self.tbPartnerFetterSetting[nFetterId].nPartnerId3 or 0
+  local nPartner4 = self.tbPartnerFetterSetting[nFetterId].nPartnerId4 or 0
+  local nPartner5 = self.tbPartnerFetterSetting[nFetterId].nPartnerId5 or 0
+  if tbAllPartnerNpcTemplateId[nPartner1] and tbAllPartnerNpcTemplateId[nPartner2] and tbAllPartnerNpcTemplateId[nPartner3] and tbAllPartnerNpcTemplateId[nPartner4] and tbAllPartnerNpcTemplateId[nPartner5] then
+    bFetterFull = true
+  end
+  if not bFetterFull then
+    return bFetterFull, bFetterMaxLevel, 0, 0
+  end
+  local tbThisPartnerList = {}
+  local nFightPowerRequire = self.tbPartnerFetterSetting[nFetterId].nRequireFightPower
+  local nFriendLevel = self:GetPartnerFetterLevel(pPlayer, nFetterId)
+  table.insert(tbThisPartnerList, self.tbPartnerFetterSetting[nFetterId].nPartnerId1)
+  table.insert(tbThisPartnerList, self.tbPartnerFetterSetting[nFetterId].nPartnerId2)
+  table.insert(tbThisPartnerList, self.tbPartnerFetterSetting[nFetterId].nPartnerId3)
+  table.insert(tbThisPartnerList, self.tbPartnerFetterSetting[nFetterId].nPartnerId4)
+  local nMinPartnerLevel = math.huge
+  for _, nNpcTemplateId in pairs(tbThisPartnerList) do
+    if tbAllPartnerNpcTemplateId[nNpcTemplateId] and 0 ~= nNpcTemplateId and nMinPartnerLevel > tbAllPartnerNpcTemplateId[nNpcTemplateId].nFightPower then
+      nMinPartnerLevel = tbAllPartnerNpcTemplateId[nNpcTemplateId].nFightPower
+    end
+  end
+  local nMaxFriendLevel = math.modf(nMinPartnerLevel / nFightPowerRequire) + 1
+  if nFriendLevel >= nMaxFriendLevel then
+    bFetterMaxLevel = true
+  end
+  return bFetterFull, bFetterMaxLevel, nMaxFriendLevel, nFriendLevel
+end

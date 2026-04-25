@@ -1,0 +1,191 @@
+Require("CommonScript/Welfare/GrowUpInvestCommon.lua")
+local tbWnd = Ui:CreateClass("UIGrowUpInvest", "UIPanel")
+local tbControls = {
+  txtPayReward = "imgTitleBg/txtTitle1",
+  txtTotalReward = "imgTitleBg/txtTitle2",
+  txtLeftReward = "SurplusClaim/FullPrice/txtPriceValue",
+  txtnGetAll = "btnGetAll/Text",
+  btnGetAll = "btnGetAll",
+  TemplateTeammate = "List/Viewport/Content/Template"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnGetAll = function(self)
+    if not self.bIsBuy then
+      GrowUpInvest:RefreshTemporaryReddot("GROWUP_BUY")
+      local _, _, _, nIndex = GrowUpInvest:GetGrowUpInvestSetting()
+      GrowUpInvest:OnChargeGrowUpInvestReq(nIndex)
+      return
+    end
+    if Lib:IsEmptyTB(self.tbCanGetAwardIndex or {}) then
+      return
+    end
+    for _, nAwardIndex in ipairs(self.tbCanGetAwardIndex) do
+      GrowUpInvest:GetGrowUpInvestAwardReq(nAwardIndex)
+    end
+    self.tbCanGetAwardIndex = {}
+  end
+}
+
+local function fFormatThousands(nNumber)
+  local szNumber = tostring(tonumber(nNumber) or 0)
+  local nLength = #szNumber
+  local nIndex, nBreakTime = nLength, nLength
+  while true do
+    szNumber, nIndex = string.gsub(szNumber, "^(-?%d+)(%d%d%d)", "%1,%2")
+    nBreakTime = nBreakTime - 1
+    if 0 == nIndex or 0 == nBreakTime then
+      break
+    end
+  end
+  return szNumber
+end
+
+local tbTextDef = {
+  TitleUp = function(...)
+    return i18n.EasyGet("<color=#fbe41f>{0}\229\133\131</color>\232\180\173\228\185\176\231\171\139\229\190\151<color=#fbe41f>{1}</color>\229\133\131\229\174\157", ...)
+  end,
+  TitleDown = function(...)
+    return i18n.EasyGet("<color=#fbe41f>\229\141\135\231\186\167{0}</color>\229\128\141\232\182\133\229\128\188<color=#fbe41f>\232\191\148\229\136\169</color>\229\133\177<color=#fbe41f>{1}</color>\229\133\131\229\174\157", ...)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.pAwardScorllView = Ui:NewScrollView(self, self.TemplateTeammate, nil, false, false)
+end
+
+function tbWnd:_MakeDynKey(szPath, pTargetPanel)
+  pTargetPanel = pTargetPanel or self.pPanel
+  local szKey = string.format("%s|%s", szPath, pTargetPanel)
+  return szKey
+end
+
+function tbWnd:_RegDynReddot(szPath, pTargetPanel)
+  pTargetPanel = pTargetPanel or self.pPanel
+  local szKey = self:_MakeDynKey(szPath, pTargetPanel)
+  if self._tbDynReddotList[szKey] then
+    return
+  end
+  self._tbDynReddotList[szKey] = pTargetPanel
+  RedPointMgr:DynamicRegisteRedPoint(self._tbDynReddotList[szKey], szPath, {
+    RedPointMgr.EVENT.GrowUpInvest
+  })
+end
+
+function tbWnd:_UnRegDynReddot(szKey)
+  if not self._tbDynReddotList[szKey] then
+    return
+  end
+  local szPath = (Lib:SplitStr(szKey, "|") or {})[1]
+  if not szPath then
+    return
+  end
+  RedPointMgr:DynamicUnRegist(self._tbDynReddotList[szKey], szPath)
+  self._tbDynReddotList[szKey] = nil
+end
+
+function tbWnd:OnOpen()
+  self._tbDynReddotList = {}
+  GrowUpInvest.bHaveClick = true
+  GrowUpInvest:UpdateReddotState(false)
+  self:UpdateView()
+end
+
+function tbWnd:UpdateView()
+  local tbGrowUpSetting, tbRewardSetting, nProductId = GrowUpInvest:GetGrowUpInvestSetting()
+  local tbProductSetting = Recharge:GetProductSettingById(nProductId)
+  local szRewardType, nRewardVal = table.unpack(tbProductSetting.tbFirstExtraAwards[1])
+  local nPayRewards = "YuanBao" == szRewardType and nRewardVal or 0
+  local szShowPrice = Recharge:GetShowPrice(tbProductSetting)
+  self.bIsBuy = nProductId == GrowUpInvest:GetBuyProductId(me)
+  self.pPanel:Label_SetText(tbControls.txtPayReward, tbTextDef.TitleUp(szShowPrice, nPayRewards))
+  self.tbRewardSetting = tbRewardSetting
+  local nRewardTotal = 0
+  local nLeftReward = 0
+  for _, tbInfo in ipairs(self.tbRewardSetting) do
+    local nAwardIndex, nLevel, nWeight, bGetAward = table.unpack(tbInfo)
+    if not bGetAward or not self.bIsBuy then
+      nLeftReward = nLeftReward + nWeight
+    end
+    nRewardTotal = nRewardTotal + nWeight
+  end
+  self.pPanel:Label_SetText(tbControls.txtTotalReward, tbTextDef.TitleDown(tbGrowUpSetting.nMultiple, nRewardTotal))
+  self:InitRewardUnit()
+  self.pPanel:Label_SetText(tbControls.txtLeftReward, tostring(nLeftReward))
+  self.pPanel:SetActive(tbControls.btnGetAll, not self.bIsBuy or not Lib:IsEmptyTB(self.tbCanGetAwardIndex or {}))
+  self.pPanel:Label_SetText(tbControls.txtnGetAll, self.bIsBuy and i18n.EasyGet("\228\184\128\233\148\174\233\162\134\229\143\150") or szShowPrice)
+end
+
+function tbWnd:InitRewardUnit()
+  self.pAwardScorllView:Clear()
+  self.tbCanGetAwardIndex = {}
+  for nIndex, tbRewardInfo in ipairs(self.tbRewardSetting) do
+    self.pAwardScorllView:SetElement(nIndex, function(tbElement)
+      self:SetElementInfo(tbElement, table.unpack(tbRewardInfo))
+    end)
+  end
+end
+
+local tbAwardStateDesc = {
+  [GrowUpInvest.nNotBuy] = function()
+    return i18n.EasyGet("\230\156\170\232\180\173\228\185\176")
+  end,
+  [GrowUpInvest.nNotGet] = function()
+    return i18n.EasyGet("\233\162\134\229\143\150")
+  end,
+  [GrowUpInvest.nNotArrive] = function()
+    return i18n.EasyGet("\230\156\170\232\190\190\229\136\176")
+  end
+}
+
+function tbWnd:SetElementInfo(tbElement, nAwardIndex, nLevel, nWeight, bGetAward)
+  tbElement.pPanel:Label_SetText("PriceGroup/FullPrice/txtPriceValue", tostring(nWeight))
+  tbElement.pPanel:Label_SetText("txtActivityName", i18n.EasyGet("{0}\231\186\167", Lib:GetLevelText(nLevel)))
+  if ZongShiSkill:IsZongShiByLevel(nLevel) then
+    tbElement.pPanel:Label_SetText("txtActivityName", Lib:GetLevelText(nLevel))
+  end
+  tbElement.pPanel:SetActive("PriceGroup/FullPrice/txtPrice", false)
+  local nState
+  if self.bIsBuy then
+    if bGetAward then
+      nState = GrowUpInvest.nHadGet
+    elseif nLevel <= me.nTotalLevel then
+      nState = GrowUpInvest.nNotGet
+    else
+      nState = GrowUpInvest.nNotArrive
+    end
+  else
+    nState = GrowUpInvest.nNotBuy
+  end
+  if nState == GrowUpInvest.nNotGet then
+    table.insert(self.tbCanGetAwardIndex, nAwardIndex)
+  end
+  local bShowButton = nState ~= GrowUpInvest.nHadGet
+  tbElement.pPanel:SetActive("btnGet", bShowButton)
+  tbElement.pPanel:SetActive("MarkRecieved", not bShowButton)
+  if bShowButton then
+    local bBtnEnable = nState == GrowUpInvest.nNotGet
+    tbElement.pPanel:Button_SetEnable("btnGet", bBtnEnable)
+    if bBtnEnable then
+      Ui:Button_BindEvent(tbElement.pPanel, "btnGet", function()
+        GrowUpInvest:GetGrowUpInvestAwardReq(nAwardIndex)
+      end)
+    end
+    tbElement.pPanel:Label_SetText("btnGet/Text", tbAwardStateDesc[nState]())
+  end
+  if nState == GrowUpInvest.nNotGet then
+    self:_RegDynReddot("btnGet", tbElement.pPanel)
+  else
+    self:_UnRegDynReddot(self:_MakeDynKey("btnGet", tbElement.pPanel))
+  end
+end
+
+function tbWnd:OnClose()
+  local tbRegKey = {}
+  for szKey, _ in pairs(self._tbDynReddotList) do
+    table.insert(tbRegKey, szKey)
+  end
+  for szKey, _ in pairs(tbRegKey) do
+    self:_UnRegDynReddot(szKey)
+  end
+end

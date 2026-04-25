@@ -1,0 +1,197 @@
+Require("Script/ShenBingPu/ShenBingPuC.lua")
+local tbWnd = Ui:CreateClass("UIDivineBreakDown", "UIPanel")
+local ShenBingPuC = Item.ShenBingPu
+local tbControls = {
+  MiddleGridTemplate = "Middle/ScrollViewItem/Viewport/Content/Template",
+  txtMiddleTittle = "Middle/txtTittle",
+  DropdownQuality = "Right/panelItemList/DropdownQuality",
+  ToggleTemplate = "Right/ScrollViewToggle/Viewport/Content/Template",
+  BreakItemGrid = "Right/Scroll ViewItem/Viewport/Content/Template",
+  btnBreakDown = "Right/btnBreakDown",
+  ImgLine = "Right/ImgLine",
+  panelItemList = "Right/panelItemList"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnBreakDown = function(self)
+    ShenBingPuC:DoRecycleReq(self.tbSelectedWeaponId)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbSelectedWeaponId = self.tbSelectedWeaponId or {}
+  self.tbMiddleGridView = Ui:NewItemGridScrollView(self, tbControls.MiddleGridTemplate, 1, 1, nil)
+  self.tbToggleScrollView = Ui:NewScrollView(self, tbControls.ToggleTemplate)
+  self.tbBreakResultView = Ui:NewItemGridScrollView(self, tbControls.BreakItemGrid, 1, 1)
+  self.pPanel:Dropdown_BindEvent(tbControls.DropdownQuality, function(value)
+    self:OnDropDownChange(value)
+  end)
+end
+
+function tbWnd:OnPanelOpen(nSelectIndex)
+  self:UpdateMiddleAndRight(nSelectIndex)
+end
+
+function tbWnd:OnSelectWeaponChange(nSelectIndex)
+  self:UpdateMiddleAndRight(nSelectIndex)
+end
+
+function tbWnd:UpdateMiddleAndRight(nSelectIndex)
+  local nSlot = Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1 + nSelectIndex - 1
+  self:UpdateMiddleInfo(nSlot)
+  self:UpdateRightInfo(nSlot)
+end
+
+function tbWnd:UpdateMiddleInfo(nSlot)
+  local tbAllWeapon = ShenBingPuC:GetAllShenBingPuItemInBagBySlot(me, nSlot)
+  local tbAllSeed = ShenBingPuC:GetAllShenBingPuSeedInBagBySlot(me, nSlot)
+  local tbAllItem = Lib:MergeTable(tbAllWeapon, tbAllSeed)
+  self.tbMiddleGridView:AdjustGridCount(#tbAllItem)
+  self.tbMiddleGridView:Clean()
+  for nIndex, pItem in ipairs(tbAllItem) do
+    local tbGrid = self.tbMiddleGridView:SetItem(nIndex, pItem.dwId, nil, pItem.dwTemplateId, nil, nil, {bShowTip = true})
+    tbGrid:Plus_SetActive(false)
+    tbGrid:SetLongPressEndEnable(true)
+    tbGrid:SetClickEnable(true, self.OnWeaponGridClicked, self, pItem.dwId)
+    tbGrid.nStarLevel = ShenBingPuC:GetStarLevel(pItem) or ShenBingPuC:GetStarLevelForSeed(pItem)
+    self:SelectOneItem(pItem.dwId, false)
+  end
+  self.tbSelectedWeaponId = {}
+  local szWeaponName = ShenBingPuC:GetFactionWeaponName(me.nFaction, me.nFactionSect, nSlot)
+  self.pPanel:Label_SetText(tbControls.txtMiddleTittle, i18n.EasyGet("\226\151\134 \233\128\137\230\139\169\229\136\134\232\167\163{0}", szWeaponName))
+end
+
+function tbWnd:OnWeaponGridClicked(nWeaponId)
+  self:SelectOneItem(nWeaponId, self.tbSelectedWeaponId[nWeaponId] == nil)
+end
+
+function tbWnd:UpdateRightInfo(nSlot)
+  self.pPanel:SetActive(tbControls.ImgLine, false)
+  self.pPanel:SetActive(tbControls.panelItemList, false)
+  self:UpdateAllToggle()
+  self:UpdateBreakDownResult()
+end
+
+function tbWnd:UpdateDropDownOpt()
+  local tbOptList = {}
+  for _, szIter in ipairs(ShenBingPuC.tbSortIterationList) do
+    local szIterSuitName = ShenBingPuC:GetIterationSuitName(szIter)
+    table.insert(tbOptList, szIterSuitName)
+  end
+  self.pPanel:Dropdown_ResetOptions(tbControls.DropdownQuality, tbOptList)
+end
+
+function tbWnd:OnDropDownChange(szValue)
+  local szSelectedIter = ""
+  for szIter, szSuitName in pairs(Item.ShenBingPu.CFG.IterationName) do
+    if szValue == i18n.Get(szSuitName) then
+      szSelectedIter = szIter
+      break
+    end
+  end
+  if not Lib:IsEmptyStr(szSelectedIter) then
+    for i = 1, #self.tbMiddleGridView.tbGridList do
+      local tbGrid = self.tbMiddleGridView.tbGridList[i][1]
+      local tbItemCfg = ShenBingPuC.tbItemCfg[tbGrid.nTemplate]
+      local nWeaponIter = ShenBingPuC.tbSortIterationSet[tbItemCfg.szIteration] or Env.INT_MAX
+      if nWeaponIter <= ShenBingPuC.tbSortIterationSet[szSelectedIter] then
+        self:SelectOneItem(tbGrid.nItemId, false)
+      else
+        self:SelectOneItem(tbGrid.nItemId, false)
+      end
+    end
+  end
+end
+
+function tbWnd:ResetAllToggle()
+  local tbAllElement = self.tbToggleScrollView:GetAllElement()
+  for _, tbElement in ipairs(tbAllElement) do
+    tbElement.pPanel:Toggle_SetChecked("ToggleAuto", false)
+  end
+end
+
+function tbWnd:UpdateAllToggle()
+  local nCurMaxStarLevel = ShenBingPuC:GetCurMaxStarLevel()
+  self.tbToggleScrollView:SetElement(1, function(tbElement)
+    tbElement.pPanel:Label_SetText("ToggleAuto/Label", i18n.EasyGet("\229\133\168\233\131\168"))
+    tbElement.pPanel:Toggle_BindEvent("ToggleAuto", function(isOn)
+      local tbAllToggle = self.tbToggleScrollView:GetAllElement()
+      for i = 2, #tbAllToggle do
+        tbAllToggle[i].pPanel:Toggle_SetChecked("ToggleAuto", isOn)
+      end
+    end)
+  end)
+  for i = 1, nCurMaxStarLevel do
+    self.tbToggleScrollView:SetElement(i + 1, function(tbElement)
+      tbElement.pPanel:Label_SetText("ToggleAuto/Label", i18n.EasyGet("\231\154\147\230\156\136{0}", i))
+      tbElement.nStarLevel = i
+      tbElement.pPanel:Toggle_BindEvent("ToggleAuto", function(isOn)
+        self:OnToggleClicked(tbElement.nStarLevel, isOn)
+      end)
+    end)
+  end
+  self:ResetAllToggle()
+end
+
+function tbWnd:OnToggleClicked(nTargetStarLevel, bTicked)
+  for nItemId, nGridIndex in pairs(self.tbMiddleGridView.tbItemId2GridIndex) do
+    local tbGrid = self.tbMiddleGridView.tbGridList[nGridIndex][1]
+    if tbGrid.nStarLevel == nTargetStarLevel then
+      self:SelectOneItem(tbGrid.nItemId, bTicked)
+    end
+  end
+end
+
+function tbWnd:SelectOneItem(nItemId, bSelect)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  if bSelect then
+    self.tbSelectedWeaponId[nItemId] = pItem.nCount
+  else
+    self.tbSelectedWeaponId[nItemId] = nil
+  end
+  for i = 1, #self.tbMiddleGridView.tbGridList do
+    local tbGrid = self.tbMiddleGridView.tbGridList[i][1]
+    if tbGrid.nItemId == nItemId then
+      tbGrid.pPanel:SetActive("Img_Select", bSelect)
+      break
+    end
+  end
+  self:UpdateBreakDownResult()
+end
+
+function tbWnd:UpdateBreakDownResult()
+  local tbAllItem = {}
+  local tbSeedClass = Item:GetClass("ShenBingPuSeed")
+  for nWeaponId, nCount in pairs(self.tbSelectedWeaponId) do
+    local pItem = KItem.GetItemObj(nWeaponId)
+    if pItem then
+      if ShenBingPuC.tbItemCfg[pItem.dwTemplateId] then
+        local tbItemCfg = ShenBingPuC.tbItemCfg[pItem.dwTemplateId]
+        tbAllItem[tbItemCfg.nRecycleMaterialId] = tbAllItem[tbItemCfg.nRecycleMaterialId] or 0
+        tbAllItem[tbItemCfg.nRecycleMaterialId] = tbAllItem[tbItemCfg.nRecycleMaterialId] + tbItemCfg.nRecycleMaterialNum * nCount
+      else
+        local nMaterialId, nMaterialNum = tbSeedClass:GetRecyclePrice(pItem.dwTemplateId)
+        if nMaterialId and nMaterialNum then
+          tbAllItem[nMaterialId] = tbAllItem[nMaterialId] or 0
+          tbAllItem[nMaterialId] = tbAllItem[nMaterialId] + nMaterialNum * nCount
+        end
+      end
+    end
+  end
+  self.tbBreakResultView:AdjustGridCount(Lib:CountTB(tbAllItem))
+  self.tbBreakResultView:Reset()
+  local nIndex = 1
+  for nMaterialId, nNum in pairs(tbAllItem) do
+    local tbGrid = self.tbBreakResultView:SetItemByTemplate(nIndex, nil, nNum, nMaterialId, false)
+    tbGrid:Plus_SetActive(false)
+    tbGrid:SetClickEnable(true)
+    nIndex = nIndex + 1
+  end
+end
+
+function tbWnd:OnClose()
+  self.tbSelectedWeaponId = {}
+end

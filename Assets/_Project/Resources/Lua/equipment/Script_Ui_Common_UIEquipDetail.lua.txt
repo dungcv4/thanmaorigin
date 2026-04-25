@@ -1,0 +1,603 @@
+local tbWnd = Ui:CreateClass("UIEquipDetail", "UIPanel")
+tbWnd.TB_SERIES_IMG = {
+  "UI/icon/series/jin.png",
+  "UI/icon/series/mu.png",
+  "UI/icon/series/shui.png",
+  "UI/icon/series/huo.png",
+  "UI/icon/series/tu.png"
+}
+tbWnd.tbControls = {
+  ItemGridTemplate = "ItemIntro/ItemGrid",
+  HasEquipped = "ItemIntro/imgMarkEquipped",
+  txtEquipBelong = "ItemIntro/txtEquipBelong",
+  SalePrice = "ItemIntro/SalePrice",
+  txtSalePrice = "ItemIntro/SalePrice/txtSalePrice",
+  imgSalePrice = "ItemIntro/SalePrice/imgMoney",
+  txtItemName = "imgTitle/txtTitle",
+  txtLevelLimit = "ItemIntro/txtLevelLimit",
+  txtRank = "ItemIntro/txtRank",
+  txtTradeLimitState = "ItemIntro/txtTradeLimitState",
+  txtItemTime = "ItemIntro/txtItemTime",
+  txtFightPower = "ItemIntro/txtFightPower",
+  DescTemplate = "ItemIntro/ScrollView/Viewport/Content/Template",
+  line1 = "ScrollView/Viewport/Content/Template/line1",
+  line2 = "ScrollView/Viewport/Content/Template/line2",
+  line3 = "ScrollView/Viewport/Content/Template/line3",
+  txtSeries = "ItemIntro/txtSeries",
+  txtSeriesType = "ItemIntro/txtSeries/txtSeriesType",
+  Stars = "ItemIntro/Stars"
+}
+local tbSeriesControls = {
+  [Item.emSERIES_TYPE.SERIES_METAL] = "ItemIntro/txtSeries/txtSeriesMetal",
+  [Item.emSERIES_TYPE.SERIES_WOOD] = "ItemIntro/txtSeries/txtSeriesWood",
+  [Item.emSERIES_TYPE.SERIES_WATER] = "ItemIntro/txtSeries/txtSeriesWater",
+  [Item.emSERIES_TYPE.SERIES_FIRE] = "ItemIntro/txtSeries/txtSeriesFire",
+  [Item.emSERIES_TYPE.SERIES_EARTH] = "ItemIntro/txtSeries/txtSeriesEarth"
+}
+local nStartCount = 10
+
+function tbWnd:OnCreate()
+  self.szWeaponType = {
+    i18n.EasyGet("\230\139\179\229\165\151"),
+    i18n.EasyGet("\229\137\145"),
+    i18n.EasyGet("\229\141\149\229\136\128"),
+    i18n.EasyGet("\230\163\141\230\163\146"),
+    i18n.EasyGet("\230\158\170"),
+    i18n.EasyGet("\229\143\140\233\148\164"),
+    i18n.EasyGet("\229\143\140\229\136\128"),
+    i18n.EasyGet("\230\154\151\229\153\168")
+  }
+  self.itemGrid = Ui:NewExistItemGrid(self, self.ItemGridTemplate)
+  self.tbScrollView = Ui:NewScrollView(self, self.DescTemplate, nil, false, true)
+  self.tbTradePanel = {}
+end
+
+function tbWnd:Update(tbInfo)
+  self.szOpt = tbInfo.szOpt
+  self.pItem = tbInfo.pItem
+  self.nItemId = tbInfo.nItemId
+  self.nTemplateId = tbInfo.nTemplateId
+  self.nFaction = tbInfo.nFaction
+  self.nFactionSect = tbInfo.nFactionSect
+  self.nSex = tbInfo.nSex
+  self.pAsyncData = tbInfo.pAsyncData
+  self.bIsCompare = tbInfo.bIsCompare
+  self.nSeries = tbInfo.nSeries
+  local tbItemInfo = Item:GetItemBaseProp(self.nTemplateId)
+  tbInfo.tbItemExtParams = tbInfo.tbItemExtParams or {}
+  self.nTimeOutValue = tbInfo.tbItemExtParams.nItemTimeOut or 0
+  self.nTradeLimitType = tbInfo.tbItemExtParams.nTradeLimitType or tbItemInfo.nTradeLimitType
+  self.nTradeLimitValue = tbInfo.tbItemExtParams.nTradeLimitValue or 0
+  self.tbTradeInfo = tbInfo.tbItemExtParams.tbTradeInfo
+  self.tbLinkInfo = tbInfo.tbLinkInfo
+  self.tbItemExtParams = tbInfo.tbItemExtParams
+  self.pPanel:SetActive(self.txtItemTime, false)
+  self:UpdateEquipType()
+  self:UpdateSaleMoney()
+  self:UpdateIcon()
+  self:UpdateLevelAndDesc()
+  self:UpdateBindStateDesc()
+  self:UpdateEquiped()
+  self:UpdateAttrib()
+  self:UpdateStar()
+  self:OnFixedUpdate()
+  self:UpdateTradePanel()
+end
+
+function tbWnd:GetItemGrid()
+  return self.itemGrid
+end
+
+function tbWnd:UpdateEquipType()
+  local tbInfo = Item:GetItemBaseProp(self.nTemplateId)
+  self.pPanel:SetActive(self.txtEquipBelong, true)
+  self.pPanel:Label_SetText(self.txtEquipBelong, i18n.Get(Item:GetEquipTypeName(self.nTemplateId)))
+  if self.pItem and -1 ~= self.pItem.nWeaponType then
+    if KFightSkill.IsWeaponFitFactionSect(me.nFaction, me.nFactionSect, self.pItem.nWeaponType) then
+      self.pPanel:Label_SetText(self.txtEquipBelong, self.szWeaponType[self.pItem.nWeaponType + 1])
+    else
+      self.pPanel:Label_SetText(self.txtEquipBelong, i18n.EasyGet("{0}  <color=#b60000>\231\177\187\229\158\139\228\184\141\231\172\166</color>", self.szWeaponType[self.pItem.nWeaponType + 1]))
+    end
+  end
+  self.pPanel:Label_SetColorByName(self.txtEquipBelong, Item.tbTipsColorDef.EquipBelong.ColorName or "Red")
+end
+
+function tbWnd:UpdateSaleMoney()
+  local szCurrency, nPrice = Item.tbItemSell:GetSellCurrencyValue(self.nTemplateId)
+  if szCurrency then
+    self.pPanel:SetActive(self.SalePrice, true)
+    self.pPanel:Label_SetText(self.txtSalePrice, nPrice)
+    local tbCustomData = Item.tbItemSell:GetCustomSellData(szCurrency)
+    local szIcon = tbCustomData.funcGetIcon(szCurrency)
+    self.pPanel:Sprite_SetSprite(self.imgSalePrice, szIcon)
+  else
+    self.pPanel:SetActive(self.SalePrice, false)
+  end
+end
+
+function tbWnd:UpdateIcon()
+  local szName = ""
+  for nSeries, szPath in pairs(tbSeriesControls) do
+    self.pPanel:SetActive(szPath, false)
+  end
+  if self.pItem then
+    szName = KItem.GetItemShowInfo(self.pItem.dwTemplateId, self.nFaction or me.nFaction, self.nFactionSect or me.nFactionSect, self.nSex or me.nSex)
+    local nSeries = self.pItem.GetSeries()
+    local szSeriesPath = tbSeriesControls[nSeries]
+    if 0 ~= nSeries then
+      self.pPanel:SetActive(self.txtSeries, true)
+      self.pPanel:SetActive(szSeriesPath, true)
+      self.pPanel:Label_SetText(szSeriesPath, Item.TB_SERIES_TEXT[nSeries])
+    else
+      self.pPanel:SetActive(self.txtSeries, false)
+    end
+  else
+    szName = KItem.GetItemShowInfo(self.nTemplateId, self.nFaction or me.nFaction, self.nFactionSect or me.nFactionSect, self.nSex or me.nSex)
+    if self.nSeries and 0 ~= self.nSeries then
+      local szSeriesPath = tbSeriesControls[self.nSeries]
+      self.pPanel:SetActive(self.txtSeries, true)
+      self.pPanel:SetActive(szSeriesPath, true)
+      self.pPanel:Label_SetText(szSeriesPath, Item.TB_SERIES_TEXT[self.nSeries])
+    else
+      self.pPanel:SetActive(self.txtSeries, false)
+    end
+  end
+  local bShowTip = true
+  if self.pAsyncData then
+    bShowTip = false
+  end
+  local nLianHuaLevel = -1
+  szName = i18n.Parse(szName)
+  if self.pItem and Item:IsMainEquipPos(self.pItem.nEquipPos) then
+    local nEquipPos = self.pItem.nEquipPos
+    if self.pAsyncData then
+      nLianHuaLevel = self.pAsyncData.GetLianHua(nEquipPos + 1)
+      if nLianHuaLevel == self.pItem.nLevel then
+        szName = string.format("%s\194\183%s", Item.EquipLianHua.tbEquipPos2NamePrefix[nEquipPos](), szName)
+      end
+      local nJingZhuLevel = self.pAsyncData.GetJingZhu(nEquipPos + 1)
+      if nJingZhuLevel > 0 then
+        szName = string.format("%s (%s)", szName, i18n.EasyGet("\231\178\190\233\147\184+{0}", nJingZhuLevel))
+      end
+    else
+      nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, nEquipPos)
+      if self.tbItemExtParams.nLianHuaLevel then
+        nLianHuaLevel = self.tbItemExtParams.nLianHuaLevel
+      end
+      if nLianHuaLevel == self.pItem.nLevel then
+        szName = string.format("%s\194\183%s", Item.EquipLianHua.tbEquipPos2NamePrefix[nEquipPos](), szName)
+      end
+      local nJingZhuLevel = Item.EquipJingZhu:GetJingZhuLevel(me, nEquipPos)
+      if nJingZhuLevel > 0 then
+        szName = string.format("%s (%s)", szName, i18n.EasyGet("\231\178\190\233\147\184+{0}", nJingZhuLevel))
+      end
+    end
+  end
+  if EDITOR then
+    szName = string.format("%s (ID:%d)", szName, self.nTemplateId)
+  end
+  self.pPanel:Label_SetText(self.txtItemName, szName)
+  self.itemGrid:SetItem(self.nItemId, self.nTemplateId, {bShowTip = bShowTip}, self.nFaction, self.nFactionSect, self.nSex, self.pAsyncData, nil, {nLianHuaLevel = nLianHuaLevel})
+end
+
+function tbWnd:UpdateStrengthen()
+  if (self.szOpt == "PlayerEquip" or self.pAsyncData) and self.pItem.nEquipPos <= Item.EQUIPPOS_AMULET then
+    local nStrenghLevel = Strengthen:GetStrengthenLevel(self.pAsyncData or me, self.pItem.nEquipPos)
+    if BattleRoyaleMgr:IsInRound() then
+      nStrenghLevel = nStrenghLevel - Strengthen.BATTLEROYALE_START_LEVEL
+    end
+    local szEnhance = string.format("+%s", nStrenghLevel)
+    self.itemGrid:SetRBCornerText(szEnhance)
+  else
+    self.itemGrid:SetRBCornerText("")
+  end
+end
+
+function tbWnd:UpdateLevelAndDesc()
+  local tbInfo = Item:GetItemBaseProp(self.nTemplateId)
+  local szColor = me.nTotalLevel >= tbInfo.nRequireLevel and "#52D455" or "#b60000"
+  if ZongShiSkill:IsZongShiByLevel(tbInfo.nRequireLevel) then
+    self.pPanel:Label_SetText(self.txtLevelLimit, i18n.EasyGet("\233\156\128\230\177\130\231\173\137\231\186\167\239\188\154<color={0}>{1}</color>", szColor, Lib:GetLevelText(tbInfo.nRequireLevel)))
+  else
+    self.pPanel:Label_SetText(self.txtLevelLimit, i18n.EasyGet("\233\156\128\230\177\130\231\173\137\231\186\167\239\188\154<color={0}>{1}</color>\231\186\167", szColor, Lib:GetLevelText(tbInfo.nRequireLevel)))
+  end
+  self.pPanel:Label_SetColorByName(self.txtLevelLimit, Item.tbTipsColorDef.EquipLevel.ColorName or "Red")
+  self.pPanel:Label_SetText(self.txtRank, i18n.EasyGet("{0}\233\152\182", tbInfo.nLevel))
+  self.pPanel:Label_SetColorByName(self.txtRank, Item.tbTipsColorDef.EquipRank.ColorName or "Red")
+  self.pPanel:SetActive(self.txtLevelLimit, true)
+  self.pPanel:SetActive(self.txtRank, true)
+end
+
+function tbWnd:GetItemTradeText(pItem)
+  if not pItem.IsInTradeLimit(Item.eTRADELIMITWAY.P2P) then
+    return true, i18n.EasyGet("\229\143\175\228\186\164\230\152\147")
+  end
+  if not pItem.IsInTradeLimit(Item.eTRADELIMITWAY.MARKETSTALL) then
+    return true, i18n.EasyGet("\229\143\175\230\145\134\230\145\138")
+  end
+  return false
+end
+
+function tbWnd:UpdateBindStateDesc()
+  if self.pItem and (not (not self.tbTradeInfo or self.tbTradeInfo.bTrade) or not self.tbTradeInfo) then
+    local bCanTrade, szTradeWay = self:GetItemTradeText(self.pItem)
+    self.pPanel:SetActive(self.txtTradeLimitState, true)
+    if bCanTrade then
+      self.pPanel:Label_SetText(self.txtTradeLimitState, szTradeWay)
+      self.pPanel:Label_SetColorByName(self.txtTradeLimitState, Item.tbTipsColorDef.ItemTransaction.ColorName or "Red")
+    else
+      self.pPanel:Label_SetText(self.txtTradeLimitState, i18n.EasyGet("\231\187\145\229\174\154\228\184\141\229\143\175\228\186\164\230\152\147"))
+      self.pPanel:Label_SetColorByName(self.txtTradeLimitState, Item.tbTipsColorDef.NoItemTransaction.ColorName or "Red")
+    end
+  else
+    self.pPanel:SetActive(self.txtTradeLimitState, false)
+  end
+end
+
+function tbWnd:OnFixedUpdate()
+  local pItem = self.pItem
+  if pItem then
+    local bHas, nGenTime, nTimeOut = Item:GetTimeOut(pItem)
+    if bHas then
+      local bIsTimeOut = Item:CheckIsTimeOut(pItem)
+      if bIsTimeOut then
+        self.pPanel:Label_SetText(self.txtItemTime, i18n.EasyGet("\229\183\178\229\164\177\230\149\136"))
+      else
+        local nLeaveSec = nTimeOut - GetTime()
+        local nLeaveTime = Lib:TimeDesc2(nLeaveSec)
+        if nLeaveSec < 600 then
+          nLeaveTime = string.format("<color=#057fc5>%s</color>", nLeaveTime)
+        else
+          nLeaveTime = string.format("<color=#057fc5>%s</color>", nLeaveTime)
+        end
+        self.pPanel:Label_SetText(self.txtItemTime, i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154{0}", nLeaveTime))
+      end
+      self.pPanel:SetActive(self.txtItemTime, true)
+    end
+  elseif self.tbLinkInfo and self.tbLinkInfo.nTimeOut and self.tbLinkInfo.nTimeOut > 0 then
+    local nLeaveSec = self.tbLinkInfo.nTimeOut - GetTime()
+    if nLeaveSec <= 0 then
+      self.pPanel:Label_SetText(self.txtItemTime, i18n.EasyGet("\229\183\178\229\164\177\230\149\136"))
+    else
+      local nLeaveTime = Lib:TimeDesc2(nLeaveSec)
+      if nLeaveSec < 600 then
+        nLeaveTime = string.format("<color=#057fc5>%s</color>", nLeaveTime)
+      else
+        nLeaveTime = string.format("<color=#057fc5>%s</color>", nLeaveTime)
+      end
+      self.pPanel:Label_SetText(self.txtItemTime, i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154{0}", nLeaveTime))
+    end
+    self.pPanel:SetActive(self.txtItemTime, true)
+  end
+end
+
+function tbWnd:UpdateEquiped()
+  local nEquipedType = self:GetHasEquippedType()
+  self.pPanel:SetActive(self.HasEquipped, nEquipedType == Item.Equip.EQUIPED_TYPE.ME)
+end
+
+function tbWnd:GetHasEquippedType()
+  local nEquipedType = Item.Equip.EQUIPED_TYPE.NOT
+  if self.pItem then
+    if not self.pAsyncData then
+      if self.pItem.nEquipPos == Item.EQUIPPOS_EXTEND then
+        local nSlot = Item.ExtEquip:GetSlot(self.pItem)
+        local pThisSlotWearEquip = Item.ExtEquip:GetEquipObj(me, nSlot)
+        if nil ~= pThisSlotWearEquip and pThisSlotWearEquip.dwId == self.nItemId then
+          nEquipedType = Item.Equip.EQUIPED_TYPE.ME
+        end
+      else
+        local tbEquips = me.GetEquips(1)
+        if tbEquips[self.pItem.nEquipPos] and tbEquips[self.pItem.nEquipPos] == self.nItemId then
+          nEquipedType = Item.Equip.EQUIPED_TYPE.ME
+        end
+      end
+    else
+      local tbEquips = self.pAsyncData.GetEquips()
+      if tbEquips[self.pItem.nEquipPos] and tbEquips[self.pItem.nEquipPos] == self.nItemId then
+        nEquipedType = Item.Equip.EQUIPED_TYPE.ASYNCDATA
+      end
+    end
+  end
+  return nEquipedType
+end
+
+function tbWnd:UpdateAttrib()
+  local tbInfo = Item:GetItemBaseProp(self.nTemplateId)
+  local tbClass = Item.tbClass[tbInfo.szClass] or Item.tbClass.default
+  local tbAttrib
+  local nFightPower = 0
+  if self.pItem then
+    local pPlayer = self.pAsyncData or me
+    local tbEquips = pPlayer.GetEquips()
+    local bIsSame = tbEquips[self.pItem.nEquipPos] and tbEquips[self.pItem.nEquipPos] == self.nItemId
+    tbAttrib = tbClass:GetTip(self.pItem, pPlayer, self.bIsCompare and not bIsSame, self.tbItemExtParams, self:GetHasEquippedType())
+    if Item.SecretBook:IsSecretBook(self.pItem) then
+      nFightPower = Item.SecretBook:GetFightPower(self.pItem)
+    else
+      nFightPower = FightPower:GetEquipBaseFightPower(self.pItem)
+    end
+  else
+    tbAttrib = tbClass:GetTipByTemplate(self.nTemplateId, self.tbLinkInfo)
+    if self.tbLinkInfo ~= nil then
+      local tbAttrList = {}
+      if self.tbLinkInfo.tbSeriesActiveAttrib then
+        for i, nAttr in ipairs(self.tbLinkInfo.tbSeriesActiveAttrib) do
+          if 0 ~= nAttr then
+            table.insert(tbAttrList, {
+              Item.EquipForge:UnpackAttr(nAttr)
+            })
+          else
+            table.insert(tbAttrList, {0, 0})
+          end
+        end
+      end
+      if self.tbLinkInfo.nBaseFightPower then
+        nFightPower = self.tbLinkInfo.nBaseFightPower + FightPower:GetEquipForgePowerByAttrList(tbAttrList)
+      else
+        nFightPower = KItem.GetEquipBaseFightPower(self.nTemplateId) + FightPower:GetEquipForgePowerByAttrList(tbAttrList)
+      end
+      if self.tbLinkInfo.tbRandomAttr then
+        local tbBase = Item:GetItemBaseProp(self.nTemplateId)
+        local nPos = KItem.GetEquipPos(self.nTemplateId)
+        local nRandomAttrFightPower = Item:GetClass("EquipForgeSeed"):GetRandomAttrFightPowerByAttrData(nPos, tbBase.nQuality, tbBase.nLevel, self.tbLinkInfo.tbRandomAttr)
+        nFightPower = nFightPower + nRandomAttrFightPower
+      end
+      if tbInfo.szClass == Item.WUXINGYIN_CLASS_NAME then
+        nFightPower = nFightPower + tbClass:GetFightPowerByAttrList(self.tbLinkInfo.tbWuXingYinAttr)
+      elseif tbInfo.szClass == Item.SecretBook.szClass then
+        nFightPower = Item.SecretBook:GetFightPowerByLevelAndRank(self.tbLinkInfo.nSecretBookLevel, self.tbLinkInfo.nRank)
+      end
+    else
+      nFightPower = KItem.GetEquipBaseFightPower(self.nTemplateId)
+    end
+  end
+  local nEquipPos = KItem.GetEquipPos(self.nTemplateId)
+  if nFightPower > 0 then
+    self.pPanel:Label_SetText(self.txtFightPower, i18n.EasyGet("\230\136\152\229\138\155\229\128\188\239\188\154") .. tostring(nFightPower))
+    self.pPanel:Label_SetColorByName(self.txtFightPower, Item.tbTipsColorDef.EquipFightPower.ColorName or "Red")
+  else
+    self.pPanel:Label_SetText(self.txtFightPower, "")
+  end
+  self:SetTips(tbAttrib or {}, nEquipPos)
+end
+
+function tbWnd:UpdateTradePanel()
+  if not self.tbTradeInfo or not self.tbTradeInfo.bTrade then
+    for _, szWndType in ipairs(self.tbTradePanel) do
+      self.pPanel:SetActive(szWndType, false)
+    end
+    return
+  end
+  local bNotInTBPanel = true
+  local szWndType = self.tbTradeInfo.szWndType
+  for k, v in ipairs(self.tbTradePanel) do
+    if szWndType == v then
+      bNotInTBPanel = false
+      break
+    end
+  end
+  if bNotInTBPanel then
+    local szWnd = Ui:CreatePanel(szWndType, szWndType, self)
+    table.insert(self.tbTradePanel, szWndType)
+    self.tbTradePanelObj = self.tbTradePanelObj or {}
+    self.tbTradePanelObj[szWndType] = szWnd
+  end
+  if "UIMarketStallBuyPanel" == szWndType then
+    self.tbTradePanelObj[szWndType]:OnOpen(self.tbTradeInfo.nStallType, self.tbTradeInfo.nSeTypeId, self.tbTradeInfo.nStallItemTempId, self.tbTradeInfo.tbItem)
+  elseif "UIMarketStallSellPanel" == szWndType then
+    self.tbTradePanelObj[szWndType]:OnOpen(self.tbTradeInfo.nStallType, self.tbTradeInfo.nShowType, self.tbTradeInfo.index, self.tbTradeInfo.bBag, self.tbTradeInfo.tbItem and self.tbTradeInfo.tbItem.nPrice, self.tbTradeInfo.nTimeout)
+  elseif "UITradeItemPanel" == szWndType then
+    self.tbTradePanelObj[szWndType]:OnOpen(self.tbTradeInfo.nItemId, self.tbTradeInfo.nOnTradeCount, self.tbTradeInfo.nMaxCount, self.tbTradeInfo.bOnTrade)
+  end
+  if tbWnd.szlastPanel then
+    self.pPanel:SetActive(tbWnd.szlastPanel, false)
+  end
+  tbWnd.szlastPanel = szWndType
+  self.pPanel:SetActive(szWndType, true)
+end
+
+function tbWnd:SetText(tbElement, tbDesc, nEquipPos)
+  local pPanel = tbElement.pPanel
+  local szText, nColor, nIcon, szAtlas, szText2, szStoneName, szEquipFrameColor, nTemplateId = table.unpack(tbDesc)
+  if nil == tbDesc then
+    tbDesc = {}
+    szText = ""
+  else
+    szText, nColor, nIcon, szAtlas, szText2, szStoneName, szEquipFrameColor, nTemplateId = table.unpack(tbDesc)
+  end
+  local oldText = szText
+  if nil ~= tbDesc.checkFunc then
+    local function SetTime()
+      if nil == tbDesc then
+        return false
+      end
+      if nil == tbDesc.checkFunc then
+        return false
+      end
+      if pParent and pParent.bClosed then
+        return false
+      end
+      local szTime = tbDesc.checkFunc()
+      pPanel:Label_SetText("line1/Attribute1/txtAttr", szTime)
+      return true
+    end
+    
+    Timer:Register(Env.GAME_FPS, SetTime)
+  end
+  local nStyle
+  if "table" == type(szText) then
+    nStyle = 4
+  elseif not szText then
+    nStyle = 3
+  elseif not nColor then
+    nStyle = 1
+  elseif nIcon then
+    nStyle = 2
+  else
+    nStyle = 4
+  end
+  pPanel:SetActive("line1", true)
+  pPanel:SetActive("line2", false)
+  pPanel:SetActive("line3", false)
+  if 1 == nStyle then
+    pPanel:SetActive("line1/txtClass", true)
+    pPanel:Label_SetText("line1/txtClass", szText)
+    pPanel:Label_SetColorByName("line1/txtClass", Item.tbTipsColorDef.EquipAttrbTittle.ColorName or "Red")
+    pPanel:SetActive("line1/Attribute1/txtAttr", false)
+    pPanel:Label_SetColorByName("line1/Attribute1/txtAttr", "Blue")
+    pPanel:SetActive("line1/Attribute1/Extra", false)
+  elseif 2 == nStyle then
+    local szColor, _ = Item:GetQualityColor(nColor)
+    if szText2 and szStoneName then
+      pPanel:SetActive("line1", false)
+      pPanel:SetActive("line2", true)
+      pPanel:SetActive("line3", false)
+      tbElement.itemGrid = Ui:NewExistItemGrid(tbElement, "line2/Stone1/item/UIItemGrid")
+      if "" ~= szText then
+        szText = szStoneName .. "\n" .. szText
+      else
+        szText = szStoneName
+      end
+      if "" ~= szText2 then
+        szText = szText .. "\n" .. szText2
+      end
+      pPanel:SetActive("line2/txtClass", false)
+      pPanel:Label_SetText("line2/Stone1/Attribute/txtAttr1", szText)
+      pPanel:Label_SetColorByName("line2/Stone1/Attribute/txtAttr1", szColor or "White")
+      if nIcon and "" ~= nIcon then
+        tbElement.itemGrid:ItemIcon_SetActive(true)
+        tbElement.itemGrid:BaseColor_SetActive(true)
+        tbElement.itemGrid:ItemIcon_SetSpriteByID(nIcon)
+        tbElement.itemGrid:BaseColor_SetSpriteByQuality(nColor)
+      else
+        tbElement.itemGrid:ItemIcon_SetActive(false)
+        tbElement.itemGrid:BaseColor_SetActive(false)
+        tbElement.itemGrid:SetCenterText()
+        tbElement.itemGrid:SetLTCornerImg()
+      end
+      if nTemplateId and Item.Stone:IsStone(nTemplateId) then
+        local szCenterText = Item.Stone:GetTag(nTemplateId)
+        local nComposeLevel = Item.Stone:GetComposeLevel(nTemplateId)
+        local szLTCornerImg = tbElement.itemGrid:GetStoneCompserImage(nComposeLevel)
+        tbElement.itemGrid:SetCenterText(szCenterText)
+        tbElement.itemGrid:SetLTCornerImg(szLTCornerImg)
+      end
+      tbElement.itemGrid:CDLabyer_SetActive(false)
+    else
+      pPanel:Label_SetText("line1/Attribute1/txtAttr", szText)
+      pPanel:SetActive("line1/Attribute1/txtAttr", true)
+      pPanel:SetActive("line1/Attribute1/Extra", false)
+      pPanel:SetActive("line1/txtClass", false)
+      pPanel:Label_SetColorByName("line1/Attribute1/txtAttr", szColor or "White")
+    end
+  elseif 3 == nStyle then
+    pPanel:SetActive("line1", false)
+    pPanel:SetActive("line2", false)
+    pPanel:SetActive("line3", true)
+    pPanel:Label_SetText("line3/txtLine", szText2)
+    pPanel:Label_SetColorByName("line3/txtLine", nColor or "White")
+  else
+    if "table" == type(szText) then
+      pPanel:SetActive("line1/Attribute1/txtAttr", true)
+      pPanel:SetActive("line1/Attribute1/Extra", true)
+      for i = 1, 3 do
+        pPanel:SetActive("line1/Attribute1/Extra/txtExtra" .. i, false)
+      end
+      local szColor = szText[2]
+      if type(szColor) == "number" then
+        szColor = Item:GetQualityColor(szColor)
+      end
+      pPanel:Label_SetText("line1/Attribute1/txtAttr", szText[1])
+      if nEquipPos >= Item.EQUIP_HELM - 1 and nEquipPos <= Item.EQUIP_AMULET - 1 then
+        pPanel:Label_SetColorByName("line1/Attribute1/txtAttr", szColor or "White")
+      else
+        local tbBaseInfo = Item:GetItemBaseProp(self.nTemplateId)
+        local nQuality = tbBaseInfo.nQuality
+        local szLastFivePosColor = Item:GetQualityColor(nQuality)
+        pPanel:Label_SetColorByName("line1/Attribute1/txtAttr", szColor or szLastFivePosColor)
+      end
+      if "table" == type(szText[3]) then
+        if szText[3].szEnhance then
+          pPanel:SetActive("line1/Attribute1/Extra/txtExtra1", true)
+          pPanel:Label_SetText("line1/Attribute1/Extra/txtExtra1", szText[3].szEnhance)
+          pPanel:Label_SetColorByName("line1/Attribute1/Extra/txtExtra1", szText[3].szColor)
+        end
+        if szText[3].szWuLian then
+          pPanel:SetActive("line1/Attribute1/Extra/txtExtra2", true)
+          pPanel:Label_SetText("line1/Attribute1/Extra/txtExtra2", szText[3].szWuLian)
+          pPanel:Label_SetColorByName("line1/Attribute1/Extra/txtExtra2", szText[3].szColor)
+        end
+        if szText[3].tbLianHua then
+          pPanel:SetActive("line1/Attribute1/Extra/txtExtra1", true)
+          pPanel:Label_SetText("line1/Attribute1/Extra/txtExtra1", szText[3].tbLianHua)
+          pPanel:Label_SetColorByName("line1/Attribute1/Extra/txtExtra1", szText[3].szColor)
+        end
+        if szText[3].tbLianHuaSuit then
+          pPanel:Label_SetText("line1/Attribute1/txtAttr", szText[3].tbLianHuaSuit)
+        end
+      else
+        pPanel:SetActive("line1/Attribute1/Extra/txtExtra2", true)
+        pPanel:Label_SetText("line1/Attribute1/Extra/txtExtra2", szText[3])
+      end
+    elseif type(nColor) == "number" then
+      pPanel:SetActive("line1/Attribute1/txtAttr", true)
+      pPanel:SetActive("line1/Attribute1/Extra/", false)
+      pPanel:Label_SetText("line1/Attribute1/txtAttr", szText)
+      if nEquipPos >= Item.EQUIP_HELM - 1 and nEquipPos <= Item.EQUIP_AMULET - 1 then
+        local szColor = Item:GetQualityColor(nColor)
+        pPanel:Label_SetColorByName("line1/Attribute1/txtAttr", szColor or "White")
+      else
+        local tbBaseInfo = Item:GetItemBaseProp(self.nTemplateId)
+        local nQuality = tbBaseInfo.nQuality
+        local szLastFivePosColor = Item:GetQualityColor(nQuality)
+        pPanel:Label_SetColorByName("line1/Attribute1/txtAttr", szLastFivePosColor or "White")
+      end
+    else
+      pPanel:SetActive("line1/Attribute1/txtAttr", true)
+      pPanel:SetActive("line1/Attribute1/Extra/", false)
+      pPanel:Label_SetText("line1/Attribute1/txtAttr", szText)
+      if nEquipPos >= Item.EQUIP_HELM - 1 and nEquipPos <= Item.EQUIP_AMULET - 1 then
+        pPanel:Label_SetColorByName("line1/Attribute1/txtAttr", nColor or "White")
+      else
+        local tbBaseInfo = Item:GetItemBaseProp(self.nTemplateId)
+        local nQuality = tbBaseInfo.nQuality
+        local szLastFivePosColor = Item:GetQualityColor(nQuality)
+        pPanel:Label_SetColorByName("line1/Attribute1/txtAttr", szLastFivePosColor or "White")
+      end
+    end
+    pPanel:SetActive("line1/txtClass", false)
+  end
+end
+
+function tbWnd:SetTips(tbAttribs, nEquipPos)
+  self.tbScrollView:Reset()
+  for i = 1, #tbAttribs do
+    self.tbScrollView:SetElement(i, function(tbElement)
+      self:SetText(tbElement, tbAttribs[i], nEquipPos)
+    end)
+  end
+end
+
+function tbWnd:UpdateStar()
+  local tbItemInfo = Item:GetItemBaseProp(self.nTemplateId)
+  if tbItemInfo.szClass == "HorseSkillStoneItem" then
+    self.pPanel:SetActive(self.Stars, true)
+    local nStarCount = tbItemInfo.nQuality - 1
+    for i = 1, nStarCount do
+      local szKey = "ItemIntro/Stars/imgStar" .. i
+      if not self.pPanel:IsObjectExist(szKey) then
+        self.pPanel:CloneObject("ItemIntro/Stars/imgStar1", "imgStar" .. i)
+      end
+      self.pPanel:SetActive(szKey, true)
+    end
+    for i = nStarCount + 1, HorseSkillMgr.nMaxSkillStoneStar do
+      local szKey = "ItemIntro/Stars/imgStar" .. i
+      if self.pPanel:IsObjectExist(szKey) then
+        self.pPanel:SetActive(szKey, false)
+      end
+    end
+  else
+    self.pPanel:SetActive(self.Stars, false)
+  end
+end

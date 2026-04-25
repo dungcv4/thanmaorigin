@@ -1,0 +1,264 @@
+local tbWnd = Ui:CreateWindow("UIKeYiMenEntrance")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_LEAVE,
+      self.OnLeaveMap
+    },
+    {
+      EventNotify.emNOTIFY_KEYIMEN_ON_RESPOND_DATA,
+      self.OnSyncMapData
+    }
+  }
+end
+
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  txtTitle = "node/imgBG/txtTitle",
+  OccuredTime = "node/imgBG/Content/TrapList/txtTime",
+  ItemTemplate = "node/imgBG/Content/AwardInfo/AwardList/MaskLayer/BG/Item",
+  MapTemplate = "node/imgBG/Content/MapList/maskLayer/paneBG/MapTemplate",
+  TrapList = "node/imgBG/Content/TrapList"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("KeYiMenHelp")
+  end
+}
+
+function tbWnd:OnCreate()
+  local tbMapTIDArr = {}
+  self.tbMapTIDArr = tbMapTIDArr
+  for i = 2, #KeYiMen.Def.tbMapTIDArr do
+    local nMapTID = KeYiMen.Def.tbMapTIDArr[i]
+    table.insert(tbMapTIDArr, nMapTID)
+  end
+  self.tbMapScrollView = Ui:NewScrollView(self, self.MapTemplate, function(self, nIndex, tbElement)
+    self:OnMapCellSelected(nIndex, tbElement)
+  end)
+  self.tbItemView = Ui:NewItemGridView(self, self.ItemTemplate)
+end
+
+function tbWnd:OnOpen()
+  self.pPanel:Label_SetText(self.txtTitle, i18n.EasyGet("\229\133\139\229\164\183\233\151\168\230\136\152\229\156\186"))
+  self:UpdateSyncData()
+end
+
+function tbWnd:UpdateMapCell(tbElement, tbMap)
+  assert(tbElement)
+  assert(tbMap)
+  local bStart = KeYiMen.Com:GetState() == KeYiMen.Def.STATE_START
+  local pPanel = tbElement.pPanel
+  local bEnd = true
+  local nBossCount = 0
+  for _, tbGroup in pairs(tbMap.tbGroupArr) do
+    if tbGroup.nBossTID then
+      nBossCount = nBossCount + 1
+      if not KeYiMen.C:IsBossDead(tbGroup.nBossTID) then
+        bEnd = false
+        break
+      end
+    end
+    if false == bEnd then
+      break
+    end
+  end
+  if 0 == nBossCount then
+    bEnd = false
+  end
+  local nMapJoinCamp = KeYiMen.Com:GetMapJoinCamp(tbMap.nMapTID)
+  local nTongJoinCamp = KeYiMen.C:GetTongJoinCamp()
+  pPanel:SetActive("ImgCamp", nMapJoinCamp == nTongJoinCamp)
+  local szName = Map:GetMapName(tbMap.nMapTID)
+  pPanel:Label_SetText("txtName", szName)
+  pPanel:SetActive("imgClosed", bEnd)
+  pPanel:SetActive("imgRefresh", not bEnd)
+  if not bEnd then
+    if KeYiMen.Com:GetState() == KeYiMen.Def.STATE_END then
+      pPanel:Label_SetText("imgRefresh/Text", i18n.EasyGet("\230\156\170\229\136\183\230\150\176"))
+    else
+      pPanel:Label_SetText("imgRefresh/Text", bStart and i18n.EasyGet("\229\183\178\229\136\183\230\150\176") or i18n.EasyGet("\230\156\170\229\136\183\230\150\176"))
+    end
+  end
+end
+
+function tbWnd:UpdateMapList()
+  self.tbMapScrollView:Reset()
+  local tbMapArr = self.tbMapArr or {}
+  local nCount = #tbMapArr
+  for i = 1, nCount do
+    self.tbMapScrollView:SetElement(i, function(tbElement)
+      self:UpdateMapCell(tbElement, tbMapArr[i])
+    end)
+  end
+  if nCount > 0 then
+    self.tbMapScrollView:SelectElement(KeYiMen.C:GetSelectIndex())
+  end
+end
+
+function tbWnd:UpdateTrapList()
+  local nIndex = KeYiMen.C:GetSelectIndex()
+  local tbMap = self.tbMapArr[nIndex]
+  assert(tbMap)
+  local tbShowAward = Award:GetAllAwardNoRand(KeYiMen.Def.nShowAwardID, 1)
+  self:UpdateAwardList(tbShowAward)
+  self.pPanel:Label_SetText(self.OccuredTime, i18n.EasyGet("\229\135\186\231\142\176\230\151\182\233\151\180\239\188\154{0}", KeYiMen.Def.szStartTime))
+  for nGroupIndex = 1, KeYiMen.Def.nTrapGroupCountPerMap do
+    self:UpdateTrapGroupCell(tbMap.nMapTID, tbMap.tbGroupArr[nGroupIndex], nGroupIndex)
+  end
+end
+
+function tbWnd:GetLayerData(nLayerIndex, tbBoss)
+  local nMapTID = KeYiMen.Com:LayerIndex2MapTID(nLayerIndex)
+  if tbBoss.tbPosDatas then
+    for _, tbPosData in pairs(tbBoss.tbPosDatas) do
+      if tbPosData.nMapTID == nMapTID then
+        return tbPosData
+      end
+    end
+  end
+  return {nMapTID = nMapTID}
+end
+
+function tbWnd:UpdateTrapGroupCell(nMapTID, tbGroup, nGroupIndex)
+  assert(nMapTID)
+  assert(tbGroup)
+  assert(nGroupIndex)
+  local szNodePath
+  local szTrapPath = string.format("node/imgBG/Content/TrapList/List%d/TrapTemplate/", nGroupIndex)
+  local nBossTID = tbGroup.nBossTID
+  local bStart = nil ~= nBossTID
+  local bEnd = false
+  local tbBossData
+  if nBossTID and KeYiMen.C:IsBossDead(nBossTID) then
+    tbBossData = KeYiMen.C:GetBossData(nBossTID)
+    bEnd = true
+  end
+  szNodePath = szTrapPath .. "txtBossName"
+  self.pPanel:SetActive(szNodePath, nil ~= nBossTID)
+  if nil ~= nBossTID then
+    self.pPanel:Label_SetText(szNodePath, Npc:GetNameByTemplateId(nBossTID))
+  end
+  local nLayerIndex = KeYiMen.Com:MapTID2LayerIndex(nMapTID)
+  for i = 1, 2 do
+    local nPosID = tbGroup.tbPosIDArr[i]
+    local tbPosCfg = KeYiMen.Com:GetBossPosCfgByPosID(nPosID)
+    local szPointAvailable = string.format("%s%s%s", szTrapPath, "Point" .. i, "/PointAvailable")
+    self.pPanel:SetActive(szPointAvailable, false)
+    local szPointClear = string.format("%s%s%s", szTrapPath, "Point" .. i, "/PointClear")
+    self.pPanel:SetActive(szPointClear, false)
+    if tbBossData and tbBossData.nPointIndex == i and tbBossData.tbDeathInfo then
+      self.pPanel:SetActive(szPointClear, true)
+      local szTitle, szName
+      if not Lib:IsEmptyStr(tbBossData.tbDeathInfo.szTongName) then
+        szTitle = i18n.EasyGet("\228\188\164\229\174\179\230\156\128\233\171\152\229\184\174\228\188\154\239\188\154")
+        szName = tbBossData.tbDeathInfo.szTongName
+      elseif not Lib:IsEmptyStr(tbBossData.tbDeathInfo.szKinName) then
+        szTitle = i18n.EasyGet("\228\188\164\229\174\179\230\156\128\233\171\152\229\174\182\230\151\143\239\188\154")
+        szName = tbBossData.tbDeathInfo.szKinName
+      end
+      szNodePath = szPointClear .. "/txtKillTong"
+      self.pPanel:Label_SetText(szNodePath, szTitle)
+      szNodePath = szPointClear .. "/txtKillTong/txtKillTongValue"
+      self.pPanel:Label_SetText(szNodePath, szName)
+      szNodePath = szPointClear .. "/txtKillName"
+      self.pPanel:Label_SetText(szNodePath, i18n.EasyGet("\230\156\128\229\144\142\228\184\128\229\135\187\239\188\154"))
+      szNodePath = szPointClear .. "/txtKillName/txtKillNameValue"
+      self.pPanel:Label_SetText(szNodePath, tbBossData.tbDeathInfo.szPlayerName)
+    else
+      self.pPanel:SetActive(szPointAvailable, true)
+      local fnTitle = KeYiMen.Text.PointNameArr[(nGroupIndex - 1) * 2 + i]
+      assert(fnTitle)
+      self.pPanel:Label_SetText(szPointAvailable .. "/txtPointNum", fnTitle())
+    end
+    szNodePath = szTrapPath .. "Point" .. i
+    local tbCfg = {
+      nMapTID = tbPosCfg.nMapTID,
+      nX = tbPosCfg.tbXYZArr[1],
+      nY = tbPosCfg.tbXYZArr[2]
+    }
+    Ui:Button_BindEvent(self.pPanel, szNodePath, function()
+      self:GotoLayerWithIndex(nLayerIndex, tbCfg)
+    end)
+  end
+  if KeYiMen.Com:GetState() == KeYiMen.Def.STATE_END then
+    bStart = false
+  end
+  self.pPanel:SetActive(szTrapPath .. "imgNonRefresh", not bStart and not bEnd)
+  self.pPanel:SetActive(szTrapPath .. "imgRefresh", bStart and not bEnd)
+  self.pPanel:SetActive(szTrapPath .. "imgClosed", bEnd)
+  if bEnd then
+    self.pPanel:Label_SetText(szTrapPath .. "imgClosed/Text", i18n.EasyGet("\229\183\178\229\135\187\233\128\128"))
+  end
+end
+
+function tbWnd:GotoLayerWithIndex(nLayerIndex, tbPos)
+  KeYiMen.C:GotoLayer(nLayerIndex, tbPos)
+  self:Close()
+end
+
+function tbWnd:UpdateAwardList(tbAwardArr)
+  self.tbItemView:Reset()
+  for i = 1, #tbAwardArr do
+    local tbItem = tbAwardArr[i]
+    if tbItem then
+      self.tbItemView:SetItem(i, tbItem, true)
+    end
+  end
+end
+
+function tbWnd:OnLeaveMap()
+  Ui:CloseWindow("UIActivity")
+end
+
+function tbWnd:GetMapArr()
+  local tbMapArr = {}
+  local tbSyncData = KeYiMen.C:GetSyncData()
+  for _, nMapTID in ipairs(self.tbMapTIDArr) do
+    local tbMap = {
+      nMapTID = nMapTID,
+      tbGroupArr = {}
+    }
+    table.insert(tbMapArr, tbMap)
+    local tbPosCfgArr = KeYiMen.Com:GetPosCfgArrByMapTID(nMapTID)
+    for i = 1, KeYiMen.Def.nTrapGroupCountPerMap do
+      local nIndexBaseZero = i - 1
+      local nStartIndex = nIndexBaseZero * KeYiMen.Def.nTrapCountPerTrapGroup
+      table.insert(tbMap.tbGroupArr, {
+        tbPosIDArr = {
+          tbPosCfgArr[nStartIndex + 1].nPosID,
+          tbPosCfgArr[nStartIndex + 2].nPosID
+        }
+      })
+    end
+  end
+  local tbBossDataSet = tbSyncData.tbBossDataSet
+  if tbBossDataSet then
+    for nBossTID, tbBoss in pairs(tbBossDataSet) do
+      local nMapIndex, nGroupIndex = tbBoss.nMapIndex, tbBoss.nGroupIndex
+      if nMapIndex then
+        tbMapArr[nMapIndex].tbGroupArr[nGroupIndex].nBossTID = tbBoss.nBossTID
+      end
+    end
+  end
+  return tbMapArr
+end
+
+function tbWnd:UpdateSyncData()
+  self.tbMapArr = self:GetMapArr()
+  self:UpdateMapList()
+end
+
+function tbWnd:OnSyncMapData()
+  self:UpdateSyncData()
+end
+
+function tbWnd:OnMapCellSelected(nIndex, tbElement)
+  KeYiMen.C:SetSelectIndex(nIndex)
+  self:UpdateTrapList()
+end

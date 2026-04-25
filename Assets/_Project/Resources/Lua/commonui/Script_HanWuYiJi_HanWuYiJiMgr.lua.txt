@@ -1,0 +1,334 @@
+HanWuYiJi.nGameEndTime = HanWuYiJi.nGameEndTime or 0
+HanWuYiJi.nGameSignupNum = HanWuYiJi.nGameSignupNum or -1
+HanWuYiJi.tbMemberList = HanWuYiJi.tbMemberList or {}
+HanWuYiJi.tbSeriesList = HanWuYiJi.tbSeriesList or {}
+HanWuYiJi.tbSelFactionList = HanWuYiJi.tbSelFactionList or {}
+HanWuYiJi.tbOptFactionList = HanWuYiJi.tbOptFactionList or {}
+HanWuYiJi.tbEnhanceInfo = HanWuYiJi.tbEnhanceInfo or {}
+
+function HanWuYiJi:SyncSignupInfoReq()
+  RemoteServer.RequestHanWuYiJi("SyncSignupInfoReq", self.nGameSignupNum)
+end
+
+function HanWuYiJi:SyncSignupInfoRsp(nEndTime, nSignupNum)
+  self.nGameEndTime = nEndTime
+  self.nGameSignupNum = nSignupNum
+  EventNotify.OnNotify(EventNotify.emNOTIFY_HANWUYIJI_SYNC_SIGNUP_INFO)
+end
+
+function HanWuYiJi:AttendReq(bHasTeam)
+  local bRet, szErr = self:CanAttend(me, bHasTeam)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return false
+  end
+  RemoteServer.RequestHanWuYiJi("AttendReq", bHasTeam)
+  return true
+end
+
+function HanWuYiJi:CanAttend(pPlayer, bHasTeam)
+  if 1 ~= GetTimeFrameState(self.ATTEND_COND.TIMEFRAME_REQ) then
+    return false, i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\230\148\190")
+  end
+  if GetTime() >= self.nGameEndTime then
+    return false, i18n.EasyGet("\230\180\187\229\138\168\229\183\178\231\187\147\230\157\159")
+  end
+  if pPlayer.nLevel < self.ATTEND_COND.PLAYER_LEVEL_REQ then
+    return false, i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179{0}\231\186\167", self.ATTEND_COND.PLAYER_LEVEL_REQ)
+  end
+  local bRet, szErr = ActivityCheck:CheckCanEnterActivityEx(pPlayer, nil, nil, nil, nil, true)
+  if not bRet then
+    return false, szErr
+  end
+  if bHasTeam then
+    if not TeamMgr:HasTeam() then
+      return false, i18n.EasyGet("\232\175\183\231\187\132\233\152\159\229\144\142\229\143\130\229\138\160")
+    end
+    if not TeamMgr:IsCaptain() then
+      return false, i18n.EasyGet("\233\152\159\233\149\191\230\137\141\232\131\189\230\138\165\229\144\141")
+    end
+    local tbMemberList = TeamMgr:GetMembers()
+    if #tbMemberList > self.ATTEND_COND.TEAM_MEMBER_NUM_LIMIT then
+      return false, i18n.EasyGet("\233\152\159\228\188\141\228\186\186\230\149\176\232\182\133\232\191\135{0}\228\186\186", self.ATTEND_COND.TEAM_MEMBER_NUM_LIMIT)
+    end
+    for _, tbMember in pairs(tbMemberList) do
+      local bRet, szErr = self:CanMemberAttend(pPlayer, tbMember)
+      if not bRet then
+        return false, szErr
+      end
+    end
+  end
+  return true
+end
+
+function HanWuYiJi:CanMemberAttend(pPlayer, tbMember)
+  local nCapMapId, nCapPosX, nCapPosY = pPlayer.GetWorldPos()
+  local nMemMapId, nMemPosX, nMemPosY = tbMember.nMapId, tbMember.nPosX, tbMember.nPosY
+  if nMemMapId ~= nCapMapId or (nMemPosX - nCapPosX) ^ 2 + (nMemPosY - nCapPosY) ^ 2 > self.ATTEND_COND.TEAM_MEMBER_DIST_LIMIT ^ 2 then
+    return false, i18n.EasyGet("\233\152\159\229\145\152{0}\228\184\141\229\156\168\233\153\132\232\191\145", tbMember.szName)
+  end
+  if tbMember.nLevel < self.ATTEND_COND.PLAYER_LEVEL_REQ then
+    return false, i18n.EasyGet("\233\152\159\229\145\152{0}\231\173\137\231\186\167\228\184\141\232\182\179{1}\231\186\167", tbMember.szName, self.ATTEND_COND.PLAYER_LEVEL_REQ)
+  end
+  return true
+end
+
+function HanWuYiJi:SelSeriesReq(nSeries)
+  RemoteServer.RequestHanWuYiJi("SelSeriesReq", nSeries)
+end
+
+function HanWuYiJi:SelSeriesRsp(tbSeriesList, bOpenUI, nEndTime)
+  if not self:IsInFubenMap(me) then
+    return
+  end
+  self.tbSeriesList = tbSeriesList
+  if bOpenUI then
+    local function func(tbChatWnd)
+      if not tbChatWnd then
+        return
+      end
+      Ui:OpenWindowWithCallback("UIHanWuSelectSeries", function(_, tbHanWuWnd)
+        tbHanWuWnd:SetPos(tbChatWnd:GetMainSize())
+      end, nil, "SERIES", nEndTime)
+    end
+    
+    local szWndName = "UIChat"
+    if Ui:WindowVisible(szWndName) then
+      return func(Ui:GetWindow(szWndName))
+    end
+    Ui:OpenWindowWithCallback(szWndName, function(_, tbWnd)
+      func(tbWnd)
+    end, nil, ChatMgr.ChannelType.Team)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_HANWUYIJI_SYNC_SEL_SERIES)
+end
+
+function HanWuYiJi:SelFactionReq(nFaction, nFactionSect)
+  RemoteServer.RequestHanWuYiJi("SelFactionReq", nFaction, nFactionSect)
+end
+
+function HanWuYiJi:SelFactionRsp(tbSelFactionList, tbOptFactionList, bOpenUI, nEndTime)
+  if not self:IsInFubenMap(me) then
+    return
+  end
+  self.tbSelFactionList = tbSelFactionList
+  self.tbOptFactionList = tbOptFactionList
+  if bOpenUI then
+    local function func(tbChatWnd)
+      if not tbChatWnd then
+        return
+      end
+      Ui:OpenWindowWithCallback("UIHanWuSelectSeries", function(_, tbHanWuWnd)
+        tbHanWuWnd:SetPos(tbChatWnd:GetMainSize())
+      end, nil, "FACTION", nEndTime)
+    end
+    
+    local szWndName = "UIChat"
+    if Ui:WindowVisible(szWndName) then
+      return func(Ui:GetWindow(szWndName))
+    end
+    Ui:OpenWindowWithCallback(szWndName, function(_, tbWnd)
+      func(tbWnd)
+    end, nil, ChatMgr.ChannelType.Team)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_HANWUYIJI_SYNC_SEL_FACTION)
+end
+
+function HanWuYiJi:SyncMemberInfoRsp(tbMemberList)
+  self.tbMemberList = tbMemberList
+  EventNotify.OnNotify(EventNotify.emNOTIFY_HANWUYIJI_SYNC_MEM_INFO)
+end
+
+function HanWuYiJi:SyncResultRsp(nPhase, bWin, tbKillNumList, nAwardKey)
+  Ui:OpenWindow("UIHanWuResult", nPhase, bWin, tbKillNumList, nAwardKey)
+end
+
+function HanWuYiJi:QuitFubenRsp()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_PK_MODE)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_PORTRAIT)
+end
+
+function HanWuYiJi:OnLogout()
+  self.nGameEndTime = 0
+  self.nGameSignupNum = -1
+  self.tbMemberList = {}
+  self.tbSeriesList = {}
+  self.tbSelFactionList = {}
+  self.tbOptFactionList = {}
+  self.isHaveExitBtn = true
+  self.tbEnhanceInfo = {}
+  HanWuYiJi:SetHonorTitleIsShow(true)
+end
+
+function HanWuYiJi:OnMapLoaded()
+  if me.nMapTemplateId == self.MAP_FIGHT.ID then
+    return
+  end
+  if Ui:WindowVisible("UIHanWuSelectSeries") then
+    Ui:CloseWindow("UIHanWuSelectSeries")
+  end
+  if Ui:WindowVisible("UIHanWuResult") then
+    Ui:CloseWindow("UIHanWuResult")
+  end
+  if Ui:WindowVisible("UIHudHanWuYiJi") then
+    Ui:CloseWindow("UIHudHanWuYiJi")
+  end
+end
+
+function HanWuYiJi:OnFubenMapLoaded(pPlayer)
+  Ui:CloseWindow("UIBattleEntranceHanWu")
+  FubenUIController:OpenFuBenUI()
+end
+
+function HanWuYiJi:IsInFubenMap(pPlayer)
+  return pPlayer.nMapTemplateId == self.MAP_READY.ID or pPlayer.nMapTemplateId == self.MAP_FIGHT.ID
+end
+
+function HanWuYiJi:IsNeedExitFubenButton()
+  return self.isHaveExitBtn
+end
+
+function HanWuYiJi:RegisterFubenUIChecker()
+  FubenUIController:RegisterChecker({
+    self.MAP_READY.ID,
+    self.MAP_FIGHT.ID
+  }, self)
+end
+
+function HanWuYiJi:RefreshBagView()
+  if Ui:WindowVisible("UIHudHanWuYiJi") == true then
+    Ui:GetWindow("UIHudHanWuYiJi"):RefreshView()
+  end
+end
+
+function HanWuYiJi:RefreshSignUpView()
+  if Ui:WindowVisible("UIBattleEntranceHanWu") == true then
+    Ui:GetWindow("UIBattleEntranceHanWu"):ShowDesc()
+  end
+end
+
+function HanWuYiJi:OnEnterHanWuYiJiMatch()
+  self.isHaveExitBtn = false
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_HANWUYIJI_IN_MATCH)
+end
+
+function HanWuYiJi:OnEnhanceEquip(nEquipPosIndex, tbHanWuYiJiEquipEnhanceData)
+  local bNearNpc = false
+  local tbNpcList = KNpc.GetAroundNpcList(me.GetNpc(), GetNpcDialogDistance(self.SHOP_NPCID[1])) or {}
+  for _, pNpc in pairs(tbNpcList) do
+    if pNpc.nTemplateId == self.SHOP_NPCID[1] then
+      bNearNpc = true
+      break
+    end
+  end
+  if bNearNpc or me.GetItemCountByTypeInBag(tbHanWuYiJiEquipEnhanceData.nCostItemTemplatedId) >= tbHanWuYiJiEquipEnhanceData.nCostItemNum then
+    RemoteServer.RequestHanWuYiJi("ReqEnhanceEquip", nEquipPosIndex)
+  else
+    me.CenterMsg(i18n.EasyGet("\230\178\161\230\156\137\232\182\179\229\164\159\231\154\132{0}", (KItem.GetItemShowInfo(tbHanWuYiJiEquipEnhanceData.nCostItemTemplatedId))))
+  end
+end
+
+function HanWuYiJi:OnGiveFuShi(nCount, nBeGivePlayerId)
+  if nCount > 0 and nCount <= me.GetItemCountByTypeInBag(HanWuYiJi.FuShiTemplatedId) then
+    RemoteServer.RequestHanWuYiJi("ReqGiveFuShi", nCount, nBeGivePlayerId)
+  end
+end
+
+function HanWuYiJi:GetMemberList()
+  return self.tbMemberList
+end
+
+function HanWuYiJi:RefreshEnhanceRedPoint()
+  for nEquipPosIndex, nEquipPos in ipairs(HanWuYiJi.EquipPosMap) do
+    local tbEquipPos = HanWuYiJi.EquipPosMap[nEquipPosIndex]
+    local pItem
+    for i, nEquipPos in pairs(tbEquipPos) do
+      pItem = me.GetEquipByPos(nEquipPos)
+      if nil ~= pItem then
+        break
+      end
+    end
+    local nEnhanceLv = 0
+    if nil ~= pItem then
+      nEnhanceLv = Item.EquipEnhance:GetEquipEnhanceLevel(me, pItem.nEquipPos)
+    end
+    local bIsEnhanceMax = nEnhanceLv >= HanWuYiJi.DEF.MAX_ENCHANCE_LV and true or false
+    local tbHanWuYiJiEquipEnhanceData
+    if false == bIsEnhanceMax and nil ~= HanWuYiJi.tbHanWuYiJiEquipEnhanceCfg and nil ~= HanWuYiJi.tbHanWuYiJiEquipEnhanceCfg[nEquipPosIndex] then
+      for i = nEnhanceLv, HanWuYiJi.DEF.MAX_ENCHANCE_LV do
+        if nil ~= HanWuYiJi.tbHanWuYiJiEquipEnhanceCfg[nEquipPosIndex][i + 1] then
+          tbHanWuYiJiEquipEnhanceData = HanWuYiJi.tbHanWuYiJiEquipEnhanceCfg[nEquipPosIndex][i + 1]
+          break
+        end
+      end
+      if nil ~= tbHanWuYiJiEquipEnhanceData and me.GetItemCountByTypeInBag(tbHanWuYiJiEquipEnhanceData.nCostItemTemplatedId) >= tbHanWuYiJiEquipEnhanceData.nCostItemNum then
+        RedPointMgr:LightRedPoint(RedPointMgr.EVENT.HanWuEnhance)
+        return
+      end
+    end
+  end
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.HanWuEnhance)
+end
+
+function HanWuYiJi:OnSyncEnhanceInfo(tbInfo)
+  self.tbEnhanceInfo = tbInfo
+  if Ui:WindowVisible("UIHanWuEnhance") == true then
+    Ui:GetWindow("UIHanWuEnhance"):UpdateWithEnhanceInfo(tbInfo)
+  end
+  self:RefreshEnhanceRedPoint()
+end
+
+function HanWuYiJi:GetEnhanceInfo()
+  return self.tbEnhanceInfo
+end
+
+function HanWuYiJi:OnLeaveFightMap()
+  self.tbEnhanceInfo = {}
+  FubenUIController:CloseFubenUI()
+end
+
+function HanWuYiJi:CheckInHanWuYiJi()
+  if me.nMapTemplateId == HanWuYiJi.MAP_FIGHT.ID or me.nMapTemplateId == HanWuYiJi.MAP_READY.ID then
+    return true
+  else
+    return false
+  end
+end
+
+function HanWuYiJi:SetHonorTitleIsShow(bIsShow)
+  local meObj = Ui.GameObject.Find("HeadTextSet/Me")
+  if meObj then
+    local honorTitleObj = meObj:GetComponentInChildren(Ui.UIHonorTitle)
+    if nil ~= honorTitleObj then
+      honorTitleObj:SetHonorVisible(bIsShow)
+    end
+  end
+end
+
+function HanWuYiJi:CloseUIWhenGameStart()
+  Ui:CloseWindow("UIHanWuPlayerInfo")
+  Ui:CloseWindow("UIHanWuEnhance")
+  Ui:CloseWindow("UISkill")
+  Ui:CloseWindow("UINpcShop")
+  Ui:OpenWindow("UIHudHanWuYiJi")
+  AFK:Start()
+  Operation:StopGoDir()
+end
+
+function HanWuYiJi:Init()
+  if self.bInit then
+    return
+  end
+  self:RegisterFubenUIChecker()
+  self.isHaveExitBtn = true
+  self.bInit = true
+end
+
+HanWuYiJi:Init()
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_LOGOUT_ZONE, HanWuYiJi)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, HanWuYiJi)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_LOADED, HanWuYiJi)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_LOGOUT_ZONE, HanWuYiJi.OnLogout, HanWuYiJi)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, HanWuYiJi.OnLogout, HanWuYiJi)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LOADED, HanWuYiJi.OnMapLoaded, HanWuYiJi)

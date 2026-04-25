@@ -1,0 +1,1046 @@
+Require("CommonScript/FriendShip/friendship.lua")
+local emFriendData_Type = FriendShip.tbDataType.emFriendData_Type
+local emFriendData_Imity = FriendShip.tbDataType.emFriendData_Imity
+local emFriendData_Enemy_Left = FriendShip.tbDataType.emFriendData_Enemy_Left
+local emFriendData_Enemy_Right = FriendShip.tbDataType.emFriendData_Enemy_Right
+local emFriendData_BlackOrRequest = FriendShip.tbDataType.emFriendData_BlackOrRequest
+local emFriendData_Temp_Refuse = FriendShip.tbDataType.emFriendData_Temp_Refuse
+local emFriendData_SendPhysicalPower = FriendShip.tbDataType.emFriendData_SendPhysicalPower
+local emFriendData_GetPhysicalPower = FriendShip.tbDataType.emFriendData_GetPhysicalPower
+local emFriend_Type_Invalid = FriendShip.tbDataVal.emFriend_Type_Invalid
+local emFriend_Type_Friend = FriendShip.tbDataVal.emFriend_Type_Friend
+local emFriend_Type_Black_Left = FriendShip.tbDataVal.emFriend_Type_Black_Left
+local emFriend_Type_Black_Right = FriendShip.tbDataVal.emFriend_Type_Black_Right
+local emFriend_Type_Black_Both = FriendShip.tbDataVal.emFriend_Type_Black_Both
+local emFriend_Type_Request_Left = FriendShip.tbDataVal.emFriend_Type_Request_Left
+local emFriend_Type_Request_Right = FriendShip.tbDataVal.emFriend_Type_Request_Right
+FriendShip.MAX_SYNC_NUM = 100
+FriendShip.tbExtraList = FriendShip.tbExtraList or {}
+
+function FriendShip:OnSynFriendShipData(tbData)
+  local dwID = tbData.dwID
+  local nFaction = tbData.nFaction
+  local nLevel = tbData.nLevel
+  local szName = tbData.szName
+  local nState = tbData.nState
+  local nPortrait = tbData.nPortrait
+  local dwKinId = tbData.dwKinId
+  local dwTongId = tbData.dwTongId
+  local szKinOrTongName = tbData.szKinOrTongName
+  local nHonorStarLevel = tbData.nHonorStarLevel
+  local nSex = tbData.nSex
+  local emType = tbData.emType
+  local emImity = tbData.emImity
+  local emEnemy_Left = tbData.emEnemy_Left
+  local emEnemy_Right = tbData.emEnemy_Right
+  local emBlackOrRequest = tbData.emBlackOrRequest
+  local emTemp_Refuse = tbData.emTemp_Refuse
+  local emSendPhysicalPower = tbData.emSendPhysicalPower
+  local emGetPhysicalPower = tbData.emGetPhysicalPower
+  local nVipLevel = tbData.nVipLevel
+  local szAccount = tbData.szAccount
+  local dwTeamId = tbData.dwTeamId
+  local nPortraitFrame = tbData.nPortraitFrame or 0
+  local bModify = self.tbAllData[dwID] and self.tbAllData[dwID][emFriendData_Type] == emType and 0 ~= emType and true or false
+  self.tbAllData[dwID] = {
+    dwRoleId = dwID,
+    dwID = dwID,
+    dwTeamId = dwTeamId,
+    nFaction = nFaction,
+    nLevel = nLevel,
+    szName = szName,
+    szAccount = szAccount,
+    nState = nState,
+    nPortrait = nPortrait,
+    nPortraitFrame = nPortraitFrame,
+    dwKinId = dwKinId,
+    dwTongId = dwTongId,
+    szKinOrTongName = szKinOrTongName,
+    nHonorStarLevel = nHonorStarLevel,
+    nSex = nSex,
+    nImity = emImity,
+    nVipLevel = nVipLevel,
+    nHate = dwID > me.dwID and emEnemy_Left or emEnemy_Right
+  }
+  local tbData = self.tbAllData[dwID]
+  tbData[emFriendData_Type] = emType
+  tbData[emFriendData_Imity] = emImity
+  tbData[emFriendData_Enemy_Left] = emEnemy_Left
+  tbData[emFriendData_Enemy_Right] = emEnemy_Right
+  tbData[emFriendData_BlackOrRequest] = emBlackOrRequest
+  tbData[emFriendData_SendPhysicalPower] = emSendPhysicalPower
+  tbData[emFriendData_GetPhysicalPower] = emGetPhysicalPower
+  if 0 ~= emImity then
+    local nImityLevel, nMaxImity = FriendShip:GetImityLevel(emImity)
+    tbData.nImityLevel = nImityLevel
+    tbData.nMaxImity = nMaxImity
+    if self.tbMyBlackList[dwID] then
+      FriendShip:DelBlack(dwID)
+    end
+  end
+  if FriendShip:IsMeRequested(me.dwID, dwID, self.tbAllData[dwID]) and self:IsHeInMyBlack(dwID) then
+    RemoteServer.RefuseAddFriend(dwID)
+  end
+  self.nVersion = self.nVersion + 1
+  self:UpdateFriendInfoListWithRoleInfoCache({dwID})
+  EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA, bModify and dwID or nil)
+end
+
+function FriendShip:InitBlackList()
+  local tbMyBlack = LocalData:GetRoleTable("FriendShipBlackList", {})
+  for szId, tbData in pairs(tbMyBlack) do
+    self.tbMyBlackList[tonumber(szId)] = tbData
+  end
+end
+
+function FriendShip:InitRemarkList()
+  local tbMyRemark = LocalData:GetRoleTable("FriendShipRemarkList", {})
+  for szId, tbData in pairs(tbMyRemark) do
+    self.tbMyRemarkList[tonumber(szId)] = tbData
+  end
+end
+
+function FriendShip:SaveBlackList()
+  local nRet = cjson.encode_sparse_array()
+  if not nRet then
+    cjson.encode_sparse_array(true)
+  end
+  LocalData:SetRoleTable("FriendShipBlackList", self.tbMyBlackList)
+  if not nRet then
+    cjson.encode_sparse_array(false)
+  end
+end
+
+function FriendShip:SaveRemarkList()
+  local nRet = cjson.encode_sparse_array()
+  if not nRet then
+    cjson.encode_sparse_array(true)
+  end
+  LocalData:SetRoleTable("FriendShipRemarkList", self.tbMyRemarkList)
+  if not nRet then
+    cjson.encode_sparse_array(false)
+  end
+end
+
+function FriendShip:TransBlackListAndRemarkList()
+  local bHasMyBlack = LocalData:HasRoleKey("FriendShipBlackList")
+  local bHasMyRemark = LocalData:HasRoleKey("FriendShipRemarkList")
+  if bHasMyBlack and bHasMyRemark then
+    return
+  end
+  local szFileContent, nLen = Lib:ReadFile_W(g_szUserPath .. "User/UserInfo.lua", "r")
+  if 0 == nLen then
+    szFileContent = "return {};"
+  end
+  local tbTmpEnv = {}
+  szFileContent = "local fnLoad = function () " .. szFileContent .. " end tbUserInfo = fnLoad();"
+  local fnFile = load(szFileContent, nil, "bt", tbTmpEnv)
+  if fnFile then
+    fnFile()
+  end
+  local tbUserInfo = tbTmpEnv.tbUserInfo or {}
+  tbUserInfo[me.dwID] = tbUserInfo[me.dwID] or {}
+  tbUserInfo[me.dwID].BlackList = tbUserInfo[me.dwID].BlackList or {}
+  tbUserInfo[me.dwID].RemarkList = tbUserInfo[me.dwID].RemarkList or {}
+  local nRet = cjson.encode_sparse_array()
+  if not nRet then
+    cjson.encode_sparse_array(true)
+  end
+  if not bHasMyBlack then
+    LocalData:SetRoleTable("FriendShipBlackList", tbUserInfo[me.dwID].BlackList)
+  end
+  if not bHasMyRemark then
+    LocalData:SetRoleTable("FriendShipRemarkList", tbUserInfo[me.dwID].RemarkList)
+  end
+  if not nRet then
+    cjson.encode_sparse_array(false)
+  end
+  tbUserInfo[me.dwID].BlackList = nil
+  tbUserInfo[me.dwID].RemarkList = nil
+  if Client.tbUserInfo and Client.tbUserInfo[me.dwID] then
+    Client.tbUserInfo[me.dwID].BlackList = nil
+    Client.tbUserInfo[me.dwID].RemarkList = nil
+  end
+  local szValue = Lib:Val2Str(tbUserInfo)
+  local szTable = "return" .. szValue
+  local bResult = Lib:WriteFile_W(g_szUserPath .. "User/UserInfo.lua", "w+", szTable)
+  if not bResult then
+    return
+  end
+end
+
+function FriendShip:CheckImitiyAchieve(nImityLevel, nOldImityLevel)
+  Log("FriendShip:CheckImitiyAchieve", nImityLevel, nOldImityLevel)
+  if self.nCheckImityAchieveVersion == self.nVersion then
+    return
+  end
+  self.nCheckImityAchieveVersion = self.nVersion
+  for i = 1, #self.tbImityAchivementLevel do
+    local nCheckLevel = self.tbImityAchivementLevel[i]
+    if nOldImityLevel < nCheckLevel and nImityLevel >= nCheckLevel then
+      local tbAllFriendData = self:GetAllFriendData()
+      local tbVaildFriendIds = {}
+      for _, tbFriend in ipairs(tbAllFriendData) do
+        if nCheckLevel <= tbFriend.nImityLevel then
+          table.insert(tbVaildFriendIds, tbFriend.dwID)
+        end
+      end
+      if FriendShip.nAchievementNeedFriendNum <= #tbVaildFriendIds then
+        RemoteServer.TryCheckImityAchievement(nCheckLevel, tbVaildFriendIds)
+      end
+    end
+  end
+end
+
+function FriendShip:haveFriendInImityLevel(nCurLevel, nNum)
+  local tbAllFriendData = self:GetAllEnemyData()
+  local nValidNum = 0
+  for _, tbFriend in ipairs(tbAllFriendData) do
+    if nCurLevel <= tbFriend.nImityLevel then
+      nValidNum = nValidNum + 1
+    end
+  end
+  if nNum <= nValidNum then
+    return true
+  else
+    return false
+  end
+end
+
+function FriendShip:DelBlack(dwRoleId2, szName)
+  self:OnDelBlack(dwRoleId2)
+  if szName then
+    me.CenterMsg(i18n.EasyGet("\229\183\178\229\176\134 {0} \228\187\142\233\187\145\229\144\141\229\141\149\231\167\187\233\153\164!", szName))
+  end
+end
+
+function FriendShip:OnDelBlack(dwRoleId2)
+  self.tbMyBlackList[dwRoleId2] = nil
+  self:SaveBlackList()
+end
+
+function FriendShip:DelAllBlack()
+  local tbList = {}
+  for dwRoleId in pairs(self.tbMyBlackList) do
+    table.insert(tbList, dwRoleId)
+  end
+  self.tbMyBlackList = {}
+  self:SaveBlackList()
+  if next(tbList) then
+    me.CenterMsg(i18n.EasyGet("\229\183\178\230\136\144\229\138\159\229\174\140\230\136\144\228\184\128\233\148\174\231\167\187\233\153\164!"))
+  end
+end
+
+function FriendShip:AddBlack(dwRoleId2, tbRoleInfo)
+  if dwRoleId2 == me.dwID then
+    return
+  end
+  self.tbAllData[dwRoleId2] = nil
+  self.tbMyBlackList[dwRoleId2] = tbRoleInfo
+  self:SaveBlackList()
+  self.nVersion = self.nVersion + 1
+  ChatMgr.PrivateChatUnReadCache[dwRoleId2] = nil
+  ChatMgr.PrivateChatReadCache[dwRoleId2] = nil
+  ChatMgr:RemoveRecentPrivateTarget(dwRoleId2)
+  EventNotify.OnNotify(EventNotify.emNoTIFY_NEW_PRIVATE_MSG)
+  EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA)
+end
+
+function FriendShip:GetBlackList()
+  local tbBlackList = {}
+  for _, tbInfo in pairs(self.tbMyBlackList or {}) do
+    table.insert(tbBlackList, tbInfo)
+  end
+  return tbBlackList
+end
+
+function FriendShip:RequestUpdateBlackInfo()
+  if self.bUpdateBlackInfo then
+    return
+  end
+  local tbIds = {}
+  for dwId, _ in pairs(self.tbMyBlackList) do
+    table.insert(tbIds, dwId)
+  end
+  if not next(tbIds) then
+    return
+  end
+  self.bUpdateBlackInfo = true
+  RemoteServer.RequestFriendShip("UpdateBlackInfo", tbIds)
+end
+
+function FriendShip:OnUpdateBlackInfo(tbInfos)
+  local bUpdate
+  for dwId, tbInfo in pairs(tbInfos) do
+    if self.tbMyBlackList[dwId] then
+      self.tbMyBlackList[dwId] = tbInfo
+      bUpdate = bUpdate or true
+    end
+  end
+  if bUpdate then
+    self:SaveBlackList()
+    EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA)
+  end
+end
+
+function FriendShip:IsHeInMyBlack(dwRoleId2)
+  return self.tbMyBlackList[dwRoleId2]
+end
+
+function FriendShip:OnFriendOnLine(dwFriendId)
+  local tbRoleInfo = self:GetFriendDataInfo(dwFriendId)
+  if not tbRoleInfo then
+    return
+  end
+  tbRoleInfo.nState = 2
+  self.nVersion = self.nVersion + 1
+  local relation = MasterPrentice:GetRelation(me, dwFriendId)
+  if relation == MasterPrentice.Def.Relation_Master then
+    me.Msg(i18n.EasyGet("\230\130\168\231\154\132\229\184\136\231\136\182\227\128\140{0}\227\128\141\228\184\138\231\186\191\228\186\134", tbRoleInfo.szName))
+  elseif relation > 0 then
+    me.Msg(i18n.EasyGet("\230\130\168\231\154\132\229\190\146\229\188\159\227\128\140{0}\227\128\141\228\184\138\231\186\191\228\186\134", tbRoleInfo.szName))
+  else
+    me.Msg(i18n.EasyGet("\230\130\168\231\154\132\229\165\189\229\143\139\227\128\140{0}\227\128\141\228\184\138\231\186\191\228\186\134", tbRoleInfo.szName))
+  end
+  self:UpdateFriendInfoListWithRoleInfoCache({dwFriendId})
+  EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA, dwFriendId)
+end
+
+function FriendShip:OnEnemyOnLine(dwEnemyId)
+  local tbRoleInfo = self:GetFriendDataInfo(dwEnemyId)
+  if not tbRoleInfo then
+    return
+  end
+  tbRoleInfo.nState = 2
+  self.nVersion = self.nVersion + 1
+  EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA, dwEnemyId)
+end
+
+function FriendShip:OnFriendOffline(dwFriendId)
+  local tbRoleInfo = self:GetFriendDataInfo(dwFriendId)
+  if not tbRoleInfo then
+    return
+  end
+  tbRoleInfo.nState = 0
+  self.nVersion = self.nVersion + 1
+  self:UpdateFriendInfoListWithRoleInfoCache({dwFriendId})
+  EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA, dwFriendId)
+end
+
+function FriendShip:OnEnemyOffline(dwEnemyId)
+  local tbRoleInfo = self:GetFriendDataInfo(dwEnemyId)
+  if not tbRoleInfo then
+    return
+  end
+  tbRoleInfo.nState = 0
+  self.nVersion = self.nVersion + 1
+  EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA, dwEnemyId)
+end
+
+function FriendShip:BeginLoadFriendData()
+  self.tbAllData = {}
+  self.tbAllFriendData = nil
+  self.tbAllRequestData = nil
+  self.tbAllEnemyData = nil
+end
+
+function FriendShip:RequestUpdateFriendInfo()
+  local tbIds = {}
+  if self.tbAllFriendData then
+    for i, v in ipairs(self.tbAllFriendData) do
+      tbIds[i] = v.dwID
+    end
+  end
+  if not next(tbIds) then
+    return
+  end
+  self:UpdateFriendInfoListWithRoleInfoCache(tbIds)
+end
+
+function FriendShip:UpdateFriendRoleInfoWithCacheList(tbRoleInfoList)
+  local tbFriendInfo
+  for dwId, tbInfo in pairs(tbRoleInfoList or {}) do
+    tbFriendInfo = self.tbAllData[dwId]
+    if tbFriendInfo then
+      tbFriendInfo.dwId = tbInfo.nPlayerId
+      tbFriendInfo.szName = tbInfo.szName
+      tbFriendInfo.nLevel = tbInfo.nLevel
+      tbFriendInfo.nHonorStarLevel = tbInfo.nHonorStarLevel
+      tbFriendInfo.nFaction = tbInfo.nFaction
+      tbFriendInfo.nPortrait = tbInfo.nPortrait
+      tbFriendInfo.nPortraitFrame = tbInfo.nPortraitFrame
+      tbFriendInfo.szKinOrTongName = tbInfo.szKinOrTongName
+      tbFriendInfo.dwKinId = tbInfo.dwKinId
+      tbFriendInfo.dwTongId = tbInfo.dwTongId
+      tbFriendInfo.nVipLevel = tbInfo.nVipLevel
+    end
+  end
+end
+
+function FriendShip:UpdateFriendInfoWithRoleInfoCache()
+  local tbIds = {}
+  for _, tbInfo in ipairs(self.tbAllFriendData or {}) do
+    table.insert(tbIds, tbInfo.dwID)
+  end
+  if not next(tbIds) then
+    return
+  end
+  self:UpdateFriendInfoListWithRoleInfoCache(tbIds)
+end
+
+function FriendShip:UpdateFriendInfoListWithRoleInfoCache(tbIds)
+  local bAllHit, nSession, tbRoleInfoList = Player.RoleInfoCache:GetCache(tbIds)
+  if not bAllHit then
+    self.nCacheUpdateSession = nSession
+  end
+  self:UpdateFriendRoleInfoWithCacheList(tbRoleInfoList)
+  self:RequestExtraInfo(tbIds)
+end
+
+function FriendShip:RequestExtraInfo(tbIds)
+  self.tbExtraIdList = self.tbExtraIdList or {}
+  for _, nId in ipairs(tbIds) do
+    if not self.tbExtraIdList[nId] then
+      self.tbExtraIdList[nId] = true
+    end
+  end
+  if self.nQuestExtraInfoTimer then
+    return
+  end
+  local nInterval = 3
+  self.nQuestExtraInfoTimer = Timer:Register(nInterval * Env.GAME_FPS, self.RequestExtraInfoHelper, self)
+end
+
+function FriendShip:RequestExtraInfoHelper()
+  if self.nQuestExtraInfoTimer then
+    Timer:Close(self.nQuestExtraInfoTimer)
+    self.nQuestExtraInfoTimer = nil
+  end
+  self.nVersion = self.nVersion + 1
+  local tbIds = {}
+  for nId in pairs(self.tbExtraIdList or {}) do
+    table.insert(tbIds, nId)
+    if #tbIds >= self.MAX_SYNC_NUM then
+      RemoteServer.RequestFriendShip("UpdateExtraInfo", tbIds)
+      tbIds = {}
+    end
+  end
+  self.tbExtraIdList = {}
+  RemoteServer.RequestFriendShip("UpdateExtraInfo", tbIds)
+end
+
+function FriendShip:OnUpdateFriendInfo(tbInfos)
+  if not tbInfos then
+    return
+  end
+  for i = 1, #tbInfos do
+    local tbInfo = tbInfos[i]
+    local tbData = self.tbAllData[tbInfo.dwID]
+    if not tbData then
+      return
+    end
+    tbData.dwId = tbInfo.dwID
+    tbData.szName = tbInfo.szName
+    tbData.nLevel = tbInfo.nLevel
+    tbData.nHonorStarLevel = tbInfo.nHonorStarLevel
+    tbData.nFaction = tbInfo.nFaction
+    tbData.nPortrait = tbInfo.nPortrait
+    tbData.szKinOrTongName = tbInfo.szKinOrTongName
+    tbData.dwKinId = tbInfo.dwKinId
+    tbData.dwTongId = tbInfo.dwTongId
+    tbData.nVipLevel = tbInfo.nVipLevel
+    tbData.nState = tbInfo.nState or self.tbExtraList[tbInfo.dwID].nState
+    tbData.tbChuanGong = tbInfo.tbChuanGong or self.tbExtraList[tbInfo.dwID].tbChuanGong
+    self.tbAllData[tbInfo.dwID] = tbData
+  end
+  EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA)
+end
+
+function FriendShip:OnUpdateExtraInfo(tbInfos)
+  self.tbExtraList = {}
+  for _, tbInfo in ipairs(tbInfos) do
+    self.tbExtraList[tbInfo[1]] = tbInfo[2]
+    if self.tbAllData[tbInfo[1]] then
+      self.tbAllData[tbInfo[1]].tbChuanGong = tbInfo[2].tbChuanGong
+      self.tbAllData[tbInfo[1]].nState = tbInfo[2].nState
+    end
+  end
+  self.nVersion = self.nVersion + 1
+  EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA)
+end
+
+function FriendShip:OnSyncRoleStayInfo(nSession, tbRoleInfoList)
+  if self.nCacheUpdateSession ~= nSession then
+    return
+  end
+  self.nCacheUpdateSession = nil
+  self:UpdateFriendRoleInfoWithCacheList(tbRoleInfoList)
+  self.nVersion = self.nVersion + 1
+  EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA)
+end
+
+function FriendShip:RequestUpdateEnemyInfo()
+  local tbIds = {}
+  if self.tbAllEnemyData then
+    for i, v in ipairs(self.tbAllEnemyData) do
+      tbIds[i] = v.dwID
+    end
+  end
+  if not next(tbIds) then
+    return
+  end
+  RemoteServer.RequestFriendShip("UpdateEnemyInfo", tbIds)
+end
+
+function FriendShip:OnUpdateEnemyInfo(tbInfos)
+  if not tbInfos then
+    return
+  end
+  for i = 1, #tbInfos do
+    local tbInfo = tbInfos[i]
+    local tbData = self.tbAllData[tbInfo.dwID]
+    if not tbData then
+      return
+    end
+    tbData.dwId = tbInfo.dwID
+    tbData.szName = tbInfo.szName
+    tbData.nLevel = tbInfo.nLevel
+    tbData.nHonorStarLevel = tbInfo.nHonorStarLevel
+    tbData.nFaction = tbInfo.nFaction
+    tbData.nPortrait = tbInfo.nPortrait
+    tbData.nPortraitFrame = tbInfo.nPortraitFrame
+    tbData.szKinOrTongName = tbInfo.szKinOrTongName
+    tbData.dwKinId = tbInfo.dwKinId
+    tbData.dwTongId = tbInfo.dwTongId
+    tbData.nVipLevel = tbInfo.nVipLevel
+    tbData.nState = tbInfo.nState
+    self.tbAllData[tbInfo.dwID] = tbData
+  end
+  self.nVersion = self.nVersion + 1
+  EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA)
+end
+
+function FriendShip:GetFriendDataInfo(dwRoleId)
+  return self.tbAllData[dwRoleId]
+end
+
+function FriendShip:GetAllFriendData(bNoSort)
+  if self.tbAllFriendData and self.nAllFriendDataVersion == self.nVersion then
+    return self.tbAllFriendData
+  end
+  if bNoSort and self.tbAllFriendData then
+    for i, v in ipairs(self.tbAllFriendData) do
+      self.tbAllFriendData[i] = self.tbAllData[v.dwID]
+    end
+    return self.tbAllFriendData
+  end
+  local tbFriends = {}
+  for k, v in pairs(self.tbAllData) do
+    if v[emFriendData_Type] == emFriend_Type_Friend then
+      table.insert(tbFriends, v)
+    end
+  end
+  self.tbAllFriendData = tbFriends
+  self.nAllFriendDataVersion = self.nVersion
+  return self.tbAllFriendData
+end
+
+function FriendShip:GetAllFriendRequestData()
+  if self.tbAllRequestData and self.nAllRequestDataVersion == self.nVersion then
+    return self.tbAllRequestData
+  end
+  local tbFriends = {}
+  for k, v in pairs(self.tbAllData) do
+    if k > me.dwID and v[emFriendData_BlackOrRequest] == emFriend_Type_Request_Right or k < me.dwID and v[emFriendData_BlackOrRequest] == emFriend_Type_Request_Left then
+      table.insert(tbFriends, v)
+    end
+  end
+  self.tbAllRequestData = tbFriends
+  self.nAllRequestDataVersion = self.nVersion
+  return self.tbAllRequestData
+end
+
+function FriendShip:GetAllEnemyData()
+  if self.tbAllEnemyData and self.nAllEnemyDataVersion == self.nVersion then
+    return self.tbAllEnemyData
+  end
+  local tbFriends = {}
+  for k, v in pairs(self.tbAllData) do
+    if k > me.dwID and v[emFriendData_Enemy_Left] and v[emFriendData_Enemy_Left] > 0 or k < me.dwID and v[emFriendData_Enemy_Right] and v[emFriendData_Enemy_Right] > 0 then
+      table.insert(tbFriends, v)
+    end
+  end
+  self.tbAllEnemyData = tbFriends
+  self.nAllEnemyDataVersion = self.nVersion
+  return self.tbAllEnemyData
+end
+
+function FriendShip:AddOrDelFriend(dwPlayerID, szPlayerName)
+  if nil == dwPlayerID then
+    return
+  end
+  if nil == szPlayerName or "" == szPlayerName then
+    return
+  end
+  self:OpenAddFriendUI(dwPlayerID, szPlayerName)
+end
+
+function FriendShip:BlackHim(dwRoleId2)
+  if dwRoleId2 == me.dwID then
+    me.CenterMsg(i18n.EasyGet("\228\184\141\232\131\189\230\139\137\233\187\145\232\135\170\229\183\177"))
+    return
+  end
+  local tbFriendData = self:GetFriendDataInfo(dwRoleId2)
+  if FriendShip:IsHeInMyBlack(dwRoleId2) then
+    me.CenterMsg(i18n.EasyGet("\229\175\185\230\150\185\229\183\178\231\187\143\229\156\168\230\130\168\231\154\132\233\187\145\229\144\141\229\141\149\229\136\151\232\161\168\228\184\173\228\186\134"))
+    return
+  end
+  if Lib:CountTB(self.tbMyBlackList) >= FriendShip.nMaxBlackNum then
+    me.CenterMsg(i18n.EasyGet("\233\187\145\229\144\141\229\141\149\229\183\178\230\187\161"))
+    return
+  end
+  if SocialJieYi:IsMyJieYiBrother(dwRoleId2) then
+    me.CenterMsg(i18n.EasyGet("<color=#ffff0e>{0}</color>\230\152\175\228\189\160\231\154\132\231\187\147\228\185\137\228\188\153\228\188\180\239\188\140\232\175\183\229\133\136\232\167\163\233\153\164\231\187\147\228\185\137\229\133\179\231\179\187\239\188\129", tbFriendData.szName))
+    return
+  end
+  local szMsg = i18n.EasyGet("\231\161\174\229\174\154\232\166\129\229\176\134\229\175\185\230\150\185\229\138\160\229\133\165\230\130\168\231\154\132\233\187\145\229\144\141\229\141\149\229\136\151\232\161\168\228\184\173\229\144\151\239\188\159")
+  if FriendShip:IsFriend(me.dwID, dwRoleId2, tbFriendData) then
+    szMsg = i18n.EasyGet("<color=#ffff0e>{0}</color> \230\152\175\228\189\160\231\154\132\229\165\189\229\143\139\239\188\140\231\161\174\229\174\154\232\166\129\230\139\137\233\187\145\228\187\150\229\144\151\239\188\159\239\188\136\230\139\137\233\187\145\229\144\142\229\143\140\230\150\185\232\167\163\233\153\164\229\165\189\229\143\139\229\133\179\231\179\187\239\188\137", tbFriendData.szName)
+  end
+  
+  local function fnOK()
+    RemoteServer.RequestBlackHim(dwRoleId2)
+  end
+  
+  local function fnCancel()
+  end
+  
+  Ui:OpenWindow("UIMessageBoxBig", szMsg, {fnOK, fnCancel})
+end
+
+function FriendShip:OpenAddFriendUI(dwPlayerID, szPlayerName)
+  return FriendShip:RequestAddFriend(dwPlayerID)
+end
+
+function FriendShip:RequestAddFriend(dwRoleId2, tbFriendData)
+  local dwRoleId1 = me.dwID
+  if dwRoleId1 == dwRoleId2 then
+    me.CenterMsg(i18n.EasyGet("\228\184\141\232\131\189\230\183\187\229\138\160\232\135\170\229\183\177\228\184\186\229\165\189\229\143\139"))
+    return
+  end
+  tbFriendData = tbFriendData or self:GetFriendDataInfo(dwRoleId2)
+  if not tbFriendData then
+    RemoteServer.RequestAddFriend(dwRoleId2)
+    return
+  end
+  if FriendShip:IsFriend(dwRoleId1, dwRoleId2, tbFriendData) then
+    me.CenterMsg(i18n.EasyGet("\228\189\160\228\187\172\229\183\178\231\187\143\230\152\175\229\165\189\229\143\139\229\133\179\231\179\187\228\186\134"))
+    return
+  end
+  if FriendShip:IsInHisTempRefuse(dwRoleId1, dwRoleId2, tbFriendData) then
+    me.CenterMsg(i18n.EasyGet("\230\183\187\229\138\160\229\165\189\229\143\139\232\175\183\230\177\130\229\183\178\229\143\145\229\135\186\239\188\140\232\175\183\231\173\137\229\190\133\229\175\185\230\150\185\229\155\158\229\186\148"))
+    return
+  end
+  if FriendShip:IsHeIsMyEnemy(dwRoleId1, dwRoleId2, tbFriendData) then
+    local function fnDelay()
+      local function fnAgree()
+        RemoteServer.RequestAddFriend(dwRoleId2)
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("<color=#ffff0e>{0}</color> \230\152\175\228\189\160\231\154\132\229\175\185\230\137\139\239\188\140\230\152\175\229\144\166\232\166\129\231\187\167\231\187\173\230\183\187\229\138\160\228\187\150\228\184\186\229\165\189\229\143\139\239\188\159\230\136\144\229\138\159\230\183\187\229\138\160\228\184\186\229\165\189\229\143\139\229\144\142\229\176\134\232\135\170\229\138\168\232\167\163\233\153\164\229\175\185\230\137\139\229\133\179\231\179\187\227\128\130", tbFriendData.szName), {
+        {fnAgree},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      })
+      return 0
+    end
+    
+    Timer:Register(2, fnDelay)
+    return
+  end
+  if FriendShip:IsHeInMyBlack(dwRoleId2) then
+    local function fnDelay()
+      local function fnAgree()
+        self:DelBlack(dwRoleId2, tbFriendData.szName)
+        
+        RemoteServer.RequestAddFriend(dwRoleId2)
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("<color=#ffff0e>{0}</color> \229\156\168\230\130\168\231\154\132\233\187\145\229\144\141\229\141\149\228\184\173\239\188\140\230\152\175\229\144\166\232\166\129\232\167\163\233\153\164\229\175\185\228\187\150\231\154\132\229\177\143\232\148\189\228\184\148\231\148\179\232\175\183\230\183\187\229\138\160\228\184\186\229\165\189\229\143\139\239\188\159", tbFriendData.szName), {
+        {fnAgree},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      })
+      return 0
+    end
+    
+    Timer:Register(2, fnDelay)
+    return
+  end
+  if FriendShip:IsMeRequested(dwRoleId1, dwRoleId2, tbFriendData) then
+    local function fnDelay()
+      local function fnAgree()
+        RemoteServer.AcceptFriendRequest(dwRoleId2)
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("<color=#ffff0e>{0}</color> \229\183\178\231\187\143\229\175\185\230\130\168\229\143\145\233\128\129\228\186\134\229\165\189\229\143\139\231\148\179\232\175\183\239\188\140\231\161\174\229\174\154\231\155\180\230\142\165\229\174\140\230\136\144\230\183\187\229\138\160", tbFriendData.szName), {
+        {fnAgree},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      })
+      return 0
+    end
+    
+    Timer:Register(2, fnDelay)
+    return
+  end
+  RemoteServer.RequestAddFriend(dwRoleId2)
+end
+
+function FriendShip:RequestAddFriendByName(szRoleName)
+  local dwRoleId1 = me.dwID
+  local dwRoleId2
+  local bIsEnemy = false
+  local tbEnemy = self:GetAllEnemyData()
+  for i, tbInfo in ipairs(tbEnemy) do
+    if tbInfo.szName == szRoleName then
+      bIsEnemy = true
+      dwRoleId2 = tbInfo.dwID
+    end
+  end
+  if bIsEnemy then
+    local function fnDelay()
+      local function fnAgree()
+        RemoteServer.RequestAddFriend(dwRoleId2)
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("<color=#ffff0e>{0}</color> \230\152\175\228\189\160\231\154\132\229\175\185\230\137\139\239\188\140\230\152\175\229\144\166\232\166\129\231\187\167\231\187\173\230\183\187\229\138\160\228\187\150\228\184\186\229\165\189\229\143\139\239\188\159\230\136\144\229\138\159\230\183\187\229\138\160\228\184\186\229\165\189\229\143\139\229\144\142\229\176\134\232\135\170\229\138\168\232\167\163\233\153\164\229\175\185\230\137\139\229\133\179\231\179\187\227\128\130", szRoleName), {
+        {fnAgree},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      })
+      return 0
+    end
+    
+    Timer:Register(2, fnDelay)
+    return
+  end
+  local bIsBlack = false
+  for i, tbInfo in pairs(self.tbMyBlackList) do
+    if tbInfo.szName == szRoleName then
+      bIsBlack = true
+      dwRoleId2 = tbInfo.dwID
+    end
+  end
+  if bIsBlack then
+    local function fnDelay()
+      local function fnAgree()
+        self:DelBlack(dwRoleId2, szRoleName)
+        
+        RemoteServer.RequestAddFriend(dwRoleId2)
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("<color=#ffff0e>{0}</color> \229\156\168\230\130\168\231\154\132\233\187\145\229\144\141\229\141\149\228\184\173\239\188\140\230\152\175\229\144\166\232\166\129\232\167\163\233\153\164\229\175\185\228\187\150\231\154\132\229\177\143\232\148\189\228\184\148\231\148\179\232\175\183\230\183\187\229\138\160\228\184\186\229\165\189\229\143\139\239\188\159", szRoleName), {
+        {fnAgree},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      })
+      return 0
+    end
+    
+    Timer:Register(2, fnDelay)
+    return
+  end
+  RemoteServer.RequestAddFriendByName(szRoleName)
+end
+
+function FriendShip:AcceptFriendRequest(dwRoleId2, tbFriendData)
+  local dwRoleId1 = me.dwID
+  if dwRoleId1 == dwRoleId2 then
+    me.CenterMsg(i18n.EasyGet("\228\184\141\232\131\189\230\183\187\229\138\160\232\135\170\229\183\177\228\184\186\229\165\189\229\143\139"))
+    return
+  end
+  tbFriendData = tbFriendData or self:GetFriendDataInfo(dwRoleId2)
+  if not tbFriendData then
+    Log(debug.traceback())
+    return
+  end
+  if tbFriendData[emFriendData_Type] == emFriend_Type_Friend then
+    return me.CenterMsg(i18n.EasyGet("\228\189\160\228\187\172\229\183\178\231\187\143\230\152\175\229\165\189\229\143\139\228\186\134"))
+  end
+  if FriendShip:IsHeIsMyEnemy(dwRoleId1, dwRoleId2, tbFriendData) then
+    local function fnAgree()
+      RemoteServer.AcceptFriendRequest(dwRoleId2)
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("<color=#ffff0e>{0}</color> \230\152\175\228\189\160\231\154\132\229\175\185\230\137\139\239\188\140\230\152\175\229\144\166\232\166\129\231\187\167\231\187\173\230\183\187\229\138\160\228\187\150\228\184\186\229\165\189\229\143\139\239\188\159\230\136\144\229\138\159\230\183\187\229\138\160\228\184\186\229\165\189\229\143\139\229\144\142\229\176\134\232\135\170\229\138\168\232\167\163\233\153\164\229\175\185\230\137\139\229\133\179\231\179\187\227\128\130", tbFriendData.szName), {
+      {fnAgree},
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+    return
+  end
+  RemoteServer.AcceptFriendRequest(dwRoleId2)
+  self.tbAllData[dwRoleId2] = nil
+  self.tbAllRequestData = nil
+  EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA)
+end
+
+function FriendShip:RequetDelFriend(dwRoleId2, tbFriendData)
+  local dwRoleId1 = me.dwID
+  if dwRoleId1 == dwRoleId2 then
+    Log(debug.traceback())
+    return
+  end
+  tbFriendData = tbFriendData or self:GetFriendDataInfo(dwRoleId2)
+  if not tbFriendData then
+    Log(debug.traceback())
+    return
+  end
+  if tbFriendData[emFriendData_Type] ~= emFriend_Type_Friend then
+    Log(debug.traceback())
+    return
+  end
+  if SocialJieYi:IsMyJieYiBrother(dwRoleId2) then
+    me.CenterMsg(i18n.EasyGet("<color=#ffff0e>{0}</color>\230\152\175\228\189\160\231\154\132\231\187\147\228\185\137\228\188\153\228\188\180\239\188\140\232\175\183\229\133\136\232\167\163\233\153\164\231\187\147\228\185\137\229\133\179\231\179\187\239\188\129", tbFriendData.szName))
+    return
+  end
+  RemoteServer.RequesDelFriend(dwRoleId2)
+end
+
+function FriendShip:RefuseAllRequet()
+  RemoteServer.RefuseAllRequet()
+  local tbNeedDel = {}
+  for k, v in pairs(self.tbAllData) do
+    if k > me.dwID and v[emFriendData_BlackOrRequest] == emFriend_Type_Request_Right or k < me.dwID and v[emFriendData_BlackOrRequest] == emFriend_Type_Request_Left then
+      tbNeedDel[k] = 1
+    end
+  end
+  for k, _ in pairs(tbNeedDel) do
+    self.tbAllData[k] = nil
+  end
+  self.tbAllRequestData = {}
+  EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA)
+end
+
+function FriendShip:RefuseAddFriend(dwID)
+  RemoteServer.RefuseAddFriend(dwID)
+  if not self.tbAllData then
+    return
+  end
+  if self.tbAllData[dwID] and (dwID > me.dwID and self.tbAllData[dwID][emFriendData_BlackOrRequest] == emFriend_Type_Request_Right or dwID < me.dwID and self.tbAllData[dwID][emFriendData_BlackOrRequest] == emFriend_Type_Request_Left) then
+    self.tbAllData[dwID] = nil
+  end
+  self.tbAllRequestData[dwID] = nil
+  if 0 == Lib:CountTB(self.tbAllRequestData) then
+    EventNotify.OnNotify(EventNotify.emNoTIFY_SYNC_FRIEND_DATA)
+  end
+end
+
+function FriendShip:DelEnemy(tbRoleInfo, tbFriendData)
+  local dwRoleId1 = me.dwID
+  local dwRoleId2 = tbRoleInfo.dwID
+  if dwRoleId1 == dwRoleId2 then
+    Log(debug.traceback())
+    return
+  end
+  tbFriendData = tbFriendData or self:GetFriendDataInfo(dwRoleId2)
+  if not tbFriendData then
+    Log(debug.traceback())
+    return
+  end
+  if not FriendShip:IsHeIsMyEnemy(dwRoleId1, dwRoleId2, tbFriendData) then
+    me.CenterMsg(i18n.EasyGet("\228\187\150\228\184\141\230\152\175\228\189\160\231\154\132\229\175\185\230\137\139"))
+    return
+  end
+  
+  local function fnAgree()
+    RemoteServer.RequesDelEnemy(dwRoleId2)
+  end
+  
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\231\161\174\232\174\164\229\136\160\233\153\164\230\130\168\231\154\132\229\175\185\230\137\139 <color=#ffff0e>{0}</color> \229\144\151\239\188\159", tbRoleInfo.szName), {
+    {fnAgree},
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function FriendShip:OnRequestAddFriendRes(bRet, szMsg)
+  if bRet then
+    me.CenterMsg(i18n.EasyGet("\229\165\189\229\143\139\231\148\179\232\175\183\229\143\145\233\128\129\230\136\144\229\138\159"))
+  else
+    me.CenterMsg(szMsg or i18n.EasyGet("\229\165\189\229\143\139\231\148\179\232\175\183\229\164\177\232\180\165"))
+  end
+end
+
+function FriendShip:RemarkPlayer(dwRoleId, szRemark)
+  if "" == szRemark then
+    self.tbMyRemarkList[dwRoleId] = nil
+  else
+    self.tbMyRemarkList[dwRoleId] = szRemark
+  end
+  self:SaveRemarkList()
+end
+
+function FriendShip:GetPlayerRemarkName(dwRoleId)
+  return self.tbMyRemarkList[dwRoleId] and self.tbMyRemarkList[dwRoleId] or ""
+end
+
+function FriendShip:RequestEnemyPosition(dwRoleId)
+  local nTimestamp = GetTime()
+  if nTimestamp - FriendShip:GetUseSearchCdTime() < self.Cfg.nGetEnemyPositionCd then
+    me.CenterMsg(i18n.EasyGet("\230\159\165\232\175\162\229\138\159\232\131\189\230\173\163\229\156\168\229\134\183\229\141\180\228\184\173"))
+    return
+  end
+  local nDate = Lib:GetTimeNum(nTimestamp)
+  local nLeftTimes = self:GetLeftUseTimes()
+  if nDate == FriendShip:GetLastSearchDate() and nLeftTimes < 1 then
+    me.CenterMsg(i18n.EasyGet("\230\159\165\232\175\162\230\172\161\230\149\176\229\183\178\231\148\168\229\174\140"))
+    return
+  end
+  RemoteServer.RequestFriendShip("TryGetEnemyPosition", dwRoleId)
+end
+
+function FriendShip:AddSearchTimes()
+  if self:GetLeftUseTimes() > 0 then
+    me.CenterMsg(i18n.EasyGet("\230\159\165\232\175\162\230\172\161\230\149\176\232\191\152\230\156\170\231\148\168\229\174\140"))
+    return
+  end
+  
+  local function fnSure()
+    if me.GetMoney(self.Cfg.szCurrencyType) < self.Cfg.nAddSearchTimesCost then
+      me.CenterMsg(i18n.EasyGet("{0}\228\184\141\232\182\179", Currency:GetName(self.Cfg.szCurrencyType)))
+      return
+    end
+    RemoteServer.RequestFriendShip("AddSearchTimes")
+  end
+  
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\228\189\160\230\152\175\229\144\166\232\138\177\232\180\185{0}{1}\232\180\173\228\185\176{2}\230\172\161\230\159\165\232\175\162\230\172\161\230\149\176\239\188\159\232\180\173\228\185\176\231\154\132\230\172\161\230\149\176\228\184\141\230\182\136\232\128\151\229\143\175\228\187\165\228\184\128\231\155\180\228\191\157\229\173\152\227\128\130", self.Cfg.nAddSearchTimesCost, Currency:GetName(self.Cfg.szCurrencyType), self.Cfg.nAddSearchTimes), {
+    {fnSure},
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function FriendShip:IsSearchInCd()
+  return GetTime() - FriendShip:GetUseSearchCdTime() < self.Cfg.nGetEnemyPositionCd
+end
+
+function FriendShip:ClearSearchCd()
+  if not self:IsSearchInCd() then
+    return
+  end
+  
+  local function fnSure()
+    if me.GetMoney(self.Cfg.szCurrencyType) < self.Cfg.nClearSearchCdCost then
+      me.CenterMsg(i18n.EasyGet("{0}\228\184\141\232\182\179", Currency:GetName(self.Cfg.szCurrencyType)))
+      return
+    end
+    RemoteServer.RequestFriendShip("ClearSearchCd")
+  end
+  
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\228\189\160\230\152\175\229\144\166\232\138\177\232\180\185{0}{1}\230\184\133\233\153\164\229\134\183\229\141\180\230\151\182\233\151\180", self.Cfg.nClearSearchCdCost, Currency:GetName(self.Cfg.szCurrencyType)), {
+    {fnSure},
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function FriendShip:ShowEnemyPosition(nMapId, nPosX, nPosY, nMapTemplateId, szEnemyName)
+  local szLocation = string.format("<%s(%.0f,%.0f)> %s", Map:GetMapName(nMapTemplateId), nPosX * Map.nShowPosScale, nPosY * Map.nShowPosScale, szEnemyName)
+  local tbLinkInfo = {
+    nX = nPosX,
+    nY = nPosY,
+    nLinkType = ChatMgr.LinkType.Position,
+    nMapId = nMapId,
+    nMapTemplateId = nMapTemplateId
+  }
+  self:UpdataSearchEnemyInfo()
+  me.Msg(szLocation, ChatMgr.SystemMsgType.System, tbLinkInfo)
+  Ui:CloseWindow("UISocial")
+  Ui:OpenWindowWithCallback("UIChat", function(_, tbWnd)
+    tbWnd:OuterSetChatInput("Position", szLocation, {
+      nLinkType = ChatMgr.LinkType.Position,
+      linkParam = {
+        nMapId,
+        nPosX,
+        nPosY,
+        nMapTemplateId,
+        nMapTemplateId
+      }
+    })
+  end)
+end
+
+function FriendShip:UpdataSearchEnemyInfo()
+  local tbUiClass = Ui:GetClass("UISocial")
+  if tbUiClass then
+    tbUiClass:ResetSearchEnemyInfo()
+  end
+end
+
+function FriendShip:ShowHelp()
+  Ui:OnHelpClicked("FriendHelp")
+end
+
+function FriendShip:InitData()
+  self:Init()
+  self.tbAllData = {}
+  self.nVersion = 0
+  self.tbMyBlackList = {}
+  self.tbMyRemarkList = {}
+end
+
+if not FriendShip.tbAllData then
+  FriendShip:InitData()
+end
+
+function FriendShip:UpdateIntimacyBuff()
+  local pNpc = me.GetNpc()
+  if not TeamMgr:HasTeam() or GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+    if pNpc and pNpc.GetSkillState(FriendShip.nIntimacyBuffId) then
+      pNpc.RemoveSkillState(FriendShip.nIntimacyBuffId)
+    end
+    return
+  end
+  local tbMembers = TeamMgr:GetMembers()
+  self.tbIntimacyBuffTip = {}
+  for _, tbMember in ipairs(tbMembers) do
+    local tbFriendInfo = FriendShip:GetFriendDataInfo(tbMember.nPlayerID)
+    if tbFriendInfo and tbFriendInfo.nPlayerID ~= "" then
+      local nBuff = FriendShip:GetFriendImityExpP(tbFriendInfo.nImityLevel)
+      if nBuff > 0 then
+        local szIntimacyBuffTip = i18n.EasyGet("\228\184\142 <color={0}>{1}</color> \233\135\142\229\164\150\230\137\147\230\128\170\231\187\143\233\170\140\229\133\177\228\186\171 <color={2}>+{3}%</color>\n", FriendShip.tbIntimacyBuffColor[1], tbMember.szName, FriendShip.tbIntimacyBuffColor[2], nBuff)
+        table.insert(self.tbIntimacyBuffTip, szIntimacyBuffTip)
+      end
+    end
+  end
+  if Lib:CountTB(self.tbIntimacyBuffTip) > 0 and pNpc then
+    pNpc.AddSkillState(FriendShip.nIntimacyBuffId, 1, 0, -1)
+  else
+    pNpc.RemoveSkillState(FriendShip.nIntimacyBuffId)
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_TEAM_UPDATE, FriendShip)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_TEAM_UPDATE, FriendShip.UpdateIntimacyBuff, FriendShip)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ROLE_STAY_INFO, FriendShip)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ROLE_STAY_INFO, FriendShip.OnSyncRoleStayInfo, FriendShip)

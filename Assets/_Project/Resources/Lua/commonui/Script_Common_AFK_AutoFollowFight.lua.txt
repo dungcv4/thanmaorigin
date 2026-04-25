@@ -1,0 +1,489 @@
+Require("Script/Common/AFK_SkillMgr.lua")
+Require("Script/Common/AFK_AutoMedicine.lua")
+Require("Script/EventSystem/EventNotify.lua")
+Require("CommonScript/BehaviorTree/BehaviorTree.lua")
+AFK.AFKAutoFollowFight = {}
+local AFKFightSetting = AFK:GetSetting():GetFightSetting()
+local AFKAutoFollowFight = AFK.AFKAutoFollowFight
+local AFKAutoMedicine = AFK.AFKAutoMedicine
+local AFKSkillMgr = AFK.AFKSkillMgr
+AFKAutoFollowFight.AutoPathNearLength = 1024
+AFKAutoFollowFight.MaxFollowDistance = 2560
+local BTNode = BTClassMgr:GetClass("BTNode")
+local BTSequenceNode = BTClassMgr:GetClass("BTSequenceNode")
+local BTPrioritySelector = BTClassMgr:GetClass("BTPrioritySelector")
+local BehaviourTree = BTClassMgr:GetClass("BehaviourTree")
+local BTWaitingTime = BTClassMgr:GetClass("BTWaitingTime")
+local BTFollowFightAI = Lib:NewClass(BehaviourTree)
+local BTFollowLeaderCond = Lib:NewClass(BTNode)
+local BTFollowLeaderAction = Lib:NewClass(BTNode)
+local BTChooseTargetCond = Lib:NewClass(BTNode)
+local BTChooseTargetAction = Lib:NewClass(BTNode)
+local BTChaseTargetCond = Lib:NewClass(BTNode)
+local BTChaseTargetAction = Lib:NewClass(BTNode)
+local BTGetDownHorseCond = Lib:NewClass(BTNode)
+local BTGetDownHorseAction = Lib:NewClass(BTNode)
+local BTAttackTargetCond = Lib:NewClass(BTNode)
+local BTAttackTargetAction = Lib:NewClass(BTNode)
+
+function BTChooseTargetCond:Activate()
+  self.nState = BTClassMgr.tbTaskState.emFailure
+  local tbBlackboard = self.tbOwner.tbBlackboard
+  if not tbBlackboard then
+    assert(false)
+    return
+  end
+  if not tbBlackboard.nFollowTeammateNpcId or tbBlackboard.nFollowTeammateNpcId < 0 then
+    return
+  end
+  local tbTeammate = TeamMgr:GetMemberData(tbBlackboard.nFollowTeammateNpcId)
+  if not tbTeammate then
+    return
+  end
+  local nTargetNpcId = tbBlackboard.nTargetNpcId
+  if tbTeammate.nTargetNpcId and tbTeammate.nTargetNpcId > 0 and nTargetNpcId ~= tbTeammate.nTargetNpcId then
+    self.nState = BTClassMgr.tbTaskState.emSuccess
+    return
+  end
+  if nTargetNpcId and nTargetNpcId > 0 and not Npc:IsDead(nTargetNpcId) then
+    return
+  end
+  self.nState = BTClassMgr.tbTaskState.emSuccess
+end
+
+function BTChooseTargetAction:Activate()
+  self.nState = BTClassMgr.tbTaskState.emFailure
+  local tbBlackboard = self.tbOwner.tbBlackboard
+  local tbTeammate = TeamMgr:GetMemberData(tbBlackboard.nFollowTeammateNpcId)
+  if not tbTeammate then
+    self.nState = BTClassMgr.tbTaskState.emFailure
+    return
+  end
+  local nTeamTargetNpcId = tbTeammate.nTargetNpcId
+  tbBlackboard.nTargetNpcId = nTeamTargetNpcId or me.GetNpc().GetLastDamageNpcId()
+  if Npc:IsOutOfCircle(tbBlackboard.nTargetNpcId, AFKFightSetting.nSearchRadius, tbTeammate.nPosX, tbTeammate.nPosY) then
+    tbBlackboard.nTargetNpcId = nil
+    return
+  end
+  if nTeamTargetNpcId and nTeamTargetNpcId > 0 and nTeamTargetNpcId == tbBlackboard.nTargetNpcId then
+    local nNow = GetTime()
+    if nNow > tbTeammate.nAttackTimeOut then
+      tbTeammate.nTargetNpcId = nil
+      tbBlackboard.nTargetNpcId = nil
+      return
+    end
+  end
+  AFKSkillMgr:SetIntentTargetNpc(tbBlackboard.nTargetNpcId)
+  self.nState = BTClassMgr.tbTaskState.emSuccess
+end
+
+function BTChaseTargetCond:Activate()
+  self.nState = BTClassMgr.tbTaskState.emFailure
+  local tbBlackboard = self.tbOwner.tbBlackboard
+  if not tbBlackboard then
+    assert(false)
+    return
+  end
+  local nTargetNpcId = tbBlackboard.nTargetNpcId
+  if not nTargetNpcId or nTargetNpcId < 0 then
+    return
+  end
+  local pTargetNpc = KNpc.GetById(nTargetNpcId)
+  if not pTargetNpc then
+    return
+  end
+  if Npc:IsDead(nTargetNpcId) then
+    return
+  end
+  tbBlackboard.nCurSkillId = AFKSkillMgr:GetOneCanCastSkill()
+  if not tbBlackboard.nCurSkillId or tbBlackboard.nCurSkillId < 0 then
+    return
+  end
+  local bCanCast = me.CheckSkillAvailable2Npc(tbBlackboard.nCurSkillId, nTargetNpcId)
+  if not bCanCast then
+    bCanCast = me.CheckSkillAvailable2Npc(tbBlackboard.nCurSkillId, me.GetNpc().nId)
+    if bCanCast then
+      nTargetNpcId = me.GetNpc().nId
+      tbBlackboard.nTargetNpcId = nTargetNpcId
+    end
+  end
+  if not bCanCast then
+    return
+  end
+  local _, nSelfX, nSelfY = me.GetWorldPos()
+  local _, nTargetNpcX, nTargetNpcY = pTargetNpc.GetWorldPos()
+  local nSkillAttackRadius = FightSkill:GetAttackRadius(tbBlackboard.nCurSkillId) / 1.2
+  local nDisSquare = Lib:GetDistsSquare(nSelfX, nSelfY, nTargetNpcX, nTargetNpcY)
+  local nDisRequired = nSkillAttackRadius ^ 2
+  if nDisSquare < nDisRequired then
+    return
+  end
+  self.nState = BTClassMgr.tbTaskState.emSuccess
+end
+
+function BTChaseTargetAction:Activate()
+  self.nState = BTClassMgr.tbTaskState.emFailure
+  local tbBlackboard = self.tbOwner.tbBlackboard
+  local nTargetNpcId = tbBlackboard.nTargetNpcId
+  local pTargetNpc = KNpc.GetById(nTargetNpcId)
+  local nSkillAttackRadius = FightSkill:GetAttackRadius(tbBlackboard.nCurSkillId) / 1.2
+  if not nSkillAttackRadius and nSkillAttackRadius < 0 then
+    AutoPath:StopGoto()
+    return
+  end
+  local _, nTargetNpcX, nTargetNpcY = pTargetNpc.GetWorldPos()
+  if not (nTargetNpcX and not (nTargetNpcX < 0) and nTargetNpcY) or nTargetNpcY < 0 then
+    AutoPath:StopGoto()
+    return
+  end
+  if tbBlackboard.bAutoPathFlag and AutoPath:IsPathing() then
+    self.nState = BTClassMgr.tbTaskState.emRunning
+    return
+  end
+  local _, nSelfX, nSelfY = me.GetWorldPos()
+  local nDisSquare = Lib:GetDistsSquare(nSelfX, nSelfY, nTargetNpcX, nTargetNpcY)
+  local nDisRequired = nSkillAttackRadius ^ 2
+  if nDisSquare <= nDisRequired then
+    AutoPath:StopGoto()
+    self.nState = BTClassMgr.tbTaskState.emFailure
+    return
+  end
+  tbBlackboard.bAutoPathFlag = true
+  self.nState = BTClassMgr.tbTaskState.emRunning
+  AutoPath:DelayGotoAndCallEx(5, me.nMapId, nTargetNpcX, nTargetNpcY, function()
+    tbBlackboard.bAutoPathFlag = false
+    self.nState = BTClassMgr.tbTaskState.emSuccess
+  end, nSkillAttackRadius)
+end
+
+function BTGetDownHorseCond:Activate()
+  self.nState = BTClassMgr.tbTaskState.emFailure
+  local tbBlackboard = self.tbOwner.tbBlackboard
+  if not tbBlackboard then
+    assert(false)
+    return
+  end
+  local bLimited = Operation:GetSkillHorseLimited(tbBlackboard.nCurSkillId)
+  if not bLimited then
+    return
+  end
+  if 1 ~= me.nRideState then
+    return
+  end
+  self.nState = BTClassMgr.tbTaskState.emSuccess
+end
+
+function BTGetDownHorseAction:Activate()
+  self.nState = BTClassMgr.tbTaskState.emFailure
+  if 1 ~= me.nRideState then
+    self.nState = BTClassMgr.tbTaskState.emSuccess
+    return
+  end
+  local tbBlackboard = self.tbOwner.tbBlackboard
+  Operation:GetDownHorse(tbBlackboard.nCurSkillId)
+  self.nState = BTClassMgr.tbTaskState.emRunning
+end
+
+function BTAttackTargetCond:Activate()
+  self.nState = BTClassMgr.tbTaskState.emFailure
+  local tbBlackboard = self.tbOwner.tbBlackboard
+  if not tbBlackboard then
+    assert(false)
+    return
+  end
+  if not tbBlackboard.nCurSkillId or tbBlackboard.nCurSkillId < 0 then
+    return
+  end
+  local nTargetNpcId = tbBlackboard.nTargetNpcId
+  if not nTargetNpcId or nTargetNpcId < 0 then
+    return
+  end
+  if not me.CheckSkillAvailable2Npc(tbBlackboard.nCurSkillId, nTargetNpcId) then
+    return
+  end
+  self.nState = BTClassMgr.tbTaskState.emSuccess
+end
+
+function BTAttackTargetAction:Activate()
+  local tbBlackboard = self.tbOwner.tbBlackboard
+  AFKSkillMgr:ResetIntentTargetNpc(tbBlackboard.nTargetNpcId)
+  Operation:UseSkillToNpc(tbBlackboard.nCurSkillId, tbBlackboard.nTargetNpcId)
+  self.nState = BTClassMgr.tbTaskState.emSuccess
+end
+
+function BTFollowLeaderCond:Activate()
+  self.nState = BTClassMgr.tbTaskState.emFailure
+  local tbBlackboard = self.tbOwner.tbBlackboard
+  if not tbBlackboard then
+    assert(false)
+    return
+  end
+  if not tbBlackboard.nFollowTeammateNpcId or tbBlackboard.nFollowTeammateNpcId <= 0 then
+    AFK:Log("<BT_GoToLeaderCondition>: Invalid NpcId. nFollowTeammateNpcId = ", tbBlackboard.nFollowTeammateNpcId)
+    return
+  end
+  local tbTeammate = TeamMgr:GetMemberData(tbBlackboard.nFollowTeammateNpcId)
+  if not tbTeammate then
+    AFK:Log("<BT_GoToLeaderCondition>: Can't find teammate. nFollowTeammateNpcId = ", tbBlackboard.nFollowTeammateNpcId)
+    return
+  end
+  local bNeedFollow = false
+  local nSelfMapId, nSelfX, nSelfY = me.GetWorldPos()
+  if tbTeammate.nMapId ~= nSelfMapId then
+    bNeedFollow = true
+  else
+    if not Npc:IsOutOfCircle(tbBlackboard.nTargetNpcId, AFKFightSetting.nSearchRadius, tbTeammate.nPosX, tbTeammate.nPosY) then
+      return
+    end
+    local nDisSquare = (tbTeammate.nPosX - nSelfX) ^ 2 + (tbTeammate.nPosY - nSelfY) ^ 2
+    local nDisRequired = AFKAutoFollowFight.MaxFollowDistance ^ 2
+    if nDisSquare > nDisRequired then
+      bNeedFollow = true
+      if nDisSquare >= nDisRequired * 2 then
+        tbBlackboard.bNeedRideHorse = true
+      end
+    end
+  end
+  if not bNeedFollow then
+    tbBlackboard.nTargetMapId = -1
+    tbBlackboard.nTargetMapX = -1
+    tbBlackboard.nTargetMapY = -1
+    tbBlackboard.nTargetMapTemplateId = -1
+    return
+  end
+  if not tbBlackboard.nLastUpdateTargetPosTime then
+    tbBlackboard.nLastUpdateTargetPosTime = 0
+  end
+  local bPosChanged = false
+  if tbBlackboard.nTargetMapId ~= tbTeammate.nMapId then
+    tbBlackboard.nTargetMapId = tbTeammate.nMapId
+    bPosChanged = true
+  end
+  if tbBlackboard.nTargetMapX ~= tbTeammate.nPosX then
+    tbBlackboard.nTargetMapX = tbTeammate.nPosX
+    bPosChanged = true
+  end
+  if tbBlackboard.nTargetMapY ~= tbTeammate.nPosY then
+    tbBlackboard.nTargetMapY = tbTeammate.nPosY
+    bPosChanged = true
+  end
+  if tbBlackboard.nTargetMapTemplateId ~= tbTeammate.nMapTemplateId then
+    tbBlackboard.nTargetMapTemplateId = tbTeammate.nMapTemplateId
+    bPosChanged = true
+  end
+  local nNowTime = GetTime()
+  if bPosChanged and nNowTime >= tbBlackboard.nLastUpdateTargetPosTime then
+    tbBlackboard.bNeedUpdateTargetPos = true
+    tbBlackboard.nLastUpdateTargetPosTime = nNowTime + 2
+  end
+  self.nState = BTClassMgr.tbTaskState.emSuccess
+end
+
+function BTFollowLeaderAction:Activate()
+  self.nState = BTClassMgr.tbTaskState.emFailure
+  local tbBlackboard = self.tbOwner.tbBlackboard
+  if not (tbBlackboard.nTargetMapId and not (tbBlackboard.nTargetMapId < 0) and tbBlackboard.nTargetMapX and not (tbBlackboard.nTargetMapX < 0) and tbBlackboard.nTargetMapY and not (tbBlackboard.nTargetMapX < 0) and tbBlackboard.nTargetMapTemplateId) or tbBlackboard.nTargetMapTemplateId < 0 then
+    AutoPath:StopGoto()
+    return
+  end
+  if AutoPath:IsWaitingSwitchMap() then
+    self.nState = BTClassMgr.tbTaskState.emRunning
+    return
+  end
+  if tbBlackboard.bAutoPathFlag and AutoPath:IsPathing() then
+    if tbBlackboard.bNeedUpdateTargetPos then
+      AutoPath:StopGoto()
+      tbBlackboard.bAutoPathFlag = false
+      tbBlackboard.bNeedUpdateTargetPos = false
+    else
+      self.nState = BTClassMgr.tbTaskState.emRunning
+      return
+    end
+  end
+  local nSelfMapId, nSelfX, nSelfY = me.GetWorldPos()
+  if nSelfMapId == tbBlackboard.nTargetMapId then
+    local nDisSquare = Lib:GetDistsSquare(nSelfX, nSelfY, tbBlackboard.nTargetMapX, tbBlackboard.nTargetMapY)
+    local nDisRequired = AFKAutoFollowFight.AutoPathNearLength ^ 2
+    if nDisSquare <= nDisRequired then
+      AutoPath:StopGoto()
+      self.nState = BTClassMgr.tbTaskState.emFailure
+      tbBlackboard.bNeedRideHorse = false
+      return
+    end
+  end
+  tbBlackboard.nTargetNpcId = nil
+  if tbBlackboard.nTargetMapId ~= me.nMapId then
+    local tbMapClass = Map:GetClass(me.nMapTemplateId, 1)
+    if nil ~= tbMapClass and nil ~= tbMapClass.TransmitTo then
+      local bCanTrans, tbWayPoint = tbMapClass:TransmitTo(me.nMapId, me.nMapTemplateId, tbBlackboard.nTargetMapId, tbBlackboard.nTargetMapTemplateId)
+      if not bCanTrans then
+        AFKAutoFollowFight:WaitTime(1)
+        return
+      end
+      if tbWayPoint then
+        self.nState = self:Goto(me.nMapId, tbWayPoint.nTransPosX, tbWayPoint.nTransPosY, Npc.MIN_DISTANCE)
+        return
+      end
+    end
+    local tbMapClass = Map:GetClass(tbBlackboard.nTargetMapTemplateId, 1)
+    if nil ~= tbMapClass and nil ~= tbMapClass.TransmitFrom then
+      local bCanTrans, tbWayPoint = tbMapClass:TransmitFrom(me.nMapId, me.nMapTemplateId, tbBlackboard.nTargetMapId, tbBlackboard.nTargetMapTemplateId)
+      if not bCanTrans then
+        AFKAutoFollowFight:WaitTime(1)
+        return
+      end
+      if tbWayPoint then
+        self.nState = self:Goto(me.nMapId, tbWayPoint.nTransPosX, tbWayPoint.nTransPosY, Npc.MIN_DISTANCE)
+        return
+      end
+    end
+  end
+  self.nState = self:Goto(tbBlackboard.nTargetMapId, tbBlackboard.nTargetMapX, tbBlackboard.nTargetMapY, AFKAutoFollowFight.AutoPathNearLength)
+end
+
+function BTFollowLeaderAction:Goto(nTargetMapId, nTargetMapX, nTargetMapY, nDistance)
+  local tbBlackboard = self.tbOwner.tbBlackboard
+  tbBlackboard.bAutoPathFlag = true
+  AutoPath:DelayGotoAndCallEx(5, nTargetMapId, nTargetMapX, nTargetMapY, function()
+    tbBlackboard.bAutoPathFlag = false
+    tbBlackboard.bNeedRideHorse = false
+    self.nState = BTClassMgr.tbTaskState.emSuccess
+  end, nDistance, nil, nil, nil, nil, nil, nil, AutoPath.PathReason.emAFK_AutoFollowFightFollowLeader)
+  return BTClassMgr.tbTaskState.emRunning
+end
+
+function AFKAutoFollowFight:Init()
+  self.tbFollowFightAI = self:CreateFollowFightAI()
+end
+
+function AFKAutoFollowFight:Start(nNpcId)
+  if not self.tbFollowFightAI then
+    assert(false)
+    return
+  end
+  if not nNpcId or nNpcId < 0 then
+    return
+  end
+  local tbBlackboard = {nFollowTeammateNpcId = nNpcId}
+  self.tbFollowFightAI:Init(tbBlackboard)
+  AFKAutoMedicine:OpenUseItem(true)
+end
+
+function AFKAutoFollowFight:Stop()
+  if not self.tbFollowFightAI then
+    assert(false)
+    return
+  end
+  self.tbFollowFightAI:UnInit()
+  AFKAutoMedicine:OpenUseItem(false)
+end
+
+function AFKAutoFollowFight:Activate(nMainTick)
+  if not nMainTick then
+    Log("AFKAutoFollowFight:Activate() nMainTick is nil. Please check AFK module.")
+    return
+  end
+  if 0 == nMainTick % AFKFightSetting.nFrameCtrlOfQualitySetting then
+    self.tbFollowFightAI:Activate()
+  end
+end
+
+function AFKAutoFollowFight:CreateFollowFightAI()
+  local tbAI = Lib:NewClass(BTFollowFightAI)
+  local tbFollowFightWaitingTime = Lib:NewClass(BTWaitingTime)
+  local tbFollowFightPrioritySelector = Lib:NewClass(BTPrioritySelector)
+  local tbAIRoot = Lib:NewClass(BTSequenceNode)
+  tbAIRoot:SetOwner(tbAI)
+  tbAIRoot:SetName("FollowFightAI")
+  tbAI:SetRootNode(tbAIRoot)
+  tbFollowFightWaitingTime:SetName("FollowFightWaitingTime")
+  tbFollowFightPrioritySelector:SetName("FollowFightPrioritySelector")
+  tbAIRoot:AddNode(tbFollowFightWaitingTime)
+  tbAIRoot:AddNode(tbFollowFightPrioritySelector)
+  local tbFollowLeaderCond = Lib:NewClass(BTFollowLeaderCond)
+  local tbFollowLeaderAction = Lib:NewClass(BTFollowLeaderAction)
+  local tbFollowLeaderSequence = Lib:NewClass(BTSequenceNode)
+  tbFollowLeaderCond:SetName("FollowLeaderCond")
+  tbFollowLeaderAction:SetName("FollowLeaderAction")
+  tbFollowLeaderSequence:SetName("FollowLeaderSequence")
+  tbFollowFightPrioritySelector:AddNode(tbFollowLeaderSequence)
+  tbFollowLeaderSequence:AddCond(tbFollowLeaderCond)
+  tbFollowLeaderSequence:AddNode(tbFollowLeaderAction)
+  local tbAttackTargetSelector = Lib:NewClass(BTPrioritySelector)
+  tbAttackTargetSelector:SetName("AttackTargetSelector")
+  tbFollowFightPrioritySelector:AddNode(tbAttackTargetSelector)
+  local tbChooseTargetCond = Lib:NewClass(BTChooseTargetCond)
+  local tbChooseTargetAction = Lib:NewClass(BTChooseTargetAction)
+  local tbChooseTargetSequence = Lib:NewClass(BTSequenceNode)
+  tbChooseTargetCond:SetName("ChooseTargetCond")
+  tbChooseTargetAction:SetName("ChooseTargetAction")
+  tbChooseTargetSequence:SetName("ChooseTargetSequence")
+  tbAttackTargetSelector:AddNode(tbChooseTargetSequence)
+  tbChooseTargetSequence:AddCond(tbChooseTargetCond)
+  tbChooseTargetSequence:AddNode(tbChooseTargetAction)
+  local tbChaseTargetCond = Lib:NewClass(BTChaseTargetCond)
+  local tbChaseTargetAction = Lib:NewClass(BTChaseTargetAction)
+  local tbChaseTargetSequence = Lib:NewClass(BTSequenceNode)
+  tbChaseTargetCond:SetName("ChaseTargetCond")
+  tbChaseTargetAction:SetName("ChaseTargetAction")
+  tbChaseTargetSequence:SetName("ChaseTargetSequence")
+  tbAttackTargetSelector:AddNode(tbChaseTargetSequence)
+  tbChaseTargetSequence:AddCond(tbChaseTargetCond)
+  tbChaseTargetSequence:AddNode(tbChaseTargetAction)
+  local tbGetDownHorseCond = Lib:NewClass(BTGetDownHorseCond)
+  local tbGetDownHorseAction = Lib:NewClass(BTGetDownHorseAction)
+  local tbGetDownHorseSequence = Lib:NewClass(BTSequenceNode)
+  tbGetDownHorseCond:SetName("GetDownHorseCond")
+  tbGetDownHorseAction:SetName("GetDownHorseAction")
+  tbGetDownHorseSequence:SetName("GetDownHorseSequence")
+  tbAttackTargetSelector:AddNode(tbGetDownHorseSequence)
+  tbGetDownHorseSequence:AddCond(tbGetDownHorseCond)
+  tbGetDownHorseSequence:AddNode(tbGetDownHorseAction)
+  local tbAttackTargetCond = Lib:NewClass(BTAttackTargetCond)
+  local tbAttackTargetAction = Lib:NewClass(BTAttackTargetAction)
+  local tbAttackTargetSequence = Lib:NewClass(BTSequenceNode)
+  tbAttackTargetCond:SetName("AttackTargetCond")
+  tbAttackTargetAction:SetName("AttackTargetAction")
+  tbAttackTargetSequence:SetName("AttackTargetSequence")
+  tbAttackTargetSelector:AddNode(tbAttackTargetSequence)
+  tbAttackTargetSequence:AddCond(tbAttackTargetCond)
+  tbAttackTargetSequence:AddNode(tbAttackTargetAction)
+  return tbAI
+end
+
+function AFKAutoFollowFight:OnMapLoaded()
+  local bIsRunning = AFK:IsFollowFightRunning()
+  if not bIsRunning then
+    return
+  end
+  TeamMgr:RequestLeaderFightPos()
+end
+
+AFKAutoFollowFight:Init()
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_LOADED, AFKAutoFollowFight)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LOADED, AFKAutoFollowFight.OnMapLoaded, AFKAutoFollowFight)
+
+function AFKAutoFollowFight:Suspend()
+  self.tbFollowFightAI:Suspend()
+end
+
+function AFKAutoFollowFight:Resume()
+  self.tbFollowFightAI:Resume()
+end
+
+function AFKAutoFollowFight:IsRunning()
+  if self.tbFollowFightAI ~= nil and nil ~= self.tbFollowFightAI.bIsRunning then
+    return self.tbFollowFightAI.bIsRunning
+  else
+    return false
+  end
+end
+
+function AFKAutoFollowFight:WaitTime(nTime)
+  if not self:IsRunning() or not self.tbFollowFightAI.tbBlackboard then
+    return
+  end
+  AutoPath:StopGoto()
+  self.tbFollowFightAI:Reset()
+  self.tbFollowFightAI.tbBlackboard.nBTWaitTime = GetTime() + nTime
+end

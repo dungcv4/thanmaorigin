@@ -1,0 +1,469 @@
+Require("Script/ShenBingPu/ShenBingPuC.lua")
+local tbWnd = Ui:CreateClass("UIDivineStrengthen", "UIPanel")
+local ShenBingPuC = Item.ShenBingPu
+local tbControls = {
+  Middle = "Middle",
+  MiddleItem = "Middle/Item",
+  TxtMiddleItemName = "Middle/TxtItemName",
+  Empty = "Right/Empty",
+  Empty01 = "Right/Empty01",
+  btnGo = "Right/Empty01/btnGo",
+  txtSaleInfo = "Right/Content/txtSale",
+  txtFull = "Right/txtFull",
+  Content = "Right/Content",
+  AttrTemplate = "Right/Content/Scroll View/Viewport/Content/Template",
+  AttrView = "Right/Content/Scroll View",
+  txtTittle01 = "Right/Content/txtTittle01",
+  txtTittle02 = "Right/txtTittle02",
+  ToggleAuto = "Right/Content/ToggleAuto",
+  btnStrengthen = "Right/Content/btnStrengthen",
+  btnCuttingEdge = "Right/Empty/btnCuttingEdge",
+  txtCostTittle = "Right/txtTittle02",
+  CostMaterialTemplate = "Right/Template",
+  CostCoinTemplate = "Right/Template01",
+  txtCost = "Right/Template/txtCost",
+  txtSale = "Right/Template/txtCost/txtSale",
+  btnAddMaterial = "Right/Template/btnAdd",
+  btnAddCoin = "Right/Template01/btnAdd",
+  UICostItemGrid = "Right/Template/UIItemGrid",
+  UICoinItemGrid = "Right/Template01/UIItemGrid",
+  txtCoinCost = "Right/Template01/txtCost",
+  txtCoinSale = "Right/Template01/txtCost/txtSale"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnStrengthen = function(self)
+    if self.bIsAuto then
+      if self.nAutoTimer then
+        self:CloseAuto()
+      else
+        self.nAutoTimer = Timer:Register(Env.GAME_FPS, self.OnBtnStrengthenClicked, self)
+        self.pPanel:Button_SetText(tbControls.btnStrengthen, i18n.EasyGet("\229\129\156\230\173\162\229\188\186\229\140\150"), "Text")
+      end
+    else
+      self:OnBtnStrengthenClicked()
+    end
+  end,
+  btnAddMaterial = function(self)
+    local nCurMaterialId = ShenBingPuC:GetCurIterMaterial()
+    local tbWare = Shop:GetAWare2(Shop.ShopTypeStr.YuanBao, nCurMaterialId)
+    if tbWare then
+      Ui:OpenWindow("UIShopBuy", tbWare, true)
+    end
+  end,
+  btnAddCoin = function(self)
+    Ui:OpenWindow("UIWelfare", "PANEL_TYPE_MONEY_TREE")
+  end,
+  btnCuttingEdge = function(self)
+    self:OnBtnCuttingEdgeClicked()
+  end,
+  btnGo = function(self)
+    self.tbOwner:DoChangePanel(2)
+  end
+}
+tbWnd.tbOnToggleClick = {
+  ToggleAuto = function(self, isOn)
+    self.bIsAuto = isOn
+    if not isOn then
+      self:CloseAuto()
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbAttrView = Ui:NewScrollView(self, tbControls.AttrTemplate)
+  self.tbMiddleGrid = Ui:NewExistItemGrid(self, tbControls.MiddleItem)
+  self.tbMaterialGrid = Ui:NewExistItemGrid(self, tbControls.UICostItemGrid)
+  self.tbCoinGrid = Ui:NewExistItemGrid(self, tbControls.UICoinItemGrid)
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnStrengthen, {
+    RedPointMgr.EVENT.ShenBingStrengthForBtn
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnCuttingEdge, {
+    RedPointMgr.EVENT.ShenBingActivateForBtn
+  })
+end
+
+function tbWnd:OnPanelOpen(nSelectIndex)
+  self.pPanel:Toggle_SetChecked(tbControls.ToggleAuto, false)
+  self:UpdateMiddleAndRight(nSelectIndex)
+  self:RefreshSlotRedPoint()
+end
+
+function tbWnd:OnSelectWeaponChange(nSelectIndex)
+  self.pPanel:Toggle_SetChecked(tbControls.ToggleAuto, false)
+  self:UpdateMiddleAndRight(nSelectIndex)
+end
+
+function tbWnd:UpdateMiddleAndRight(nSelectIndex)
+  local nSlot = Item.ExtEquip.CFG.SLOT.SHENBINGPU_WEAPON1 + nSelectIndex - 1
+  self:UpdateMiddleInfo(nSlot)
+  local pWeapon = ShenBingPuC:GetUsingShenBingPuBySlot(me, nSlot)
+  if pWeapon then
+    local bRet = ShenBingPuC:CheckHasActivate(me, nSlot) or false
+    if bRet then
+      self:UpdateRightAttrInfo(nSlot)
+      local bFullMax = ShenBingPuC:IsAllFixedAttrFullMax(me, nSlot)
+      if bFullMax then
+        self:ShowRightFullMaxStatus(nSlot)
+      else
+        self:ShowRightNormalEnhanceStatus(nSlot)
+      end
+      self:RefreshStrengthBtnRedPoint(nSlot)
+    else
+      self:ShowRightUnActivateEmpty(nSlot)
+      self:RefreshActivateBtnRedPoint(nSlot)
+    end
+  else
+    self:ShowRightUnEquipEmpty(nSlot)
+  end
+end
+
+function tbWnd:ShowRightUnEquipEmpty(nSlot)
+  self.pPanel:SetActive(tbControls.CostMaterialTemplate, false)
+  self.pPanel:SetActive(tbControls.CostCoinTemplate, false)
+  self.pPanel:SetActive(tbControls.txtTittle02, false)
+  self.pPanel:SetActive(tbControls.txtFull, false)
+  self.pPanel:SetActive(tbControls.Content, false)
+  self.pPanel:SetActive(tbControls.Empty, false)
+  self.pPanel:SetActive(tbControls.Empty01, true)
+end
+
+function tbWnd:ShowRightUnActivateEmpty(nSlot)
+  self:UpdateActivateMaterialInfo()
+  self.pPanel:SetActive(tbControls.txtTittle02, true)
+  self.pPanel:SetActive(tbControls.Empty, true)
+  self.pPanel:SetActive(tbControls.Content, false)
+  self.pPanel:SetActive(tbControls.CostMaterialTemplate, true)
+  self.pPanel:SetActive(tbControls.CostCoinTemplate, false)
+  self.pPanel:SetActive(tbControls.txtFull, false)
+  self.pPanel:SetActive(tbControls.Empty01, false)
+end
+
+function tbWnd:ShowRightNormalEnhanceStatus(nSlot)
+  self:UpdateRightAttrInfo(nSlot)
+  self:UpdateEnhanceMaterialInfo(nSlot)
+  self.pPanel:SetActive(tbControls.Content, true)
+  self.pPanel:SetActive(tbControls.txtTittle02, true)
+  self.pPanel:SetActive(tbControls.Empty, false)
+  self.pPanel:SetActive(tbControls.CostMaterialTemplate, true)
+  self.pPanel:SetActive(tbControls.CostCoinTemplate, true)
+  self.pPanel:SetActive(tbControls.txtFull, false)
+  self.pPanel:SetActive(tbControls.Empty01, false)
+  self.pPanel:SetActive(tbControls.ToggleAuto, true)
+  self.pPanel:SetActive(tbControls.btnStrengthen, true)
+  self.pPanel:Label_SetText(tbControls.txtSaleInfo, i18n.EasyGet("\230\175\143\230\151\165\233\166\150\230\172\161\229\188\186\229\140\150{0}\230\138\152", Item.ShenBingPu.CFG.nDailtSaleOff))
+  self.pPanel:SetActive(tbControls.txtSaleInfo, true)
+end
+
+function tbWnd:ShowRightFullMaxStatus(nSlot)
+  self:UpdateRightAttrInfo(nSlot)
+  self.pPanel:SetActive(tbControls.Content, true)
+  self.pPanel:SetActive(tbControls.txtFull, true)
+  self.pPanel:SetActive(tbControls.txtTittle02, false)
+  self.pPanel:SetActive(tbControls.Empty, false)
+  self.pPanel:SetActive(tbControls.CostMaterialTemplate, false)
+  self.pPanel:SetActive(tbControls.CostCoinTemplate, false)
+  self.pPanel:SetActive(tbControls.Empty01, false)
+  self.pPanel:SetActive(tbControls.ToggleAuto, false)
+  self.pPanel:SetActive(tbControls.btnStrengthen, false)
+  self.pPanel:SetActive(tbControls.txtSaleInfo, false)
+end
+
+function tbWnd:UpdateRightAttrInfo(nSlot)
+  local pWeapon = ShenBingPuC:GetUsingShenBingPuBySlot(me, nSlot)
+  if pWeapon then
+    local tbAllEnhanceFixedAttr = ShenBingPuC:GetAllFixedAttr(me, pWeapon, 2) or {}
+    local tbAllFixedAttrDesc = ShenBingPuC:GetWeaponAttrDiffByBatch(tbAllEnhanceFixedAttr) or {}
+    for nIndex, _ in ipairs(tbAllFixedAttrDesc) do
+      self.tbAttrView:SetElement(nIndex, function(tbElement, nHoleIndex)
+        self:__SetAttrElement(tbElement, pWeapon, nHoleIndex, tbAllFixedAttrDesc[nIndex])
+      end)
+    end
+  end
+end
+
+function tbWnd:OnEnhanceSucc(pWeapon, nHoleIndex, nHistoryLevel, nAddLevel, nPrevEnhanceValue, nCurEnhanceValue)
+  local nCurMaxEnhanceLevel = ShenBingPuC:GetCurMaxEnhanceLevel()
+  local nCurEnhanceLevel = nHistoryLevel + nAddLevel
+  local tbAllElement = self.tbAttrView:GetAllElement()
+  for nIndex, tbElement in ipairs(tbAllElement) do
+    if nIndex == nHoleIndex then
+      local tbMaxAttrInfo = ShenBingPuC:GetFixedAttrMaxVal(me, pWeapon, nHoleIndex)
+      if not tbMaxAttrInfo then
+        return
+      end
+      local _, nMaxEnhanceAttrValue, _ = ShenBingPuC:GetWeaponAttrDiff(tbMaxAttrInfo)
+      tbElement.pPanel:Label_SetText("txtLV", i18n.EasyGet("\231\173\137\231\186\167\239\188\154{0}/{1}", nCurEnhanceLevel, nCurMaxEnhanceLevel))
+      tbElement.pPanel:Label_SetText("txtExperience", i18n.EasyGet("\229\177\158\230\128\167\239\188\154+{0}/+{1} <color=#42DF39>+{2}</color>", nCurEnhanceValue, nMaxEnhanceAttrValue, nCurEnhanceValue - nPrevEnhanceValue))
+      if nCurMaxEnhanceLevel <= nCurEnhanceLevel then
+        tbElement.pPanel:SetActive("txtTips", false)
+      else
+        tbElement.pPanel:Label_SetText("txtTips", i18n.EasyGet("\229\188\186\229\140\150{0}\230\172\161\229\144\142\229\164\167\229\185\133\229\186\166\230\143\144\229\141\135", Item.ShenBingPu.CFG.nHugeEnhanceNum - nCurEnhanceLevel % Item.ShenBingPu.CFG.nHugeEnhanceNum))
+        tbElement.pPanel:SetActive("txtTips", true)
+      end
+    else
+      local szExperience = tbElement.pPanel:Label_GetText("txtExperience")
+      szExperience = string.gsub(szExperience, "<color=#42DF39>%+%d+</color>", "")
+      tbElement.pPanel:Label_SetText("txtExperience", szExperience)
+    end
+  end
+  local nSlot = Item:GetExtEquipSlot(pWeapon)
+  if ShenBingPuC:IsAllFixedAttrFullMax(me, nSlot) then
+    self:ShowRightFullMaxStatus(nSlot)
+  end
+  self:__ShowEnhanceEffect(nSlot, nHoleIndex, nHistoryLevel, nAddLevel)
+end
+
+function tbWnd:__SetAttrElement(tbElement, pWeapon, nHoleIndex, tbAttrDesc)
+  local nSlot = Item:GetExtEquipSlot(pWeapon)
+  local nEnhanceLevel = ShenBingPuC:GetAttrEnhanceLevel(me, nSlot, nHoleIndex)
+  local nCurMaxEnhanceLevel = ShenBingPuC:GetCurMaxEnhanceLevel()
+  local tbMaxAttrInfo = ShenBingPuC:GetFixedAttrMaxVal(me, pWeapon, nHoleIndex)
+  if not tbMaxAttrInfo then
+    return
+  end
+  local _, nAttrValue, _ = ShenBingPuC:GetWeaponAttrDiff(tbMaxAttrInfo)
+  tbElement.pPanel:SetActive("EnhanceEffect_Small", false)
+  tbElement.pPanel:SetActive("EnhanceEffect_Big", false)
+  tbElement.pPanel:Label_SetText("txtName", tbAttrDesc.szAttrDesc)
+  tbElement.pPanel:Label_SetText("txtLV", i18n.EasyGet("\231\173\137\231\186\167\239\188\154{0}/{1}", nEnhanceLevel, nCurMaxEnhanceLevel))
+  tbElement.pPanel:Label_SetText("txtExperience", i18n.EasyGet("\229\177\158\230\128\167\239\188\154+{0}/+{1}", tbAttrDesc.nAttr1Value, nAttrValue))
+  if nEnhanceLevel >= nCurMaxEnhanceLevel then
+    tbElement.pPanel:SetActive("txtTips", false)
+  else
+    tbElement.pPanel:Label_SetText("txtTips", i18n.EasyGet("\229\188\186\229\140\150{0}\230\172\161\229\144\142\229\164\167\229\185\133\229\186\166\230\143\144\229\141\135", Item.ShenBingPu.CFG.nHugeEnhanceNum - nEnhanceLevel % Item.ShenBingPu.CFG.nHugeEnhanceNum))
+    tbElement.pPanel:SetActive("txtTips", true)
+  end
+end
+
+function tbWnd:UpdateEnhanceMaterialInfo(nSlot)
+  local nMaterialId = ShenBingPuC:GetCurIterMaterial()
+  if nMaterialId then
+    self.tbMaterialGrid:SetItemByTemplate(nMaterialId)
+    self.tbMaterialGrid:SetClickEnable(true)
+    local nNeedCostMaterialNum = ShenBingPuC:GetEnhanceCostNumByIter(me, nSlot)
+    local nOwnMaterialNum = me.GetItemCountInBags(nMaterialId)
+    self.tbCoinGrid:SetDigitalItem(Currency.TYPE.Coin)
+    self.tbCoinGrid:SetClickEnable(true)
+    local nNeedCostCoinNum = ShenBingPuC:GetEnhanceCostCoinByIter(me, nSlot)
+    local nOwnCoinNum = me.GetMoney(Currency.TYPE.Coin)
+    if ShenBingPuC:CheckHasDailySaleCount(me) then
+      local nNeedCostMaterialNumAfterSale = math.floor(nNeedCostMaterialNum * Item.ShenBingPu.CFG.nDailtSaleOff / 10)
+      if nOwnMaterialNum < nNeedCostMaterialNumAfterSale then
+        self.pPanel:Label_SetText(tbControls.txtCost, string.format("<color=red>%d</color>/%d", nOwnMaterialNum, nNeedCostMaterialNumAfterSale))
+      else
+        self.pPanel:Label_SetText(tbControls.txtCost, string.format("%d/%d", nOwnMaterialNum, nNeedCostMaterialNumAfterSale))
+      end
+      self.pPanel:Label_SetText(tbControls.txtSale, nNeedCostMaterialNum)
+      local nNeedCostCoinNumAfterSale = math.floor(nNeedCostCoinNum * Item.ShenBingPu.CFG.nDailtSaleOff / 10)
+      if nOwnCoinNum < nNeedCostCoinNumAfterSale then
+        self.pPanel:Label_SetText(tbControls.txtCoinCost, string.format("<color=red>%d</color>/%d", nOwnCoinNum, nNeedCostCoinNumAfterSale))
+      else
+        self.pPanel:Label_SetText(tbControls.txtCoinCost, string.format("%d/%d", nOwnCoinNum, nNeedCostCoinNumAfterSale))
+      end
+      self.pPanel:Label_SetText(tbControls.txtCoinSale, nNeedCostCoinNum)
+      self.pPanel:SetActive(tbControls.txtSale, true)
+      self.pPanel:SetActive(tbControls.txtCoinSale, true)
+    else
+      if nNeedCostMaterialNum > nOwnMaterialNum then
+        self.pPanel:Label_SetText(tbControls.txtCost, string.format("<color=red>%d</color>/%d", nOwnMaterialNum, nNeedCostMaterialNum))
+      else
+        self.pPanel:Label_SetText(tbControls.txtCost, string.format("%d/%d", nOwnMaterialNum, nNeedCostMaterialNum))
+      end
+      self.pPanel:SetActive(tbControls.txtSale, false)
+      if nNeedCostCoinNum > nOwnCoinNum then
+        self.pPanel:Label_SetText(tbControls.txtCoinCost, string.format("<color=red>%d</color>/%d", nOwnCoinNum, nNeedCostCoinNum))
+      else
+        self.pPanel:Label_SetText(tbControls.txtCoinCost, string.format("%d/%d", nOwnCoinNum, nNeedCostCoinNum))
+      end
+      self.pPanel:SetActive(tbControls.txtCoinSale, false)
+    end
+  end
+  self.pPanel:Label_SetText(tbControls.txtTittle02, i18n.EasyGet("\226\151\134 \229\188\186\229\140\150\230\157\144\230\150\153"))
+end
+
+function tbWnd:UpdateActivateMaterialInfo()
+  local szCurIter = ShenBingPuC:GetCurIteration()
+  local tbActivateCost = Item.ShenBingPu.CFG.ACTIVATE_COST[szCurIter]
+  if not tbActivateCost then
+    self.pPanel:SetActive(tbControls.CostMaterialTemplate, false)
+    return
+  else
+    local nMaterialId = tbActivateCost[1]
+    self.tbMaterialGrid:SetItemByTemplate(nMaterialId)
+    self.tbMaterialGrid:SetClickEnable(true)
+    local nNeedCostNum = tbActivateCost[2]
+    local nOwnNum = me.GetItemCountInBags(nMaterialId)
+    if nNeedCostNum > nOwnNum then
+      self.pPanel:Label_SetText(tbControls.txtCost, string.format("<color=red>%d</color>/%d", nOwnNum, nNeedCostNum))
+    else
+      self.pPanel:Label_SetText(tbControls.txtCost, string.format("%d/%d", nOwnNum, nNeedCostNum))
+    end
+    self.pPanel:SetActive(tbControls.txtSale, false)
+  end
+  self.pPanel:Label_SetText(tbControls.txtTittle02, i18n.EasyGet("\226\151\134 \229\188\128\229\136\131\230\157\144\230\150\153"))
+end
+
+function tbWnd:UpdateMiddleInfo(nSlot)
+  local pWeapon = ShenBingPuC:GetUsingShenBingPuBySlot(me, nSlot)
+  if pWeapon then
+    self.nWeaponId = pWeapon.dwId
+    self.tbMiddleGrid:SetItem(pWeapon.dwId)
+    self.tbMiddleGrid:Plus_SetActive(false)
+    self.tbMiddleGrid:SetClickEnable(true)
+    self.pPanel:SetActive(tbControls.TxtMiddleItemName, true)
+    local szWeaponName = i18n.Parse(KItem.GetItemShowInfo(pWeapon.dwTemplateId, me.nFaction, me.nFactionSect, me.nSex))
+    self.pPanel:Label_SetText(tbControls.TxtMiddleItemName, szWeaponName)
+  else
+    self.nWeaponId = nil
+    self.tbMiddleGrid:Clear()
+    self.tbMiddleGrid:BaseColor_SetSpriteByQuality(1)
+    self.tbMiddleGrid:BaseColor_SetActive(true)
+    self.tbMiddleGrid:Plus_SetActive(true)
+    self.tbMiddleGrid:SetClickEnable(true, self.OnMiddlePlusImgClicked, nSlot)
+    self.pPanel:SetActive(tbControls.TxtMiddleItemName, false)
+  end
+end
+
+function tbWnd:__ShowEnhanceEffect(nSlot, nMainAttrIndex, nHistoryLevel, nAddLevel)
+  local tbElement = self.tbAttrView:GetElement(nMainAttrIndex)
+  if not tbElement then
+    return
+  end
+  tbElement.pPanel:SetActive("EnhanceEffect_Small", false)
+  tbElement.pPanel:SetActive("EnhanceEffect_Big", false)
+  local nCurEnhanceLevel = nHistoryLevel + nAddLevel
+  if math.floor(nCurEnhanceLevel / Item.ShenBingPu.CFG.nHugeEnhanceNum) ~= math.floor(nHistoryLevel / Item.ShenBingPu.CFG.nHugeEnhanceNum) then
+    tbElement.pPanel:SetActive("EnhanceEffect_Big", true)
+  else
+    tbElement.pPanel:SetActive("EnhanceEffect_Small", true)
+  end
+end
+
+function tbWnd:OnSyncItem()
+  if self.nWeaponId then
+    local pWeapon = KItem.GetItemObj(self.nWeaponId)
+    if pWeapon then
+      local nSlot = Item:GetExtEquipSlot(pWeapon)
+      local bRet = ShenBingPuC:CheckHasActivate(me, nSlot) or false
+      if bRet then
+        self:UpdateEnhanceMaterialInfo(nSlot)
+      else
+        self:UpdateActivateMaterialInfo()
+      end
+    end
+  end
+end
+
+function tbWnd:OnMiddlePlusImgClicked(nSlot)
+end
+
+function tbWnd:OnBtnStrengthenClicked()
+  local nMaterialId = ShenBingPuC:GetCurIterMaterial()
+  if nMaterialId and self.nWeaponId then
+    local bRet = ShenBingPuC:DoEnhanceReq(self.nWeaponId, nMaterialId)
+    if not bRet then
+      self.pPanel:Button_SetText(tbControls.btnStrengthen, i18n.EasyGet("\229\188\186\229\140\150"), "Text")
+    end
+    return bRet
+  end
+end
+
+function tbWnd:OnBtnCuttingEdgeClicked()
+  if self.nWeaponId then
+    ShenBingPuC:DoActivateReq(self.nWeaponId)
+  end
+end
+
+function tbWnd:CloseAuto()
+  if self.nAutoTimer then
+    Timer:Close(self.nAutoTimer)
+    self.nAutoTimer = nil
+  end
+  self.pPanel:Button_SetText(tbControls.btnStrengthen, i18n.EasyGet("\229\188\186\229\140\150"), "Text")
+end
+
+function tbWnd:OnClose()
+  self:CloseAuto()
+  self.nWeaponId = nil
+  self:FadeAllSlotRedPoint()
+end
+
+function tbWnd:OnDestroy()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnCuttingEdge)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnStrengthen)
+end
+
+function tbWnd:RefreshStrengthBtnRedPoint(nSlot)
+  local bCanStrength = ShenBingPuC:CheckSlotCanEnhance(nSlot)
+  if bCanStrength and not RedPointMgr:CheckEvent(RedPointMgr.EVENT.ShenBingStrengthForBtn) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.ShenBingStrengthForBtn)
+  end
+  if not bCanStrength and RedPointMgr:CheckEvent(RedPointMgr.EVENT.ShenBingStrengthForBtn) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ShenBingStrengthForBtn)
+  end
+end
+
+function tbWnd:RefreshActivateBtnRedPoint(nSlot)
+  local bCanActivate = ShenBingPuC:CheckSlotCanActivate(nSlot)
+  if bCanActivate and not RedPointMgr:CheckEvent(RedPointMgr.EVENT.ShenBingActivateForBtn) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.ShenBingActivateForBtn)
+  end
+  if not bCanActivate and RedPointMgr:CheckEvent(RedPointMgr.EVENT.ShenBingActivateForBtn) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ShenBingActivateForBtn)
+  end
+end
+
+function tbWnd:RefreshSlotRedPoint()
+  local tbAllCanEnhanceSlot = ShenBingPuC:CheckAllCanEnhanceSlot()
+  for nSlot, bCanEnhance in pairs(tbAllCanEnhanceSlot) do
+    local nEventId = RedPointMgr.EVENT["ShenBingStrengthForSlot" .. nSlot - Item.ShenBingPu.WEAPON_1 + 1]
+    if bCanEnhance then
+      if nEventId and not RedPointMgr:CheckEvent(nEventId) then
+        RedPointMgr:LightRedPoint(nEventId)
+      end
+    elseif nEventId and RedPointMgr:CheckEvent(nEventId) then
+      RedPointMgr:FadeRedPoint(nEventId)
+    end
+  end
+  local tbAllCanActivateSlot = ShenBingPuC:CheckAllCanActivateSlot()
+  for nSlot, bCanActivate in pairs(tbAllCanActivateSlot) do
+    local nEventId = RedPointMgr.EVENT["ShenBingActivateForSlot" .. nSlot - Item.ShenBingPu.WEAPON_1 + 1]
+    if bCanActivate then
+      if nEventId and not RedPointMgr:CheckEvent(nEventId) then
+        RedPointMgr:LightRedPoint(nEventId)
+      end
+    elseif nEventId and RedPointMgr:CheckEvent(nEventId) then
+      RedPointMgr:FadeRedPoint(nEventId)
+    end
+  end
+end
+
+function tbWnd:FadeAllSlotRedPoint()
+  for nSlot = Item.ShenBingPu.WEAPON_1, Item.ShenBingPu.WEAPON_3 do
+    local nEventId = RedPointMgr.EVENT["ShenBingActivateForSlot" .. nSlot - Item.ShenBingPu.WEAPON_1 + 1]
+    if nEventId and RedPointMgr:CheckEvent(nEventId) then
+      RedPointMgr:FadeRedPoint(nEventId)
+    end
+    local nEventId2 = RedPointMgr.EVENT["ShenBingStrengthForSlot" .. nSlot - Item.ShenBingPu.WEAPON_1 + 1]
+    if nEventId2 and RedPointMgr:CheckEvent(nEventId2) then
+      RedPointMgr:FadeRedPoint(nEventId2)
+    end
+  end
+end
+
+function tbWnd:CheckTabRedPoint()
+  local tbAllCanEnhanceSlot = ShenBingPuC:CheckAllCanEnhanceSlot()
+  for _, bCanEnhance in pairs(tbAllCanEnhanceSlot) do
+    if bCanEnhance then
+      return true
+    end
+  end
+  local tbAllCanActivateSlot = ShenBingPuC:CheckAllCanActivateSlot()
+  for _, bCanActivate in pairs(tbAllCanActivateSlot) do
+    if bCanActivate then
+      return true
+    end
+  end
+  return false
+end

@@ -1,0 +1,252 @@
+local tbWnd = Ui:CreateWindow("UILoginChannelInner")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_GATEWAY_CONNECT,
+      self.GatewayConnectResult
+    },
+    {
+      EventNotify.emNOTIFY_GATEWAY_HANDED,
+      self.GatewayHandSuccess
+    },
+    {
+      EventNotify.emNOTIFY_NEED_ACCOUT_REG,
+      self.OnNeedAccountReg
+    },
+    {
+      EventNotify.emNOTIFY_GATEWAY_CONNECT_LOST,
+      self.GatewayConnectLost
+    },
+    {
+      EventNotify.emNOTIFY_NEED_ACCOUT_ACTIVE,
+      self.OnNeedAccountActive
+    },
+    {
+      EventNotify.emNOTIFY_NEED_CLIENT_UPDATE,
+      self.OnNeedClientUpdate
+    }
+  }
+end
+
+local tbControls = {
+  InputAccount = "imgBG/imgAccount/inputAccount",
+  txtCurZone = "imgBG/txtCurZoneValue",
+  togRememberAccount = "imgBG/imgAccount/togRememberAccount",
+  btnEnterGame = "imgBG/btnEnterGame",
+  btnSelectZone = "imgBG/btnSelectZone",
+  txtAppVersion = "imgBG/txtAppVersion",
+  panelSelectPlatform = "imgBG/SelectPlatform",
+  togPC = "imgBG/SelectPlatform/togglePC",
+  togiOS = "imgBG/SelectPlatform/toggleiOS",
+  togAndroid = "imgBG/SelectPlatform/toggleAndroid",
+  togMix = "imgBG/SelectPlatform/toggleMix",
+  imgCADPA = "imgBG/imgCADPA"
+}
+tbWnd.tbControls = tbControls
+
+local function OnEnterGameClick(self)
+  if EDITOR and Validator.bNotPass then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\173\152\229\156\168\233\148\153\232\175\175\239\188\140\232\175\183\230\163\128\230\159\165\233\133\141\231\189\174\232\161\168"))
+    return
+  end
+  local szToken = "xxxxxxx"
+  self.szAccount = self.pPanel:Input_GetText(self.InputAccount)
+  Login:ResetTryConnectGatewayCounter()
+  Login:RandomLastConnectGatewayIndex()
+  Login:ConnectGateWay(self.szAccount, szToken)
+  Login:SetLoginType(Login.LOGIN_TYPE.Account)
+  Ui.PlayerPrefs.SetString("Account", self.szAccount)
+end
+
+tbWnd.tbOnClick = {
+  btnEnterGame = OnEnterGameClick,
+  btnSelectZone = function(self)
+    Ui:OpenWindow("UISelectZone")
+  end,
+  imgCADPA = function(self)
+    if Client.EnableLoginCADPA then
+      Ui:OpenWindow("UIAgeAgreement")
+    end
+  end
+}
+tbWnd.tbOnToggleClick = {
+  togRememberAccount = function(self, isOn)
+    if true == isOn then
+      Ui.PlayerPrefs.SetInt("RememberAccount", 1)
+    else
+      Ui.PlayerPrefs.SetInt("RememberAccount", 0)
+    end
+  end,
+  togPC = function(self, isOn)
+    if isOn then
+      self:SelectLoginPlatform(1)
+    end
+  end,
+  togiOS = function(self, isOn)
+    if isOn then
+      self:SelectLoginPlatform(2)
+    end
+  end,
+  togAndroid = function(self, isOn)
+    if isOn then
+      self:SelectLoginPlatform(3)
+    end
+  end,
+  togMix = function(self, isOn)
+    if isOn then
+      self:SelectLoginPlatform(4)
+    end
+  end
+}
+tbWnd.tbPlatformToggleGroup = {
+  [1] = tbWnd.tbControls.togPC,
+  [2] = tbWnd.tbControls.togiOS,
+  [3] = tbWnd.tbControls.togAndroid,
+  [4] = tbWnd.tbControls.togMix
+}
+
+function tbWnd:OnCreate()
+  self.pPanel:Sprite_SetNativeSize(tbControls.imgCADPA)
+  self.pPanel:SetActive(tbControls.imgCADPA, Client.EnableLoginCADPA)
+  self.rememberAccount = Ui.PlayerPrefs.GetInt("RememberAccount", 1)
+  if 0 == self.rememberAccount then
+    self.pPanel:Toggle_SetChecked(tbControls.togRememberAccount, false)
+  else
+    self.pPanel:Toggle_SetChecked(tbControls.togRememberAccount, true)
+  end
+  self.pPanel:Label_SetText(tbControls.txtAppVersion, i18n.EasyGet("\231\168\139\229\186\143\231\137\136\230\156\172\239\188\154") .. Ui.GameEnv.GetAppVersionStr3() .. "." .. Ui.GameEnv.GetUpdateVersion())
+  if EDITOR then
+    self:SelectLoginPlatform(1)
+  end
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:OnOpen(szAccount)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UILOGINBG_ACTION, "Stop")
+  Ui:CloseWindow("UILoadingTips")
+  self.szAccount = szAccount
+  Client.UIModule.CloseStartUI()
+  if not self.szAccount then
+    local szAccount = Ui.PlayerPrefs.GetString("Account", "")
+    if not szAccount or "" == szAccount or 0 == self.rememberAccount then
+      szAccount = Ui.GameEnv.TestAccount
+    end
+    self.szAccount = szAccount
+  end
+  self.pPanel:Input_SetText(tbControls.InputAccount, self.szAccount)
+  self:SetCurZoneID(Login.CurrentSelectZoneID)
+  Ui:PlayLoginMusic()
+  Ui.SceneCameraController.ClearTarget()
+  Ui.SceneCameraController.SetGray(false)
+  local szVersionType = Ui.GameEnv.GetVersionType()
+  if EDITOR or "alpha" == szVersionType or "beta" == szVersionType then
+    self.pPanel:SetActive(tbControls.btnSelectZone, true)
+  else
+    self.pPanel:SetActive(tbControls.btnSelectZone, false)
+    self:SetCurZoneID(1)
+  end
+  if bAllSameAsLastTime then
+    OnEnterGameClick(self)
+  end
+  if EDITOR then
+    self.pPanel:SetActive(tbControls.panelSelectPlatform, true)
+  else
+    self.pPanel:SetActive(tbControls.panelSelectPlatform, false)
+  end
+  Client:DeepGC()
+  ClientBulletin:GetBulletin(ClientBulletin.BULLETIN_TYPE_LOGIN)
+end
+
+function tbWnd:GatewayConnectResult(nResult)
+  if 1 ~= nResult then
+    if Login:IsNeedRetryConnectGateway() then
+      Login:RetryOtherGateWayAddr()
+      return
+    end
+    Ui:OpenWindow("UIMessageBoxBig", i18n.Get("Connect2ServerFailed"))
+    Ui:CloseWindow("UILoadingTips")
+  end
+  Login:SetNextLoginTime()
+end
+
+function tbWnd:GatewayHandSuccess(nRetCode, nShowAgreement)
+  Login.nShowAgreement = nShowAgreement
+  if 0 ~= nRetCode then
+    if -104 == nRetCode then
+      Ui:OpenWindow("UIMessageBoxBig", i18n.Get("RoleBanded"))
+    elseif nRetCode >= 4000 and nRetCode < 4010 then
+      Ui:OpenWindow("UIMessageBoxBig", i18n.EasyGet("\230\191\128\230\180\187\231\160\129\228\184\141\230\173\163\231\161\174"))
+    else
+      Ui:OpenWindow("UIMessageBoxBig", i18n.Get("GatewayRetCode", nRetCode))
+    end
+    Ui:CloseWindow("UILoadingTips")
+    Login:SetNextLoginTime()
+    return
+  end
+  Ui:CloseWindow("UIMessageBoxBig")
+  Ui:CloseWindow("UILoadingTips")
+  self:Close()
+  Login:ResetNextLoginTime()
+  Ui:OpenWindow("UILoginServer")
+end
+
+function tbWnd:OnNeedAccountReg(nRetCode)
+end
+
+function tbWnd:SelectLoginPlatform(nIndex)
+  for i = 1, #self.tbPlatformToggleGroup do
+    self.pPanel:Toggle_SetChecked(self.tbPlatformToggleGroup[i], i == nIndex)
+  end
+  Ui.GameEnv.SetPlatform(nIndex - 1)
+end
+
+function tbWnd:SetCurZoneID(id)
+  local tbList = Login:GetZoneList()
+  self.pPanel:Label_SetText(tbControls.txtCurZone, tbList[id].Name)
+end
+
+function tbWnd:GatewayConnectLost(nSysErr, nUsrErr)
+  if nSysErr > 0 or 2 == nUsrErr then
+    Ui:OpenWindow("UIMessageBoxBig", i18n.Get("Connect2ServerFailed") .. string.format("(%d_%d)", nSysErr, nUsrErr))
+    Ui:CloseWindow("UILoadingTips")
+  end
+end
+
+function tbWnd:OnNeedAccountActive(nRetCode)
+  Ui:CloseWindow("UILoadingTips")
+  
+  local function fnCallBack(szInputCode)
+    if "" == szInputCode or string.len(szInputCode) > 15 then
+      self:OnNeedAccountActive(1)
+      return
+    end
+    RequestAccountActive(szInputCode)
+  end
+  
+  if 0 == nRetCode then
+    Ui:OpenWindow("UIInputBoxCmn", i18n.EasyGet("\232\175\183\232\190\147\229\133\165\230\191\128\230\180\187\231\160\129"), fnCallBack)
+  else
+    Ui:OpenWindow("UIMessageBoxBig", i18n.EasyGet("\230\191\128\230\180\187\231\160\129\228\184\141\230\173\163\231\161\174"), {
+      function()
+        Ui:OpenWindow("UIInputBoxCmn", i18n.EasyGet("\232\175\183\232\190\147\229\133\165\230\191\128\230\180\187\231\160\129"), fnCallBack)
+      end
+    }, {
+      i18n.szOk
+    })
+  end
+end
+
+function tbWnd:OnNeedClientUpdate(nGameVersion)
+  Ui:CloseWindow("UILoadingTips")
+  local szVersionInfo = Login:GetVersionDesc(nGameVersion)
+  Ui:OpenWindow("UIMessageBoxBig", i18n.Get("NeedUpdateClient", szVersionInfo), {
+    function()
+      CS.UnityEngine.Application.Quit()
+    end
+  }, {
+    i18n.EasyGet("\233\128\128\229\135\186\230\184\184\230\136\143")
+  })
+end

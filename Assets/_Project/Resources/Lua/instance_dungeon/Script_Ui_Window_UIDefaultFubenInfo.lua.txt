@@ -1,0 +1,152 @@
+local tbWnd = Ui:CreateClass("UIDefaultFubenInfo", "UIPanel")
+tbWnd.tbControls = {
+  txtTimer = "InfoScroll/Viewport/Content/txtTimer",
+  txtContent = "InfoScroll/Viewport/Content/txtContent"
+}
+
+function tbWnd:OnActivate()
+  self:UpdatePanel()
+end
+
+function tbWnd:OnDeactivate()
+  self:CloseTimer()
+end
+
+function tbWnd:OnClose()
+  self:CloseTimer()
+end
+
+function tbWnd:UpdateData(...)
+  self:UpdateTimerData()
+  self:UpdatePanel()
+end
+
+function tbWnd:UpdateTimerData()
+  self.pPanel:SetActive(self.txtTimer, FubenUIController.tbTimerParam ~= nil)
+  if FubenUIController.tbTimerParam then
+    self.tbTimerParam = {}
+    for i, tbParam in ipairs(FubenUIController.tbTimerParam) do
+      if nil == tbParam[1] then
+        self.pPanel:Label_SetText(self.txtTimer, tbParam[2])
+        break
+      else
+        table.insert(self.tbTimerParam, {
+          nTime = tbParam[1],
+          szTitle = tbParam[2]
+        })
+      end
+    end
+  else
+    self.tbTimerParam = nil
+  end
+end
+
+function tbWnd:UpdatePanel()
+  if self.tbTimerParam then
+    self:UpdateFubenTimer()
+  else
+    self:CloseTimer()
+    self.pPanel:Label_SetText(self.txtTimer, "")
+  end
+  self:UpdateFubenInfo()
+end
+
+function tbWnd:UpdateFubenTimer()
+  self:CloseTimer()
+  self.tbTimerList = self.tbTimerList or {}
+  local bRefreshTimer = false
+  for idx, tbParam in ipairs(self.tbTimerParam) do
+    bRefreshTimer = true
+    if not self.tbTimerList[idx] then
+      local nTimeRest = tbParam.nTime - GetTime()
+      if nTimeRest < 0 then
+        nTimeRest = 0
+      end
+      if nTimeRest > 0 then
+        self.tbTimerList[idx] = Timer:Register(nTimeRest * Env.GAME_FPS, self.TimeUp, self, idx)
+      end
+    end
+  end
+  if bRefreshTimer then
+    self:OnUpdateTime()
+    if not self.nUpdateTimer then
+      self.nUpdateTimer = Timer:Register(Env.GAME_FPS, self.OnUpdateTime, self)
+    end
+  end
+end
+
+function tbWnd:OnUpdateTime()
+  local szContent = ""
+  local nParamIndex = 1
+  for i = 1, #self.tbTimerParam do
+    local tbParam = self.tbTimerParam[i]
+    local szDesc = self:GetTimerDesc(nParamIndex)
+    local szColor = Ui.tbColor:GetColorByType("ClassifyParameter")
+    szDesc = string.format("<color=#%s>", szColor) .. szDesc .. "</color>"
+    szContent = string.format(1 == nParamIndex and "%s%s" or [[
+%s
+%s]], szContent, string.format(i18n.Parse(tbParam.szTitle), szDesc))
+    nParamIndex = nParamIndex + 1
+  end
+  self.pPanel:Label_SetText(self.txtTimer, szContent)
+  return true
+end
+
+function tbWnd:UpdateFubenInfo()
+  if not FubenUIController.tbDefaultContent then
+    for i = 1, 5 do
+      self.pPanel:SetActive(self.txtContent .. i, false)
+    end
+    return
+  end
+  for i = 1, 5 do
+    local bContentActive = FubenUIController.tbDefaultContent[i] ~= nil
+    self.pPanel:SetActive(self.txtContent .. i, bContentActive)
+    if bContentActive then
+      if string.find(i18n.Parse(FubenUIController.tbDefaultContent[i]), i18n.EasyGet("\229\189\147\229\137\141\231\155\174\230\160\135")) then
+        self.pPanel:Label_SetText(self.txtContent .. i, "<color=#c5b505>" .. i18n.Parse(FubenUIController.tbDefaultContent[i]) .. "</color>" or "")
+      else
+        self.pPanel:Label_SetText(self.txtContent .. i, i18n.Parse(FubenUIController.tbDefaultContent[i]) or "")
+      end
+    end
+  end
+end
+
+function tbWnd:GetTimerDesc(nIndex)
+  if self.tbTimerList[nIndex] and self.tbTimerList[nIndex] > 0 then
+    local nLastTime = math.floor(Timer:GetRestTime(self.tbTimerList[nIndex]) / Env.GAME_FPS)
+    if nLastTime <= 0 then
+      nLastTime = 0
+    end
+    return Lib:TimeDesc(nLastTime)
+  else
+    return Lib:TimeDesc(0)
+  end
+end
+
+function tbWnd:TimeUp(nIndex)
+  self.tbTimerList[nIndex] = nil
+end
+
+function tbWnd:CloseTimer()
+  if self.tbTimerList then
+    for _, nTimer in pairs(self.tbTimerList) do
+      if nTimer and nTimer > 0 then
+        Timer:Close(nTimer)
+      end
+    end
+    self.tbTimerList = nil
+  end
+  if self.nUpdateTimer then
+    Timer:Close(self.nUpdateTimer)
+    self.nUpdateTimer = nil
+  end
+end
+
+function tbWnd:RegisterPanelClickEvent(fnEvent, ...)
+  self.pPanel:Button_BindEvent("", fnEvent, ...)
+end
+
+function tbWnd:UnRegisterPanelClickEvent()
+  self.pPanel:Button_ClearEvent("")
+end

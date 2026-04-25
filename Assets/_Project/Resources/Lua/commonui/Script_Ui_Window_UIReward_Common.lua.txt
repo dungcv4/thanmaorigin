@@ -1,0 +1,154 @@
+local tbWnd = Ui:CreateWindow("UIReward_Common")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnReward = "node/imgBG/btnReward",
+  btnRewardYuanBao = "node/imgBG/btnRewardYuanBao",
+  reward = "node/imgBG/Content/reward",
+  rewardYuanbao = "node/imgBG/Content/rewardYuanbao",
+  rewardTemplate = "node/imgBG/Content/reward/Viewport/Content/Template",
+  rewardYuanBaoTemplate = "node/imgBG/Content/rewardYuanbao/Viewport/Content/YuanBaoTemplate",
+  txtTitle = "node/imgBG/txtTitle"
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_UPDATE_EXTRA_AWARD,
+      self.UpdateReward,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MAP_ENTER,
+      self.OnEnterMap,
+      self
+    }
+  }
+end
+
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseByDefault()
+  end
+}
+local tbSubPanelIndex = {PANEL_TYPE_SIMPLE = 1, PANEL_TYPE_BETTER = 2}
+local tbButtonGroup = {
+  [tbSubPanelIndex.PANEL_TYPE_SIMPLE] = tbControls.btnReward,
+  [tbSubPanelIndex.PANEL_TYPE_BETTER] = tbControls.btnRewardYuanBao
+}
+local tbPanelGroup = {
+  [tbSubPanelIndex.PANEL_TYPE_SIMPLE] = tbControls.reward,
+  [tbSubPanelIndex.PANEL_TYPE_BETTER] = tbControls.reward
+}
+
+function tbWnd:OnEnterMap()
+  self:Close()
+end
+
+function tbWnd:OnCreate()
+  self.tbButton = Ui:NewButtonGroup(self, tbButtonGroup, true, function(tbSelf, nIdx)
+    self.nCurRewardType = nIdx
+    self:UpdateReward()
+  end)
+  self.tbSimpleScrollView = Ui:NewScrollView(self, tbControls.rewardTemplate, nil)
+  self.tbBetterScrollView = Ui:NewScrollView(self, tbControls.rewardYuanBaoTemplate, nil)
+end
+
+function tbWnd:OnOpen(nAchieveActId)
+  if not Lib:IsInteger(nAchieveActId) then
+    return 0
+  end
+  self.pAchieveActInstance = ActivityMgr:GetInstanceById(nAchieveActId)
+  if not self.pAchieveActInstance or not self.pAchieveActInstance:IsOpen() then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return 0
+  end
+  self:UpdateReward()
+  self.nCurRewardType = tbSubPanelIndex.PANEL_TYPE_SIMPLE
+  self.tbButton:Select(self.nCurRewardType)
+  local szTitle = self.pAchieveActInstance:GetUiTitle()
+  if "" ~= szTitle then
+    self.pPanel:Label_SetText(tbControls.txtTitle, i18n.Parse(szTitle))
+  end
+end
+
+function tbWnd:SelectRewardType()
+  for nIndex, szPath in pairs(tbPanelGroup) do
+    self.pPanel:SetActive(szPath, self.nCurRewardType == nIndex)
+  end
+end
+
+function tbWnd:UpdateReward()
+  local tbAwardList = self.pAchieveActInstance:GetExtraAwardList()
+  local nBetterIndex = 1
+  local nSimpleIndex = 1
+  local tbShowList = {}
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnReward, self.pAchieveActInstance:GetRedPointEventId())
+  for _, tbAwardInfo in ipairs(tbAwardList) do
+    if self.nCurRewardType == tbSubPanelIndex.PANEL_TYPE_SIMPLE then
+      if Lib:IsEmptyStr(tbAwardInfo.szCurrencyType) then
+        table.insert(tbShowList, tbAwardInfo)
+      end
+    elseif not Lib:IsEmptyStr(tbAwardInfo.szCurrencyType) then
+      table.insert(tbShowList, tbAwardInfo)
+    end
+  end
+  self.tbSimpleScrollView:Clear()
+  for _, tbAwardInfo in ipairs(tbShowList) do
+    self.tbSimpleScrollView:SetElement(nSimpleIndex, function(tbElement)
+      self:__SetElement(tbElement, tbAwardInfo)
+    end)
+    nSimpleIndex = nSimpleIndex + 1
+  end
+end
+
+function tbWnd:__SetElement(tbElement, tbAwardInfo)
+  local szDesc = ""
+  if self.pAchieveActInstance.nId == 253 then
+    szDesc = i18n.EasyGet(i18n.Parse(tbAwardInfo.szInfo), tbAwardInfo.nNeedCount)
+  else
+    szDesc = i18n.Parse(tbAwardInfo.szInfo)
+  end
+  tbElement.pPanel:Label_SetText("txtInfo", szDesc)
+  RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, "btnReceive", self.pAchieveActInstance:GetRedPointEventId())
+  if not tbElement.tbItemGridView then
+    tbElement.tbItemGridView = Ui:NewItemGridView(tbElement, "ItemCell/reward")
+  else
+    tbElement.tbItemGridView:Clear()
+  end
+  for nIndex, tbAward in ipairs(tbAwardInfo.tbAward) do
+    tbElement.tbItemGridView:SetItem(nIndex, tbAward, true)
+  end
+  if tbAwardInfo.bSuccess and not tbAwardInfo.bHasAward then
+    tbElement.pPanel:SetActive("imgComplete", false)
+    if tbAwardInfo.nPrice > 0 then
+      tbElement.pPanel:SetActive("btnReceive", false)
+      tbElement.pPanel:SetActive("btnReceive01", true)
+      tbElement.pPanel:Sprite_SetSprite("btnReceive01/Image", Currency:GetIcon(tbAwardInfo.szCurrencyType), true)
+      tbElement.pPanel:Button_SetText("btnReceive01", tbAwardInfo.nPrice, "txt")
+      tbElement.pPanel:Button_BindEvent("btnReceive01", function(nAchieveId)
+        self.pAchieveActInstance:GetExtraAward(nAchieveId)
+      end, tbAwardInfo.nAchieveId)
+    else
+      tbElement.pPanel:SetActive("btnReceive", true)
+      tbElement.pPanel:SetActive("btnReceive01", false)
+      tbElement.pPanel:Button_SetText("btnReceive", i18n.EasyGet("\233\162\134\229\143\150"), "txt")
+      tbElement.pPanel:Button_BindEvent("btnReceive", function(nAchieveId)
+        self.pAchieveActInstance:GetExtraAward(nAchieveId)
+      end, tbAwardInfo.nAchieveId)
+    end
+    tbElement.pPanel:SetActive("prg", false)
+  elseif tbAwardInfo.bSuccess and tbAwardInfo.bHasAward then
+    tbElement.pPanel:SetActive("imgComplete", true)
+    tbElement.pPanel:SetActive("prg", false)
+    tbElement.pPanel:SetActive("btnReceive", false)
+    tbElement.pPanel:SetActive("btnReceive01", false)
+  else
+    tbElement.pPanel:Label_SetText("prg/txtPrg", string.format("%s/%s", tbAwardInfo.nFinishCount, tbAwardInfo.nNeedCount))
+    tbElement.pPanel:Sprite_SetFillAmount("prg/imgBar", 0, tbAwardInfo.nFinishCount / tbAwardInfo.nNeedCount, 1, true)
+    tbElement.pPanel:SetActive("prg", true)
+    tbElement.pPanel:SetActive("imgComplete", false)
+    tbElement.pPanel:SetActive("btnReceive", false)
+    tbElement.pPanel:SetActive("btnReceive01", false)
+  end
+end

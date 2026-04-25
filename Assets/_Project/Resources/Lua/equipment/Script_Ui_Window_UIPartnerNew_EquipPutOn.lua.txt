@@ -1,0 +1,349 @@
+Require("Script/PartnerEquip/PartnerEquipC.lua")
+local tbWnd = Ui:CreateClass("UIPartnerNew_EquipPutOn", "UIPanel")
+local PartnerEquipC = Item.PartnerEquip
+local tbControls = {
+  leftTemplate = "TabScrollView/Viewport/Content/Template",
+  ownEquipTemplate = "equipItemList/equipScrollView/Viewport/Content/Template",
+  ownTxtEmpty = "equipItemList/txtEmpty",
+  ownEquipScrollView = "equipItemList/equipScrollView",
+  btnEquipGet = "equipItemList/btnEquipGet",
+  beforeInfo = "equipBefore/info",
+  beforeImgEmpty = "equipBefore/imgEmpty",
+  beforeTxtEquipName = "equipBefore/info/txtEquipName",
+  beforeTxtFightPower = "equipBefore/info/txtFightPower",
+  beforeUIItemGrid = "equipBefore/info/UIItemGrid",
+  beforeBasicAttr = "equipBefore/info/infoScrollView/Viewport/Content/attrBasic/attr%s",
+  beforeAttrRandomTemplate = "equipBefore/info/infoScrollView/Viewport/Content/attrRandom/attrRandomTemplate",
+  beforeAttrHide = "equipBefore/info/infoScrollView/Viewport/Content/attrHide",
+  beforeAttrHideLock = "equipBefore/info/infoScrollView/Viewport/Content/attrHide/attrLock",
+  beforeAttrHideContent = "equipBefore/info/infoScrollView/Viewport/Content/attrHide/attrHideContent",
+  afterInfo = "equipAfter/info",
+  afterImgEmpty = "equipAfter/imgEmpty",
+  afterTxtEquipName = "equipAfter/info/txtEquipName",
+  afterTxtFightPower = "equipAfter/info/txtFightPower",
+  afterUIItemGrid = "equipAfter/info/UIItemGrid",
+  afterBasicAttr = "equipAfter/info/infoScrollView/Viewport/Content/attrBasic/attr%s",
+  afterAttrRandomTemplate = "equipAfter/info/infoScrollView/Viewport/Content/attrRandom/attrRandomTemplate",
+  afterAttrHide = "equipAfter/info/infoScrollView/Viewport/Content/attrHide",
+  afterAttrHideLock = "equipAfter/info/infoScrollView/Viewport/Content/attrHide/attrLock",
+  afterAttrHideContent = "equipAfter/info/infoScrollView/Viewport/Content/attrHide/attrHideContent",
+  btnEquip = "btnEquip",
+  btnDissolve = "btnDissolve"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbEventCallBack = {}
+
+function tbWnd:OnCreate()
+  self.tbLeftTabView = Ui:NewScrollView(self, tbControls.leftTemplate, self.OnClickLeftTab)
+end
+
+function tbWnd:OnOpen(nEquipType)
+  self:UpdateLeftTab()
+  self.tbLeftTabView:SelectElement(nEquipType or Item.PartnerEquip.WEAPON)
+  Ui:Button_BindEvent(self.pPanel, tbControls.btnEquipGet, self.OnClickEquipGet, self)
+end
+
+function tbWnd:OnClickSwitchEquip()
+  if self.nSelectedOwnEquipId then
+    Player:UseEquip(self.nSelectedOwnEquipId)
+  end
+end
+
+function tbWnd:OnClickUnEquip()
+  if self.nSelectedOwnEquipId then
+    RemoteServer.UnuseEquipById(self.nSelectedOwnEquipId)
+  end
+end
+
+function tbWnd:OnClickEquipGet()
+  local tbWindow = Ui:GetWindow("UIPartnerNew")
+  if tbWindow then
+    tbWindow:UpdateJumpToWnd()
+  end
+end
+
+function tbWnd:UpdateLeftTab()
+  for nEquipType = Item.PartnerEquip.WEAPON, Item.PartnerEquip.BOOTS do
+    if 0 ~= GetTimeFrameState(Item.PartnerEquip.CFG.OpenTimeFrame[nEquipType]) then
+      self.tbLeftTabView:SetElement(nEquipType, function(tbElement)
+        self:__SetLeftTabElement(tbElement, nEquipType)
+      end)
+    end
+  end
+end
+
+function tbWnd:__SetLeftTabElement(tbElement, nEquipType)
+  tbElement.pPanel:Label_SetText("txtName", i18n.Get(Item.PartnerEquip.CFG.EquipPosDesc[nEquipType]))
+  local pUsingEquip = Item.ExtEquip:GetEquipObj(me, nEquipType)
+  if PartnerEquipC:GetBetterRedPointData(nEquipType) and (pUsingEquip and pUsingEquip.dwId or 0) ~= PartnerEquipC:GetBetterRedPointData(nEquipType) then
+    RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, "Main", {
+      RedPointMgr.EVENT.PartnerEquipBetter
+    })
+  else
+    RedPointMgr:DynamicUnRegist(tbElement.pPanel, "Main")
+  end
+end
+
+function tbWnd:OnClickLeftTab(nEquipType)
+  if nEquipType < Item.PartnerEquip.WEAPON or nEquipType > Item.PartnerEquip.BOOTS then
+    return
+  end
+  self:UpdateOwnEquipPanel(nEquipType)
+  self:UpdateBeforeEquipPanel(self.nSelectedOwnEquipId, nEquipType)
+end
+
+function tbWnd:OnClickOwnEquip(nIndex, nEquipType)
+  if self.nSelectedOwnIndex then
+    local tbElementPrev = self.tbOwnEquipView:GetElement(self.nSelectedOwnIndex)
+    tbElementPrev.pPanel:SetActive("imgSelected", false)
+  end
+  local tbElementNow = self.tbOwnEquipView:GetElement(nIndex)
+  tbElementNow.pPanel:SetActive("imgSelected", true)
+  self.nSelectedOwnIndex = nIndex
+  self.nSelectedOwnEquipId = self.tbOwnEquip[nIndex].dwId
+  self:UpdateBeforeEquipPanel(self.nSelectedOwnEquipId, nEquipType)
+  self:UpdateAfterEquipPanel(self.nSelectedOwnEquipId, nEquipType)
+  local pUsingEquip = Item.ExtEquip:GetEquipObj(me, nEquipType)
+  self.pPanel:Button_SetEnable(tbControls.btnEquip, true)
+  if pUsingEquip and self.nSelectedOwnEquipId == pUsingEquip.dwId then
+    self.pPanel:Button_SetText(tbControls.btnEquip, i18n.EasyGet("\229\141\184\228\184\139"), "Text")
+    Ui:Button_BindEvent(self.pPanel, tbControls.btnEquip, self.OnClickUnEquip, self)
+    RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnEquip)
+    self.pPanel:SetActive(tbControls.btnDissolve, false)
+  else
+    if not pUsingEquip then
+      self.pPanel:Button_SetText(tbControls.btnEquip, i18n.EasyGet("\232\163\133\229\164\135"), "Text")
+    else
+      self.pPanel:Button_SetText(tbControls.btnEquip, i18n.EasyGet("\230\155\191\230\141\162"), "Text")
+    end
+    Ui:Button_BindEvent(self.pPanel, tbControls.btnEquip, self.OnClickSwitchEquip, self)
+    local nFocusEquipId = PartnerEquipC:GetBetterRedPointData(nEquipType)
+    if nFocusEquipId and nFocusEquipId == self.nSelectedOwnEquipId then
+      RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnEquip, {
+        RedPointMgr.EVENT.PartnerEquipBetter
+      })
+    else
+      RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnEquip)
+    end
+    self.pPanel:SetActive(tbControls.btnDissolve, true)
+    
+    local function fnOK(tbSelectedItemIdList)
+      PartnerEquipC:ReqPartnerEquipDecomposeByBatch(tbSelectedItemIdList)
+    end
+    
+    Ui:Button_BindEvent(self.pPanel, tbControls.btnDissolve, function(tbSelf)
+      local pEquip = me.GetItemInAllSpace(tbSelf.nSelectedOwnEquipId)
+      local nRewardNum = PartnerEquipC:GetNeedRewardMaterial(pEquip)
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\231\161\174\232\174\164\229\136\134\232\167\163\229\185\182\232\142\183\229\190\151{0}\231\142\132\231\159\179\239\188\159", nRewardNum), {
+        {
+          fnOK,
+          {
+            tbSelf.nSelectedOwnEquipId
+          }
+        },
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      })
+    end, self)
+  end
+end
+
+function tbWnd:__SetOwnEquipElement(tbElement, pEquip, nUsingEquipId)
+  if not tbElement.tbEquipGrid then
+    tbElement.tbEquipGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  end
+  tbElement.tbEquipGrid:SetItem(pEquip.dwId, pEquip.dwTemplateId)
+  local nLevel = PartnerEquipC:GetEquipLevel(pEquip)
+  tbElement.pPanel:SetActive("txtLv", nLevel and nLevel > 0)
+  tbElement.pPanel:Label_SetText("txtLv", "+" .. (nLevel or 0))
+  tbElement.pPanel:Label_SetText("txtEquipName", i18n.Parse(pEquip.szName))
+  tbElement.pPanel:Label_SetText("txtFightPower", i18n.EasyGet("\230\136\152\229\138\155\239\188\154{0}", PartnerEquipC:GetEquipFightPower(pEquip)))
+  tbElement.pPanel:SetActive("imgSelected", false)
+  tbElement.pPanel:SetActive("imgEquip", pEquip.dwId == nUsingEquipId)
+  local nFocusEquipId = PartnerEquipC:GetBetterRedPointData(Item:GetExtEquipSlot(pEquip))
+  if nFocusEquipId and nFocusEquipId == pEquip.dwId and nUsingEquipId ~= nFocusEquipId then
+    RedPointMgr:DynamicRegisteRedPoint(tbElement.pPanel, "Main", {
+      RedPointMgr.EVENT.PartnerEquipBetter
+    })
+  else
+    RedPointMgr:DynamicUnRegist(tbElement.pPanel, "Main")
+  end
+end
+
+function tbWnd:UpdateOwnEquipPanel(nEquipType)
+  self.nEquipType = self.nEquipType or Item.PartnerEquip.WEAPON
+  if type(nEquipType) ~= "number" then
+    nEquipType = self.nEquipType
+  elseif nEquipType >= Item.PartnerEquip.WEAPON and nEquipType <= Item.PartnerEquip.BOOTS then
+    self.nEquipType = nEquipType
+  else
+    nEquipType = self.nEquipType
+  end
+  self.tbOwnEquip = PartnerEquipC:GetAllPartnerEquipByPos(me, self.nEquipType) or {}
+  if not self.tbOwnEquipView then
+    self.tbOwnEquipView = Ui:NewScrollView(self, tbControls.ownEquipTemplate, function(tbSelf, nIndex)
+      tbSelf:OnClickOwnEquip(nIndex, self.nEquipType)
+    end)
+  end
+  if Lib:IsEmptyTB(self.tbOwnEquip) then
+    self.pPanel:SetActive(tbControls.ownTxtEmpty, true)
+    self.pPanel:SetActive(tbControls.ownEquipScrollView, false)
+    self.pPanel:SetActive(tbControls.beforeImgEmpty, true)
+    self.pPanel:SetActive(tbControls.beforeInfo, false)
+    self.pPanel:SetActive(tbControls.afterImgEmpty, true)
+    self.pPanel:SetActive(tbControls.afterInfo, false)
+    self.pPanel:SetActive(tbControls.btnEquip, false)
+  else
+    self.pPanel:SetActive(tbControls.ownTxtEmpty, false)
+    self.pPanel:SetActive(tbControls.ownEquipScrollView, true)
+    self.tbOwnEquipView:Clear()
+    local pUsingEquip = Item.ExtEquip:GetEquipObj(me, self.nEquipType)
+    for nItemIndex, pEquip in ipairs(self.tbOwnEquip) do
+      self.tbOwnEquipView:SetElement(nItemIndex, function(tbElement)
+        self:__SetOwnEquipElement(tbElement, pEquip, pUsingEquip and pUsingEquip.dwId or 0)
+      end)
+    end
+    self.tbOwnEquipView:SelectElement(1)
+    self.pPanel:SetActive(tbControls.btnEquip, true)
+  end
+end
+
+function tbWnd:UpdateBeforeEquipPanel(nSelectedOwnEquipId, nEquipType)
+  local pUsingEquip = Item.ExtEquip:GetEquipObj(me, nEquipType)
+  if not pUsingEquip then
+    self.pPanel:SetActive(tbControls.beforeImgEmpty, true)
+    self.pPanel:SetActive(tbControls.beforeInfo, false)
+  else
+    self.pPanel:SetActive(tbControls.beforeImgEmpty, false)
+    self.pPanel:SetActive(tbControls.beforeInfo, true)
+    self.pPanel:ContentSizeFitter_Refresh(tbControls.beforeInfo .. "/infoScrollView/Viewport/Content")
+    if not self.tbBeforeGrid then
+      self.tbBeforeGrid = Ui:NewExistItemGrid(self, tbControls.beforeUIItemGrid)
+    end
+    self.tbBeforeGrid:SetItem(pUsingEquip.dwId)
+    local nLevel = PartnerEquipC:GetEquipLevel(pUsingEquip)
+    self.tbBeforeGrid.pPanel:SetActive("../txtLv", nLevel and nLevel > 0)
+    self.tbBeforeGrid.pPanel:Label_SetText("../txtLv", "+" .. (nLevel or 0))
+    self.pPanel:Label_SetText(tbControls.beforeTxtEquipName, i18n.Parse(pUsingEquip.szName))
+    self.pPanel:Label_SetText(tbControls.beforeTxtFightPower, i18n.EasyGet("\230\136\152\229\138\155\239\188\154{0}", PartnerEquipC:GetEquipFightPower(pUsingEquip)))
+    local tbAllBasicAttr = PartnerEquipC:GetAllBaseAttr(pUsingEquip) or {}
+    for nIndex, tbBasicAttr in ipairs(tbAllBasicAttr) do
+      local szBasePath = string.format(tbControls.beforeBasicAttr, nIndex)
+      local _, nEnhanceValue, _ = PartnerEquipC:GetBaseAttrDiffByLevel(pUsingEquip, nIndex, 0, nLevel)
+      local szAttrDesc, nAttrValue = PartnerEquipC:GetEquipAttrDiff(tbBasicAttr, nil)
+      self.pPanel:Label_SetText(szBasePath .. "/txtAttrTip", i18n.Parse(szAttrDesc))
+      self.pPanel:Label_SetText(szBasePath .. "/txtAttrValueNow", string.format("+%s", nAttrValue - nEnhanceValue))
+    end
+    local tbAllRandomAttr = PartnerEquipC:GetAllRandomAttr(pUsingEquip) or {}
+    if not self.tbBeforeRandomView then
+      self.tbBeforeRandomView = Ui:NewScrollView(self, tbControls.beforeAttrRandomTemplate)
+    end
+    self.tbBeforeRandomView:Clear()
+    for nIndex = 1, PartnerEquipC.MAX_RANDOMATTR_NUM do
+      self.tbBeforeRandomView:SetElement(nIndex, function(tbElement)
+        self:__SetRandomAttrElement(nIndex, tbElement, tbAllRandomAttr[nIndex])
+      end)
+    end
+    if pUsingEquip.nQuality ~= PartnerEquipC.eEquipQuality.Rare or not PartnerEquipC:IsEquipFullLevel(pUsingEquip) then
+      self.pPanel:SetActive(tbControls.beforeAttrHide, false)
+    else
+      self.pPanel:SetActive(tbControls.beforeAttrHide, true)
+      self:__SetHideAttrInfo(pUsingEquip, tbControls.beforeAttrHideLock, tbControls.beforeAttrHideContent)
+    end
+  end
+end
+
+function tbWnd:UpdateAfterEquipPanel(nSelectedOwnEquipId, nEquipType)
+  local pUsingEquip = Item.ExtEquip:GetEquipObj(me, nEquipType)
+  local pPreUseEquip = me.GetItemInAllSpace(nSelectedOwnEquipId)
+  if not pPreUseEquip or pUsingEquip and pPreUseEquip.dwId == pUsingEquip.dwId then
+    self.pPanel:SetActive(tbControls.afterImgEmpty, true)
+    self.pPanel:SetActive(tbControls.afterInfo, false)
+  else
+    self.pPanel:SetActive(tbControls.afterImgEmpty, false)
+    self.pPanel:SetActive(tbControls.afterInfo, true)
+    self.pPanel:ContentSizeFitter_Refresh(tbControls.afterInfo .. "/infoScrollView/Viewport/Content")
+    if not self.tbAfterGrid then
+      self.tbAfterGrid = Ui:NewExistItemGrid(self, tbControls.afterUIItemGrid)
+    end
+    self.tbAfterGrid:SetItem(pPreUseEquip.dwId, pPreUseEquip.dwTemplateId)
+    local nLevel = PartnerEquipC:GetEquipLevel(pPreUseEquip)
+    self.tbAfterGrid.pPanel:SetActive("../txtLv", nLevel and nLevel > 0)
+    self.tbAfterGrid.pPanel:Label_SetText("../txtLv", "+" .. (nLevel or 0))
+    self.pPanel:Label_SetText(tbControls.afterTxtEquipName, i18n.Parse(pPreUseEquip.szName))
+    self.pPanel:Label_SetText(tbControls.afterTxtFightPower, i18n.EasyGet("\230\136\152\229\138\155\239\188\154{0}", PartnerEquipC:GetEquipFightPower(pPreUseEquip)))
+    local tbAllBasicAttr = PartnerEquipC:GetAllBaseAttr(pPreUseEquip) or {}
+    for nIndex, tbBasicAttr in ipairs(tbAllBasicAttr) do
+      local szBasePath = string.format(tbControls.afterBasicAttr, nIndex)
+      local _, nEnhanceValue, _ = PartnerEquipC:GetBaseAttrDiffByLevel(pPreUseEquip, nIndex, 0, nLevel)
+      local szAttrDesc, nAttrValue = PartnerEquipC:GetEquipAttrDiff(tbBasicAttr, nil)
+      self.pPanel:Label_SetText(szBasePath .. "/txtAttrTip", i18n.Parse(szAttrDesc))
+      self.pPanel:Label_SetText(szBasePath .. "/txtAttrValueNow", string.format("+%s", nAttrValue - nEnhanceValue))
+    end
+    local tbAllRandomAttr = PartnerEquipC:GetAllRandomAttr(pPreUseEquip) or {}
+    if not self.tbAfterRandomView then
+      self.tbAfterRandomView = Ui:NewScrollView(self, tbControls.afterAttrRandomTemplate)
+    end
+    self.tbAfterRandomView:Clear()
+    for nIndex = 1, PartnerEquipC.MAX_RANDOMATTR_NUM do
+      self.tbAfterRandomView:SetElement(nIndex, function(tbElement)
+        self:__SetRandomAttrElement(nIndex, tbElement, tbAllRandomAttr[nIndex])
+      end)
+    end
+    if pPreUseEquip.nQuality ~= PartnerEquipC.eEquipQuality.Rare or not PartnerEquipC:IsEquipFullLevel(pPreUseEquip) then
+      self.pPanel:SetActive(tbControls.afterAttrHide, false)
+    else
+      self.pPanel:SetActive(tbControls.afterAttrHide, true)
+      self:__SetHideAttrInfo(pPreUseEquip, tbControls.afterAttrHideLock, tbControls.afterAttrHideContent)
+    end
+  end
+end
+
+function tbWnd:__SetRandomAttrElement(nIndex, tbElement, tbRandomAttr)
+  if not tbRandomAttr then
+    tbElement.pPanel:SetActive("attrNormal", false)
+    tbElement.pPanel:SetActive("attrLock", true)
+    tbElement.pPanel:Label_SetText("attrLock/txtLock", i18n.EasyGet("\229\141\135\232\135\179{0}\231\186\167\229\144\142\229\143\175\232\167\163\233\148\129", nIndex * Item.PartnerEquip.CFG.nRandomAttrStageLevel))
+  else
+    tbElement.pPanel:SetActive("attrNormal", true)
+    tbElement.pPanel:SetActive("attrLock", false)
+    local szAttrDesc, nAttrValue = PartnerEquipC:GetEquipAttrDiff(tbRandomAttr, nil)
+    tbElement.pPanel:Label_SetText("attrNormal/txtAttrTip", i18n.Parse(szAttrDesc))
+    tbElement.pPanel:Label_SetText("attrNormal/txtAttrValueNow", "+" .. nAttrValue)
+    tbElement.pPanel:SetActive("attrNormal/txtLimit", false)
+  end
+end
+
+function tbWnd:__SetHideAttrInfo(pEquip, szHideLockPath, szHideContentPath)
+  local szSkillName, szSkillDesc = PartnerEquipC:GetHideSkillInfo(pEquip)
+  if pEquip.nQuality ~= PartnerEquipC.eEquipQuality.Rare then
+    self.pPanel:SetActive(szHideLockPath, false)
+    self.pPanel:SetActive(szHideContentPath, false)
+  elseif not szSkillName then
+    self.pPanel:SetActive(szHideLockPath, true)
+    self.pPanel:SetActive(szHideContentPath, false)
+  else
+    self.pPanel:SetActive(szHideLockPath, false)
+    self.pPanel:SetActive(szHideContentPath, true)
+    self.pPanel:Label_SetText(szHideContentPath, string.format("[%s] %s", szSkillName, szSkillDesc))
+  end
+end
+
+function tbWnd:OnEventNotify(...)
+  self:UpdateOwnEquipPanel(...)
+  self:UpdateLeftTab()
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:SetActive(bActive, nEquipType)
+  self.pPanel:SetActive("Main", bActive)
+  if bActive then
+    self:OnOpen(nEquipType)
+  else
+    self:OnClose()
+  end
+end

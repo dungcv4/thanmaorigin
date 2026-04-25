@@ -1,0 +1,321 @@
+local tbMapEnterBlackBoardMsg = {}
+Map.tbFieldFightMap = {}
+
+function Map:GetCanEnterFightMapsByLevel(nLevel)
+  local tbMaps = {}
+  for nTemplateID, _ in pairs(Map.tbFieldFightMap) do
+    if Map:CanSwitchMap(nLevel, nTemplateID) then
+      table.insert(tbMaps, nTemplateID)
+    end
+  end
+  return tbMaps
+end
+
+function Map:GetCanEnterBestFightMapByLevel(nLevel)
+  local nMaxMapLevel = 0
+  local nMapTemplateId
+  for nTemplateID, _ in pairs(Map.tbFieldFightMap) do
+    local nMapLevel = Map:GetMapLevel(nTemplateID)
+    if nMaxMapLevel < nMapLevel and Map:CanSwitchMap(nLevel, nTemplateID) then
+      nMaxMapLevel = nMapLevel
+      nMapTemplateId = nTemplateID
+    end
+  end
+  return nMapTemplateId
+end
+
+function Map:OnEnter(nTemplateID, nMapID, nIsLocal)
+  if not PlayerEvent.bLogin then
+    PlayerEvent.tbMapOnEnterParam = {
+      nTemplateID,
+      nMapID,
+      nIsLocal
+    }
+    return
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MAP_ENTER, nTemplateID, nMapID)
+  ClientNpc:OnEnterMap(nTemplateID)
+end
+
+function Map:OnLogin(bIsReconnect)
+end
+
+function Map:OnLeave(nTemplateID, nMapID, nToMapTemplateID)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MAP_LEAVE, nTemplateID, nMapID)
+  Client.QualityModule.StepClearMemory()
+  Ui:CloseWindow("UINpcDialog")
+  me.nLastLeaveMap = nTemplateID
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MAP_LEAVE2)
+end
+
+function Map:OnSwitchMap(nOldMapId, nNewMapId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MAP_SWITCH, nOldMapId, nNewMapId)
+end
+
+function Map:OnDestroy(nTemplateID, nMapID, nIsLocal)
+  Ui:CloseWindow("UIActivity")
+  Map:StopMapSound()
+  Map:CheckCloseUi(self.tbOnLeaveCloseUi, nMapID)
+end
+
+function Map:UpdateMapLoaded(nMapTemplateID)
+end
+
+function Map:OnMapLoadFail(nMapTemplateID)
+  Ui:DestroyWindow("UIMapLoading")
+  TeamMgr:StopFollowMember()
+  AFK:Stop()
+  Dialog:MsgBox(i18n.EasyGet("\228\184\139\232\189\189\229\156\176\229\155\190\229\164\177\232\180\165\239\188\140\232\175\183\230\163\128\230\159\165\228\189\160\231\154\132\231\189\145\231\187\156\227\128\130"), {
+    {
+      i18n.EasyGet("\231\187\167\231\187\173\230\184\184\230\136\143"),
+      function()
+        RemoteServer.SwitchMap(1)
+      end
+    }
+  }, nil, nil, nil, "UIMessageBox")
+end
+
+function Map:OnMapLoaded(nMapTemplateID, nLastMapTemplateId)
+  Map:UpdateMapLoaded(nMapTemplateID)
+  if 0 == nMapTemplateID then
+    Login:OnMapLoaded()
+    return
+  else
+    Ui:DestroyWindow("UILoginBG")
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MAP_LOADED, nMapTemplateID)
+  Client:DoSetPlayerDir()
+  if CustomMusicPlayer:IsEnable() then
+    CustomMusicPlayer:PlayRandomMusic()
+  else
+    Map:PlayMapSound(nMapTemplateID)
+  end
+  me.OnEvent("OnMapLoaded", nMapTemplateID)
+  if me and me.nMapId then
+    Map:CheckCloseUi(self.tbOnLoadCloseUi, me.nMapId)
+  end
+  if tbMapEnterBlackBoardMsg[nMapTemplateID] then
+    me.SendBlackBoardMsg(tbMapEnterBlackBoardMsg[nMapTemplateID])
+  end
+  Player:FlyChar()
+  AutoPath:StopGoto()
+  ClientUtil:OnMapLoad()
+  AutoPath:OnMapLoaded(me.nMapId)
+  RemoteServer.OnClientMapLoaded(nMapTemplateID, me.nMapId, me.dwID)
+  Lib:CallBack({
+    TeamMgr.OnMapLoaded,
+    TeamMgr,
+    nMapTemplateID,
+    nLastMapTemplateId
+  })
+end
+
+function Map:OnPlayerTrap(nMapTemplateID, nMapID, szTrapName, nIsLocal)
+end
+
+function Map:OnNpcTrap(nMapTemplateID, nMapID, szTrapName, nIsLocal)
+end
+
+local tbMiniMapNpcPositions = {}
+
+function Map:OnSyncNpcsPos(szType, tbPos)
+  tbMiniMapNpcPositions[szType] = tbPos
+end
+
+function Map:GetMiniMapPos(szType)
+  return tbMiniMapNpcPositions[szType] or {}
+end
+
+Map.tbPlaySceneSound = Map.tbPlaySceneSound or {}
+
+function Map:PlayMapSound(nTemplateMapId)
+  local nSoundID = self:GetSoundID(nTemplateMapId)
+  if nSoundID > 0 then
+    self:PlaySceneSound(nSoundID)
+  end
+end
+
+function Map:StopMapSound()
+  Client.AudioModule.StopMusic()
+  self.tbPlaySceneSound = {}
+end
+
+function Map:PlaySceneSound(nSoundID)
+  if self.tbPlaySceneSound[nSoundID] then
+    return
+  end
+  Client.AudioModule.PlayMusic(nSoundID)
+  self.tbPlaySceneSound[nSoundID] = 1
+end
+
+function Map:SwitchSceneSound(nSoundID)
+  self:StopMapSound()
+  self:PlaySceneSound(nSoundID)
+end
+
+function Map:PlaySceneOneSound(nSoundID)
+  self:StopMapSound()
+  self:PlaySceneSound(nSoundID)
+end
+
+function Map:RestartPlayMapSound()
+  self:StopMapSound()
+  self:PlayMapSound(me.nMapTemplateId)
+end
+
+function Map:SetCloseUiOnLoad(nMapId, szUiName)
+  self.tbOnLoadCloseUi = self.tbOnLoadCloseUi or {}
+  self.tbOnLoadCloseUi[szUiName] = nMapId
+end
+
+function Map:SetCloseUiOnLeave(nMapId, szUiName)
+  self.tbOnLeaveCloseUi = self.tbOnLeaveCloseUi or {}
+  self.tbOnLeaveCloseUi[szUiName] = nMapId
+end
+
+function Map:CheckCloseUi(tbCloseInfo, nMapId)
+  if not tbCloseInfo then
+    return
+  end
+  tbCloseInfo = tbCloseInfo or {}
+  local tbInfo = {}
+  for szUiName, nMd in pairs(tbCloseInfo) do
+    if nMapId == nMd then
+      Ui:CloseWindow(szUiName)
+      table.insert(tbInfo, szUiName)
+    end
+  end
+  for _, szUiName in pairs(tbInfo) do
+    tbCloseInfo[szUiName] = nil
+  end
+end
+
+function Map:OnSynAllRolePos(tbPosList)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYN_MAP_ALL_POS, tbPosList)
+end
+
+function Map:SwitchMap(nMapId)
+  AutoPath:ClearSwitchMapCache()
+  AutoPath:StopGoto()
+  if not self.nDelayTimer then
+    Timer:Close(self.nDelayTimer)
+  end
+  self.nDelayTimer = Timer:Register(9, function()
+    self.nDelayTimer = nil
+    Map:SendSwitchMapRequest(nMapId)
+    return false
+  end)
+end
+
+function Map:HasSwitchMapDelayTimer()
+  return self.nDelayTimer ~= nil
+end
+
+function Map:SendSwitchMapRequest(nMapId)
+  if not nMapId or nMapId < 0 then
+    return
+  end
+  local bRet = TeamMgr:CanSwitchMap(nMapId)
+  if not bRet then
+    return
+  end
+  local bOk, szMsg = GlobalHangUp:OnSwitchMap(me.nMapTemplateId, nMapId)
+  if not bOk then
+    me.CenterMsg(szMsg)
+    return
+  end
+  local nDelayFrame
+  if AFK:IsInFightStep() then
+    AFK:Suspend()
+    nDelayFrame = 18
+  end
+  local bIsFollowTeammate = TeamMgr:IsFollowTeammate()
+  if nDelayFrame then
+    if self.nDelayTimer then
+      Timer:Close(self.nDelayTimer)
+    end
+    self.nDelayTimer = Timer:Register(nDelayFrame, function()
+      self.nDelayTimer = nil
+      RemoteServer.SwitchMap(nMapId, bIsFollowTeammate)
+    end)
+    return
+  end
+  RemoteServer.SwitchMap(nMapId, bIsFollowTeammate)
+end
+
+function Map:OnSwitchMapFail(szMsg)
+  AutoPath:ClearSwitchMapCache()
+  szMsg = szMsg or i18n.EasyGet("\228\188\160\233\128\129\229\164\177\232\180\165")
+  if not me.nCannotTransToTargetMapErrMsgSendFrameTime then
+    me.nCannotTransToTargetMapErrMsgSendFrameTime = 0
+  end
+  local nCurFrame = GetFrame()
+  if TeamMgr:IsFollowTeammate() then
+    if nCurFrame > me.nCannotTransToTargetMapErrMsgSendFrameTime + 5 * Env.GAME_FPS then
+      me.CenterMsg(szMsg)
+      me.nCannotTransToTargetMapErrMsgSendFrameTime = nCurFrame
+    end
+  elseif nCurFrame > me.nCannotTransToTargetMapErrMsgSendFrameTime + 0.5 * Env.GAME_FPS then
+    me.CenterMsg(szMsg)
+    me.nCannotTransToTargetMapErrMsgSendFrameTime = nCurFrame
+  end
+end
+
+function Map:OnBreakSwitchMapProgress(nTargetMapId, nTargetPosX, nTargetPosY)
+  local nMapTemplateId = me.nMapTemplateId
+  local nPosX, nPosY = self:GetDefaultPos(nMapTemplateId)
+  local nBreakProgressPathReason = AutoPath.PathReason.emMiniMap_GoToTargetPos
+  if not AutoPath.tbParamExt or not AutoPath.tbParamExt[1] then
+  else
+    local nAutoPathMapId = AutoPath.tbParamExt[1]
+    local nAutoPathPosX = AutoPath.tbParamExt[2]
+    local nAutoPathPosY = AutoPath.tbParamExt[3]
+    local fnSucceed = AutoPath.tbParamExt[4]
+    local nNearLength = AutoPath.tbParamExt[5]
+    local nTaskId = AutoPath.tbParamExt[6]
+    local nNpcTemplateId = AutoPath.tbParamExt[7]
+    local nTransX = AutoPath.tbParamExt[8]
+    local nTransY = AutoPath.tbParamExt[9]
+    local fnFail = AutoPath.tbParamExt[10]
+    local fnFinish = AutoPath.tbParamExt[11]
+    local nPathReason = AutoPath.tbParamExt[12]
+    AutoPath:ClearSwitchMapCache()
+    AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, function()
+      AutoPath:GotoAndCallEx(nAutoPathMapId, nAutoPathPosX, nAutoPathPosY, fnSucceed, nNearLength, nTaskId, nNpcTemplateId, nTransX, nTransY, fnFail, fnFinish, nPathReason)
+    end, nil, nil, nil, nil, nil, nil, nil, nBreakProgressPathReason)
+  end
+end
+
+function Map:IsNeedTrapPointToSwitchMap(nFromMapTID, nToMapTID)
+  local tbMapClass = self:GetClass(nFromMapTID, true)
+  if nil ~= tbMapClass and nil ~= tbMapClass.IsNeedTrapPointToSwitchMap then
+    return tbMapClass:IsNeedTrapPointToSwitchMap(nFromMapTID, nToMapTID)
+  end
+  return false
+end
+
+function Map:OnBreakSwitchKinMapProgress(szFunc)
+  local nMapTemplateId = me.nMapTemplateId
+  local nPosX, nPosY = self:GetDefaultPos(nMapTemplateId)
+  AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, function()
+    Kin:OnBreakSwitchKinMapProgressCallBack(szFunc)
+  end)
+end
+
+function Map:GetClass(nMapTemplateId, bNotCreate)
+  local tbClass = self.tbClass[nMapTemplateId]
+  if not tbClass and not bNotCreate then
+    tbClass = {}
+    tbClass.nMapTemplateId = nMapTemplateId
+    self.tbClass[nMapTemplateId] = tbClass
+  end
+  return tbClass
+end
+
+function Map:Init()
+  if not self.tbClass then
+    self.tbClass = {}
+  end
+end
+
+Map:Init()

@@ -1,0 +1,225 @@
+local tbWnd = Ui:CreateWindow("UIGoldenShell")
+tbWnd.tbControls = {
+  btnClose = "node/imgBg/btnClose",
+  btnOpenOne = "node/imgBg/Right/btnOpenOne",
+  btnOpenTen = "node/imgBg/Right/btnOpenTen",
+  txtShell = "node/imgBg/Right/txtShell",
+  txtToggle = "node/imgBg/Right/Toggle",
+  btnHelp = "node/imgBg/Title/btnHelp"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnOpenOne = function(self)
+    self:OnClickOpenBtn(1)
+  end,
+  btnOpenTen = function(self)
+    self:OnClickOpenBtn(10)
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("BaiBaoXiangHelp")
+  end
+}
+tbWnd.nMaxAwardCount = 14
+tbWnd.nMaxOpenItem = 10
+tbWnd.nFirstSpeed = 2
+tbWnd.nSecondSpeed = 10
+tbWnd.nNextAwardSpeed = 5
+tbWnd.nSkipNextAwardSpeed = 5
+tbWnd.nFirstSlowNum = 7
+tbWnd.nFirstSlowSpeed = 10
+
+function tbWnd:OnCreate()
+  self.tbItemGridList = {}
+  for i = 1, self.nMaxAwardCount do
+    if i <= 9 then
+      self.tbItemGridList[i] = Ui:NewExistItemGrid(self, string.format("node/imgBg/Left/item0%d/UIItemGrid", i))
+      self.pPanel:SetActive(string.format("node/imgBg/Left/item0%d/imgSelected", i), false)
+    else
+      self.tbItemGridList[i] = Ui:NewExistItemGrid(self, string.format("node/imgBg/Left/item%d/UIItemGrid", i))
+      self.pPanel:SetActive(string.format("node/imgBg/Left/item%d/imgSelected", i), false)
+    end
+  end
+end
+
+function tbWnd:OnOpen(nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    Ui:CloseWindow(self.ClassName)
+    return
+  end
+  self.nItemId = nItemId
+  self.nTemplateId = pItem.dwTemplateId
+  self.nAwardId = KItem.GetItemExtParam(pItem.dwTemplateId, 1)
+  self.nAwardKey = KItem.GetItemExtParam(pItem.dwTemplateId, 2)
+  local tbAwards = Award:GetAllAwardNoRand(self.nAwardId, self.nAwardKey, {bNotMerge = true})
+  for i = 1, self.nMaxAwardCount do
+    if tbAwards[i] and self.tbItemGridList[i] then
+      self.tbItemGridList[i].tbControlFlag.bShowTip = true
+      self.tbItemGridList[i]:SetGenericItem(tbAwards[i])
+      self.tbItemGridList[i]:SetClickEnable(true)
+    end
+  end
+  self:RefreshItemCount()
+  self.pPanel:Toggle_SetChecked(self.txtToggle, true)
+  self:ShowHideAllEffect(false)
+end
+
+function tbWnd:OnClickOpenBtn(nOpenCount)
+  local nItemCount = 0
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if pItem then
+    nItemCount = pItem.nCount
+  end
+  if nOpenCount > nItemCount then
+    me.CenterMsg(i18n.EasyGet("\233\129\147\229\133\183\230\149\176\233\135\143\228\184\141\232\182\179"))
+    return
+  end
+  if self.bShowEffect == true then
+    me.CenterMsg(i18n.EasyGet("\230\173\163\229\156\168\229\188\128\229\144\175\228\184\173\239\188\140\232\175\183\231\168\141\229\144\142"))
+    return
+  end
+  RemoteServer.UseManyItem(self.nItemId, nOpenCount)
+end
+
+function tbWnd:ShowHideAllEffect(bShow)
+  for i = 1, self.nMaxAwardCount do
+    if i <= 9 then
+      self.pPanel:SetActive(string.format("node/imgBg/Left/item0%d/imgSelected", i), bShow)
+    else
+      self.pPanel:SetActive(string.format("node/imgBg/Left/item%d/imgSelected", i), bShow)
+    end
+  end
+end
+
+function tbWnd:RefreshItemCount()
+  local nItemCount = 0
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if pItem then
+    nItemCount = pItem.nCount
+  end
+  self.pPanel:Label_SetText(self.txtShell, i18n.EasyGet("\230\139\165\230\156\137\233\135\145\232\180\157\229\163\179\239\188\154{0}", nItemCount))
+  self.pPanel:Button_SetEnable(self.btnOpenTen, nItemCount >= self.nMaxOpenItem)
+end
+
+function tbWnd:ShowEffect(tbIndex)
+  if tbIndex then
+    self.tbAwardIndex = tbIndex
+    self.nShowIndex = 1
+    self.nStartAwardIndex = 1
+    self:BeginShowOneAward()
+  end
+end
+
+function tbWnd:BeginShowOneAward()
+  self.bShowEffect = true
+  local nCurShowIndex = self.tbAwardIndex[self.nShowIndex]
+  if nCurShowIndex then
+    if not self:GetSkipAnim() then
+      if nCurShowIndex == self.nStartAwardIndex then
+        self.nStep = self.nMaxAwardCount
+      elseif nCurShowIndex > self.nStartAwardIndex and nCurShowIndex <= self.nMaxAwardCount then
+        self.nStep = nCurShowIndex - self.nStartAwardIndex
+      else
+        self.nStep = self.nMaxAwardCount + nCurShowIndex - self.nStartAwardIndex
+      end
+      if 1 == self.nShowIndex then
+        self.nStep = self.nStep + math.random(2, 3) * self.nMaxAwardCount
+      end
+      self:ShowCurEffect(true)
+      self:CloseUITimer()
+      local nSpeed = 1 == self.nShowIndex and self.nFirstSpeed or self.nSecondSpeed
+      self.nCurTimer = Timer:Register(nSpeed, self.ShowOneStep, self)
+    elseif 1 == #self.tbAwardIndex then
+      self:ShowCurEffect(false)
+      self.nStep = 0
+      self.nStartAwardIndex = nCurShowIndex
+      self:ShowOneStep()
+    else
+      for _, nAwardIndex in ipairs(self.tbAwardIndex) do
+        self.nStartAwardIndex = nAwardIndex
+        self:ShowCurEffect(true)
+        self.nShowIndex = self.nShowIndex + 1
+      end
+      local nNextSpeed = self.nNextAwardSpeed
+      local nSkip = self:GetSkipAnim()
+      if nSkip then
+        nNextSpeed = self.nSkipNextAwardSpeed
+      end
+      self.nCurTimer = Timer:Register(nNextSpeed, self.BeginShowOneAward, self)
+    end
+  else
+    self:ShowHideAllEffect(false)
+    self:RefreshItemCount()
+    local tbAwards = Award:GetAllAwardNoRand(self.nAwardId, self.nAwardKey, {bNotMerge = true})
+    local tbCacheAwards = {}
+    for _, nAwardIndex in pairs(self.tbAwardIndex) do
+      table.insert(tbCacheAwards, tbAwards[nAwardIndex])
+    end
+    Ui:OpenWindow("UIGetAwardShow", tbCacheAwards)
+    self:Clear()
+    self:CloseUITimer()
+  end
+end
+
+function tbWnd:Clear()
+  self.nStartAwardIndex = nil
+  self.nShowIndex = nil
+  self.tbAwardIndex = nil
+  self.bShowEffect = false
+end
+
+function tbWnd:ShowOneStep()
+  if self.nStep <= 0 then
+    self:ShowCurEffect(true)
+    self.nShowIndex = self.nShowIndex + 1
+    self:CloseUITimer()
+    local nNextSpeed = self.nNextAwardSpeed
+    local nSkip = self:GetSkipAnim()
+    if nSkip then
+      nNextSpeed = self.nSkipNextAwardSpeed
+    end
+    self.nCurTimer = Timer:Register(nNextSpeed, self.BeginShowOneAward, self)
+    return
+  end
+  self:ShowCurEffect(false)
+  self.nStep = self.nStep - 1
+  self.nStartAwardIndex = self.nStartAwardIndex + 1
+  if self.nStartAwardIndex > self.nMaxAwardCount then
+    self.nStartAwardIndex = self.nStartAwardIndex - self.nMaxAwardCount
+  end
+  self:ShowCurEffect(true)
+  self:CloseUITimer()
+  local nSpeed = 1 == self.nShowIndex and self.nFirstSpeed or self.nSecondSpeed
+  if 1 == self.nShowIndex then
+    nSpeed = self.nStep > self.nFirstSlowNum and self.nFirstSpeed or self.nFirstSlowSpeed
+  end
+  self.nCurTimer = Timer:Register(nSpeed, self.ShowOneStep, self)
+end
+
+function tbWnd:CloseUITimer()
+  if self.nCurTimer and self.nCurTimer > 0 then
+    Timer:Close(self.nCurTimer)
+    self.nCurTimer = 0
+  end
+end
+
+function tbWnd:ShowCurEffect(bShow)
+  if self.nStartAwardIndex > 0 then
+    if self.nStartAwardIndex <= 9 then
+      self.pPanel:SetActive(string.format("node/imgBg/Left/item0%d/imgSelected", self.nStartAwardIndex), bShow)
+    else
+      self.pPanel:SetActive(string.format("node/imgBg/Left/item%d/imgSelected", self.nStartAwardIndex), bShow)
+    end
+  end
+end
+
+function tbWnd:GetSkipAnim()
+  return self.pPanel:Toggle_GetChecked(self.txtToggle)
+end
+
+function tbWnd:OnClose()
+  self:Clear()
+  self:CloseUITimer()
+end

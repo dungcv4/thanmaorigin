@@ -1,0 +1,123 @@
+local tbWnd = Ui:CreateWindow("UIAccess_Tip")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  ItemTemplate = "node/imgBG/TabScrollView/Viewport/Content/Template",
+  UIItemGrid = "node/imgBG/Content/Up/UIItemGrid",
+  txtTittle = "node/imgBG/Content/Up/txtTittle",
+  txtNum = "node/imgBG/Content/Up/txtNum",
+  txtInfo = "node/imgBG/Content/Up/txtInfo",
+  WayTemplate = "node/imgBG/Content/Down/ScrollView/Viewport/Content/Template"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:OnCreate()
+end
+
+function tbWnd:OnOpen(nSelect, ...)
+  self.tbItemList = Ui:NewScrollView(self, tbControls.ItemTemplate, self.OnSwitchItem)
+  self.tbWayList = Ui:NewScrollView(self, tbControls.WayTemplate)
+  self.tbItem = table.pack(...)
+  self:SetItem()
+  self.pPanel:SetActive(tbControls.btnHelp, false)
+  self.tbItemList:SelectElement(nSelect or 1)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.UpdateItem, self)
+end
+
+function tbWnd:SetItem()
+  self.tbItemList:Clear()
+  for index, nItemTemplatedId in ipairs(self.tbItem) do
+    self.tbItemList:SetElement(index, function(tbElement)
+      local tbGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      tbGrid:SetItemByTemplate(nItemTemplatedId)
+      tbGrid:SetClickEnable(true, self.OnClickItem, self, index)
+    end)
+  end
+end
+
+function tbWnd:OnClickItem(index)
+  self.tbItemList:SelectElement(index)
+end
+
+function tbWnd:OnSwitchItem(nIndex)
+  if self.tbItem[nIndex] then
+    self:UpDatePanel(self.tbItem[nIndex])
+  end
+  self.nIndex = nIndex
+end
+
+function tbWnd:UpDatePanel(nItemTemplatedId)
+  local tbGrid = Ui:NewExistItemGrid(self, tbControls.UIItemGrid)
+  tbGrid:SetItemByTemplate(nItemTemplatedId)
+  self.pPanel:Label_SetText(tbControls.txtTittle, Item:GetName(nItemTemplatedId, me))
+  local nHave = me.GetItemCountByTypeInBag(nItemTemplatedId)
+  self.pPanel:Label_SetText(tbControls.txtNum, i18n.EasyGet("\229\189\147\229\137\141\230\139\165\230\156\137\239\188\154{0}", nHave))
+  local szDesc = Item:GetSourceDesc(nItemTemplatedId)
+  self.pPanel:Label_SetText(tbControls.txtInfo, i18n.Parse(szDesc))
+  self:SetWay(nItemTemplatedId)
+end
+
+function tbWnd:SetWay(nItemTemplatedId)
+  self.pPanel:SetActive(tbControls.WayTemplate, false)
+  self.tbWayList:Clear()
+  local tbWay = Item:GetProduceWay(nItemTemplatedId)
+  if not tbWay then
+    return
+  end
+  for nWayId, tbInfo in ipairs(tbWay) do
+    self.tbWayList:SetElement(nWayId, function(tbElement)
+      tbElement.pPanel:Label_SetText("imgTittle/txtActivityTittle", i18n.Parse(tbInfo.szWay))
+      tbElement.pPanel:SetActive("imgTittle/txtActivityTime", false)
+      tbElement.pPanel:SetActive("ContGrid/txtIWay01", tbInfo.szTextSource and not Lib:IsEmptyStr(tbInfo.szTextSource))
+      if not Lib:IsEmptyStr(tbInfo.szTextSource) then
+        tbElement.pPanel:Label_SetText("ContGrid/txtIWay01", i18n.Parse(tbInfo.szTextSource))
+      end
+      tbElement.pPanel:SetActive("ContGrid/Cont_Way02", tbInfo.szTextSource and not Lib:IsEmptyStr(tbInfo.szGridSource))
+      tbElement.pPanel:SetActive("ContGrid/Cont_Way03", tbInfo.szTextSource and not Lib:IsEmptyStr(tbInfo.szJumpSource))
+      if not Lib:IsEmptyStr(tbInfo.szJumpSource) then
+        tbElement.pPanel:Label_SetText("ContGrid/Cont_Way03/txtInfo03", i18n.Parse(tbInfo.szJumpSource))
+        local szSourceTemplate = "ContGrid/Cont_Way03/txtInfo03/ScrollViewBtn/Viewport/Content/Template"
+        local tbSourceList = Ui:NewScrollView(tbElement, szSourceTemplate)
+        for index, tbData in pairs(tbInfo.tbJumpSource) do
+          tbSourceList:SetElement(index, function(tbSourceElement)
+            local tbSource = Item:GetSourceFromPool(tbData.nSourceId)
+            if tbSource then
+              local szShow = tbData.nNums and string.format("%s\239\188\154<color=#54AB4D>%d</color>", i18n.Parse(tbSource.szShow), tbData.nNums) or i18n.Parse(tbSource.szShow)
+              tbSourceElement.pPanel:Button_SetText("btnGo", szShow, "Text")
+              Ui:Button_BindEvent(tbSourceElement.pPanel, "btnGo", self.OnClickJump, self, tbSource.szCallBack, tbSource.szParam)
+            end
+          end)
+        end
+      end
+    end)
+  end
+end
+
+tbWnd.tbJumpFn = {
+  OpenWindow = function(szUiName, ...)
+    Ui:OpenWindow(szUiName, ...)
+  end
+}
+
+function tbWnd:OnClickJump(szCallBack, szParam)
+  local tbParam = Lib:SplitStrTry2Num(szParam, "|")
+  if self.tbJumpFn then
+    self.tbJumpFn[szCallBack](table.unpack(tbParam))
+  end
+end
+
+function tbWnd:UpdateItem()
+  local nHave = me.GetItemCountByTypeInBag(self.tbItem[self.nIndex])
+  self.pPanel:Label_SetText(tbControls.txtNum, i18n.EasyGet("\229\189\147\229\137\141\230\139\165\230\156\137\239\188\154{0}", nHave))
+end
+
+function tbWnd:OnClose()
+  self.tbItemList:Clear()
+  self.tbWayList:Clear()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+end

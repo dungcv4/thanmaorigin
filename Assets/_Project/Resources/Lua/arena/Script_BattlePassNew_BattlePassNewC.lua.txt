@@ -1,0 +1,362 @@
+Require("CommonScript/BattlePassNew/BattlePassNewComm.lua")
+
+function BattlePassNew:GetRemainingTime()
+  local nCreateRealTime = GetServerCreateTime() - 14400
+  nCreateRealTime = nCreateRealTime - Lib:GetLocalDayTime(nCreateRealTime)
+  local nSeason = self.battlePassPlayerData.nSeason
+  local nFinishTime = nCreateRealTime + nSeason * BattlePassNew.RestCycle * 3600 * 24
+  local nCurTime = GetTime() - 14400
+  local nSurplusTime = nFinishTime - nCurTime
+  return Lib:TimeDesc2(nSurplusTime)
+end
+
+function BattlePassNew:BuyBattlePass(nBattlePassType)
+  local nBattlePassPlayerType = self:GetBattlePassPlayerType()
+  if nBattlePassType > nBattlePassPlayerType then
+    RemoteServer.OnBattlePassNewRequest(BattlePassNew.Protocol.C2SReqBuyBattlePass, nBattlePassType)
+  else
+    me.CenterMsg(i18n.EasyGet("\230\130\168\229\183\178\232\180\173\228\185\176"))
+  end
+end
+
+function BattlePassNew:ResBuyBattlePass(nProductId)
+  Recharge:RequestCreateRechargeOrder(nProductId)
+end
+
+function BattlePassNew:OnGoTask(nTaskId, nTag)
+  local tbBattlePassTaskCfgData = self:GetBattlePassTaskCfgData(nTaskId, nTag)
+  if PlayerGuide.tbButtonFuncs[tbBattlePassTaskCfgData.szGuideFunc] then
+    PlayerGuide.tbButtonFuncs[tbBattlePassTaskCfgData.szGuideFunc](tbBattlePassTaskCfgData.szGuideParam)
+  else
+    me.CenterMsg(i18n.EasyGet("\230\154\130\228\184\141\229\188\128\230\148\190"))
+  end
+end
+
+function BattlePassNew:OnClinetLogin(nBeginDay)
+  self.battlePassPlayerData = {}
+  local nCurLv = me.GetUserValue(BattlePassNew.GroupKey, BattlePassNew.CurLv)
+  local nCurExp = me.GetUserValue(BattlePassNew.GroupKey, BattlePassNew.CurExp)
+  local nCanUseQuickCompleteCount = me.GetUserValue(BattlePassNew.GroupKey, BattlePassNew.CanUseQuickCompleteCount)
+  local nBattlePassType = me.GetUserValue(BattlePassNew.GroupKey, BattlePassNew.BattlePassType)
+  local nSeason = me.GetUserValue(BattlePassNew.GroupKey, BattlePassNew.Season)
+  self.battlePassPlayerData.nCurLv = nCurLv
+  self.battlePassPlayerData.nCurExp = nCurExp
+  self.battlePassPlayerData.nCanUseQuickCompleteCount = nCanUseQuickCompleteCount
+  self.battlePassPlayerData.nBattlePassType = nBattlePassType
+  self.battlePassPlayerData.nSeason = nSeason
+  self:SynBattlePassBeginDay(nBeginDay)
+  self.battlePassPlayerData.tbAwardReceiveTable = {}
+  for nLv, battlePassLvCfgData in ipairs(self.tbBattlePassLvCfg) do
+    for i, nAwardTag in pairs(BattlePassNew.AwardTag) do
+      if self.battlePassPlayerData.tbAwardReceiveTable[nLv] == nil then
+        self.battlePassPlayerData.tbAwardReceiveTable[nLv] = {}
+      end
+      if self.battlePassPlayerData.tbAwardReceiveTable[nLv][nAwardTag] == nil then
+        self.battlePassPlayerData.tbAwardReceiveTable[nLv][nAwardTag] = {}
+      end
+      local bIsAwardReceive = self:GetAwardIsGet(me, nLv, nAwardTag)
+      self.battlePassPlayerData.tbAwardReceiveTable[nLv][nAwardTag] = bIsAwardReceive
+    end
+  end
+end
+
+function BattlePassNew:InitBattlePassTaskTable()
+  self.battlePassPlayerData.battlePassTaskTable = {}
+  for nTaskId, tb in pairs(self.tbBattlePassServerData.tbTaskAndTagMap) do
+    for nTag, nIndex in pairs(tb) do
+      if self.battlePassPlayerData.battlePassTaskTable[nTaskId] == nil then
+        self.battlePassPlayerData.battlePassTaskTable[nTaskId] = {}
+      end
+      if self.battlePassPlayerData.battlePassTaskTable[nTaskId][nTag] == nil then
+        self.battlePassPlayerData.battlePassTaskTable[nTaskId][nTag] = {}
+      end
+      local tbBattlePassTaskData = {}
+      local nCurCount = self:GetTaskCount(me, nTaskId)
+      local bIsCompleted = self:GetTaskIsCompleted(me, nTaskId, nTag)
+      tbBattlePassTaskData.nCurCount = nCurCount
+      tbBattlePassTaskData.bIsCompleted = bIsCompleted
+      self.battlePassPlayerData.battlePassTaskTable[nTaskId][nTag] = tbBattlePassTaskData
+    end
+  end
+end
+
+function BattlePassNew:UpdateSingleBattlePassTaskData(nTaskId, nTag, nCount)
+  if self.battlePassPlayerData == nil or nil == self.battlePassPlayerData.battlePassTaskTable or nil == self.battlePassPlayerData.battlePassTaskTable[nTaskId] or nil == self.battlePassPlayerData.battlePassTaskTable[nTaskId][nTag] then
+    return
+  end
+  self.battlePassPlayerData.battlePassTaskTable[nTaskId][nTag].nCurCount = nCount
+end
+
+function BattlePassNew:UpdateBattlePassTaskState(nTaskId, nTag, bState)
+  if self.battlePassPlayerData == nil or nil == self.battlePassPlayerData.battlePassTaskTable or nil == self.battlePassPlayerData.battlePassTaskTable[nTaskId] or nil == self.battlePassPlayerData.battlePassTaskTable[nTaskId][nTag] then
+    return
+  end
+  self.battlePassPlayerData.battlePassTaskTable[nTaskId][nTag].bIsCompleted = bState
+end
+
+function BattlePassNew:UpdateBattlePassLvAndExpData(nLv, nExp)
+  if self.battlePassPlayerData == nil then
+    LogErr("[BattlePassNew:UpdateBattlePassLvAndExpData] failed")
+    return
+  end
+  self.battlePassPlayerData.nCurLv = nLv
+  self.battlePassPlayerData.nCurExp = nExp
+  self:RefreshBattlePassAwardRedPoint()
+end
+
+function BattlePassNew:UpdateBattlePassType(nBattlePassType)
+  if self.battlePassPlayerData == nil then
+    LogErr("[BattlePassNew:UpdateBattlePassType] failed")
+    return
+  end
+  self.battlePassPlayerData.nBattlePassType = nBattlePassType
+  self:RefreshBattlePassAwardRedPoint()
+end
+
+function BattlePassNew:UpdateBattlePassCanUseQuickCompleteCount(nCount)
+  self.battlePassPlayerData.nCanUseQuickCompleteCount = nCount
+end
+
+function BattlePassNew:UpdateBattlePassAwardReceiveData(nLv, nAwardTag, bState)
+  if self.battlePassPlayerData == nil or nil == self.battlePassPlayerData.tbAwardReceiveTable or nil == self.battlePassPlayerData.tbAwardReceiveTable[nLv] or self.battlePassPlayerData.tbAwardReceiveTable[nLv][nAwardTag] then
+    LogErr("[BattlePassNew:UpdateBattlePassAwardReceiveData] failed, nLv" .. nLv .. ",nAwardTag" .. nAwardTag)
+    return
+  end
+  self.battlePassPlayerData.tbAwardReceiveTable[nLv][nAwardTag] = bState
+  self:RefreshBattlePassAwardRedPoint()
+end
+
+function BattlePassNew:GetHaveAwardMinLevel()
+  if not self.battlePassPlayerData then
+    return nil
+  end
+  local nBattlePassPlayerType = self:GetBattlePassPlayerType()
+  local nCurLv = self:GetBattlePassPlayerLv()
+  local tbAwardReceiveTable = self:GetLvAwardReceiveTable()
+  for nLv, _table in ipairs(tbAwardReceiveTable) do
+    if nLv > nCurLv then
+      break
+    end
+    for nAwardTag, bAwardReceive in pairs(_table) do
+      if false == bAwardReceive and nAwardTag <= nBattlePassPlayerType then
+        return nLv
+      end
+    end
+  end
+  return nCurLv
+end
+
+function BattlePassNew:RefreshTaskView()
+  if Ui:WindowVisible("UIBattlePassNew") == true then
+    Ui:GetWindow("UIBattlePassNew"):RefreshTaskView()
+  end
+end
+
+function BattlePassNew:RefreshAwardView(nLv)
+  if Ui:WindowVisible("UIBattlePassNew") == true then
+    Ui:GetWindow("UIBattlePassNew"):RefreshAwardView(nLv)
+    Ui:GetWindow("UIBattlePassNew"):RefreshRewardGetAllButton()
+  end
+end
+
+function BattlePassNew:RefreshBattlePassBuyView()
+  if Ui:WindowVisible("UIbattlePassNewBuy") == true then
+    Ui:GetWindow("UIbattlePassNewBuy"):RefreshView()
+  end
+end
+
+function BattlePassNew:RefreshBattlePassLvInfoView()
+  if Ui:WindowVisible("UIBattlePassNew") == true then
+    Ui:GetWindow("UIBattlePassNew"):ShowLevelInfo()
+  end
+end
+
+function BattlePassNew:RefreshBattlePassTypeState()
+  if Ui:WindowVisible("UIBattlePassNew") == true then
+    Ui:GetWindow("UIBattlePassNew"):UpdateBattlePassPlayerTypeState()
+  end
+end
+
+function BattlePassNew:ReqQuickCompleteTask(nTaskId, nTag)
+  local nHaveGold = me.GetMoney("Gold")
+  local tbBattlePassTaskCfgData = self:GetBattlePassTaskCfgData(nTaskId, nTag)
+  if nTag == BattlePassNew.TaskTag.Legend then
+    me.CenterMsg(i18n.EasyGet("\230\173\164\228\187\187\229\138\161\230\151\160\230\179\149\229\191\171\233\128\159\229\174\140\230\136\144"))
+    return
+  end
+  if nHaveGold >= tbBattlePassTaskCfgData.nCostGold then
+    RemoteServer.OnBattlePassNewRequest(BattlePassNew.Protocol.C2SReqQuickCompleteTask, nTaskId, nTag)
+  else
+    me.CenterMsg(i18n.EasyGet("\230\130\168\231\154\132\233\135\145\229\184\129\228\184\141\232\182\179"))
+  end
+end
+
+function BattlePassNew:ReqBattlePassTaskMap()
+  if self.battlePassPlayerData.battlePassTaskTable == nil then
+    RemoteServer.OnBattlePassNewRequest(BattlePassNew.Protocol.C2SReqBattlePassTaskMap)
+  end
+end
+
+function BattlePassNew:SyncBattlePassTaskMap(tbTaskMap, tbTaskAndTagMap)
+  self.tbBattlePassServerData = {}
+  self.tbBattlePassServerData.tbTaskMap = tbTaskMap
+  self.tbBattlePassServerData.tbTaskAndTagMap = tbTaskAndTagMap
+  self:InitBattlePassTaskTable()
+  if Ui:WindowVisible("UIBattlePassNew") == true then
+    Ui:GetWindow("UIBattlePassNew"):ShowTaskPanel()
+  end
+end
+
+function BattlePassNew:CheckCanReceiveAllAward()
+  local tbAllAwardList = {}
+  local nBattlePassPlayerType = self:GetBattlePassPlayerType()
+  local nCurLv = self:GetBattlePassPlayerLv()
+  local tbAwardReceiveTable = self:GetLvAwardReceiveTable()
+  for nLv, _table in ipairs(tbAwardReceiveTable) do
+    if nLv > nCurLv then
+      break
+    end
+    for nAwardTag, bAwardReceive in pairs(_table) do
+      if false == bAwardReceive and nAwardTag <= nBattlePassPlayerType then
+        local allAwardData = {}
+        allAwardData.nBattlePassLv = nLv
+        allAwardData.nAwardTag = nAwardTag
+        table.insert(tbAllAwardList, allAwardData)
+      end
+    end
+  end
+  if #tbAllAwardList > 0 then
+    return true
+  else
+    return false
+  end
+end
+
+function BattlePassNew:ReqReceiveAllAward()
+  if self:CheckCanReceiveAllAward() == true then
+    RemoteServer.OnBattlePassNewRequest(BattlePassNew.Protocol.C2SReqReceiveAllAward)
+  end
+end
+
+function BattlePassNew:RefreshBattlePassAwardRedPoint()
+  local nBattlePassPlayerType = self:GetBattlePassPlayerType()
+  local nCurLv = self:GetBattlePassPlayerLv()
+  local tbAwardReceiveTable = self:GetLvAwardReceiveTable()
+  if nil ~= tbAwardReceiveTable then
+    for nLv, _table in ipairs(tbAwardReceiveTable) do
+      if nLv > nCurLv then
+        break
+      end
+      for nAwardTag, bAwardReceive in pairs(_table) do
+        if false == bAwardReceive and nAwardTag <= nBattlePassPlayerType then
+          RedPointMgr:LightRedPoint(RedPointMgr.EVENT.BattlePassAward)
+          return
+        end
+      end
+    end
+  end
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.BattlePassAward)
+end
+
+function BattlePassNew:GetBattlePassTaskClassList(nTaskClass)
+  self.tbBattlePassTask = {}
+  for i, nTaskClass in ipairs(BattlePassNew.TaskClass) do
+    self.tbBattlePassTask[nTaskClass] = {}
+  end
+  local nServerOpenDay = Lib:GetServerOpenDay_4AM()
+  local szTimeFrameEnd
+  for nTaskId, v in pairs(self.tbBattlePassTaskCfg) do
+    for nTag, battlePassTaskCfgData in pairs(v) do
+      if self:CheckBattlePassTaskTypeIsValid(nTaskId, nTag, nServerOpenDay) and BattlePassNew:GetBattlePassTaskData(nTaskId, nTag) ~= nil then
+        local szTaskType = battlePassTaskCfgData.szTaskType
+        local battlePassTypeCfgData = BattlePassNew:GetBattlePassTypeCfgData(szTaskType)
+        local szTimeFrameEvent = battlePassTypeCfgData.szTimeFrameEvent
+        szTimeFrameEnd = battlePassTypeCfgData.szTimeFrameEnd
+        if 1 == GetTimeFrameState(szTimeFrameEvent) and (Lib:IsEmptyStr(szTimeFrameEnd) or 0 == GetTimeFrameState(szTimeFrameEnd)) then
+          local tbBattlePassTaskData = self:GetBattlePassTaskData(nTaskId, nTag)
+          local nPreTag = nTag - 1
+          local nNextTag = nTag + 1
+          if nil == self:GetBattlePassTaskCfgData(nTaskId, nPreTag) then
+            if nil ~= tbBattlePassTaskData and tbBattlePassTaskData.bIsCompleted == false then
+              table.insert(self.tbBattlePassTask[battlePassTaskCfgData.nTaskClass], battlePassTaskCfgData)
+              break
+            end
+          else
+            local tbPreBattlePassTaskData = self:GetBattlePassTaskData(nTaskId, nPreTag)
+            if nil ~= tbPreBattlePassTaskData and tbPreBattlePassTaskData.bIsCompleted == true and tbBattlePassTaskData.bIsCompleted == false then
+              table.insert(self.tbBattlePassTask[battlePassTaskCfgData.nTaskClass], battlePassTaskCfgData)
+              break
+            end
+          end
+          if nil == self:GetBattlePassTaskCfgData(nTaskId, nNextTag) then
+            table.insert(self.tbBattlePassTask[battlePassTaskCfgData.nTaskClass], battlePassTaskCfgData)
+            break
+          end
+        end
+      end
+    end
+  end
+  return self.tbBattlePassTask[nTaskClass]
+end
+
+function BattlePassNew:GetBattlePassPlayerLv()
+  return self.battlePassPlayerData.nCurLv
+end
+
+function BattlePassNew:GetBattlePassPlayerExp()
+  return self.battlePassPlayerData.nCurExp
+end
+
+function BattlePassNew:GetBattlePassPlayerType()
+  return self.battlePassPlayerData.nBattlePassType
+end
+
+function BattlePassNew:GetLvAwardReceive(nLv)
+  return self.battlePassPlayerData.tbAwardReceiveTable[nLv]
+end
+
+function BattlePassNew:GetLvAwardReceiveTable()
+  return self.battlePassPlayerData.tbAwardReceiveTable
+end
+
+function BattlePassNew:GetBattlePassTaskData(nTaskId, nTag)
+  if not self.battlePassPlayerData.battlePassTaskTable[nTaskId] or not self.battlePassPlayerData.battlePassTaskTable[nTaskId][nTag] then
+    return nil
+  end
+  return self.battlePassPlayerData.battlePassTaskTable[nTaskId][nTag]
+end
+
+function BattlePassNew:GetBattlePassTaskTable()
+  return self.battlePassPlayerData.battlePassTaskTable
+end
+
+function BattlePassNew:GetBattlePassCanUseQuickCompleteCount()
+  return self.battlePassPlayerData.nCanUseQuickCompleteCount
+end
+
+function BattlePassNew:OnSyncIsNewServer(bIsNewServer)
+  self.bIsNewServer = bIsNewServer
+end
+
+function BattlePassNew:OpenAwardsTipsUi(tbAllMergetAwards)
+  Ui:OpenWindow("UIGetAwardShowBattlePass", tbAllMergetAwards)
+end
+
+function BattlePassNew:SendSystemMsg(szTaskDesc, szTaskName, nFinishCount)
+  local szMsg = string.format(i18n.Parse(szTaskDesc), nFinishCount)
+  me.Msg(i18n.EasyGet("\230\136\152\228\187\164\228\187\187\229\138\161\227\128\144{0}-{1}\227\128\145\229\174\140\230\136\144\239\188\129", szTaskName, szMsg), ChatMgr.SystemMsgType.System)
+end
+
+function BattlePassNew:ReqBattlePassBeginDay()
+  RemoteServer.OnBattlePassNewRequest(BattlePassNew.Protocol.C2SReqBattlePassBeginDay)
+end
+
+function BattlePassNew:SynBattlePassBeginDay(nOpenDay)
+  if self.battlePassPlayerData.nBeginDay ~= nOpenDay then
+    self.battlePassPlayerData.nBeginDay = nOpenDay
+    local tbWnd = Ui:GetWindow("BattlePassNew")
+    if tbWnd then
+      tbWnd:UpdateRewardScrollView()
+    end
+  end
+end

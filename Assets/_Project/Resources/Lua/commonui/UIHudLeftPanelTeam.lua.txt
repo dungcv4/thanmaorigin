@@ -1,0 +1,223 @@
+local tbWnd = Ui:CreateClass("UIHudLeftPanelTeam", "UIPanel")
+tbWnd.tbControls = {
+  btnCreateTeam = "PanelCreateTeam/btnCreateTeam",
+  btnSearchTeam = "PanelCreateTeam/btnSearchTeam",
+  btnInviteGroup = "PanelTeamMember/btnInvite",
+  btnInvite = "PanelTeamMember/btnInvite/imgbtn",
+  btnMember1 = "PanelTeamMember/Member1",
+  btnMember2 = "PanelTeamMember/Member2",
+  btnMember3 = "PanelTeamMember/Member3",
+  btnMember4 = "PanelTeamMember/Member4",
+  panelTeamOfTeamMember = "PanelTeamMember",
+  panelTeamOfCreateTeam = "PanelCreateTeam",
+  txtAutoMatch = "PanelCreateTeam/txtMatching"
+}
+tbWnd.tbOnClick = {
+  btnCreateTeam = function(self)
+    if not TeamMgr:CanTeam(me.nMapTemplateId) then
+      me.CenterMsg(i18n.Get(TeamMgr.Terms.MapLimitWhenJoin))
+      return
+    end
+    
+    local function fnOK()
+      TeamMgr:CreateOnePersonTeam()
+      TeamMgr:SetShowTargetPanel()
+      if (Map:IsFieldFightMap(me.nMapTemplateId) or Map:IsCityMap(me.nMapTemplateId)) and 0 ~= me.nFightMode then
+        return
+      end
+      local panel = Ui:GetPanelByName("UIHudLeftPanelTeam")
+      panel:OnActivate()
+    end
+    
+    me.MsgBox(i18n.Get(TeamMgr.Terms.CreateConfirm), {
+      {
+        i18n.szOk,
+        fnOK
+      },
+      {
+        i18n.szCancel
+      }
+    })
+  end,
+  btnSearchTeam = function(self)
+    Ui:OpenWindow("UITeamAroundTeam")
+  end,
+  btnInvite = function(self)
+    if Ui.bInZone and HanWuYiJi:IsInFubenMap(me) then
+      return
+    end
+    Ui:OpenWindow("UITeamInvite")
+  end,
+  btnMember1 = function(self)
+    self:OnClickButtonMember(1)
+  end,
+  btnMember2 = function(self)
+    self:OnClickButtonMember(2)
+  end,
+  btnMember3 = function(self)
+    self:OnClickButtonMember(3)
+  end,
+  btnMember4 = function(self)
+    self:OnClickButtonMember(4)
+  end
+}
+
+function tbWnd:OnClickButtonMember(nMemberIndex)
+  local bIsSelf = nMemberIndex <= 1
+  local tbMemberData
+  if bIsSelf then
+    tbMemberData = TeamMgr:GetMyTeamMemberData()
+  else
+    tbMemberData = TeamMgr:GetMembers()[nMemberIndex - 1]
+  end
+  Ui:OpenWindowWithCallback("UIRightPopUpMenu2", function(caller, tbWnd)
+    local pos = self.tbTeamMemberPanel[nMemberIndex].pPanel:GetTransform("imgPopupPos").position
+    tbWnd:SetPos(pos.x, pos.y)
+  end, self, "team", tbMemberData, self)
+  self:ShowSelect(nMemberIndex)
+  if not bIsSelf then
+    self:PopUpRoleHead(tbMemberData)
+  end
+end
+
+function tbWnd:RightPopUpMenuCloseCallBack()
+  self:ShowSelect(0)
+end
+
+function tbWnd:ShowSelect(nIndex)
+  for i = 1, 4 do
+    local szSelect = string.format("PanelTeamMember/Member%d/imgSelected", i)
+    self.pPanel:SetActive(szSelect, nIndex == i)
+  end
+end
+
+function tbWnd:PopUpRoleHead(tbMemberData)
+  local tbInfo = {}
+  tbInfo.dwRoleId = tbMemberData.nPlayerID
+  tbInfo.nNpcID = tbMemberData.nNpcID
+  tbInfo.szName = tbMemberData.szName
+  tbInfo.dwKinId = tbMemberData.nKinId
+  tbInfo.nLevel = tbMemberData.nLevel
+  tbInfo.nFaction = tbMemberData.nFaction
+  tbInfo.nHonorLevel = tbMemberData.nHonorLevel
+  tbInfo.nBodySex = tbMemberData.nSex
+  tbInfo.nPortrait = tbMemberData.nPortrait
+  if not Lib:IsEmptyStr(tbMemberData.szTongName) then
+    tbInfo.szKinOrTongName = tbMemberData.szTongName
+  else
+    tbInfo.szKinOrTongName = tbMemberData.szKinName
+  end
+  local hudWnd = Ui:GetWindow("UIHud")
+  hudWnd:ShowRoleHeadPop(tbInfo)
+end
+
+function tbWnd:OnCreate()
+  self.tbTeamMemberPanel = {}
+  for idx = 1, TeamMgr.Cfg.MAX_MEMBER_COUNT do
+    self.tbTeamMemberPanel[idx] = Ui:CreatePanel("UIHudTeamMember", string.format("PanelTeamMember/Member%d", idx), self, idx)
+  end
+  self:UpdateTeamPanel()
+end
+
+function tbWnd:OnOpen()
+  EventNotify:RegistNotify(EventNotify.emNOTIYF_FOLLOW_STATE_UPDATE, self.OnFollowStateUpdate, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_TEAM_UPDATE, self.OnTeamUpdate, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_TEAM_CLEAR_INVITE, self.OnTeamClearInvite, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_TEAM_REMOVE_INVITE, self.OnTeamRemoveInvite, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, self.OnTeamUpdate, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_QUICK_TEAM_UPDATE, self.ShowMatch, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PORTRAIT, self.OnTeamUpdate, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_XIULIAN_JIUSTATE_CHANGE, self.OnTeamUpdate, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PORTRAIT_FRAME_CHANGE, self.OnTeamUpdate, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_ROLE_HP_CHANGE, self.OnTeamUpdate, self)
+  self:ShowSelect(0)
+end
+
+function tbWnd:OnClose()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIYF_FOLLOW_STATE_UPDATE, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_TEAM_UPDATE, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_TEAM_CLEAR_INVITE, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_TEAM_REMOVE_INVITE, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_QUICK_TEAM_UPDATE, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_PORTRAIT, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_XIULIAN_JIUSTATE_CHANGE, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PORTRAIT_FRAME_CHANGE, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_ROLE_HP_CHANGE, self)
+  self:ShowSelect(0)
+end
+
+function tbWnd:OnDeathStateUpdate(dwPlayerId)
+  self:UpdateTeamPanel(dwPlayerId)
+end
+
+function tbWnd:OnFollowStateUpdate()
+  self:UpdateTeamPanel()
+end
+
+function tbWnd:UpdateTeamPanel(dwPlayerId)
+  local bHasTeam = TeamMgr:HasTeam()
+  self.pPanel:SetActive(self.panelTeamOfCreateTeam, not bHasTeam)
+  self.pPanel:SetActive(self.panelTeamOfTeamMember, bHasTeam)
+  self:ShowMatch()
+  if not bHasTeam then
+    return
+  end
+  local nAssistNpcIndex = 1
+  local tbAssistNpc = TeamMgr:GetAssistNpc()
+  local tbCaptainData = TeamMgr:GetCaptainData()
+  local tbMembers = TeamMgr:GetMembers()
+  local tbJiuState = FieldPractice:GetJiuStateTb()
+  local nMemberCnt = 0
+  if tbMembers then
+    nMemberCnt = #tbMembers
+  end
+  for idx = 1, TeamMgr.Cfg.MAX_MEMBER_COUNT do
+    local tbMemberData = tbMembers[idx - 1]
+    if 1 == idx then
+      tbMemberData = TeamMgr:GetMyTeamMemberData()
+    end
+    if tbMemberData then
+      local bDeath = false
+      if dwPlayerId and dwPlayerId == tbMemberData.nPlayerID then
+        bDeath = true
+      end
+      self.tbTeamMemberPanel[idx]:SetMainActive(true)
+      self.tbTeamMemberPanel[idx]:SetMainPanelData(tbMemberData, bDeath)
+      self.pPanel:Button_SetEnable(string.format("PanelTeamMember/Member%d", idx), true)
+      self.tbTeamMemberPanel[idx]:SetImgPractice(tbJiuState[tbMemberData.nPlayerID])
+    elseif nAssistNpcIndex <= #tbAssistNpc then
+      self.tbTeamMemberPanel[idx]:SetMainActive(true)
+      self.tbTeamMemberPanel[idx]:SetFakePanelData(tbAssistNpc[nAssistNpcIndex], tbCaptainData)
+      self.pPanel:Button_SetEnable(string.format("PanelTeamMember/Member%d", idx), false)
+      nAssistNpcIndex = nAssistNpcIndex + 1
+      nMemberCnt = nMemberCnt + 1
+    else
+      self.tbTeamMemberPanel[idx]:SetMainActive(false)
+    end
+  end
+  self.pPanel:SetActive(self.btnInviteGroup, nMemberCnt < TeamMgr.Cfg.MAX_MEMBER_COUNT - 1)
+end
+
+function tbWnd:OnTeamClearInvite()
+  self:UpdateTeamPanel()
+end
+
+function tbWnd:OnTeamUpdate()
+  self:UpdateTeamPanel()
+end
+
+function tbWnd:OnTeamRemoveInvite()
+  self:UpdateTeamPanel()
+end
+
+function tbWnd:ShowMatch()
+  local bMatching = TeamMgr:IsMatchingAct()
+  self.pPanel:SetActive(self.txtAutoMatch, bMatching)
+end
+
+function tbWnd:OnActivate()
+end
+
+function tbWnd:OnDeactivate()
+end

@@ -1,0 +1,1249 @@
+local AFKSkillMgr = AFK.AFKSkillMgr
+local AFKFightSetting = AFK:GetSetting():GetFightSetting()
+local AFKAutoFight = AFK.AFKAutoFight
+Operation.nKickFrame = 0
+Operation.nMaxKickFrame = 1800
+Operation.nRideDownOperationInterval = 2
+Operation.bCanUseSkillInSavePlace = true
+Operation.nLockTargetCircleFrameTime = 72
+Operation.nLockTargetFrameTime = 90
+Operation.nJoyStickFindTargetDirDiff = 42
+
+function Operation:Init()
+  self.bBlock = false
+  self.bStopTarget = false
+  self.nSelectLastTargetDirRange = 32
+  self.tbCheckSkill = {}
+  self.tbCheckNpc = {}
+  self.nLockTargetId = nil
+end
+
+Operation:Init()
+
+function Operation:ClearScreen()
+end
+
+function Operation:RecoverScreen()
+end
+
+function Operation:OnDestroyMap()
+end
+
+function Operation:OnMapLoaded()
+  Operation:EnableWalking()
+end
+
+function Operation:SetGuidingJoyStick(bGuid)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_FAKE_JOYSTICK_GUIDING, bGuid and true or false)
+end
+
+function Operation:ShowFakeJoystick()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_FAKE_JOYSTICK_STATE, true)
+end
+
+function Operation:HideFakeJoystick()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_FAKE_JOYSTICK_STATE, false)
+end
+
+function Operation:DisableWalking()
+  self.bOnJoyStick = false
+  self.bForbidClickMap = true
+end
+
+function Operation:EnableWalking()
+  self.bForbidClickMap = false
+end
+
+function Operation:BlockTouch(bBlock)
+  self.bBlock = bBlock
+end
+
+function Operation:ServerForceUseSkill(nSkillId, nParm1, nParm2)
+  local meNpc = me.GetNpc()
+  if not meNpc then
+    return
+  end
+  meNpc.AddSkill(nSkillId, 1)
+  meNpc.SetForceCanSkillOnce(1)
+  me.UseSkill(nSkillId, nParm1, nParm2)
+end
+
+function Operation:GoDirection(nDir)
+  if not nDir then
+    return
+  end
+  if AFK:IsRunning() then
+    AFK:InterruptStep_GoToFightPos()
+  end
+  AFK:Suspend()
+  local nDoing = me.GetDoing()
+  if self.nLastGoDir == nDir and nDoing ~= Npc.Doing.do_hover and nDoing ~= Npc.Doing.do_qingkung and nDoing ~= Npc.Doing.stand then
+    return
+  end
+  if TeamMgr:IsFollowTeammateWithMsg(i18n.EasyGet("\229\189\147\229\137\141\230\173\163\229\156\168\232\183\159\230\136\152\239\188\140\228\184\141\229\143\175\232\135\170\231\148\177\231\167\187\229\138\168")) then
+    return
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MOVE_BY_STICK)
+  local nPlayerDoing = me.GetDoing()
+  if nPlayerDoing == Npc.Doing.dospecialmidmove or nPlayerDoing == Npc.Doing.dospecialpremove then
+    return
+  end
+  local pNpc = me.GetNpc()
+  if not pNpc then
+    return
+  end
+  if pNpc.HaveRefFlag(Npc.RefFlagType.npc_forbid_move) then
+    return
+  end
+  if nPlayerDoing == Npc.Doing.common then
+    me.StopDirection()
+  end
+  if nPlayerDoing == Npc.Doing.dospecialmove or nPlayerDoing == Npc.Doing.dospecialstand then
+    if nDir <= 0 then
+      nDir = 0
+    else
+      nDir = 1
+    end
+    RemoteServer.DoSpecialMoveStep(nDir)
+    return
+  end
+  if self.bBlock then
+    return
+  end
+  if not self.bOnJoyStick then
+    local nDoing = me.GetDoing()
+    if Npc.Doing.do_hover ~= nDoing and Npc.Doing.do_qingkung ~= nDoing then
+      Operation:SetPositionEffect(false)
+    end
+  end
+  me.GoDirection(nDir, Env.GAME_FPS * 10)
+  me.StartDirection(nDir)
+  self.nLastGoDir = nDir
+  self.bOnJoyStick = true
+  Operation.nKickFrame = 0
+  AFKFightSetting:CloseAutoFightRange(false)
+end
+
+function Operation:StopGoDir()
+  if not me then
+    return
+  end
+  local nPlayerDoing = me.GetDoing()
+  if nPlayerDoing == Npc.Doing.dospecialstand or nPlayerDoing == Npc.Doing.dospecialmove or nPlayerDoing == Npc.Doing.dospecialmidmove or nPlayerDoing == Npc.Doing.dospecialpremove then
+    return
+  end
+  local pMeNpc = me.GetNpc()
+  if not pMeNpc then
+    return
+  end
+  if pMeNpc.HaveRefFlag(Npc.RefFlagType.npc_forbid_move) then
+    return
+  end
+  if self.bBlock then
+    return
+  end
+  if self.nLastGoDir then
+    me.GoDirection(self.nLastGoDir, 2)
+  end
+  me.StopDirection()
+  self:ClearLastDir()
+end
+
+function Operation:ClearLastDir()
+  self.nLastGoDir = nil
+  self.bOnJoyStick = false
+end
+
+function Operation:SimpleTap(nNpcID, isFriend)
+  local pNpc = KNpc.GetById(nNpcID)
+  if not pNpc then
+    return
+  end
+  if pNpc.nPlayerID == me.dwID then
+    return
+  end
+  if pNpc.nKind == Npc.KIND.player then
+    if 0 == pNpc.nPlayerID then
+      Operation:SetNpcSelected(nNpcID, false)
+      if not isFriend then
+        Operation:SimpleTapEnemy(pNpc)
+      end
+    elseif 0 == pNpc.nMirriorPlayerId then
+      local tbData = {
+        dwRoleId = pNpc.nPlayerID,
+        nNpcID = nNpcID,
+        szName = pNpc.szName,
+        dwKinId = pNpc.dwKinId,
+        dwTongId = pNpc.dwTongId,
+        szKinOrTongName = Kin:GetKinNameByNpcID(nNpcID),
+        nLevel = pNpc.nLevel,
+        nZongShiLevel = pNpc.nZongShiLevel,
+        nTotalLevel = pNpc.nLevel + pNpc.nZongShiLevel,
+        nVipLevel = 0,
+        nFaction = pNpc.nFaction,
+        nHonorLevel = pNpc.nHonorLevel,
+        nBodySex = pNpc.GetBodySex(),
+        nPortrait = pNpc.nPortrait
+      }
+      local tbMember = Kin:GetMemberData(tbData.dwRoleId)
+      if tbMember then
+        tbData.tbChuanGong = tbMember.tbChuanGong
+      end
+      local hudWnd = Ui:GetWindow("UIHud")
+      if hudWnd then
+        hudWnd:ShowRoleHeadPop(tbData)
+      end
+      Operation:SetNpcSelected(nNpcID, false)
+      if not isFriend then
+        Operation:SimpleTapEnemy(pNpc)
+      end
+    end
+  elseif pNpc.nKind == Npc.KIND.dialoger then
+    Operation:OnDialogerClicked(pNpc.nId)
+    Operation:SetNpcSelected(nNpcID, false)
+  elseif pNpc.nKind == Npc.KIND.normal and not isFriend then
+    Operation:SimpleTapEnemy(pNpc)
+  end
+end
+
+function Operation:SimpleTapEnemy(pNpc)
+  if not pNpc then
+    return
+  end
+  local nTargetId = self:GetLockTargetNpcId()
+  if nil == nTargetId then
+    nTargetId = pNpc.nId
+  end
+  if AFK:IsLeadFightRunning() then
+    if not AFK:IsLeadFightInFightStep() then
+      return
+    end
+    AFKAutoFight:SetIntentTargetNpc(nTargetId)
+    me.GetNpc().ClearSkillCommandCache()
+  else
+    self:NotLeadFightRunningAction(nTargetId, FightSkill:GetSkillIdByBtnName(me.nFaction, me.nFactionSect))
+  end
+end
+
+function Operation:SwitchAttackTargetManual()
+  local nSelectType = AFKFightSetting.nSelectType
+  local nTargetId
+  nSelectType = math.max(nSelectType, AFKFightSetting.SelectType.AnyOne)
+  nSelectType = math.min(nSelectType, AFKFightSetting.SelectType.Boss)
+  if AFK:IsLeadFightRunning() then
+    if not AFK:IsLeadFightInFightStep() then
+      return
+    end
+    local nCenterX, nCenterY = AFKAutoFight:ChooseFightCenterPoint()
+    if nCenterX < 0 or nCenterY < 0 then
+      return
+    end
+    local tbBlackboard = AFKAutoFight.tbAutoFightAI:GetBlackboard()
+    local nCurSkillId = FightSkill:GetSkillIdByBtnName(me.nFaction, me.nFactionSect)
+    if not nCurSkillId or nCurSkillId < 0 then
+      nCurSkillId = AFKSkillMgr:GetOneCanCastSkill2()
+      if not nCurSkillId or nCurSkillId < 0 then
+        return
+      end
+    end
+    tbBlackboard.nCurSkillId = nCurSkillId
+    nTargetId = AFKSkillMgr:GetNearestNpc(nCurSkillId, AFKFightSetting.nSearchRadius, nSelectType, nCenterX, nCenterY, tbBlackboard.tbTargetNpcBlackList, tbBlackboard.nTargetNpcId)
+    if not nTargetId or nTargetId <= 0 then
+      tbBlackboard.nTargetNpcId = nil
+      return
+    end
+    AFKAutoFight:SetIntentTargetNpc(nTargetId)
+    me.GetNpc().ClearSkillCommandCache()
+  else
+    local nCurSkillId = FightSkill:GetSkillIdByBtnName(me.nFaction, me.nFactionSect)
+    if nCurSkillId and nCurSkillId > 0 then
+      if not AFKSkillMgr:IsSkillCanCast(nCurSkillId) then
+        nCurSkillId = AFKSkillMgr:GetOneCanCastSkill2()
+      end
+    else
+      nCurSkillId = AFKSkillMgr:GetOneCanCastSkill2()
+    end
+    if not nCurSkillId or nCurSkillId < 0 then
+      return
+    end
+    nTargetId = self:GetLockTargetNpcId()
+    if nil == nTargetId then
+      local pNpc = me.GetNpc()
+      nTargetId = nTargetId or pNpc.GetNearestNpcIdBySkillRelation(nCurSkillId, nSelectType, false, AFKFightSetting.nSearchRadius, 0, 0, self.nLastTargetId)
+      nTargetId = nTargetId or pNpc.GetNearestNpcIdBySkillRelation(nCurSkillId, 0, false, AFKFightSetting.nSearchRadius, 0, 0, self.nLastTargetId)
+    end
+    if not nTargetId or nTargetId < 0 then
+      return
+    end
+    self:NotLeadFightRunningAction(nTargetId, nCurSkillId)
+  end
+end
+
+function Operation:NotLeadFightRunningAction(nTargetId, nLastAttackSkillId)
+  self.nLastTargetId = nTargetId
+  self.nLastAttackSkillId = nLastAttackSkillId
+  self.nLastTargetLockTime = GetFrame()
+  AFKSkillMgr:SetIntentTargetNpc(nTargetId)
+  me.GetNpc().ClearSkillCommandCache()
+  self.nLastAttackTime = GetFrame()
+  local nAttackSkillId = FightSkill:GetSkillIdByBtnName(me.nFaction, me.nFactionSect)
+  Operation:ShowSkillLockRange(nAttackSkillId, false)
+end
+
+function Operation:ClickMap(nX, nY, isDoubleClick, bIsIgnoreFollow)
+  bIsIgnoreFollow = nil ~= bIsIgnoreFollow and bIsIgnoreFollow or false
+  if false == bIsIgnoreFollow and TeamMgr:IsFollowTeammateWithMsg(i18n.EasyGet("\229\189\147\229\137\141\230\173\163\229\156\168\232\183\159\230\136\152\239\188\140\228\184\141\229\143\175\232\135\170\231\148\177\231\167\187\229\138\168")) then
+    return
+  end
+  if AFK:IsRunning() then
+    AFK:InterruptStep_GoToFightPos()
+  end
+  local nPlayerDoing = me.GetDoing()
+  if nPlayerDoing == Npc.Doing.dospecialmove or nPlayerDoing == Npc.Doing.dospecialstand or nPlayerDoing == Npc.Doing.dospecialmidmove or nPlayerDoing == Npc.Doing.dospecialpremove then
+    return
+  end
+  if not me then
+    return
+  end
+  local pNpc = me.GetNpc()
+  if not pNpc then
+    return
+  end
+  if pNpc.HaveRefFlag(Npc.RefFlagType.npc_forbid_move) then
+    return
+  end
+  if not Login.bEnterGame then
+    return false
+  end
+  if self.bOnJoyStick then
+    return
+  end
+  if self.bForbidClickMap then
+    return
+  end
+  if nX < 0 or nY < 0 then
+    return false
+  end
+  if me.GetDoing() == Npc.Doing.do_qingkung then
+    return false
+  end
+  self.bIsClickMapPathing = true
+  AFK:Suspend()
+  Client.NavigationModule.ClearPathLine()
+  AutoPath:GotoAndCallEx(me.nMapId, nX, nY, function()
+    local _, nMeX, nMeY = me.GetWorldPos()
+    self.bIsClickMapPathing = false
+  end, Npc.MIN_DISTANCE, nil, nil, nil, nil, function()
+    local _, nMeX, nMeY = me.GetWorldPos()
+    self.bIsClickMapPathing = false
+  end, function()
+    local _, nMeX, nMeY = me.GetWorldPos()
+    self.bIsClickMapPathing = false
+    AFK:Resume()
+  end)
+  Operation.nKickFrame = 0
+  return false
+end
+
+function Operation:OnDialogerClicked(nNpcID, nTaskId)
+  local pNpc = KNpc.GetById(nNpcID)
+  if not pNpc then
+    return
+  end
+  local nDistance = me.GetNpc().GetDistance(pNpc.nId)
+  local nDialogDistance = GetNpcDialogDistance(pNpc.nTemplateId)
+  local nMapId, nX, nY = pNpc.GetWorldPos()
+  if nDistance < 0 then
+    return
+  end
+  if nDistance > nDialogDistance then
+    if AutoPath:IsPathing() then
+      return
+    end
+    AutoPath:GotoAndCallEx(nMapId, nX, nY, function()
+      Operation:OnDialogerClicked(nNpcID)
+    end, nDialogDistance - Npc.MIN_DISTANCE, nil, pNpc.nTemplateId)
+    return
+  end
+  AFK:WaitTime(2)
+  if pNpc.IsAlone() then
+    GameSetting:SetGlobalObj(me, pNpc, it)
+    if pNpc.szClass and pNpc.szClass ~= "" and not pNpc.bUseDefaultDialog then
+      Npc:OnDialog(him.szClass, him.szScriptParam)
+    else
+      Dialog:ShowDefaultDialog(me, him)
+    end
+    GameSetting:RestoreGlobalObj()
+  else
+    RemoteServer.OnSimpleTapNpc(pNpc.nId)
+  end
+  if pNpc.szTag ~= "NoTurn" then
+  end
+end
+
+function Operation:SetPositionEffect(bShow, nX, nY)
+end
+
+function Operation:Turn2Player(pNpc)
+  local _, nX1, nY1 = pNpc.GetWorldPos()
+  local _, nX2, nY2 = me.GetWorldPos()
+  local nHudu = math.atan(nX1 - nX2, nY1 - nY2)
+  local nRealJiaodu = nHudu * 180 / math.pi + 180
+  local nDir = Lib:FloatAngleToDir(nRealJiaodu)
+  pNpc.SetDir(nDir)
+end
+
+function Operation:ClearDownHorseTimeLimited()
+  self.tbRequestDownHorseTime = {}
+end
+
+function Operation:GetSkillHorseLimited(nSkillId)
+  if not nSkillId or nSkillId < 0 then
+    return false
+  end
+  local tbSkillInfo = KFightSkill.GetSkillInfo(nSkillId, 1)
+  if not tbSkillInfo then
+    return false
+  end
+  if 1 ~= tbSkillInfo.RideLimited then
+    return false
+  end
+  return true
+end
+
+function Operation:GetDownHorse(nSkillId)
+  self.tbRequestDownHorseTime = self.tbRequestDownHorseTime or {}
+  local nLastSendTime = self.tbRequestDownHorseTime[nSkillId] or 0
+  local nCurTime = GetTime()
+  if nCurTime >= nLastSendTime + self.nRideDownOperationInterval then
+    self.tbRequestDownHorseTime[nSkillId] = nCurTime
+    SetRideState(0)
+  end
+end
+
+function Operation:SkillCheckHorseLimited(nSkillID)
+  if not nSkillID or nSkillID < 0 then
+    return false
+  end
+  self.tbRequestDownHorseTime = self.tbRequestDownHorseTime or {}
+  local tbSkillInfo = KFightSkill.GetSkillInfo(nSkillID, 1)
+  if 1 == tbSkillInfo.RideLimited and 1 == me.nRideState then
+    local nLastSendTime = self.tbRequestDownHorseTime[nSkillID] or 0
+    local nCurTime = GetTime()
+    if nCurTime >= nLastSendTime + self.nRideDownOperationInterval then
+      self.tbRequestDownHorseTime[nSkillID] = nCurTime
+      SetRideState(0)
+    end
+    return false
+  end
+  return true
+end
+
+function Operation:Attack(nSkillID, bAngerSkill)
+  if not self:SkillCheckHorseLimited(nSkillID) then
+    return
+  end
+  Operation:JoyStickAttack(nSkillID)
+end
+
+function Operation:GotoPosition(nMapId, nX, nY)
+  me.bIsForbidUpHorseFlag = true
+  AutoPath:GotoAndCallEx(nMapId, nX, nY, nil, Npc.MIN_DISTANCE)
+end
+
+function Operation:StopGoto()
+  me.bIsForbidUpHorseFlag = false
+  AutoPath:StopGoto()
+end
+
+function Operation:IsTargetOutLockRange(nSkillId)
+  local target = KNpc.GetById(self.nLastTargetId)
+  if not target then
+    return true
+  end
+  if not nSkillId or nSkillId <= 0 then
+    return true
+  end
+  local _, nEnemyX, nEnemyY = target.GetWorldPos()
+  local _, meX, meY = me.GetWorldPos()
+  local nLockRange = FightSkill:GetSkillLockRange(nSkillId)
+  return nLockRange <= Lib:GetDistance(meX, meY, nEnemyX, nEnemyY)
+end
+
+function Operation:IsNeedChangeTarget(pNpc, nSkillID, bCheckLockRange, nSelectType)
+  if nil == bCheckLockRange then
+    bCheckLockRange = true
+  end
+  if not self.nLastTargetId or self.nLastTargetId <= 0 then
+    return true
+  end
+  local bNeedChangeTarget = false
+  local nCurFrame = GetFrame()
+  if not bNeedChangeTarget then
+    local target = KNpc.GetById(self.nLastTargetId)
+    bNeedChangeTarget = not target
+  end
+  bNeedChangeTarget = bNeedChangeTarget or Npc:IsDead(self.nLastTargetId)
+  if not bNeedChangeTarget then
+    local pTarget = KNpc.GetById(self.nLastTargetId)
+    if pTarget and nSelectType == AFKFightSetting.SelectType.Player and 0 == pTarget.nPlayerID then
+      bNeedChangeTarget = true
+    end
+  end
+  bNeedChangeTarget = bNeedChangeTarget or not me.CheckSkillAvailable2Npc(nSkillID, self.nLastTargetId)
+  bNeedChangeTarget = bNeedChangeTarget or nCurFrame >= self.nLastTargetLockTime + self.nLockTargetFrameTime
+  if bCheckLockRange and not bNeedChangeTarget then
+    bNeedChangeTarget = self:IsTargetOutLockRange(nSkillID)
+    local nTargetId = self:GetLockTargetNpcId()
+    if nil ~= nTargetId then
+      bNeedChangeTarget = false
+    end
+  end
+  return bNeedChangeTarget
+end
+
+function Operation:ShowSkillLockRange(nSkillID, bNeedCheckOnJoyStick)
+  if not AFKFightSetting.bOpenAttackRadius then
+    return false
+  end
+  if bNeedCheckOnJoyStick and Operation.bOnJoyStick then
+    return false
+  end
+  if not me.nFightMode or 0 == me.nFightMode then
+    return false
+  end
+  if not nSkillID or nSkillID <= 0 then
+    return false
+  end
+  local nLockRange = FightSkill:GetSkillLockRange(nSkillID)
+  local nScale = nLockRange * 2 / 800
+  Client.RepresentModule.SetSkillLockRangeEffect(true, nScale)
+  return true
+end
+
+function Operation:CloseSkillLockRange()
+  Client.RepresentModule.SetSkillLockRangeEffect(false)
+end
+
+function Operation:FixedActivate_SetNpcAttackNoneSelected()
+  local pNpc = me.GetNpc()
+  if not pNpc then
+    return
+  end
+  if AFK:IsInFightStep() then
+    return
+  end
+  local bIsNeedChangeTarget = self:IsNeedChangeTarget(pNpc, self.nLastAttackSkillId, false)
+  if bIsNeedChangeTarget and self.nLastTargetId and self.nLastTargetId > 0 then
+    self:SetNpcAttackNoneSelected(self.nLastTargetId, 1)
+    self:SetNpcAttackNoneSelected(self.nLastTargetId, 2)
+  end
+end
+
+function Operation:FixedActivate_ShowSkillLockRange()
+  local nCurFrame = GetFrame()
+  if not self.nLastAttackTime or nCurFrame < self.nLastAttackTime + self.nLockTargetCircleFrameTime then
+    return
+  end
+  self:CloseSkillLockRange()
+end
+
+function Operation:FixedActivate()
+  self:FixedActivate_SetNpcAttackNoneSelected()
+  self:FixedActivate_ShowSkillLockRange()
+end
+
+function Operation:SetSkillLockRange(nSkillID)
+  self:ShowSkillLockRange(nSkillID, true)
+end
+
+function Operation:IsInAttackRadius(nTargetNpcId, nSkillId)
+  if not nTargetNpcId or nTargetNpcId <= 0 then
+    return false
+  end
+  if not nSkillId or nSkillId <= 0 then
+    return false
+  end
+  local nMeNpcId = me.GetNpc().nId
+  if nTargetNpcId == nMeNpcId then
+    return true
+  end
+  local pTargetNpc = KNpc.GetById(nTargetNpcId)
+  if not pTargetNpc then
+    return false
+  end
+  local nSkillAttackRadius = FightSkill:GetAttackRadius(nSkillId)
+  if not nSkillAttackRadius or nSkillAttackRadius < 0 then
+    return false
+  end
+  local _, nSelfX, nSelfY = me.GetWorldPos()
+  local _, nTargetNpcX, nTargetNpcY = pTargetNpc.GetWorldPos()
+  local nDisRequired = nSkillAttackRadius ^ 2
+  local nDisSquare = Lib:GetDistsSquare(nSelfX, nSelfY, nTargetNpcX, nTargetNpcY)
+  if nDisRequired >= nDisSquare then
+    return true
+  end
+  return false
+end
+
+function Operation:GetTargetBySkill(nSkillID)
+  if Operation.nTimerCheckRandomMove then
+    Timer:Close(Operation.nTimerCheckRandomMove)
+    Operation.nTimerCheckRandomMove = nil
+  end
+  Operation.nKickFrame = 0
+  if self.bStopTarget then
+    return 0
+  end
+  self:SetSkillLockRange(nSkillID)
+  local pNpc = me.GetNpc()
+  local nDir = self.nLastGoDir or pNpc.GetDir()
+  local nTargetId
+  local nSelectType = AFKFightSetting.nSelectType
+  local bNeedChangeTarget = false
+  self.nLastTargetId = self.nLastTargetId or 0
+  self.nLastTargetLockTime = self.nLastTargetLockTime or 0
+  self.nLastAttackSkillId = nSkillID
+  if AFKFightSetting.bOpenAttackRadius then
+    self.nLastAttackTime = GetFrame()
+  end
+  bNeedChangeTarget = self:IsNeedChangeTarget(pNpc, nSkillID, nil, nSelectType)
+  local nLockRange = FightSkill:GetSkillLockRange(nSkillID)
+  nSelectType = math.max(nSelectType, AFKFightSetting.SelectType.AnyOne)
+  nSelectType = math.min(nSelectType, AFKFightSetting.SelectType.Boss)
+  if bNeedChangeTarget then
+    if self.bOnJoyStick and not nTargetId then
+      nTargetId = pNpc.GetNearestNpcByDirAndSkillRelation2(nDir, self.nJoyStickFindTargetDirDiff, nLockRange, nSkillID, nSelectType, false, 0, 0, 0)
+    end
+    nTargetId = nTargetId or pNpc.GetNearestNpcIdBySkillRelation(nSkillID, nSelectType, false, nLockRange, 0, 0)
+    if self.bOnJoyStick and not nTargetId then
+      nTargetId = pNpc.GetNearestNpcByDirAndSkillRelation2(nDir, self.nJoyStickFindTargetDirDiff, nLockRange, nSkillID, 0, false, 0, 0, 0)
+    end
+    nTargetId = nTargetId or pNpc.GetNearestNpcIdBySkillRelation(nSkillID, 0, false, nLockRange, 0, 0)
+    self:SetNpcAttackNoneSelected(self.nLastTargetId, 1)
+    self:SetNpcAttackNoneSelected(self.nLastTargetId, 2)
+    self.nLastTargetId = nTargetId
+    self.nLastTargetLockTime = GetFrame()
+  end
+end
+
+function Operation:GetAttackTarget(nSkillID)
+  self:GetTargetBySkill(nSkillID)
+  if not self.nLastTargetId or self.nLastTargetId <= 0 then
+    return 0
+  end
+  if not self:IsInAttackRadius(self.nLastTargetId, nSkillID) then
+    return 0
+  end
+  Operation:SetNpcAttackSelectedByIndex(self.nLastTargetId, 1)
+  Operation:SetNpcAttackNoneSelected(self.nLastTargetId, 2)
+  return self.nLastTargetId
+end
+
+function Operation:JoyStickAttack(nSkillID)
+  self:GetTargetBySkill(nSkillID)
+  local nDir = self.nLastGoDir or me.GetNpc().GetDir()
+  if not self.nLastTargetId or self.nLastTargetId <= 0 then
+    local tbSkillInfo = FightSkill:GetFactionSkillInfo(me.nFaction, me.nFactionSect, nSkillID)
+    if tbSkillInfo and tbSkillInfo.CastType == FightSkill.SkillCasterType.target then
+      return
+    end
+    Operation:UseSkillToDir(nSkillID, nDir, 1)
+    return
+  end
+  if not self:IsInAttackRadius(self.nLastTargetId, nSkillID) then
+    if not self.bOnJoyStick then
+      local target = KNpc.GetById(self.nLastTargetId)
+      if not target then
+        Operation:UseSkillToDir(nSkillID, nDir)
+        return
+      end
+      AFKSkillMgr:SetIntentTargetNpc(self.nLastTargetId)
+      local _, nX, nY = me.GetWorldPos()
+      local nEnemyMapId, nEnemyX, nEnemyY = target.GetWorldPos()
+      if nEnemyX and nEnemyY then
+        me.bIsForbidUpHorseFlag = true
+        local nSkillAttackRadius = FightSkill:GetAttackRadius(nSkillID)
+        AutoPath:GotoAndCallEx(nEnemyMapId, nEnemyX, nEnemyY, nil, nSkillAttackRadius * 2 / 3)
+      end
+      return
+    end
+    self:StopGoto()
+    Operation:UseSkillToDir(nSkillID, nDir, 1)
+    return
+  end
+  Operation:SetNpcAttackSelectedByIndex(self.nLastTargetId, 1)
+  Operation:SetNpcAttackNoneSelected(self.nLastTargetId, 2)
+  local pNpc = me.GetNpc()
+  if not pNpc.IsTargetInDirRange(self.nLastTargetId, self.nSelectLastTargetDirRange) then
+    if not self.bOnJoyStick then
+      Operation:UseSkillToNpc(nSkillID, self.nLastTargetId)
+      self.nLastTargetLockTime = GetFrame()
+      return
+    end
+    local tbSkillInfo = FightSkill:GetSkillSetting(nSkillID, 1)
+    if tbSkillInfo and tbSkillInfo.SkillType == FightSkill.SkillTypeDef.skill_type_melee then
+      Operation:UseSkillToDir(nSkillID, nDir, 1)
+    else
+      Operation:UseSkillToNpc(nSkillID, self.nLastTargetId)
+      self.nLastTargetLockTime = GetFrame()
+    end
+    return
+  end
+  Operation:UseSkillToNpc(nSkillID, self.nLastTargetId)
+  self.nLastTargetLockTime = GetFrame()
+end
+
+function Operation:SetNpcAttackSelected(nNpcId)
+  self:SetNpcAttackSelectedByIndex(nNpcId, 1)
+end
+
+function Operation:SetNpcAttackSelectedByIndex(nNpcID, nIndex)
+  local pNpc = KNpc.GetById(nNpcID)
+  if not pNpc then
+    return
+  end
+  local nCurSelectNpcId = Client.NpcManager.GetTargetSelectNpcID(nIndex - 1)
+  if not nNpcID or 0 == nNpcID or nNpcID == nCurSelectNpcId then
+    return
+  end
+  local npcRep = Client.NpcManager.GetNpc(nNpcID)
+  if not npcRep then
+    return
+  end
+  npcRep:SetSelectedEffect(true, true, nIndex - 1)
+end
+
+function Operation:SetNpcAttackNoneSelected(nNpcID, nIndex)
+  if not nNpcID or nNpcID <= 0 then
+    return
+  end
+  local pNpc = KNpc.GetById(nNpcID)
+  if not pNpc then
+    return
+  end
+  local npcRep = Client.NpcManager.GetNpc(nNpcID)
+  if npcRep then
+    npcRep:SetSelectedEffect(false, true, nIndex - 1)
+  end
+end
+
+function Operation:SetNpcSelected(nNpcID, bIsAttack)
+  if nNpcID == me.GetNpc().nId then
+    return
+  end
+  local eDoing = me.GetDoing()
+  if eDoing == Npc.Doing.stand then
+    me.GetNpc().SetDirToNpc(nNpcID or 0)
+  end
+  local nCurSelectNpcId = Client.NpcManager.GetTargetSelectNpcID(0)
+  if not nNpcID or 0 == nNpcID or nNpcID == nCurSelectNpcId then
+    return
+  end
+  local pNpc = KNpc.GetById(nNpcID)
+  if not pNpc then
+    return
+  end
+  if pNpc.nKind == Npc.KIND.god or pNpc.nKind == Npc.KIND.sporter or pNpc.nKind == Npc.KIND.novertical then
+    return
+  end
+  local npcRep = Client.NpcManager.GetNpc(nNpcID)
+  if not npcRep then
+    return
+  end
+  me.nAttackSkillId = me.nAttackSkillId or FightSkill:GetSkillIdByBtnName(me.nFaction, me.nFactionSect)
+  local bCanAttack = me.CheckSkillAvailable2Npc(me.nAttackSkillId, nNpcID) and true or false
+  if bIsAttack then
+    if me.nAttackSkillId > 0 and bCanAttack then
+      npcRep:SetSelectedEffect(true, true, 0)
+    end
+    return
+  end
+  if not bCanAttack then
+    npcRep:SetSelectedEffect(true, false, 0)
+    return
+  end
+end
+
+function Operation:UnselectNpc()
+  local nCurSelectNpcId = Client.NpcManager.GetTargetSelectNpcID(0)
+  if 0 == nCurSelectNpcId then
+    return
+  end
+  local npcRep = Client.NpcManager.GetNpc(nCurSelectNpcId)
+  if npcRep then
+    npcRep:SetSelectedEffect(false, false, 0)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_OPERATION_UNSELECT_NPC, nCurSelectNpcId)
+end
+
+function Operation:BindNpcUseSkillToNpc(pNpc, nSkillID, nNpcID)
+  local pNpc = KNpc.GetById(pNpc.nId)
+  pNpc.UseSkillToNpc(nSkillID, nNpcID)
+end
+
+function Operation:UseSkillToNpc(nSkillID, nNpcID)
+  if not nNpcID or 0 == nNpcID then
+    nNpcID = me.GetNpc().nId
+  end
+  if Operation.tbPublicFrame and Operation.tbPublicFrame[nSkillID] and Operation.tbPublicFrame[nSkillID] > 0 then
+    return false
+  end
+  local bRet = me.UseSkill(nSkillID, -1, nNpcID)
+  self:OnUseSkill(nNpcID, nSkillID)
+  if self.bOnJoyStick then
+    self:GoDirection(self.nLastGoDir)
+    self.nLastGoDir = nil
+  end
+  return bRet
+end
+
+function Operation:UseSkillToPos(nSkillID, nPosX, nPosY)
+  local bRet = me.UseSkill(nSkillID, nPosX, nPosY)
+  if self.bOnJoyStick then
+    self:GoDirection(self.nLastGoDir)
+    self.nLastGoDir = nil
+  end
+  self:OnUseSkill(nil, nSkillID)
+  return bRet
+end
+
+function Operation:BindNpcUseSkillToDir(pNpc, nSkillID, nDir)
+  pNpc.UseSkillToDir(nSkillID, nDir)
+end
+
+function Operation:UseSkillToDir(nSkillID, nDir, bNoTarget)
+  local bRet = me.UseSkillToDir(nSkillID, nDir, bNoTarget)
+  if self.bOnJoyStick then
+    self:GoDirection(self.nLastGoDir)
+    self.nLastGoDir = nil
+  end
+  self:OnUseSkill(nil, nSkillID)
+  return bRet
+end
+
+function Operation:OnUseSkill(nNpcID, nSkillID)
+  local tbCheck = self.tbCheckSkill[nSkillID]
+  if nil ~= tbCheck then
+    local nCheckNpcId = tbCheck.nCheckNpcId
+    local OnUseSkillCallback = tbCheck.OnUseSkillCallback
+    OnUseSkillCallback()
+    self.tbCheckSkill[nSkillID] = nil
+  elseif nil ~= nNpcID then
+    local tbCheck = self.tbCheckNpc[nNpcID]
+    if nil ~= tbCheck then
+      local nCheckNpcId = tbCheck.nCheckNpcId
+      local nCheckSkillID = tbCheck.nCheckSkillID
+      if nCheckSkillID == nSkillID then
+        local OnUseSkillCallback = tbCheck.OnUseSkillCallback
+        OnUseSkillCallback()
+        self.tbCheckNpc[nNpcID] = nil
+      end
+    end
+  end
+end
+
+function Operation:OnGatherClicked(pNpc)
+  local _, nX1, nY1 = pNpc.GetWorldPos()
+  local _, nX2, nY2 = me.GetWorldPos()
+  local nDistance = math.abs(nX2 - nX1) + math.abs(nY2 - nY1)
+  if nDistance > Lib:Map2Logic(300) then
+    local function fnCallBack()
+      RemoteServer.OnSimpleTapNpc(pNpc.nId)
+    end
+    
+    AutoPath:GotoAndCallEx(pNpc.nMapTemplateId, nX1, nY1, fnCallBack, GetNpcDialogDistance(pNpc.nTemplateId), nil, pNpc.nTemplateId)
+  else
+    RemoteServer.OnSimpleTapNpc(pNpc.nId)
+  end
+end
+
+function Operation:OnTouchUp(nX, nY, bShowArrow)
+  AFK:AfkTimerMgr()
+  self:ClickMap(nX, nY, false, true)
+end
+
+function Operation:OnDoubleTap(nX, nY, bShowArrow)
+  AFK:AfkTimerMgr()
+  self:ClickMap(nX, nY, true, true)
+end
+
+Operation.nLeftControlNpcId = Operation.nLeftControlNpcId or 0
+
+function Operation:OnRightTouchDown(nX, nY, bLeftControlDown)
+  if nX < 0 then
+    return
+  end
+  if nY < 0 then
+    return
+  end
+  local nRegionX, nRegionY = GetMapBaseInfo(me.nMapTemplateId)
+  if nX > nRegionX * 32 * 256 then
+    return
+  end
+  if nY > nRegionY * 32 * 256 then
+    return
+  end
+  ClientUtil:StopAutoGoto()
+  if 1 == IsAlone() then
+    me.SetPosition(nX, nY)
+  else
+    GMCommand(string.format("me.SetPosition(%d,%d)", nX, nY))
+  end
+end
+
+function Operation:OnTouchReturn()
+end
+
+function Operation:HotkeyGoDirection(nDir)
+  local y = 0
+  y = math.ceil(y * Env.LOGIC_MAX_DIR / 360)
+  y = y - math.floor(y / Env.LOGIC_MAX_DIR) * Env.LOGIC_MAX_DIR
+  nDir = nDir + y
+  if nDir < 0 then
+    nDir = nDir + Env.LOGIC_MAX_DIR
+  end
+  TeamMgr:StopFollowMember()
+  self:GoDirection(nDir)
+end
+
+local CanRunWithOutLogin = {TestCommand = 1}
+
+local function AttackFun(index)
+  local ui = Ui:GetWindow("UIHudRightSkill")
+  if ui then
+    ui:onClickSkill(index)
+  end
+end
+
+local tbKeyDownFun = {
+  HOTKEY_QINGKUNG = function()
+    PlayerQingKung:DoQingKung()
+  end,
+  HOTKEY_USE_MEDICINE = function()
+    if not MedicineMgr:CheckCDEnd() and MedicineMgr:HasMedicineLeft() then
+      return
+    end
+    if MedicineMgr:HasMedicine() then
+      MedicineMgr:UseMedicine()
+      return
+    end
+    MedicineMgr:OpenShhop(nil)
+  end,
+  HOTKEY_RIDE = function()
+    local ui = Ui:GetWindow("UIHud")
+    if ui and me.nRideState then
+      if 1 == me.nRideState then
+        ui:onClickSwitchRide(0)
+      elseif 0 == me.nRideState then
+        ui:onClickSwitchRide(1)
+      end
+    end
+  end,
+  HOTKEY_LOCK_TARGET = function()
+    Operation:SwitchAttackTargetManual()
+  end,
+  HOTKEY_AUTO_FIGHT = function()
+    local ui = Ui:GetWindow("UIHudRightSkill")
+    if ui then
+      if ui.pPanel:IsActive("imgBG/btnAuto") then
+        ui:onClickAutoFight(true)
+      else
+        ui:onClickAutoFight(false)
+      end
+    end
+  end,
+  F3 = function()
+    if AFK:IsRunning() then
+      AFK:Stop()
+    else
+      AFK:Start()
+    end
+  end,
+  HOTKEY_BAG = function()
+    CustomHotkey:OpenBag()
+  end,
+  HOTKEY_PLAYER = function()
+    CustomHotkey:OpenPlayerAttribute()
+  end,
+  HOTKEY_SKILL = function()
+    CustomHotkey:OpenSkill()
+  end,
+  HOTKEY_RANKING = function()
+    CustomHotkey:OpenRanking()
+  end,
+  HOTKEY_PARTER = function()
+    CustomHotkey:OpenParter()
+  end,
+  HOTKEY_FORGE = function()
+    CustomHotkey:OpenLifeSkill()
+  end,
+  HOTKEY_HONOR = function()
+    CustomHotkey:OpenHonor()
+  end,
+  HOTKEY_KIN = function()
+    CustomHotkey:OpenKin()
+  end,
+  HOTKEY_ACHIEVEMENT = function()
+    CustomHotkey:OpenAchievement()
+  end,
+  HOTKEY_TONG = function()
+    CustomHotkey:OpenTong()
+  end,
+  HOTKEY_BASIC_ATTACK = function()
+    AttackFun(1)
+  end,
+  HOTKEY_SKILL_1 = function()
+    AttackFun(2)
+  end,
+  HOTKEY_SKILL_2 = function()
+    AttackFun(3)
+  end,
+  HOTKEY_SKILL_3 = function()
+    AttackFun(4)
+  end,
+  HOTKEY_SKILL_4 = function()
+    AttackFun(5)
+  end,
+  HOTKEY_SIT = function()
+    CustomHotkey:Sit()
+  end,
+  M = function()
+    FightSkill.GM:UseTestSkill()
+  end,
+  N = function()
+    FightSkill.GM:ShowTestSkill()
+  end
+}
+local tbKeyUpFun = {}
+local tbKeyOnTypeFun = {
+  Move = {
+    Enter = function(self)
+      Operation:OnMoveJoyStickStart()
+    end,
+    Leave = function(self)
+      Operation:StopGoDir()
+      Operation:OnMoveJoyStickStop()
+    end,
+    On = function(self, tbKey)
+      local nV = 0
+      if tbKey.HOTKEY_MOVE_LEFT then
+        nV = -1
+      elseif tbKey.HOTKEY_MOVE_RIGHT then
+        nV = 1
+      end
+      local nH = 0
+      if tbKey.HOTKEY_MOVE_FORWARD then
+        nH = 1
+      elseif tbKey.HOTKEY_MOVE_BACK then
+        nH = -1
+      end
+      local nDir = CS.Joystick.GetJoyStickDirByAxis(Ui.Vector2(nV, nH))
+      self:GoDirection(nDir)
+    end
+  }
+}
+local tbKeyAxisFun = {}
+
+function Operation:XHKeyDown(...)
+  for _, szKey in ipairs({
+    ...
+  }) do
+    if CanRunWithOutLogin[szKey] or Login.bEnterGame then
+      if tbKeyDownFun[szKey] then
+        tbKeyDownFun[szKey](self)
+      end
+      CustomHotkey:EditHotkey(szKey)
+    end
+  end
+end
+
+function Operation:XHKeyUp(...)
+  for _, szKey in ipairs({
+    ...
+  }) do
+    if (CanRunWithOutLogin[szKey] or Login.bEnterGame) and tbKeyUpFun[szKey] then
+      tbKeyUpFun[szKey](self)
+    end
+  end
+end
+
+function Operation:XHKeyOn(...)
+  if not Login.bEnterGame then
+    return
+  end
+  local tbHKOnState = {}
+  for _, szKey in ipairs({
+    ...
+  }) do
+    local szKeyOnType = CustomHotkey.HotkeyBinding[szKey].KeyOnType
+    tbHKOnState[szKeyOnType] = tbHKOnState[szKeyOnType] or {}
+    tbHKOnState[szKeyOnType][szKey] = 1
+  end
+  for szKeyOnType, v in pairs(tbKeyOnTypeFun) do
+    local tbLast = self.tbLastHKOnState and self.tbLastHKOnState[szKeyOnType]
+    local tbNow = tbHKOnState[szKeyOnType]
+    if tbLast and not tbNow then
+      if v.Leave then
+        v.Leave(self)
+      end
+    elseif not tbLast and tbNow and v.Enter ~= nil then
+      v.Enter(self, tbNow)
+    end
+    if tbNow and v.On then
+      v.On(self, tbNow)
+    end
+  end
+  self.tbLastHKOnState = tbHKOnState
+end
+
+function Operation:XHKeyAxis(...)
+  if not Login.bEnterGame then
+    return
+  end
+  local tbArg = {
+    ...
+  }
+  local tbAxisValue = {}
+  for i = 1, #tbArg, 2 do
+    local szKey = tbArg[i]
+    local fValue = tbArg[i + 1]
+    tbAxisValue[szKey] = fValue
+  end
+  self:XHStateValueProcess(tbAxisValue, "tbLastAxisValue", tbKeyAxisFun)
+end
+
+function Operation:XHStateValueProcess(tbNew, szLast, tbOnProcess)
+  local tbCache = {}
+  local tbLast = self[szLast] or {}
+  for k, v in pairs(tbLast) do
+    tbCache[k] = -1
+  end
+  for k, v in pairs(tbNew) do
+    tbCache[k] = (tbCache[k] or 0) + 1
+  end
+  for k, v in pairs(tbCache) do
+    local tbFunc = tbOnProcess[k]
+    if nil ~= tbFunc then
+      if 1 == v then
+        if tbFunc.Enter then
+          tbFunc.Enter(self, tbNew[k])
+        end
+      elseif 0 == v then
+        if tbFunc.On then
+          tbFunc.On(self, tbNew[k])
+        end
+      elseif tbFunc.Leave then
+        tbFunc.Leave(self)
+      end
+    end
+  end
+  self[szLast] = tbNew
+end
+
+function Operation:OnMoveJoyStickStart()
+  self.bOnJoyStick = true
+  AFK:Suspend()
+  local tbWndHud = Ui:GetWindow("UIHud")
+  if tbWndHud then
+    tbWndHud:SetSitButtonVisable(false)
+  end
+  TeamMgr:StopFollowMember()
+end
+
+function Operation:OnMoveJoyStickStop()
+  self.bOnJoyStick = false
+  AFK:Resume()
+  local tbWndHud = Ui:GetWindow("UIHud")
+  if tbWndHud then
+    tbWndHud:SetSitButtonVisable(true)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_STOP_MOVE_BY_STICK)
+end
+
+function Operation:OnClickJoyStick()
+  self.bClickJoyStick = true
+end
+
+function Operation:OnDropJoyStick()
+  self.bClickJoyStick = false
+end
+
+function Operation:IsJoyStickClick()
+  return self.bClickJoyStick
+end
+
+function Operation:AddCheckSkill(nSkillID, nNpcID, nLockId, funcCB)
+  local tbC = Operation.tbCheckSkill
+  if nil == nNpcID then
+    tbC[nSkillID] = {
+      nCheckSkillID = nSkillID,
+      nCheckNpcId = nNpcID,
+      OnUseSkillCallback = funcCB,
+      nLockId = nLockId
+    }
+  end
+end
+
+function Operation:ClearEventSkill()
+  Operation.tbCheckSkill = {}
+  Operation.tbCheckNpc = {}
+end
+
+function Operation:IsSkillInCD(nSkillID)
+  local bResult = false
+  local nLogicFrame = GetFrame()
+  local nNextFrame, nCurCDTime = me.GetNpc().GetSkillNextCastTime(nSkillID)
+  local nPublicFrame = 0
+  if nil ~= self.tbPublicFrame and nil ~= self.tbPublicFrame[nSkillID] and self.tbPublicFrame[nSkillID] > 0 then
+    nPublicFrame = self.tbPublicFrame[nSkillID]
+  end
+  if nLogicFrame < nNextFrame or nPublicFrame > 0 then
+    bResult = true
+  end
+  return bResult
+end
+
+Operation.nCheckRandomFrame = 0
+
+function Operation:ChekRandomMove()
+  local nMapTID = me.nMapTemplateId
+  if BingFengQiongHua:IsJYTMap(nMapTID) or BingFengQiongHua:IsBingFengMap(nMapTID) then
+    if 9 == me.GetDoing() then
+      Operation.nCheckRandomFrame = Operation.nCheckRandomFrame + 1
+      if Operation.nCheckRandomFrame > 5 and Operation.nCheckRandomFrame < 10 and me.GetNpc() then
+        KLib.CallCFunction("RestoreAction", me.GetNpc().nId)
+      end
+    else
+      Operation.nCheckRandomFrame = 0
+    end
+  end
+  return true
+end
+
+function Operation:OnChangeFightState()
+  if me.nFightMode == Npc.FIGHT_MODE.emFightMode_None then
+    Operation:CloseSkillLockRange()
+  end
+end
+
+function Operation:SetLockTargetNpcId(nLockTargetId)
+  self.nLockTargetId = nLockTargetId
+end
+
+function Operation:GetLockTargetNpcId()
+  if self.nLockTargetId ~= nil then
+    local pNpc = KNpc.GetById(self.nLockTargetId)
+    if nil == pNpc then
+      self.nLockTargetId = nil
+    end
+  end
+  return self.nLockTargetId
+end
+
+function Operation:ClearTargetNpcId()
+  self.nLockTargetId = nil
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_FIGHT_STATE, Operation)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_FIGHT_STATE, Operation.OnChangeFightState, Operation)

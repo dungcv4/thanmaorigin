@@ -1,0 +1,99 @@
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.HonorLevelRankingActivity)
+local Protocol = {
+  [tbActivity.Protocol.OnGetFinishTimeResp] = "OnGetFinishTimeResp",
+  [tbActivity.Protocol.OnGetRankingDataResp] = "OnGetRankingDataResp"
+}
+local nTimeOffSet = 14400
+local szLightRedPointTimeKey = "HonorLevelRankingActivity"
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:OnOpen()
+  self:FinishTimeReq()
+  if not self.bRegisterEvent then
+    self.bRegisterEvent = true
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self.OnLogin, self)
+    EventNotify:RegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, self.OnCrossDay, self)
+  end
+end
+
+function tbActivity:OnClose()
+  self.nActivityFinishTime = nil
+  self.tbRankingList = {}
+  if self.bRegisterEvent then
+    self.bRegisterEvent = false
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self)
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, self)
+  end
+end
+
+function tbActivity:OnLogin()
+  self:FinishTimeReq()
+end
+
+function tbActivity:RankingListReq()
+  ActivityMgr:CallServerScript(self.nId, tbActivity.Protocol.OnGetRankingDataReq)
+end
+
+function tbActivity:FinishTimeReq()
+  ActivityMgr:CallServerScript(self.nId, self.Protocol.OnGetFinishTimeReq)
+end
+
+function tbActivity:OnGetFinishTimeResp(nActivityFinishTime, nUIfinishTime)
+  self.nUIFinishTime = nUIfinishTime
+  self.nActivityFinishTime = nActivityFinishTime
+  Event:OnEvent(Event.emEVENT_HONORLEVEL_FINISHTIME_REFRESH)
+  if self:IsActivityOpen() then
+    self:DailyLightRedPoint()
+  end
+end
+
+function tbActivity:OnGetRankingDataResp(tbRankingList)
+  self.tbRankingList = tbRankingList
+  Event:OnEvent(Event.emEVENT_HONORLEVEL_RANKINGLIST_REFRESH)
+end
+
+function tbActivity:GetRankingList()
+  return self.tbRankingList or {}
+end
+
+function tbActivity:GetFinishTime()
+  return self.nActivityFinishTime
+end
+
+function tbActivity:OnCrossDay()
+  if self:IsActivityOpen() then
+    self:DailyLightRedPoint()
+  else
+    self:TryFadeRedPoint()
+  end
+end
+
+function tbActivity:DailyLightRedPoint()
+  local nNow = GetTime()
+  local nLastLightTime = Ui.PlayerPrefs.GetInt(szLightRedPointTimeKey, 0)
+  if 0 == nLastLightTime or not Lib:IsSameDay(nTimeOffSet, nLastLightTime, nNow) then
+    Ui.PlayerPrefs.SetInt(szLightRedPointTimeKey, nNow)
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.HonorLevelRankingActivity)
+  end
+end
+
+function tbActivity:TryFadeRedPoint()
+  if RedPointMgr:CheckEvent(RedPointMgr.EVENT.HonorLevelRankingActivity) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.HonorLevelRankingActivity)
+  end
+end
+
+function tbActivity:CheckCanOpenUI()
+  if self.nUIFinishTime then
+    return self.nUIFinishTime > GetTime()
+  elseif self.nActivityFinishTime then
+    return self.nActivityFinishTime > GetTime()
+  end
+  return true
+end

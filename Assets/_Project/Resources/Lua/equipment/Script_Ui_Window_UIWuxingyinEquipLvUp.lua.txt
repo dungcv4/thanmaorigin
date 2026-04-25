@@ -1,0 +1,137 @@
+local tbWnd = Ui:CreateWindow("UIWuxingyinEquipLvUp")
+local tbControls = {
+  EquipGrid = "EquipInfo/UIItemGrid",
+  txtName = "EquipInfo/txtName",
+  txtLevel = "EquipInfo/txtLevel",
+  ItemGrid = "AttributeList/UIItemGrid",
+  btnLevelUp = "AttributeList/btnLevelUp",
+  txtCost = "AttributeList/txtCost",
+  NowTemplate = "AttributeList/Now/AttribList/Viewport/Content/AttibType",
+  NextTemplate = "AttributeList/Next/AttribList/Viewport/Content/AttibType",
+  btnAdd = "AttributeList/btnAdd",
+  txtMax = "AttributeList/txtMax"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnLevelUp = function(self)
+    Item.WuXingYin:EquipLvUp(self.nEquipId)
+    if RedPointMgr:CheckEvent(RedPointMgr.EVENT.WuXingYinEquipLvUp) then
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.WuXingYinEquipLvUp)
+    end
+  end,
+  btnAdd = function(self)
+    Item.WuXingYin:OnBuyMaterial("EquipLvUp", self.nEquipId)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.ItemGrid = Ui:NewExistItemGrid(self, tbControls.ItemGrid)
+  self.EquipGrid = Ui:NewExistItemGrid(self, tbControls.EquipGrid)
+  self.tbNowScrollView = Ui:NewScrollView(self, tbControls.NowTemplate, nil, false, true)
+  self.tbNextScrollView = Ui:NewScrollView(self, tbControls.NextTemplate, nil, false, true)
+end
+
+function tbWnd:OnOpen(nEquipId)
+  self.nEquipId = nEquipId
+  self:Update()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.OnSyncItemEvent, self)
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnLevelUp, {
+    RedPointMgr.EVENT.WuXingYinEquipLvUp
+  })
+end
+
+function tbWnd:Update(nEquipId)
+  self.nEquipId = nEquipId or self.nEquipId
+  local pEquip = KItem.GetItemObj(self.nEquipId)
+  if not pEquip then
+    return
+  end
+  self.EquipGrid:SetItem(self.nEquipId, pEquip.dwTemplateId, {bShowTip = true}, me.nFaction, me.nFactionSect, me.nSex)
+  self.EquipGrid:SetClickEnable(true)
+  self.pPanel:Label_SetText(tbControls.txtName, i18n.Parse(pEquip.szName))
+  self.pPanel:Label_SetText(tbControls.txtLevel, i18n.EasyGet("{0}\233\152\182", pEquip.nLevel))
+  self:UpdateMaterial()
+  local tbNowAttr = Item.WuXingYin:GetAttrList(self.nEquipId, pEquip.nLevel)
+  local tbNextAttr = Item.WuXingYin:GetAttrList(self.nEquipId, pEquip.nLevel + 1, true)
+  self.tbNowScrollView:Reset()
+  for i = 1, #tbNowAttr do
+    self.tbNowScrollView:SetElement(i, function(tbElement)
+      self:SetText(tbElement, tbNowAttr[i])
+    end)
+  end
+  self.tbNextScrollView:Reset()
+  for i = 1, #tbNextAttr do
+    self.tbNextScrollView:SetElement(i, function(tbElement)
+      self:SetText(tbElement, tbNextAttr[i])
+    end)
+  end
+  self.pPanel:SetActive(tbControls.txtMax, false)
+  local szOpenTime = Item.WuXingYin.tbCfg[pEquip.nLevel].szOpenTime
+  if 0 == GetTimeFrameState(szOpenTime) then
+    local szName = i18n.Parse(Calendar.tbMapTimeFrame[szOpenTime].Name)
+    self.pPanel:SetActive(tbControls.txtMax, true)
+    local szText = i18n.EasyGet("{0}\229\144\142\229\188\128\230\148\190\228\184\139\228\184\128\233\152\182", szName)
+    self.pPanel:Label_SetText(tbControls.txtMax, szText)
+  end
+  self.pPanel:Button_SetEnable(tbControls.btnLevelUp, 1 == GetTimeFrameState(szOpenTime))
+end
+
+function tbWnd:SetText(tbElement, tbDesc)
+  local pPanel = tbElement.pPanel
+  local szTittle, szValue = table.unpack(tbDesc)
+  local nType
+  if szTittle then
+    nType = 1
+  elseif "table" == type(szValue) then
+    nType = 2
+  else
+    nType = 3
+  end
+  if 1 == nType then
+    pPanel:SetActive("txtTitle", true)
+    pPanel:SetActive("Template", false)
+    pPanel:Label_SetText("txtTitle", szTittle)
+  elseif 2 == nType then
+    pPanel:SetActive("txtTitle", false)
+    pPanel:SetActive("Template", true)
+    pPanel:SetActive("Template/txtAttrib", true)
+    pPanel:Label_SetText("Template/txtAttrib", szValue.szValue)
+    pPanel:Label_SetColorByName("Template/txtAttrib", szValue.szColor or "Red")
+  elseif 3 == nType then
+    pPanel:SetActive("txtTitle", false)
+    pPanel:SetActive("Template", true)
+    pPanel:SetActive("Template/txtAttrib", true)
+    pPanel:Label_SetText("Template/txtAttrib", szValue)
+  end
+end
+
+function tbWnd:UpdateMaterial()
+  local nTemplate, nCost = Item.WuXingYin:GetEquipLvUpCost(self.nEquipId)
+  local nHave = me.GetItemCountInBags(nTemplate)
+  self.ItemGrid:SetItemByTemplate(nTemplate, nil, nil, nil, {bShowTip = true})
+  self.ItemGrid:SetClickEnable(true)
+  self.pPanel:Label_SetText(tbControls.txtCost, i18n.EasyGet("{0}/{1}", nHave, nCost))
+  if nCost > nHave then
+    self.pPanel:Label_SetColorByName(tbControls.txtCost, "Red")
+  else
+    self.pPanel:Label_SetColorByName(tbControls.txtCost, "BlackGreen")
+  end
+end
+
+function tbWnd:OnSyncItemEvent(nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  local pEquip = me.GetEquipByPos(Item.EQUIPPOS_WUXINGYIN)
+  if not pItem or not pEquip then
+    return
+  end
+  local nCostTemplate = Item.WuXingYin:GetEquipLvUpCost(pEquip.dwId)
+  if nCostTemplate ~= pItem.dwTemplateId then
+    return
+  end
+  self:UpdateMaterial()
+end
+
+function tbWnd:OnClose()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnLevelUp)
+end

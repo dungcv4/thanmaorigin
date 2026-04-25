@@ -1,0 +1,230 @@
+local tbWnd = Ui:CreateWindow("UIHorseJinjie")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnSyncItemEvent,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  txtNameCur = "node/imgBG/Content/Now/txtName",
+  NpcModelCurPath = "node/imgBG/Content/Now/imgModel",
+  TemplateCur = "node/imgBG/Content/Now/AttribList/Template",
+  txtNameNext = "node/imgBG/Content/Next/txtName",
+  NpcModelNextPath = "node/imgBG/Content/Next/imgModel",
+  TemplateNext = "node/imgBG/Content/Next/AttribList/Template",
+  Cost = "node/imgBG/Content/Cost",
+  UIItemGrid1 = "node/imgBG/Content/Cost/Item1/UIItemGrid",
+  btnAdd1 = "node/imgBG/Content/Cost/Item1/btnAdd",
+  txtCost1 = "node/imgBG/Content/Cost/Item1/txtCost",
+  UIItemGrid2 = "node/imgBG/Content/Cost/Item2/UIItemGrid",
+  txtCost2 = "node/imgBG/Content/Cost/Item2/txtCost",
+  btnAdd2 = "node/imgBG/Content/Cost/Item2/btnAdd",
+  txtFeeValue = "node/imgBG/Content/Cost/txtFeeValue",
+  btnJinjie = "node/imgBG/Content/Cost/btnJinjie",
+  txtRideLevel = "node/imgBG/Content/Next/txtRideLevel",
+  wndListHorse = "node/wndListHorse",
+  TemplateGrade = "node/wndListHorse/imgBg/HorseListBg/HorseList/Viewport/Content/Template1",
+  btnNew = "node/imgBG/Content/btnNew",
+  txtCostTips = "node/imgBG/Content/Cost/txtCostTips"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnNew = function(self)
+    self.pPanel:SetActive(tbControls.wndListHorse, true)
+  end,
+  btnJinjie = function(self)
+    Horse:CSGradeUpgradeReq(self.nSelectGrade)
+  end,
+  btnAdd1 = function(self)
+    if self.nConsumeTemplateId1 then
+      Shop:OpenShopBuyWidDefault(self.nConsumeTemplateId1)
+    end
+  end,
+  btnAdd2 = function(self)
+    if self.nConsumeTemplateId2 then
+      Shop:OpenShopBuyWidDefault(self.nConsumeTemplateId2)
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose(tbControls.wndListHorse)
+  self.tbConsumeGrid1 = Ui:NewExistItemGrid(self, tbControls.UIItemGrid1)
+  self.tbConsumeGrid1:SetClickEnable(true)
+  self.tbConsumeGrid2 = Ui:NewExistItemGrid(self, tbControls.UIItemGrid2)
+  self.tbConsumeGrid2:SetClickEnable(true)
+  local obj = self.pPanel:GetObject(tbControls.NpcModelCurPath)
+  self.NpcModelCur = obj:GetComponent(Ui.UINpcModel)
+  obj = self.pPanel:GetObject(tbControls.NpcModelNextPath)
+  self.NpcModelNext = obj:GetComponent(Ui.UINpcModel)
+  self.tbAttrScrollCur = Ui:NewScrollView(self, tbControls.TemplateCur, nil, false, true)
+  self.tbAttrScrollNext = Ui:NewScrollView(self, tbControls.TemplateNext, nil, false, true)
+  self.pPanel:SetActive(tbControls.btnAdd1, false)
+  self.tbGradeScrollView = Ui:NewScrollView(self, tbControls.TemplateGrade, function(self, nIndex, tbElement)
+    self.nSelectGrade = tbElement.nIndex
+    self:UpdateView()
+    self.pPanel:SetActive(tbControls.wndListHorse, false)
+  end)
+end
+
+function tbWnd:OnOpen()
+  self.nCurGrade = Horse:GetHorseGrade(me)
+  self.nMaxCanGrade = Horse:GetMaxCanUpgrade()
+  self:UpdateJumpGradeButton()
+  self.nSelectGrade = self.nMaxCanGrade
+  self:UpdateView()
+end
+
+function tbWnd:OnClose()
+  self.NpcModelCur:Release()
+  self.NpcModelNext:Release()
+end
+
+function tbWnd:UpdateJumpGradeButton()
+  if self.nMaxCanGrade - self.nCurGrade > 1 then
+    self.pPanel:SetActive(tbControls.btnNew, true)
+  else
+    self.pPanel:SetActive(tbControls.btnNew, false)
+  end
+end
+
+function tbWnd:HorseGradeRsp()
+  self:UpdateJumpGradeButton()
+  self.nCurGrade = Horse:GetHorseGrade(me)
+  self.nSelectGrade = self.nMaxCanGrade
+  self:UpdateView()
+end
+
+function tbWnd:UpdateView()
+  self:UpdateGradeSV()
+  self.pPanel:SetActive(tbControls.txtRideLevel, false)
+  local nMaxGrade = Horse:GetMaxGradeNumCfg()
+  local nNextGrade = self.nSelectGrade
+  if nMaxGrade < nNextGrade then
+    nNextGrade = nMaxGrade
+  end
+  local szCurName = i18n.Get(Horse.tbGradeInfoCfg[self.nCurGrade][1])
+  self.pPanel:Label_SetText(tbControls.txtNameCur, szCurName)
+  local szNextName = i18n.Get(Horse.tbGradeInfoCfg[nNextGrade][1])
+  self.pPanel:Label_SetText(tbControls.txtNameNext, szNextName)
+  self:ShowModel(self.nCurGrade, nNextGrade)
+  self:UpdateAttrInfo(self.nCurGrade, nNextGrade)
+  self:UpdateConsumeInfo(self.nCurGrade, nNextGrade)
+  if nNextGrade - self.nCurGrade > 1 then
+    self.pPanel:SetActive(tbControls.txtCostTips, true)
+  else
+    self.pPanel:SetActive(tbControls.txtCostTips, false)
+  end
+end
+
+function tbWnd:ShowModel(nCurGrade, nNextGrade)
+  local nCurTemplateId = Horse.tbGradeInfoCfg[nCurGrade][8]
+  local nNextTemplateId = Horse.tbGradeInfoCfg[nNextGrade][8]
+  local horseModelId = Horse:GetModel(me, nCurTemplateId)
+  self.NpcModelCur:ShowModel(me.nSex, 1, 0, 0, 0, horseModelId, 0, 0)
+  self.NpcModelCur:SetDir(Npc.ModelDirection.LeftBottom)
+  horseModelId = Horse:GetModel(me, nNextTemplateId)
+  self.NpcModelNext:ShowModel(me.nSex, 1, 0, 0, 0, horseModelId, 0, 0)
+  self.NpcModelNext:SetDir(Npc.ModelDirection.LeftBottom)
+end
+
+function tbWnd:UpdateConsumeInfo(nCurGrade, nNextGrade)
+  if nNextGrade <= nCurGrade then
+    self.pPanel:SetActive(tbControls.Cost, false)
+  else
+    self.pPanel:SetActive(tbControls.Cost, true)
+    local tbNeedHorseItem, tbNeedGradeItem, nNeedCoin = Horse:GetUpgradeGradeConsumeInfo(nCurGrade, nNextGrade)
+    self.nConsumeTemplateId1 = tbNeedHorseItem[1]
+    self.tbConsumeGrid1:SetItemByTemplate(tbNeedHorseItem[1])
+    local nCurNum = me.GetItemCountByTypeInBag(tbNeedHorseItem[1])
+    self.pPanel:Label_SetText(tbControls.txtCost1, nCurNum .. "/" .. tbNeedHorseItem[2])
+    if nCurNum >= tbNeedHorseItem[2] then
+      self.pPanel:Label_SetColorByName(tbControls.txtCost1, "Enough")
+    else
+      self.pPanel:Label_SetColorByName(tbControls.txtCost1, "NotEnough")
+    end
+    self.nConsumeTemplateId2 = tbNeedGradeItem[1]
+    self.tbConsumeGrid2:SetItemByTemplate(tbNeedGradeItem[1])
+    nCurNum = me.GetItemCountByTypeInBag(tbNeedGradeItem[1])
+    self.pPanel:Label_SetText(tbControls.txtCost2, nCurNum .. "/" .. tbNeedGradeItem[2])
+    if nCurNum >= tbNeedGradeItem[2] then
+      self.pPanel:Label_SetColorByName(tbControls.txtCost2, "Enough")
+    else
+      self.pPanel:Label_SetColorByName(tbControls.txtCost2, "NotEnough")
+    end
+    if nNeedCoin <= me.GetMoney("Coin") then
+      self.pPanel:Label_SetColorByName(tbControls.txtFeeValue, "Enough")
+    else
+      self.pPanel:Label_SetColorByName(tbControls.txtFeeValue, "NotEnough")
+    end
+    self.pPanel:Label_SetText(tbControls.txtFeeValue, nNeedCoin)
+  end
+end
+
+function tbWnd:UpdateAttrInfo(nCurGrade, nNextGrade)
+  local tbCurAttr = Horse.tbGradeInfoCfg[nCurGrade][100]
+  local tbCurAttribSpeed = KItem.GetEquipBaseProp(Horse.tbGradeInfoCfg[nCurGrade][8]).tbBaseAttrib
+  self.tbAttrScrollCur:Reset()
+  self.tbAttrScrollCur:SetElement(1, function(tbElement)
+    local pPanel = tbElement.pPanel
+    local szDesc, szValue = FightSkill:GetMagicDescSplit(tbCurAttribSpeed[1].szName, tbCurAttribSpeed[1].tbValue)
+    pPanel:Label_SetText("txtAttrib", szDesc)
+    pPanel:Label_SetText("txtAttribValue", szValue)
+  end)
+  for k, tbAttr in pairs(tbCurAttr) do
+    self.tbAttrScrollCur:SetElement(k + 1, function(tbElement)
+      local pPanel = tbElement.pPanel
+      local szDesc, szValue = FightSkill:GetMagicDescSplit(tbAttr[1], {
+        table.unpack(tbAttr, 2)
+      })
+      pPanel:Label_SetText("txtAttrib", szDesc)
+      pPanel:Label_SetText("txtAttribValue", szValue)
+    end)
+  end
+  self.tbAttrScrollNext:Reset()
+  local tbNextAttr = Horse.tbGradeInfoCfg[nNextGrade][100]
+  local tbNextAttribSpeed = KItem.GetEquipBaseProp(Horse.tbGradeInfoCfg[nNextGrade][8]).tbBaseAttrib
+  self.tbAttrScrollNext:SetElement(1, function(tbElement)
+    local pPanel = tbElement.pPanel
+    local szDesc, szValue = FightSkill:GetMagicDescSplit(tbNextAttribSpeed[1].szName, tbNextAttribSpeed[1].tbValue)
+    pPanel:Label_SetText("txtAttrib", szDesc)
+    pPanel:Label_SetText("txtAttribValue", szValue)
+  end)
+  for k, tbAttr in pairs(tbNextAttr) do
+    self.tbAttrScrollNext:SetElement(k + 1, function(tbElement)
+      local pPanel = tbElement.pPanel
+      local szDesc, szValue = FightSkill:GetMagicDescSplit(tbAttr[1], {
+        table.unpack(tbAttr, 2)
+      })
+      pPanel:Label_SetText("txtAttrib", szDesc)
+      pPanel:Label_SetText("txtAttribValue", szValue)
+    end)
+  end
+end
+
+function tbWnd:OnSyncItemEvent(nItemId, bUpdateAll)
+  self:UpdateView()
+end
+
+function tbWnd:UpdateGradeSV()
+  self.tbGradeScrollView:Reset()
+  local nMaxCanGrade = Horse:GetMaxCanUpgrade()
+  for i = self.nCurGrade + 1, nMaxCanGrade do
+    local nIndex = i - self.nCurGrade
+    self.tbGradeScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      tbElement.nIndex = i
+      local szGradeName = i18n.Get(Horse.tbGradeInfoCfg[i][1])
+      pPanel:Label_SetText("txtName", szGradeName)
+    end)
+  end
+end

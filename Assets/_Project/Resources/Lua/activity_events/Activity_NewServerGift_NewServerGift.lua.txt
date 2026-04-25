@@ -1,0 +1,114 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+ActivityMgr.szNewServerGiftClassName = "NewServerGift"
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.szNewServerGiftClassName)
+ActivityMgr.nNewServerGiftActivityId = 7
+tbActivity.Def = {
+  GiftExistDay = 3,
+  DayInterval = 259200,
+  HourOfDay = 14400,
+  DaySec = 86400,
+  NewServerGiftConfigId = 1
+}
+tbActivity.bLoadConfig = false
+tbActivity.szGroupKey = GetGroupKey("RechargeBuyTimes")
+tbActivity.GiftOpenStatus = {
+  NoOpen = 0,
+  Opening = 1,
+  TimeOut = 2
+}
+tbActivity.tbProductId2ConfigId = tbActivity.tbProductId2ConfigId or {}
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return true
+  end
+  self.tbProductId2ConfigId = self.tbProductId2ConfigId or {}
+  local szFilePath = "Setting/Activity/NewServerGift/NewServerGift.tab"
+  local tbActivityConfig = Lib:EasyLoadTabFile(szFilePath, {"nConfigId"})
+  self.tbConfig = {}
+  for nConfigId, tbInfo in pairs(tbActivityConfig) do
+    self.tbProductId2ConfigId[tbInfo.nProductId] = nConfigId
+    self.tbConfig[nConfigId] = tbInfo
+  end
+  if not tbActivityConfig then
+    LogErr(szFilePath .. " not find")
+    return false
+  end
+  self.ACTIVITY_CONFIG = self.ACTIVITY_CONFIG or {}
+  self.ACTIVITY_CONFIG[1] = Lib:CopyTB(tbActivityConfig)
+  if Lib:IsEmptyStr(self.ACTIVITY_CONFIG[1].szSaveKey) then
+    self.ACTIVITY_CONFIG[1].szSaveKey = "RechargeBuyTimes"
+  end
+  self.bLoadConfig = true
+  Validator:Register(self.CheckNewServerGiftCfg, self)
+  return true
+end
+
+function tbActivity:CheckNewServerGiftCfg()
+  for nProductId, _ in pairs(self.tbProductId2ConfigId) do
+    if not Recharge:GetProductSettingById(nProductId) then
+      LogErr(string.format("load NewServerGift.tab failed, nProductId %d not found in RechargeProducts.tab", nProductId))
+      return false
+    end
+  end
+  return true
+end
+
+function tbActivity:CheckConfig(nConfigId)
+  self:LoadConfig()
+  if not self.ACTIVITY_CONFIG[nConfigId] then
+    LogErr(string.format("[NewServerGift] CheckConfig fail, nConfigId=%d not found", nConfigId))
+    return false
+  end
+  return true
+end
+
+function tbActivity:CheckConfigByProductId(nProductId)
+  self:LoadConfig()
+  local nConfigId = self.tbProductId2ConfigId[nProductId]
+  return self:CheckConfig(nConfigId)
+end
+
+function tbActivity:CheckIsBuy(pPlayer, nConfigId)
+  self:LoadConfig()
+  local nValue = pPlayer.GetUserValue(self.szGroupKey, self.tbConfig[nConfigId].nProductId)
+  return nValue > 0 and true or false
+end
+
+function tbActivity:OpenStatusByProductId(nProductId)
+  local nConfigId = self.tbProductId2ConfigId[nProductId]
+  return self:OpenStatusByConfigId(nConfigId)
+end
+
+function tbActivity:OpenStatusByConfigId(nConfigId)
+  local nBegin, nEnd = self:GiftTime(nConfigId)
+  local nCurTime = GetTime()
+  if nBegin > nCurTime then
+    return self.GiftOpenStatus.NoOpen
+  elseif nEnd > nCurTime then
+    return self.GiftOpenStatus.Opening
+  else
+    return self.GiftOpenStatus.TimeOut
+  end
+end
+
+function tbActivity:GiftTime(nConfigId)
+  local nOpenServerTime = GetServerCreateTime()
+  self.tbTime = self.tbTime or {}
+  if #self.tbTime <= 0 then
+    local nActivityBegin = Lib:GetTodayZeroHour(nOpenServerTime) + self.Def.HourOfDay
+    for idx = 1, #self.tbConfig do
+      if self.tbConfig[idx] then
+        self.tbTime[idx] = {
+          nBegin = nActivityBegin + self.Def.DayInterval * (idx - 1),
+          nEnd = nActivityBegin + self.Def.DayInterval * idx
+        }
+      end
+    end
+  end
+  return self.tbTime[nConfigId].nBegin, self.tbTime[nConfigId].nEnd
+end
+
+function tbActivity:GetLogWayFieldName()
+  return ActivityMgr.NoLogWay
+end

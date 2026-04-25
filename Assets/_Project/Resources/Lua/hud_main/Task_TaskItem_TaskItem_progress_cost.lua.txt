@@ -1,0 +1,76 @@
+local tbItem = Item:GetClass("TaskItem_progress_cost")
+tbItem.EXT_PARAM_PROGRESSTIME = 1
+
+function tbItem:CheckCanUse(pItem, pPlayer)
+  local nMainTaskId = Task:GetMainTask(pPlayer)
+  if 0 == nMainTaskId then
+    return false, i18n.EasyGet("\229\175\185\229\186\148\228\187\187\229\138\161\228\184\141\229\173\152\229\156\168")
+  end
+  local tbTaskData = Task:GetTaskData(pPlayer)
+  if not tbTaskData.tbCurTaskList or not tbTaskData.tbCurTaskList[nMainTaskId] then
+    return false, i18n.EasyGet("\229\175\185\229\186\148\228\187\187\229\138\161\228\184\141\229\173\152\229\156\168")
+  end
+  local tbDetailCfg = Task:GetDetailCfg(nMainTaskId, tbTaskData.tbCurTaskList[nMainTaskId].nStep, tbTaskData.tbCurTaskList[nMainTaskId].nBranch)
+  if not tbDetailCfg then
+    return false, i18n.EasyGet("\229\175\185\229\186\148\228\187\187\229\138\161\228\184\141\229\173\152\229\156\168")
+  end
+  if not Task:CheckCondition(pPlayer, nMainTaskId) then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\231\173\137\231\186\167\228\184\141\232\131\189\228\189\191\231\148\168")
+  end
+  if not (tbDetailCfg.nItemTemplateId and tbDetailCfg.nItemTemplateId == pItem.dwTemplateId and tbDetailCfg.szAction) or tbDetailCfg.szAction ~= "useitem" then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\228\187\187\229\138\161\228\184\141\229\175\185")
+  end
+  if tbDetailCfg.nMapTemplateId > 0 and tbDetailCfg.nX > 0 and tbDetailCfg.nY > 0 then
+    local _, nPosX, nPosY = pPlayer.GetWorldPos()
+    if pPlayer.nMapTemplateId ~= tbDetailCfg.nMapTemplateId then
+      return false, i18n.EasyGet("\229\189\147\229\137\141\229\156\176\229\155\190\228\184\141\229\143\175\228\189\191\231\148\168")
+    end
+    local nDistanc = Lib:GetDistance(nPosX, nPosY, tbDetailCfg.nX, tbDetailCfg.nY)
+    if nDistanc > 5000 then
+      return false, i18n.EasyGet("\233\156\128\229\136\176\230\140\135\229\174\154\229\156\176\231\130\185\228\189\191\231\148\168")
+    end
+  end
+  return true
+end
+
+function tbItem:OnUse(pItem)
+  local bRet, szTips = self:CheckCanUse(pItem, me)
+  if not bRet then
+    me.CenterMsg(szTips)
+    return 0
+  end
+  local nProgressTime = KItem.GetItemExtParam(pItem.dwTemplateId, self.EXT_PARAM_PROGRESSTIME)
+  if nProgressTime and nProgressTime > 0 then
+    Progress:BeginProgress(me, i18n.EasyGet("\228\189\191\231\148\168\228\184\173"), nProgressTime, self.OnEndProgress, {
+      self,
+      me.dwID,
+      pItem.dwId
+    })
+  else
+    self:OnEndProgress(me.dwID, pItem.dwId)
+  end
+  return 0
+end
+
+function tbItem:OnEndProgress(nPlayerId, nItemId)
+  local pPlayer = KPlayer.GetPlayerObjById(nPlayerId)
+  if not pPlayer then
+    return
+  end
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  local bret, szTips = self:CheckCanUse(pItem, pPlayer)
+  if not bret then
+    pPlayer.CenterMsg(szTips)
+    return 0
+  end
+  local nLogWay = Env.LogWay_Task
+  local nTaskId = Task:GetItemTaskId(pPlayer, pItem.dwTemplateId)
+  if nTaskId and nTaskId > 0 then
+    nLogWay = Task:GetTaskLogWay(nTaskId)
+  end
+  assert(1 == pPlayer.ConsumeItem(pItem, 1, nLogWay))
+  Task:OnUseItem(pPlayer, pItem.dwTemplateId)
+end

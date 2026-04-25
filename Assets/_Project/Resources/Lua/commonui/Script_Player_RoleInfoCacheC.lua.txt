@@ -1,0 +1,116 @@
+Player.RoleInfoCache = Player.RoleInfoCache or {}
+local RoleInfoCache = Player.RoleInfoCache
+RoleInfoCache.MAX_SYNC_NUM = 100
+RoleInfoCache.MAX_CACHE_NUM = 300
+RoleInfoCache.tbCacheList = RoleInfoCache.tbCacheList or {}
+RoleInfoCache.tbApplyList = RoleInfoCache.tbApplyList or {}
+RoleInfoCache.nSession = RoleInfoCache.nSession or 0
+RoleInfoCache.tbDelayedList = RoleInfoCache.tbDelayedList or {}
+
+function RoleInfoCache:GetCache(tbPlayerIdList)
+  if #tbPlayerIdList <= 0 then
+    return true, self.nSession, {}
+  end
+  local tbPlayerIdSet = Lib:ListToSet(tbPlayerIdList)
+  local tbExistList = {}
+  local tbCacheHeadList = {}
+  local tbCacheTailList = {}
+  local nPlayerId
+  for _, tbInfo in ipairs(self.tbCacheList) do
+    nPlayerId = tbInfo.nPlayerId
+    if tbPlayerIdSet[nPlayerId] then
+      tbPlayerIdSet[nPlayerId] = nil
+      self.tbDelayedList[nPlayerId] = 0
+      tbExistList[nPlayerId] = tbInfo
+      table.insert(tbCacheTailList, tbInfo)
+    else
+      table.insert(tbCacheHeadList, tbInfo)
+    end
+  end
+  self.tbCacheList = Lib:MergeTable(tbCacheHeadList, tbCacheTailList)
+  for nPlayerId, _ in pairs(tbPlayerIdSet) do
+    self.tbDelayedList[nPlayerId] = 0
+  end
+  local bAllHit = Lib:IsEmptyTB(tbPlayerIdSet)
+  if self.nRequestTimerId and self.nRequestTimerId > 0 then
+    return bAllHit, self.nSession, tbExistList
+  end
+  self.nRequestTimerId = Timer:Register(1 * Env.GAME_FPS, self.GetCacheHelper, self)
+  self.nSession = self.nSession + 1
+  return bAllHit, self.nSession, tbExistList
+end
+
+function RoleInfoCache:GetCacheHelper()
+  local tbApplyList = self.tbDelayedList
+  local tbExistList = {}
+  local nPlayerId
+  for _, tbInfo in ipairs(self.tbCacheList) do
+    nPlayerId = tbInfo.nPlayerId
+    if tbApplyList[nPlayerId] then
+      tbApplyList[nPlayerId] = tbInfo.nVersion
+      tbExistList[nPlayerId] = tbInfo
+    end
+  end
+  self.tbApplyList[self.nSession] = tbExistList
+  local tbRequestList = {}
+  local nSyncNum = 0
+  for nPlayerId, nVersion in pairs(tbApplyList) do
+    if not tbRequestList[nPlayerId] then
+      tbRequestList[nPlayerId] = nVersion
+      nSyncNum = nSyncNum + 1
+      if nSyncNum >= self.MAX_SYNC_NUM then
+        RemoteServer.RequestRoleStayInfo(self.nSession, tbRequestList, false)
+        tbRequestList = {}
+        nSyncNum = 0
+      end
+    end
+  end
+  RemoteServer.RequestRoleStayInfo(self.nSession, tbRequestList, true)
+  self.tbDelayedList = {}
+  self.nRequestTimerId = 0
+end
+
+function RoleInfoCache:SyncCache(nSession, tbSyncList, bFinish)
+  local tbExistList = self.tbApplyList[nSession]
+  if not tbExistList then
+    return
+  end
+  local tbSyncMap = {}
+  for _, tbInfo in pairs(tbSyncList) do
+    tbSyncMap[tbInfo.nPlayerId] = tbInfo
+  end
+  for nIndex, tbInfo in ipairs(self.tbCacheList) do
+    local nPlayerId = tbInfo.nPlayerId
+    if tbSyncMap[nPlayerId] then
+      self.tbCacheList[nIndex] = tbSyncMap[nPlayerId]
+      tbSyncMap[nPlayerId] = nil
+    end
+  end
+  for _, tbInfo in ipairs(tbSyncList) do
+    local nPlayerId = tbInfo.nPlayerId
+    if tbSyncMap[nPlayerId] then
+      table.insert(self.tbCacheList, tbInfo)
+      tbSyncMap[nPlayerId] = nil
+    end
+  end
+  local nDelNum = #self.tbCacheList - self.MAX_CACHE_NUM
+  if nDelNum > 0 then
+    for nIndex = 1, self.MAX_CACHE_NUM do
+      self.tbCacheList[nIndex] = self.tbCacheList[nIndex + nDelNum]
+    end
+    for nIndex = 1, nDelNum do
+      table.remove(self.tbCacheList)
+    end
+  end
+  for _, tbInfo in ipairs(tbSyncList) do
+    tbExistList[tbInfo.nPlayerId] = tbInfo
+  end
+  if bFinish then
+    self.tbApplyList[nSession] = nil
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_ROLE_STAY_INFO, nSession, tbExistList)
+  end
+end
+
+function RoleInfoCache:ResetApply(nSession)
+  self.tbApplyList[nSession] = nil
+end

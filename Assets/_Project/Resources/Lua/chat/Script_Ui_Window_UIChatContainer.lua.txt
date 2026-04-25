@@ -1,0 +1,725 @@
+local tbWnd = Ui:CreateClass("UIChatContainer", "UIPanel")
+tbWnd.tbControls = {
+  PrivateChat = "PrivateChat",
+  KinLive = "PrivateChat/KinLive",
+  BtnPrivateChatReturn = "PrivateChat/btnPrivateChatReturn",
+  txtLiveAmount = "PrivateChat/KinLive/txtLiveAmount",
+  btnKinLivePeople = "PrivateChat/KinLive/btnKinLivePeople",
+  KinLiveMic = "PrivateChat/KinLive/KinLiveMic",
+  KinLiveMicOn = "PrivateChat/KinLive/KinLiveMic/KinLiveMicOn",
+  KinLiveMicOff = "PrivateChat/KinLive/KinLiveMic/KinLiveMicOff",
+  LiveVoice = "PrivateChat/KinLive/LiveVoice",
+  btnVoiceOn = "PrivateChat/KinLive/LiveVoice/btnVoiceOn",
+  btnVoiceOff = "PrivateChat/KinLive/LiveVoice/btnVoiceOff",
+  txtNullPeople = "FriendsList/viewport/txtNullPeople",
+  FriendsList = "FriendsList",
+  FriendTemplate = "FriendsList/viewport/Grid/TemplateElement",
+  ChatScroll = "ChatScroll",
+  ChatScrollGrid = "ChatScroll/viewport/Grid",
+  ChatScrollItem = "ChatScroll/viewport/Grid/Item",
+  CopyClose = "ChatScroll/viewport/CopyClose",
+  btns = "ChatScroll/viewport/btns",
+  PrivateChatScroll = "PrivateChat/ChatScroll",
+  PrivateChatScrollGrid = "PrivateChat/ChatScroll/viewport/Grid",
+  PrivateChatScrollItem = "PrivateChat/ChatScroll/viewport/Grid/Item",
+  PrivateCopyClose = "PrivateChat/ChatScroll/viewport/CopyClose",
+  btnsPrivate = "PrivateChat/ChatScroll/viewport/btns",
+  txtNullFriend = "txtNullFriend",
+  txtNullChat = "txtNullChat"
+}
+tbWnd.tbOnClick = {
+  KinLiveMicOn = function(self)
+    self:ChangeLiveMicState()
+  end,
+  KinLiveMicOff = function(self)
+    self:ChangeLiveMicState()
+  end,
+  btnVoiceOn = function(self)
+    self:ChangeLiveVoiceState()
+  end,
+  btnVoiceOff = function(self)
+    self:ChangeLiveVoiceState()
+  end,
+  btnKinLivePeople = function(self)
+    Ui:OpenWindow("UIKinLive")
+  end,
+  BtnPrivateChatReturn = function(self)
+    self:Switch2TargetList()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.bKinLiveMicOpen = false
+  self.bLiveVoiceOpen = false
+  self.ChatInputPanel = Ui:GetPanelByName("UIChatInput")
+  self.ChatLargePanel = Ui:GetWindow("UIChat")
+  self.tbChatMsgScrollView = Ui:NewSuperListView(self, self.ChatScrollItem, self.SetChatItem2Scroll)
+  self.tbFriendList = Ui:NewSuperListView(self, self.FriendTemplate, self.SetFriendItem)
+  self.tbPrivateChatScrollView = Ui:NewSuperListView(self, self.PrivateChatScrollItem, self.SetChatItem2Scroll)
+  self.ChatScrollView = self.pPanel:GetScrollRect(self.ChatScroll)
+  self.ChatScrollView.onValueChanged:AddListener(function(tbPoint)
+    local nY = tbPoint[1]
+    if nY > 0.4 and nY < 1 and not self.tbOwner:IsLockChat() then
+      self.tbOwner:LockChat(true)
+    end
+    if Lib:EqualNumber(nY, 0, 1.0E-4) and self.tbOwner:IsLockChat() then
+      self.tbOwner:LockChat(false)
+    end
+    if not self.tbOwner:IsLockChat() then
+      ChatMgr:SetUnReadChannelMsg(self.nChannelId, nil)
+      self.tbOwner:UpdateChannelNew(self.nChannelId)
+      self.tbOwner:UpdateChannelBubble(self.nChannelId)
+    end
+  end)
+end
+
+function tbWnd:SetChatMsgScrollEnd()
+end
+
+function tbWnd:SetChatMsgScrollViewData(tbData)
+  self.tbChatMsgScrollView:SetAllElement(tbData)
+end
+
+function tbWnd:ScrollToBottom()
+  self.tbChatMsgScrollView:MovePanelToLastItem()
+end
+
+function tbWnd:IsScrollAtBottom()
+  return self.tbChatMsgScrollView:IsScrollAtBottomRight()
+end
+
+function tbWnd:GetPrivateList()
+  local tbRecentPrivate = ChatMgr.RecentPrivateList
+  local tbRecentWantTo = ChatMgr.RecentWantToChatList.tbRoleInfo
+  local tbList = {}
+  local tbMap = {}
+  for i, v in ipairs(tbRecentPrivate) do
+    tbList[i] = v
+    tbMap[v.dwID] = i
+  end
+  for _, v in ipairs(tbRecentWantTo) do
+    if not tbMap[v.dwID] then
+      table.insert(tbList, v)
+    end
+  end
+  table.sort(tbList, function(tbFirst, tbSecond)
+    if FriendShip:IsHeInMyBlack(tbFirst.dwID) then
+      return false
+    end
+    if FriendShip:IsHeInMyBlack(tbSecond.dwID) then
+      return true
+    end
+    local tbFirstLastMsg = ChatMgr:GenPrivateLastMsg(tbFirst.dwID)
+    local tbSecondLastMsg = ChatMgr:GenPrivateLastMsg(tbSecond.dwID)
+    if not tbFirstLastMsg.nTime and tbSecondLastMsg.nTime then
+      return true
+    end
+    if tbFirstLastMsg.nTime and not tbSecondLastMsg.nTime then
+      return false
+    end
+    if not tbFirstLastMsg.nTime and not tbSecondLastMsg.nTime then
+      return tbFirst.dwID > tbSecond.dwID
+    end
+    if tbFirstLastMsg.nTime == tbSecondLastMsg.nTime then
+      return tbFirstLastMsg.nSenderId < tbSecondLastMsg.nSenderId
+    end
+    return tbFirstLastMsg.nTime > tbSecondLastMsg.nTime
+  end)
+  return tbList
+end
+
+function tbWnd:SetFriendItem(tbElement, tbRoleInfo)
+  tbElement.tbRoleInfo = tbRoleInfo
+  local pPanel = tbElement.pPanel
+  pPanel:SetActive("HeadFrame", true)
+  pPanel:SetActive("GroupHint", false)
+  pPanel:SetActive("txtGroupName", false)
+  local tbPortraitObjPanel = Ui:NewExistPortraitObjPanel(tbElement, "HeadFrame/PortraitObj")
+  tbPortraitObjPanel:SetOutlineObjActive(tbRoleInfo.nState == nil)
+  tbPortraitObjPanel:SetRoleIcon(tbRoleInfo.nPortrait)
+  tbPortraitObjPanel:SetPortraitFrame(tbRoleInfo.nPortraitFrame)
+  tbPortraitObjPanel:SetFactionIcon(tbRoleInfo.nFaction)
+  tbPortraitObjPanel:SetLevel(tbRoleInfo.nLevel)
+  local szName = tbRoleInfo.szName or tbRoleInfo.szWantedName
+  if FriendShip:IsHeInMyBlack(tbRoleInfo.dwID) then
+    szName = i18n.EasyGet("\233\153\140\231\148\159\228\186\186")
+  end
+  local szRemarkName = FriendShip:GetPlayerRemarkName(tbRoleInfo.dwID)
+  if "" ~= szRemarkName then
+    szName = i18n.EasyGet("{0}", szRemarkName)
+  end
+  pPanel:Label_SetText("txtFriendName", szName)
+  local tbPlayerIdList = {}
+  table.insert(tbPlayerIdList, tbRoleInfo.dwID)
+  local bAllHit, nSession, tbRoleInfoList = Player.RoleInfoCache:GetCache(tbPlayerIdList)
+  local tbData = self:ParseRoleInfo(tbRoleInfo)
+  if bAllHit then
+    tbData.szKinOrTongName = i18n.EasyGet(tbRoleInfoList[tbRoleInfo.dwID].szKinOrTongName)
+  end
+  Ui:Button_BindEvent(pPanel, "HeadFrame/PortraitObj", self.onClickShowPlayerDetails, self, tbData)
+  local tbUnReadCache = ChatMgr.PrivateChatUnReadCache[tbRoleInfo.dwID]
+  local bNew = tbUnReadCache and nil ~= next(tbUnReadCache)
+  pPanel:SetActive("New", bNew)
+  local tbMsg = {}
+  if bNew then
+    tbMsg = tbUnReadCache or {}
+    pPanel:Label_SetText("New/txtAmount", #tbMsg)
+  else
+    tbMsg = ChatMgr:GetPrivateMsg(tbRoleInfo.dwID) or {}
+  end
+  local tbLastMsg = #tbMsg > 0 and tbMsg[#tbMsg] or nil
+  if nil ~= tbLastMsg then
+    pPanel:SetActive("txtChatMsgPreview", true)
+    pPanel:SetActive("txtPreMsgTime", true)
+    local szPreviewMsg = tbLastMsg.szMsg
+    local szSenderName = tbLastMsg.szSenderName
+    if FriendShip:IsHeInMyBlack(tbRoleInfo.dwID) then
+      szSenderName = i18n.EasyGet("\233\153\140\231\148\159\228\186\186")
+    end
+    local szRemarkName = FriendShip:GetPlayerRemarkName(tbRoleInfo.dwID)
+    if "" ~= szRemarkName then
+      szSenderName = i18n.EasyGet("{0}", szRemarkName)
+    end
+    if nil ~= szSenderName then
+      szPreviewMsg = string.format("%s\239\188\154%s", szSenderName, szPreviewMsg)
+    end
+    pPanel:Label_SetText("txtChatMsgPreview", szPreviewMsg)
+    pPanel:Label_SetText("txtPreMsgTime", ChatMgr:Time2Str(tbLastMsg.nTime))
+  else
+    pPanel:SetActive("txtChatMsgPreview", false)
+    pPanel:SetActive("txtPreMsgTime", false)
+    pPanel:Label_SetText("txtChatMsgPreview", "")
+    pPanel:Label_SetText("txtPreMsgTime", "")
+  end
+  Ui:Button_BindEvent(pPanel, "btnRemove", function()
+    ChatMgr:GetPrivateMsg(tbRoleInfo.dwID)
+    ChatMgr:ClearPersonPrivateMsg(tbRoleInfo.dwID)
+    ChatMgr:RemoveRecentWantToChatList(tbRoleInfo.dwID)
+    ChatMgr:RemoveRecentPrivateTarget(tbRoleInfo.dwID)
+    self.ChatLargePanel:UpdateAllChannelNew()
+    self:Switch2TargetList()
+  end)
+  Ui:Button_BindEvent(pPanel, "Main", function()
+    self:Switch2PrivateChat(tbElement)
+    self.ChatLargePanel:UpdateChannelNew(ChatMgr.ChannelType.Private)
+  end)
+end
+
+function tbWnd:Switch2TargetList()
+  self.pPanel:SetActive(self.FriendsList, true)
+  self.pPanel:SetActive(self.ChatScroll, false)
+  self.pPanel:SetActive(self.PrivateChat, false)
+  self.pPanel:SetActive(self.btnsPrivate, false)
+  self.pPanel:SetActive(self.PrivateCopyClose, false)
+  self.ChatInputPanel:SwitchPrivateInput(false)
+  local tbPrivateList = self:GetPrivateList()
+  self.tbFriendList:SetAllElement(tbPrivateList)
+  self.pPanel:SetActive(self.txtNullPeople, 0 == #tbPrivateList)
+end
+
+function tbWnd:Switch2PrivateChat(tbElement)
+  local tbChatTargetInfo = tbElement and tbElement.tbRoleInfo or self.tbChatTargetInfo
+  self:UpdateCurTargetInfo(tbChatTargetInfo.dwID, tbChatTargetInfo)
+  local szName = self.tbChatTargetInfo.szName or self.tbChatTargetInfo.szWantedName
+  self.pPanel:SetActive(self.FriendsList, false)
+  self.pPanel:SetActive(self.ChatScroll, false)
+  self.pPanel:SetActive(self.PrivateChat, true)
+  local szRemarkName = FriendShip:GetPlayerRemarkName(tbChatTargetInfo.dwID)
+  if "" ~= szRemarkName then
+    szName = szRemarkName
+  end
+  self.pPanel:Label_SetText(self.BtnPrivateChatReturn .. "/txtChatName", szName)
+  self.ChatInputPanel:SwitchPrivateInput(true)
+  self.tbOwner:LockChat(false)
+  local tbMsgData = ChatMgr:GetPrivateMsg(self.tbChatTargetInfo.dwID) or {}
+  self.tbPrivateChatScrollView:SetAllElement(tbMsgData)
+  self.tbPrivateChatScrollView:MovePanelToLastItem()
+end
+
+function tbWnd:SwitchChatView(nChannelId)
+  local bChanged = self.nChannelId ~= nChannelId
+  self.pPanel:SetActive(self.FriendsList, false)
+  self.pPanel:SetActive(self.PrivateChat, false)
+  self.pPanel:SetActive(self.txtNullFriend, false)
+  self.pPanel:SetActive(self.txtNullChat, false)
+  if nChannelId == ChatMgr.ChannelType.Private then
+    self:Switch2TargetList()
+  elseif nChannelId == ChatMgr.ChannelType.Friend then
+    local tbAllFriend = FriendShip:GetAllFriendData()
+    if not tbAllFriend or Lib:IsEmptyTB(tbAllFriend) then
+      self.pPanel:SetActive(self.txtNullFriend, true)
+    else
+      self.pPanel:SetActive(self.ChatScroll, true)
+    end
+  else
+    self.pPanel:SetActive(self.ChatScroll, true)
+  end
+  self.nChannelId = nChannelId
+  self:UpdateNowChatList(bChanged)
+end
+
+function tbWnd:ChangeLiveVoiceState()
+  self.bLiveVoiceOpen = not self.bLiveVoiceOpen
+  ChatMgr:SwitchSpeakerState(self.bLiveVoiceOpen)
+  self.pPanel:SetActive(self.btnVoiceOff, not self.bLiveVoiceOpen)
+  self.pPanel:SetActive(self.btnVoiceOn, self.bLiveVoiceOpen)
+end
+
+function tbWnd:ChangeLiveMicState()
+  self.bKinLiveMicOpen = not self.bKinLiveMicOpen
+  Kin:SwitchMicState(self.bKinLiveMicOpen)
+  self.pPanel:SetActive(self.KinLiveMicOff, not self.bKinLiveMicOpen)
+  self.pPanel:SetActive(self.KinLiveMicOn, self.bKinLiveMicOpen)
+end
+
+function tbWnd:RefreshKinLive()
+end
+
+function tbWnd:OnCanSpeakChange()
+  local tbMemberList = Kin:GetMemberList() or {}
+  local tbCanSpeak = {}
+  for _, v in ipairs(tbMemberList) do
+    local nMemberId = v.nMemberId
+    if Kin:GetMemberVoiceUpper(nMemberId) then
+      table.insert(tbCanSpeak, v)
+    end
+  end
+  self.pPanel:Label_SetText(self.txtLiveAmount, i18n.EasyGet("\229\156\168\233\186\166\228\186\186\230\149\176\239\188\154{0}/{1}", #tbCanSpeak, Kin.Def.nMaxVoiceUpper))
+end
+
+function tbWnd:UpdateNewFriendMsg(dwSender)
+  if self.pPanel:IsActive(self.FriendsList) then
+    self:Switch2TargetList()
+  elseif dwSender == self.tbChatTargetInfo.dwID then
+    self.tbOwner:LockChat(false)
+    local tbMsgData = ChatMgr:GetPrivateMsg(self.tbChatTargetInfo.dwID) or {}
+    self.tbPrivateChatScrollView:SetAllElement(tbMsgData)
+    self.tbPrivateChatScrollView:MovePanelToLastItem()
+  end
+end
+
+function tbWnd:UpdateNewMsg(nChannelId)
+  if nChannelId ~= self.nChannelId then
+    return
+  end
+  self:UpdateNowChatList(false)
+end
+
+function tbWnd:GetCurChannelChatData()
+  local tbItemData
+  if self.nChannelId == ChatMgr.ChannelType.Recruit then
+    tbItemData = ChatMgr:GetChannelChatData(ChatMgr.ChannelType.Public, ChatMgr.ChannelType.Recruit) or {}
+  else
+    tbItemData = ChatMgr:GetChannelChatData(self.nChannelId) or {}
+  end
+  return tbItemData
+end
+
+function tbWnd:UpdateNowChatList(bChanged)
+  local tbItemData = self:GetCurChannelChatData()
+  if bChanged then
+    self.tbChatMsgScrollView:SetAllElement(tbItemData)
+    if not self.tbOwner:IsLockChat() then
+      self.tbChatMsgScrollView:MovePanelToLastItem()
+    end
+  elseif self.tbChatMsgScrollView:RefreshAllItem() or self.tbOwner.bChatDataChanged then
+    self.tbOwner.bChatDataChanged = false
+    if not self.tbOwner:IsLockChat() then
+      self.tbChatMsgScrollView:MovePanelToLastItem()
+    end
+  end
+  if not tbItemData or Lib:IsEmptyTB(tbItemData) then
+    if self.nChannelId == ChatMgr.ChannelType.Friend then
+      local bIsNullFriend = self.pPanel:IsActive(self.txtNullFriend)
+      self.pPanel:SetActive(self.txtNullChat, not bIsNullFriend)
+    elseif self.nChannelId == ChatMgr.nChannelFriendName or self.nChannelId == ChatMgr.ChannelType.Private then
+      self.pPanel:SetActive(self.txtNullChat, false)
+    else
+      self.pPanel:SetActive(self.txtNullChat, true)
+    end
+  else
+    self.pPanel:SetActive(self.txtNullChat, false)
+  end
+end
+
+function tbWnd:UpdateCurTargetInfo(nFriendId, tbCurTargetInfo)
+  self.nFriendId = nFriendId
+  self.tbChatTargetInfo = tbCurTargetInfo
+  ChatMgr:AddRecentWantToChatList(self.tbChatTargetInfo)
+  self.ChatInputPanel:UpdateTargetInfo(self.tbChatTargetInfo)
+end
+
+function tbWnd:ParseChatData(tbMsg)
+  local tbData = {}
+  tbData.dwRoleId = tbMsg.nSenderId
+  tbData.szName = tbMsg.szSenderName
+  tbData.nLevel = tbMsg.nLevel
+  tbData.szKinOrTongName = i18n.Get(ChatMgr.Terms.None)
+  if tbMsg.tbExtra then
+    if tbMsg.tbExtra.dwKinId then
+      tbData.dwKinId = tbMsg.tbExtra.dwKinId
+    end
+    if tbMsg.tbExtra.dwTongId then
+      tbData.dwTongId = tbMsg.tbExtra.dwTongId
+    end
+    if tbMsg.tbExtra.szKinOrTongName then
+      tbData.szKinOrTongName = tbMsg.tbExtra.szKinOrTongName
+    end
+  end
+  tbData.nFaction = tbMsg.nFaction
+  tbData.nPortrait = tbMsg.nPortrait
+  tbData.nPortraitFrame = tbMsg.nPortraitFrame
+  tbData.nHonorLevel = tbMsg.nHonorLevel or ""
+  tbData.szMsg = tbMsg.szMsg
+  local tbMember = Kin:GetMemberData(tbData.dwRoleId) or Tong:GetMemberData(tbData.dwRoleId)
+  if tbMember then
+    tbData.nVipLevel = tbMember.nVipLevel
+    tbData.tbChuanGong = tbMember.tbChuanGong
+  end
+  return tbData
+end
+
+function tbWnd:ParseRoleInfo(tbRoleInfo)
+  local tbData = {}
+  tbData.dwRoleId = tbRoleInfo.dwID
+  tbData.szName = tbRoleInfo.szName
+  tbData.nLevel = tbRoleInfo.nLevel
+  tbData.szKinOrTongName = i18n.Get(ChatMgr.Terms.None)
+  local tbMsgData = ChatMgr:GetPrivateMsgWithoutModified(tbRoleInfo.dwID) or {}
+  for i = 1, #tbMsgData do
+    if tbMsgData[i].nSenderId == tbRoleInfo.dwID and tbMsgData[i].tbExtra and tbMsgData[i].tbExtra.szKinOrTongName then
+      tbData.szKinOrTongName = tbMsgData[i].tbExtra.szKinOrTongName
+    end
+  end
+  tbData.dwKinId = tbRoleInfo.dwKinId or tbRoleInfo.dwKinId
+  tbData.dwTongId = tbRoleInfo.dwTongId or tbRoleInfo.dwTongId
+  tbData.nFaction = tbRoleInfo.nFaction
+  tbData.nPortrait = tbRoleInfo.nPortrait
+  tbData.nPortraitFrame = tbRoleInfo.nPortraitFrame
+  tbData.nHonorLevel = tbRoleInfo.nHonorLevel or ""
+  local tbMember = Kin:GetMemberData(tbData.dwRoleId) or Tong:GetMemberData(tbData.dwRoleId)
+  if tbMember then
+    tbData.nVipLevel = tbMember.nVipLevel
+    tbData.tbChuanGong = tbMember.tbChuanGong
+  end
+  return tbData
+end
+
+function tbWnd:SplitLast(szPath, sep)
+  local szReverse = string.reverse(szPath)
+  local i = string.find(szReverse, sep)
+  if not i then
+    return nil, nil
+  end
+  local l = string.len(szReverse)
+  local m = l - i
+  return string.sub(szPath, 1, m), string.sub(szPath, m + 2, l)
+end
+
+function tbWnd:AdjustItemHeight(tbElement, szKey, minHeight, offset)
+  minHeight = minHeight or 0
+  offset = offset or 0
+  local childObj = tbElement.pPanel:GetObject(szKey)
+  local childCsfComp = childObj:GetComponent(Ui.ContentSizeFitter)
+  childCsfComp:SetLayoutVertical()
+  tbElement.pPanel:ContentSizeFitter_Refresh(szKey)
+  local childTf = childObj:GetComponent(Ui.RectTransform)
+  local height = math.max(minHeight, childTf.sizeDelta.y + offset)
+  local szKeyTemp = szKey
+  while nil ~= szKeyTemp do
+    szKeyTemp = self:SplitLast(szKeyTemp, "/")
+    if szKeyTemp then
+      local obj = tbElement.pPanel:GetObject(szKeyTemp)
+      local tf = obj:GetComponent(Ui.RectTransform)
+      tf.sizeDelta = Ui.Vector2(tf.sizeDelta.x, height)
+    end
+  end
+  local rootObj = self.pPanel:GetObject(tbElement.szKey)
+  local rootTf = rootObj:GetComponent(Ui.RectTransform)
+  rootTf.sizeDelta = Ui.Vector2(rootTf.sizeDelta.x, height)
+end
+
+function tbWnd:SetChatItem2Scroll(tbElement, tbMsg, nIndex)
+  local pPanel = tbElement.pPanel
+  local bSystem = tbMsg.nChannelType == ChatMgr.ChannelType.System
+  local bSelf = tbMsg.nSenderId == me.dwID
+  local bHasVoice = tbMsg.szMsgVoiceFileId ~= nil
+  tbMsg.nPortrait = bSelf and me.nPortrait or tbMsg.nPortrait
+  tbMsg.nPortraitFrame = bSelf and PlayerPortraitFrame:GetMeCurPortraitFrameId(me) or tbMsg.nPortraitFrame
+  tbMsg.nSpeechBalloon = bSelf and SpeechBalloon:GetPlayerSpeechBalloonId(me) or tbMsg.nSpeechBalloon
+  tbMsg.nLevel = bSelf and me.nTotalLevel or tbMsg.nLevel
+  pPanel:SetActive("txtChatTime", false)
+  pPanel:SetActive("SystemMsg", bSystem)
+  pPanel:SetActive("SelfMsg", not bSystem and bSelf)
+  pPanel:SetActive("OtherMsg", not bSystem and not bSelf)
+  if bSelf then
+    pPanel:SetActive("SelfMsg/TxtNode", not bHasVoice)
+    pPanel:SetActive("SelfMsg/VoiceNode", bHasVoice)
+  else
+    pPanel:SetActive("OtherMsg/TxtNode", not bHasVoice)
+    pPanel:SetActive("OtherMsg/VoiceNode", bHasVoice)
+  end
+  
+  local function funcSetEmoji(szKey)
+    local txtEmoji = pPanel:GetEmojiText(szKey)
+    local tbLinkInfo = tbMsg and tbMsg.tbLinkInfo or {}
+    txtEmoji.onClickLink = nil
+    txtEmoji.raycastTarget = false
+    local szTempMsg = tbMsg.szMsg
+    if not tbLinkInfo.nLinkType or not ChatMgr.tbLinkClickFns[tbLinkInfo.nLinkType] then
+      txtEmoji.onClickLink = nil
+      txtEmoji.raycastTarget = false
+    else
+      txtEmoji.raycastTarget = true
+      
+      function txtEmoji.onClickLink(param)
+        tbMsg.bClickLink = true
+        if tbLinkInfo.nLinkType and ChatMgr.tbLinkClickFns[tbLinkInfo.nLinkType] then
+          ChatMgr.tbLinkClickFns[tbLinkInfo.nLinkType](tbLinkInfo, tonumber(param), tbMsg)
+        end
+      end
+      
+      local bSuccess, szShowMsg = Lib:CallBack({
+        ChatMgr.DealMsgWithLinkUpdate,
+        ChatMgr,
+        szTempMsg,
+        tbLinkInfo
+      })
+      if bSuccess then
+        szTempMsg = szShowMsg
+        tbMsg.szMsg = szShowMsg
+      end
+      bSuccess, szShowMsg = Lib:CallBack({
+        ChatMgr.DealMsgWithLinkColor,
+        ChatMgr,
+        szTempMsg,
+        tbLinkInfo,
+        tbMsg,
+        true
+      })
+      if bSuccess then
+        szTempMsg = szShowMsg
+      end
+    end
+    txtEmoji.text = szTempMsg
+  end
+  
+  if bSystem then
+    if tbMsg.nSenderId == ChatMgr.SystemMsgType.TimeTips then
+      pPanel:SetActive("SystemMsg", false)
+      pPanel:SetActive("txtChatTime", true)
+      pPanel:Label_SetText("txtChatTime", ChatMgr:Time2Str(tbMsg.nTime))
+      self:AdjustItemHeight(tbElement, "txtChatTime")
+    else
+      local szBg
+      if ChatMgr.ChannelSystemBg[tbMsg.nSenderId] then
+        szBg = ChatMgr.ChannelSystemBg[tbMsg.nSenderId]
+      else
+        szBg = ChatMgr.ChannelBg[tbMsg.nChannelType]
+      end
+      local szColor = ChatMgr.ChannelTagColor[szBg]
+      szBg = i18n.Get(szBg)
+      if szColor then
+        szBg = string.format("<color=%s>%s</color>", szColor, szBg)
+      end
+      pPanel:Label_SetText("SystemMsg/ChatTip", szBg)
+      funcSetEmoji("SystemMsg/txtSystemMsg")
+      self:AdjustItemHeight(tbElement, "SystemMsg/txtSystemMsg")
+    end
+  else
+    local szPath = bSelf and "SelfMsg" or "OtherMsg"
+    local szMsg = ""
+    local szSendName = tbMsg.szSenderName
+    local szRemarkName = FriendShip:GetPlayerRemarkName(tbMsg.nSenderId)
+    if "" ~= szRemarkName then
+      szSendName = szRemarkName
+    end
+    if (tbMsg.nChannelType == ChatMgr.ChannelType.Kin or tbMsg.nChannelType == ChatMgr.ChannelType.Tong) and tbMsg.tbExtra and tbMsg.tbExtra.szIdent then
+      if bSelf then
+        szMsg = table.concat({
+          tbMsg.szSenderName,
+          i18n.Parse(tbMsg.tbExtra.szIdent)
+        })
+      else
+        szMsg = table.concat({
+          i18n.Parse(tbMsg.tbExtra.szIdent),
+          szSendName
+        })
+      end
+    elseif (tbMsg.nChannelType == ChatMgr.ChannelType.Zone or tbMsg.nChannelType == ChatMgr.ChannelType.Zone_Legion) and tbMsg.tbExtra and tbMsg.tbExtra.szServerName then
+      if bSelf then
+        szMsg = tbMsg.szSenderName
+      elseif tbMsg.tbExtra.szServerName == GetServerName(SERVER_ID) then
+        szMsg = table.concat({
+          i18n.Get(ChatMgr.Terms.MyServerName),
+          szSendName
+        })
+      elseif tbMsg.tbExtra.nServerId and ChatMgr.PlatCfg.bZoneChannelShowServerId then
+        szMsg = table.concat({
+          i18n.Get(ChatMgr.Terms.OtherServerName, string.format("S%s", tostring(tbMsg.tbExtra.nServerId))),
+          szSendName
+        })
+      else
+        szMsg = table.concat({
+          i18n.Get(ChatMgr.Terms.OtherServerName, tbMsg.tbExtra.szServerName),
+          szSendName
+        })
+      end
+    else
+      local szNamePrefix
+      if tbMsg.tbExtra and tbMsg.tbExtra.nChatTitlePrefixId and 0 ~= tbMsg.tbExtra.nChatTitlePrefixId then
+        local tbCfg = ChatMgr:GetStaticChatTitlePrefixConfig(tbMsg.tbExtra.nChatTitlePrefixId)
+        local szName = tbCfg.szName
+        local nColor = tbCfg.nColorIdInChat
+        if szName and nColor then
+          szNamePrefix = string.format("<color=#%s>[%s]</color>", Ui.tbColor:GetColorHexBySettingId(nColor), i18n.Parse(szName))
+        elseif szName then
+          szNamePrefix = string.format("[%s]", i18n.Parse(szName))
+        end
+      elseif tbMsg.tbExtra and tbMsg.tbExtra.nCurrPrefix then
+        local szName = ChatMgr:GetNamePrefix(tbMsg.tbExtra.nCurrPrefix)
+        local nColor = ChatMgr:GetNamePrefixColor(tbMsg.tbExtra.nCurrPrefix)
+        if szName and nColor then
+          szNamePrefix = string.format("<color=#%s>[%s]</color>", Ui.tbColor:GetColorHexBySettingId(nColor), i18n.Parse(szName))
+        elseif szName then
+          szNamePrefix = string.format("[%s]", i18n.Parse(szName))
+        end
+      end
+      if szNamePrefix then
+        szMsg = szNamePrefix .. szSendName
+      else
+        szMsg = szSendName
+      end
+    end
+    local szBg
+    if self.nChannelId == ChatMgr.ChannelType.Recruit then
+      szBg = ChatMgr.ChannelBg[self.nChannelId]
+    else
+      szBg = ChatMgr.ChannelBg[tbMsg.nChannelType] or ChatMgr.ChannelBg[self.nChannelId]
+    end
+    local szColor = ChatMgr.ChannelTagColor[szBg]
+    szBg = i18n.Get(szBg)
+    if szColor then
+      szBg = string.format("<color=%s>%s</color>", szColor, szBg)
+    end
+    local tbPortraitObjPanel = Ui:NewExistPortraitObjPanel(tbElement, szPath .. "/HeadFrame/PortraitObj")
+    tbPortraitObjPanel:SetRoleIcon(tbMsg.nPortrait)
+    tbPortraitObjPanel:SetPortraitFrame(tbMsg.nPortraitFrame)
+    tbPortraitObjPanel:SetFactionIcon(tbMsg.nFaction)
+    tbPortraitObjPanel:SetLevel(tbMsg.nLevel)
+    pPanel:Label_SetText(szPath .. "/InfoNode/txtName", szMsg)
+    pPanel:Label_SetText(szPath .. "/InfoNode/txtChannel", szBg)
+    SpeechBalloon:SetSpeechBalloon(pPanel, szPath .. "/TxtNode/TxtBG/txtBgCell/imgBg1", tbMsg.nSpeechBalloon)
+    if not bSelf and tbMsg.nChannelType ~= ChatMgr.ChannelType.Zone and tbMsg.nChannelType ~= ChatMgr.ChannelType.Zone_Legion then
+      local tbData = self:ParseChatData(tbMsg)
+      Ui:Button_BindEvent(pPanel, szPath .. "/HeadFrame/PortraitObj", self.onClickShowPlayerDetails, self, tbData)
+    else
+      Ui:Button_UnBindEvent(pPanel, szPath .. "/HeadFrame/PortraitObj")
+    end
+    local hf_tf = tbElement.pPanel:GetObject(szPath .. "/HeadFrame"):GetComponent(Ui.RectTransform)
+    local in_tf = tbElement.pPanel:GetObject(szPath .. "/InfoNode"):GetComponent(Ui.RectTransform)
+    if not bHasVoice then
+      funcSetEmoji(szPath .. "/TxtNode/TxtBG/txtChatMsg")
+      local txtNodeKey = szPath .. "/TxtNode"
+      self:AdjustItemHeight(tbElement, txtNodeKey, hf_tf.sizeDelta.y, in_tf.sizeDelta.y + 30)
+      local szCopyCloseKey = self.pPanel:IsActive(self.ChatScroll) and self.CopyClose or self.PrivateCopyClose
+      local bNormalMsg = self.pPanel:IsActive(self.ChatScroll) and true or false
+      local szBtnsKey = bNormalMsg and self.btns or self.btnsPrivate
+      pPanel:Button_BindLongPressEnd(txtNodeKey, function()
+        self.pPanel:SetActive(szBtnsKey, true)
+        self.pPanel:SetActive(szCopyCloseKey, true)
+        local btnCount = 1
+        self.pPanel:SetActive(szBtnsKey .. "/btnReport", not bSelf)
+        if not bSelf then
+          btnCount = btnCount + 1
+        end
+        self:SetBtnsPosition(pPanel, bNormalMsg, btnCount)
+        Ui:Button_BindEvent(self.pPanel, szBtnsKey .. "/btnCopy", function()
+          self.ChatInputPanel:TryUpdateInputContent(tbMsg.szMsg)
+          self.pPanel:SetActive(szBtnsKey, false)
+          self.pPanel:SetActive(szCopyCloseKey, false)
+        end, self)
+        Ui:Button_BindEvent(self.pPanel, szBtnsKey .. "/btnReport", function()
+          Ui:OpenWindow("UIReportPlayer", tbMsg.nSenderId, tbMsg.szSenderName, tbMsg.szMsg, tbMsg.tbExtra.nServerIdWhole)
+          self.pPanel:SetActive(szBtnsKey, false)
+          self.pPanel:SetActive(szCopyCloseKey, false)
+        end, self)
+        Ui:Button_BindEvent(self.pPanel, szCopyCloseKey, function()
+          self.pPanel:SetActive(szBtnsKey, false)
+          self.pPanel:SetActive(szCopyCloseKey, false)
+        end)
+      end)
+    else
+      if not tbMsg.szMsg or "" == tbMsg.szMsg then
+        pPanel:SetActive(szPath .. "/VoiceNode/VoiceBG/txtChatMsg", false)
+      else
+        pPanel:Label_SetText(szPath .. "/VoiceNode/VoiceBG/txtChatMsg", tbMsg.szMsg)
+      end
+      self:AdjustItemHeight(tbElement, szPath .. "/VoiceNode", hf_tf.sizeDelta.y, in_tf.sizeDelta.y + 30)
+      pPanel:Label_SetText(szPath .. "/VoiceNode/VoiceBG/VoiceMsg/Text", math.ceil(tbMsg.uVoiceTime / 1000) .. "\"")
+      Ui:Button_BindEvent(pPanel, szPath .. "/VoiceNode/VoiceBG/VoiceMsg", function()
+        ChatMgr:PlayVoice(tbMsg.szMsgVoiceFileId)
+      end, self)
+    end
+  end
+end
+
+function tbWnd:SetBtnsPosition(pNodePanel, bNormalMsg, btnCount)
+  local szBtnsKey, szScroll, ScrollGrid
+  if bNormalMsg then
+    szBtnsKey = self.btns
+    szScroll = self.ChatScroll
+    ScrollGrid = self.ChatScrollGrid
+  else
+    szBtnsKey = self.btnsPrivate
+    szScroll = self.PrivateChatScroll
+    ScrollGrid = self.PrivateChatScrollGrid
+  end
+  local ScrollRect = self.pPanel:GetObject(szScroll):GetComponent("ScrollRect")
+  local nScrollRectHeight = self.pPanel:GetObject(szScroll):GetComponent(Ui.RectTransform).rect.height
+  local visibleY = -ScrollRect.content.anchoredPosition.y - nScrollRectHeight
+  local szArrowUp = string.format("%s%s", szBtnsKey, "/imgNarrow")
+  local szArrowDown = string.format("%s%s", szBtnsKey, "/imgNarrowDown")
+  local btnsObj = self.pPanel:GetObject(szBtnsKey)
+  local imgArrowDObj = self.pPanel:GetObject(szArrowDown)
+  local nodeObj = pNodePanel:GetObject("Main")
+  local gridObj = self.pPanel:GetObject(ScrollGrid)
+  local nHeight = nodeObj:GetComponent(Ui.RectTransform).rect.height
+  local nHeightBtn = 26 + 43 * btnCount
+  local nLasyPointY = nodeObj.transform.localPosition.y - nHeight
+  if nLasyPointY < visibleY + nHeightBtn + 20 then
+    btnsObj.transform.localPosition = nodeObj.transform.localPosition + gridObj.transform.localPosition + Ui.Vector3(240, nHeightBtn - 45, 0)
+    self.pPanel:SetActive(szArrowUp, false)
+    self.pPanel:SetActive(szArrowDown, true)
+    imgArrowDObj.transform.localPosition = Ui.Vector3(0, -nHeightBtn + 10, 0)
+  else
+    btnsObj.transform.localPosition = nodeObj.transform.localPosition + gridObj.transform.localPosition + Ui.Vector3(240, -nHeight, 0)
+    self.pPanel:SetActive(szArrowUp, true)
+    self.pPanel:SetActive(szArrowDown, false)
+  end
+end
+
+function tbWnd:onClickShowPlayerDetails(tbData)
+  if not tbData.nFaction and self.tbChatTargetInfo then
+    tbData.nFaction = self.tbChatTargetInfo.nFaction
+  end
+  if not tbData.nVipLevel then
+    tbData.nVipLevel = 0
+    if self.tbChatTargetInfo then
+      tbData.nVipLevel = self.tbChatTargetInfo.nVipLevel or tbData.nVipLevel
+    end
+  end
+  local tbPlayerIdList = {}
+  table.insert(tbPlayerIdList, tbData.dwRoleId)
+  local bAllHit, nSession, tbRoleInfoList = Player.RoleInfoCache:GetCache(tbPlayerIdList)
+  if bAllHit then
+    tbData.szKinOrTongName = i18n.EasyGet(tbRoleInfoList[tbData.dwRoleId].szKinOrTongName)
+  end
+  Ui:OpenWindow("UIRightPopUpMenu", "chatroleselect", tbData, self, 200, -100)
+end
+
+function tbWnd:OnClose()
+  if self.nChannelId == ChatMgr.ChannelType.Private then
+    self:Switch2TargetList()
+  end
+end

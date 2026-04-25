@@ -1,0 +1,144 @@
+Require("CommonScript/Shop/Shop.lua")
+Shop.FAMILY_SHOP_REFRESH = 14400
+Shop.FAMILY_SHOP_MAX_ITEM = 50
+Shop.tbFamilyShopIdToChar = {
+  [Kin.Def.Building_Shop] = "DrugShop"
+}
+Shop.tbFamilyShopCharToId = {
+  DrugShop = Kin.Def.Building_Shop
+}
+Shop.tbFamilyShopMoneyType = {
+  [Kin.Def.Building_Shop] = "KinContrib"
+}
+Shop.FamilyPool = {
+  DrugShop = {}
+}
+Shop.ShopWares = {}
+Shop.ShopWares.DrugShop = {}
+
+function Shop:LoadFamilyPool()
+  local tbPoolSetting = Lib:LoadTabFileEx("Setting/Shop/FamilyPool.tab", "dsddddd", nil, {
+    "Level",
+    "ShopType",
+    "Pool",
+    "Count1",
+    "Prob1",
+    "Count2",
+    "Prob2"
+  })
+  for _, v in pairs(tbPoolSetting) do
+    local tbPool = self.FamilyPool[v.ShopType]
+    assert(tbPool, v.ShopType)
+    tbPool[v.Level] = tbPool[v.Level] or {}
+    tbPool[v.Level][v.Pool] = {
+      v.Count1,
+      v.Prob1,
+      v.Count2,
+      v.Prob2
+    }
+  end
+  self.FamilyPool = SetReadOnly(self.FamilyPool)
+end
+
+Shop:LoadFamilyPool()
+
+function Shop:LoadFamilyShop()
+  local tbWares = Lib:LoadTabFileEx("Setting/Shop/FamilyShop.tab", "ddddddsdd", nil, {
+    "nWareId",
+    "nSort",
+    "Level",
+    "Pool",
+    "Count",
+    "Discount",
+    "TimeFrame",
+    "HotTip",
+    "MinLevel"
+  })
+  for _, v in pairs(tbWares) do
+    local realWare = self.tbWares[v.nWareId]
+    if realWare then
+      self.ShopWares[realWare.szShopType] = self.ShopWares[realWare.szShopType] or {}
+      local tbItems = self.ShopWares[realWare.szShopType]
+      tbItems[v.Level] = tbItems[v.Level] or {}
+      local tbPoolWares
+      if 0 ~= v.Pool then
+        tbItems[v.Level][v.Pool] = tbItems[v.Level][v.Pool] or {}
+        tbPoolWares = tbItems[v.Level][v.Pool]
+      else
+        tbPoolWares = tbItems[v.Level]
+      end
+      tbPoolWares[realWare.nItemId] = {
+        nWareId = v.nWareId,
+        nTemplateId = realWare.nItemId,
+        nPrice = realWare.nPrice,
+        szMoneyType = realWare.szCurrencyType,
+        szShopType = realWare.szShopType,
+        nSort = v.nSort,
+        nLevel = v.Level,
+        nPool = v.Pool,
+        nCount = v.Count,
+        nDiscount = v.Discount,
+        bHotTip = 1 == v.HotTip,
+        szTimeFrame = v.TimeFrame,
+        nMinLevel = v.MinLevel
+      }
+    end
+  end
+  if MODULE_GAMESERVER then
+    self.ShopWares = SetReadOnly(self.ShopWares)
+  end
+end
+
+Shop:LoadFamilyShop()
+
+function Shop:LoadFamilyDiscount()
+  local szFilePath = "Setting/Shop/FamilyDiscount.tab"
+  local tbField = {
+    "ShopType",
+    "nLevel",
+    "nDiscount"
+  }
+  local tbDiscountSetting = Lib:LoadTabFileEx(szFilePath, "sdd", nil, tbField)
+  self.tbFamilyDiscount = {}
+  for _, tbSetting in ipairs(tbDiscountSetting) do
+    self.tbFamilyDiscount[tbSetting.ShopType] = self.tbFamilyDiscount[tbSetting.ShopType] or {}
+    assert(tbSetting.nDiscount > 0, tbSetting.nLevel)
+    self.tbFamilyDiscount[tbSetting.ShopType][tbSetting.nLevel] = tbSetting.nDiscount
+  end
+  self.tbFamilyDiscount = SetReadOnly(self.tbFamilyDiscount)
+end
+
+Shop:LoadFamilyDiscount()
+
+function Shop:GetFamilyDiscount(szShopType, nLevel)
+  local tbDsicountInfo = self.tbFamilyDiscount[szShopType]
+  if not tbDsicountInfo then
+    return 1
+  end
+  local nDiscount = tbDsicountInfo[nLevel] or 100
+  nDiscount = nDiscount / 100
+  return nDiscount
+end
+
+function Shop:GetBuildingLevel(pPlayer, nBuildingId)
+  if self.GetBuildingLevelClient then
+    return self:GetBuildingLevelClient(nBuildingId)
+  end
+  if self.GetBuildingLevelServer then
+    return self:GetBuildingLevelServer(pPlayer, nBuildingId)
+  end
+end
+
+function Shop:GetFamilyShopMoneyType(nId)
+  return self.tbFamilyShopMoneyType[nId]
+end
+
+function Shop:IsFamilyShop(szShopType)
+  if not self.tbFamilyShopCharToId[szShopType] then
+    return
+  end
+  if self.FamilyPool[szShopType] then
+    return true, true
+  end
+  return true
+end

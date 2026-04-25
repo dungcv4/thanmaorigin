@@ -1,0 +1,164 @@
+local tbWnd = Ui:CreateWindow("UISuperStarCompetitionReport")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  Guessing = "node/imgBG/Content/Guessing",
+  Group = "node/imgBG/Content/Guessing/TeamGroup/Group",
+  btnGuess = "node/imgBG/Content/Guessing/btnGuess",
+  imgGuessingBg = "node/imgBG/Content/Guessing/imgGuessingBg",
+  txtGuessing = "node/imgBG/Content/Guessing/txtGuessing",
+  txtCountdown = "node/imgBG/Content/Guessing/txtCountdown",
+  txtChampionTitle = "node/imgBG/Content/Guessing/TeamGroup/Group7/txtTitle"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbUIGroup = {
+  [2] = {
+    tbControls.Group .. 7
+  },
+  [4] = {
+    tbControls.Group .. 5,
+    tbControls.Group .. 6
+  },
+  [8] = {
+    tbControls.Group .. 1,
+    tbControls.Group .. 3,
+    tbControls.Group .. 4,
+    tbControls.Group .. 2
+  }
+}
+tbWnd.PHASE_INIT = 8
+tbWnd.MAX_MEMBER = 3
+tbWnd.RESULT = {
+  WIN = 1,
+  FAIL = 2,
+  DRAW = 3
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnHelp = function(self)
+  end,
+  btnGuess = function(self)
+    if self.tbGuessCallBack then
+      Lib:CallBack(self.tbGuessCallBack)
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  for nPhase, tbGroup in pairs(self.tbUIGroup) do
+    for nIndex, szGroup in ipairs(tbGroup) do
+      Ui:Button_BindEvent(self.pPanel, szGroup .. "/btnView", function()
+        if self.tbWatchCallBack then
+          local tbCallback = {
+            table.unpack(self.tbWatchCallBack)
+          }
+          table.insert(tbCallback, nPhase)
+          table.insert(tbCallback, nIndex)
+          Lib:CallBack(tbCallback)
+        end
+      end)
+    end
+  end
+  self.pPanel:SetActive(tbControls.btnHelp, false)
+end
+
+function tbWnd:OnClose()
+  if self.nTimer ~= nil then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+end
+
+function tbWnd:OnOpen(tbSetting, tbGuessCallBack, tbWatchCallBack, tbFinalMatchData, tbId2Name, tbIndexMapId)
+  self.tbSetting = tbSetting or {}
+  self.tbGuessCallBack = tbGuessCallBack or {}
+  self.tbWatchCallBack = tbWatchCallBack or {}
+  self.tbFinalMatchData = tbFinalMatchData or {}
+  self.tbId2Name = tbId2Name or {}
+  self.tbIndexMapId = tbIndexMapId or {}
+  self:UpdateFinalPage()
+  self.pPanel:Label_SetText(tbControls.txtChampionTitle, i18n.EasyGet("\229\134\160\229\134\155"))
+end
+
+function tbWnd:UpdateFinalPage()
+  self.pPanel:SetActive(tbControls.Guessing, true)
+  self:UpdateLeftTime()
+  if not self.tbFinalMatchData or Lib:IsEmptyTB(self.tbFinalMatchData) then
+    return
+  end
+  for nPhase, tbTeamData in pairs(self.tbFinalMatchData) do
+    if self.tbUIGroup[nPhase] then
+      for i = 1, nPhase / 2 do
+        local nIdx1 = i
+        if tbTeamData[nIdx1] then
+          self.pPanel:Label_SetText(self.tbUIGroup[nPhase][nIdx1] .. "/txtTeam1", tbTeamData[nIdx1].szName)
+          self.pPanel:SetActive(self.tbUIGroup[nPhase][nIdx1] .. "/MarkWin1", tbTeamData[nIdx1].nResult == self.RESULT.WIN)
+        else
+          self.pPanel:Label_SetText(self.tbUIGroup[nPhase][nIdx1] .. "/txtTeam1", i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+          self.pPanel:SetActive(self.tbUIGroup[nPhase][nIdx1] .. "/MarkWin1", false)
+        end
+        local nIdx2 = nPhase - i + 1
+        if tbTeamData[nIdx2] then
+          self.pPanel:Label_SetText(self.tbUIGroup[nPhase][nIdx1] .. "/txtTeam2", tbTeamData[nIdx2].szName)
+          self.pPanel:SetActive(self.tbUIGroup[nPhase][nIdx1] .. "/MarkWin2", tbTeamData[nIdx2].nResult == self.RESULT.WIN)
+        else
+          self.pPanel:Label_SetText(self.tbUIGroup[nPhase][nIdx1] .. "/txtTeam2", i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+          self.pPanel:SetActive(self.tbUIGroup[nPhase][nIdx1] .. "/MarkWin2", false)
+        end
+      end
+    end
+  end
+  for nPhase, tbGroup in pairs(self.tbUIGroup) do
+    for nIndex, szGroup in ipairs(tbGroup) do
+      local bShowViewBtn = false
+      if self.tbIndexMapId and self.tbIndexMapId[nPhase] and self.tbIndexMapId[nPhase][nIndex] then
+        bShowViewBtn = true
+      end
+      self.pPanel:SetActive(szGroup .. "/btnView", bShowViewBtn)
+    end
+  end
+  self:UpdateGuessTeam()
+end
+
+function tbWnd:UpdateGuessTeam()
+  local nGuessId = 0
+  if self.tbSetting.funcGetGuessId then
+    nGuessId = self.tbSetting.funcGetGuessId()
+  end
+  local szTeam = ""
+  self.pPanel:SetActive(tbControls.imgGuessingBg, true)
+  if nGuessId >= 0 and self.tbId2Name[nGuessId] then
+    szTeam = self.tbId2Name[nGuessId]
+  elseif not self:IsGuessOpen() then
+    self.pPanel:SetActive(tbControls.imgGuessingBg, false)
+  end
+  self.pPanel:Label_SetText(tbControls.txtGuessing, szTeam)
+  self.pPanel:SetActive(tbControls.btnGuess, self:IsGuessOpen())
+end
+
+function tbWnd:UpdateLeftTime()
+  local szTime = i18n.EasyGet("\231\171\158\231\140\156\229\183\178\231\187\147\230\157\159")
+  local nTimeRemaining = Lib:GetConfigDate2Time(self.tbSetting.nGuessEndTime) - GetTime()
+  if nTimeRemaining > 0 then
+    local nHour, nMin = Lib:TransferSecond2NormalTime(nTimeRemaining)
+    szTime = i18n.EasyGet("\231\173\137\229\190\133\230\175\148\232\181\155\229\188\128\229\144\175\229\128\146\232\174\161\230\151\182\239\188\154{0}\229\176\143\230\151\182{1}\229\136\134", nHour, nMin)
+  end
+  self.pPanel:Label_SetText(tbControls.txtCountdown, szTime)
+  local nCurTime = tonumber(os.date("%Y%m%d%H%M", GetTime()))
+  local nNextTime = Lib:GetDate2Time(nCurTime + 1) - GetTime()
+  if self.nTimer ~= nil then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  if nTimeRemaining > 0 then
+    self.nTimer = Timer:Register(nNextTime * Env.GAME_FPS, self.UpdateLeftTime, self)
+  end
+  return false
+end
+
+function tbWnd:IsGuessOpen()
+  local nNowTime = GetTime()
+  return nNowTime >= Lib:GetConfigDate2Time(self.tbSetting.nGuessStartTime) and nNowTime <= Lib:GetConfigDate2Time(self.tbSetting.nGuessEndTime)
+end

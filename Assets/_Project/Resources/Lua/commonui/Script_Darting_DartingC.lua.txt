@@ -1,0 +1,209 @@
+Darting.nNpcId = Darting.nNpcId or 0
+Darting.nPath = Darting.nPath or 0
+Darting.nCurTemplateId = Darting.nCurTemplateId or 0
+Darting.nTargetTemplateId = Darting.nTargetTemplateId or 0
+Darting.nRefreshNum = Darting.nRefreshNum or 0
+Darting.nInitNpcTemplateId = Darting.nInitNpcTemplateId or 0
+
+function Darting:ResetCacheData()
+  self.nTargetTemplateId = 0
+  self.nRefreshNum = 0
+  self.nCurTemplateId = 0
+end
+
+function Darting:OnRequestDarting(nId, nPath)
+  self.nNpcId = nId
+  self.nPath = nPath
+  self:ResetCacheData()
+  Ui:OpenWindow("UIYunBiao", true)
+end
+
+function Darting:ReqBeginDartingC()
+  RemoteServer.RequestDarting(Darting.Protocol.ReqBeginDarting, self.nNpcId, self.nPath)
+end
+
+function Darting:ReqGoOnDarting()
+  local szMsg = i18n.EasyGet("\230\152\175\229\144\166\231\161\174\232\174\164\232\191\144\233\128\129{0}", Npc:GetNameByTemplateId(self.nCurTemplateId))
+  me.MsgBox(szMsg, {
+    {
+      i18n.EasyGet("\231\161\174\229\174\154"),
+      function()
+        local tbWnd = Ui:GetWindow("UIYunBiao")
+        if tbWnd then
+          tbWnd:Close()
+        end
+        RemoteServer.RequestDarting(Darting.Protocol.GoOnDarting)
+      end
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function Darting:ReqRefreshDarting()
+  RemoteServer.RequestDarting(Darting.Protocol.RefreshDarting)
+end
+
+function Darting:ShowNpcPath(nNpcId, nPosX, nPosY)
+  AutoPath:SetNpcTraceTarget(nNpcId, nPosX, nPosY)
+end
+
+function Darting:ShowNpcPathWithStartPos(nStartPosX, nStartPosY, nPosX, nPosY)
+  AutoPath:SetNpcTraceTargetWithStartPos(nStartPosX, nStartPosY, nPosX, nPosY)
+end
+
+function Darting:ClearNpcPathC()
+  AutoPath:ClearNpcTarget()
+end
+
+function Darting:ConfirmGetingDartingAward(nNpcId)
+  local szMsg = i18n.EasyGet("\230\152\175\229\144\166\231\161\174\232\174\164\228\184\138\228\186\164\233\149\150\232\189\166\239\188\136\228\184\141\229\156\168\229\173\148\233\155\128\230\178\179\231\154\132\230\136\144\229\145\152\230\151\160\230\179\149\232\142\183\229\190\151\229\165\150\229\138\177\239\188\137\239\188\159")
+  me.MsgBox(szMsg, {
+    {
+      i18n.EasyGet("\231\161\174\232\174\164"),
+      function()
+        RemoteServer.RequestDarting(Darting.Protocol.GetDartingAward, nNpcId)
+      end
+    },
+    {
+      i18n.szCancel
+    }
+  })
+end
+
+function Darting:OnTryRefreshingDarting(nRefreshNum, nTemplateId, nRefreshTemplateId)
+  self.nRefreshNum = nRefreshNum
+  self.nCurTemplateId = nTemplateId
+  self.nTargetTemplateId = nRefreshTemplateId
+  Ui:OpenWindow("UIYunBiao", false, nRefreshNum, nTemplateId, nRefreshTemplateId)
+end
+
+function Darting:OnRefreshingDarting(nRefreshNum, nTemplateId, nRefreshTemplateId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DARTING_BEGIN_REFRESH)
+  self.nRefreshNum = nRefreshNum
+  self.nCurTemplateId = nTemplateId
+  self.nTargetTemplateId = nRefreshTemplateId
+  if self.DoDartingTimer then
+    Timer:Close(self.DoDartingTimer)
+  end
+  self.DoDartingTimer = Timer:Register(self.Cfg.nDoDartingDelay * Env.GAME_FPS, function()
+    self.DoDartingTimer = nil
+    EventNotify.OnNotify(EventNotify.emNOTIFY_DARTING_ON_REFRESH)
+    me.CenterMsg(i18n.EasyGet("\229\136\183\230\150\176\229\136\176\228\186\134{0}", Npc:GetNameByTemplateId(nRefreshTemplateId)))
+  end)
+end
+
+function Darting:IsRefreshing()
+  return self.DoDartingTimer ~= nil
+end
+
+function Darting:GetDartingCarList()
+  local tbAwardInfo
+  local tbList = {}
+  for _, tbInfo in ipairs(self.Cfg.DartingCarList) do
+    tbAwardInfo = self.Cfg.DartingAwardList[tbInfo.nColor]
+    table.insert(tbList, {
+      nTemplateId = tbInfo.nTemplateId,
+      nAwardId = tbAwardInfo.nAwardId,
+      nAwardKey = tbAwardInfo.nAwardSuccessKey
+    })
+  end
+  return tbList
+end
+
+function Darting:SyncDoDarting(nTemplateId, nTargetTemplateId)
+  self.nCurTemplateId = nTemplateId
+  self.nTargetTemplateId = nTargetTemplateId
+  if self.DoDartingTimer then
+    Timer:Close(self.DoDartingTimer)
+  end
+  self.DoDartingTimer = Timer:Register(self.Cfg.nDoDartingDelay * Env.GAME_FPS, function()
+    self.DoDartingTimer = nil
+    EventNotify.OnNotify(EventNotify.emNOTIFY_DARTING_DO_DARTING)
+  end)
+end
+
+function Darting:GetCacheData()
+  return {
+    nCurTemplateId = self.nCurTemplateId,
+    nTargetTemplateId = self.nTargetTemplateId,
+    nRefreshNum = self.nRefreshNum,
+    bForbidden = self.nCurTemplateId == self.Cfg.DartingCarList[#self.Cfg.DartingCarList].nTemplateId
+  }
+end
+
+function Darting:OnSyncLoginInfo(nMapTemplateId, tbPoints, nTimeOut, nCurTemplateId, nTargetTemplateId)
+  Map:SyncDynMapPoint(nMapTemplateId, tbPoints, nTimeOut)
+  self.nCurTemplateId = nCurTemplateId
+  self.nTargetTemplateId = nTargetTemplateId
+  EventNotify.OnNotify(EventNotify.emNOTIFY_DARTING_ON_LOGIN)
+end
+
+function Darting:GetDartingStatus()
+  local nDartingTime = me.GetUserValue(self.SAVE_KEY, self.SAVE_ID_LIST.DartingTime)
+  if nDartingTime > 0 then
+    return i18n.EasyGet("\230\156\170\229\188\128\229\167\139")
+  end
+  local nTeamId = me.GetUserValue(self.SAVE_KEY, self.SAVE_ID_LIST.DartingTeamId)
+  if nTeamId > 0 then
+    return i18n.EasyGet("\232\191\155\232\161\140\228\184\173")
+  end
+  return i18n.EasyGet("\229\183\178\229\174\140\230\136\144")
+end
+
+function Darting:GetDartingIntro()
+  local szStatus = self:GetDartingStatus()
+  local szName = self:GetDynamicActivityDescHelper()
+  local szIntro = i18n.Get(self.Cfg.szFuBenUIShowIntro, szStatus, szName)
+  return szIntro
+end
+
+function Darting:OnSyncInitPoint(nNpcTemplateId)
+  self.nInitNpcTemplateId = nNpcTemplateId
+  Log("Darting:OnSyncInitPoint", nNpcTemplateId)
+end
+
+function Darting:GetDynamicActivityDescHelper()
+  local szName = i18n.EasyGet("\230\156\170\231\159\165")
+  if self.nInitNpcTemplateId and self.nInitNpcTemplateId > 0 then
+    szName = Npc:GetNameByTemplateId(self.nInitNpcTemplateId)
+  end
+  return szName
+end
+
+function Darting:GetDynamicActivityDesc()
+  return i18n.EasyGet("\n\n\228\187\138\230\151\165\230\142\165\233\149\150\231\130\185\239\188\154{0}", self:GetDynamicActivityDescHelper())
+end
+
+function Darting:GotoMap(nMapId)
+  if self.nInitNpcTemplateId <= 0 then
+    ActivityMgr:GotoMap(nMapId)
+    return
+  end
+  local nPosX, nPosY = self.Cfg.PathList[self.nInitNpcTemplateId].nPosX, self.Cfg.PathList[self.nInitNpcTemplateId].nPosY
+  
+  local function func()
+    local nNpcId = KNpc.GetNpcIdByTemplateId(self.nInitNpcTemplateId)
+    if nNpcId then
+      Operation:SimpleTap(nNpcId)
+    end
+  end
+  
+  ActivityMgr:GotoDynamicNpc(nMapId, nPosX, nPosY, func, GetNpcDialogDistance(self.nInitNpcTemplateId))
+end
+
+function Darting:OnCrossDay()
+  Log("Darting:OnCrossDay")
+  self.nInitNpcTemplateId = 0
+end
+
+function Darting:Init()
+  if self.bHasInitialized then
+    return
+  end
+  self.bHasInitialized = true
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, self.OnCrossDay, self)
+end
+
+Darting:Init()

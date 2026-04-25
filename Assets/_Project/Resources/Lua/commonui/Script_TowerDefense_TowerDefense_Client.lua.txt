@@ -1,0 +1,267 @@
+Require("Script/Fuben/FubenUIController.lua")
+TowerDefense.nMoney = 0
+
+function TowerDefense:TryUseItem(dwTemplateID)
+  local tbInfo = TowerDefense.Cfg.Item[dwTemplateID]
+  if not tbInfo then
+    return
+  end
+  if 0 == tbInfo.nLandType then
+    RemoteServer.RequestTowerDefense("UseItem", dwTemplateID)
+    return
+  end
+  local nMapId, nX, nY = me.GetWorldPos()
+  local tbLandPos = TowerDefense:GetNpcPosByType(TowerDefense.POS_DEF.LAND)
+  for nIndex, tbPos in pairs(tbLandPos) do
+    if math.abs(nX - tbPos.PosX) < TowerDefense.nLandRange and math.abs(nY - tbPos.PosY) < TowerDefense.nLandRange then
+      RemoteServer.RequestTowerDefense("UseItem", dwTemplateID)
+      return
+    end
+  end
+  me.CenterMsg(i18n.Get(TowerDefense.Cfg.Msg.CANNOTUSE))
+end
+
+function TowerDefense:TryGetInfo()
+  RemoteServer.RequestTowerDefense("TrySyncInfo")
+end
+
+function TowerDefense:RequestSignUp()
+  if DegreeCtrl:GetDegree(me, "TowerDefense") > 0 then
+    local function fCall()
+      if TeamMgr:HasTeam() then
+        local function fLeaveTeamAndSignUp()
+          TeamMgr:Quite()
+          
+          RemoteServer.RequestTowerDefense("TrySignUp")
+        end
+        
+        Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\232\191\155\229\133\165\229\133\136\231\165\150\228\185\139\233\173\130\233\156\128\232\166\129\233\128\128\229\135\186\233\152\159\228\188\141\239\188\140\231\161\174\229\174\154\231\166\187\233\152\159\239\188\159"), {
+          {fLeaveTeamAndSignUp},
+          {}
+        }, {
+          i18n.szOk,
+          i18n.szCancel
+        })
+      else
+        RemoteServer.RequestTowerDefense("TrySignUp")
+      end
+    end
+    
+    local bRet, szErr = ActivityCheck:CheckCanEnterActivityEx(me, nil, fCall, false, false, true, nil, {
+      "UIBattleEntrance_Common"
+    }, false)
+    if not bRet then
+      me.CenterMsg(szErr)
+      return
+    end
+    return true
+  else
+    me.CenterMsg(i18n.EasyGet("\229\137\169\228\189\153\229\143\130\228\184\142\230\172\161\230\149\176\228\184\141\232\182\179"))
+  end
+end
+
+function TowerDefense:OnSyncInfo(nRet, nWaitlistNum, nLeftTime)
+  local szState = 0 == nRet and i18n.EasyGet("\229\174\136\230\138\164\229\133\136\231\165\150\228\185\139\233\173\130\230\156\170\229\188\128\229\144\175") or i18n.EasyGet("\229\174\136\230\138\164\229\133\136\231\165\150\228\185\139\233\173\130\230\138\165\229\144\141\228\184\173")
+  if not Ui:WindowVisible("UIBattleEntrance_Common") then
+    local tbData = {
+      szDegreeName = "TowerDefense",
+      szOpenTimeDesc = TowerDefense.Cfg.szOpenTimeDesc,
+      tbUpdateFn = {
+        self.TryGetInfo,
+        self
+      },
+      tbSignUpFn = {
+        self.RequestSignUp,
+        self
+      },
+      szTittle = i18n.EasyGet("\229\174\136\230\138\164\229\133\136\231\165\150\228\185\139\233\173\130"),
+      szState = szState
+    }
+    Ui:OpenWindow("UIBattleEntrance_Common", tbData)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UI_BATTLEENTRANCE_COMMON_UPDATE, szState, nWaitlistNum or 0, nLeftTime)
+end
+
+function TowerDefense:RefreshSignUpView()
+  if Ui:WindowVisible("UIBattleEntrance_Common") then
+    Ui:GetWindow("UIBattleEntrance_Common"):onRefreshInfo()
+  end
+end
+
+function TowerDefense:OnSynEndSignUp()
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.QingmingAncestors)
+end
+
+TowerDefense.PreMap = TowerDefense.PreMap or {}
+local PreMap = TowerDefense.PreMap
+TowerDefense.RaceMap = TowerDefense.RaceMap or {}
+local RaceMap = TowerDefense.RaceMap
+
+function TowerDefense:RegisterFubenUIChecker()
+  FubenUIController:RegisterChecker({
+    TowerDefense.Cfg.nPreMapTemplate
+  }, PreMap)
+  FubenUIController:RegisterChecker({
+    TowerDefense.Cfg.nRaceMapTemplate
+  }, RaceMap)
+end
+
+TowerDefense:RegisterFubenUIChecker()
+
+function PreMap:SetCanExit(bExit)
+  self.IsCanExit = bExit
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function PreMap:IsNeedExitFubenButton()
+  return self.IsCanExit
+end
+
+function PreMap:OnFubenMapLoaded()
+  self:SetCanExit(true)
+  FubenUIController:OpenFuBenUI()
+end
+
+function PreMap:UpdatePreMapUI(nTime, nCount)
+  local szProgress = i18n.EasyGet("\231\173\137\229\190\133\228\184\139\228\184\128\232\189\174\230\175\148\232\181\155\229\188\128\229\144\175")
+  local szIntro = i18n.EasyGet("\229\189\147\229\137\141\229\135\134\229\164\135\229\156\186\228\186\186\230\149\176\239\188\154{0}", nCount)
+  FubenUIController:ShowInfo(nil, szProgress, {nTime}, szIntro)
+end
+
+function RaceMap:OnFubenMapLoaded()
+  local tbOptList = {}
+  table.insert(tbOptList, {
+    Text = i18n.Get("OptEnd"),
+    Callback = self.OpenItemList,
+    Param = {self}
+  })
+  local tb = {
+    Text = i18n.Get(TowerDefense.Cfg.szTeachDialog),
+    OptList = tbOptList
+  }
+  Dialog:ShowNpcDialog(tb, me, TowerDefense.Cfg.nTeachDialogNpc)
+end
+
+function RaceMap:OpenItemList()
+  if not Ui:WindowVisible("UIHUD_Tip") then
+    local tbData = {}
+    for dwTemplateID, tbInfo in pairs(TowerDefense.Cfg.Item) do
+      local tbTemp = {
+        dwTemplateID = dwTemplateID,
+        szIcon = "UI/icon/item/other/junxiang.png",
+        nPrice = tbInfo.nPrice,
+        nSort = tbInfo.nSort
+      }
+      table.insert(tbData, tbTemp)
+    end
+    table.sort(tbData, function(tbTempA, tbTempB)
+      return tbTempA.nSort < tbTempB.nSort
+    end)
+    Ui:OpenWindow("UIHUD_Tip", tbData, TowerDefense.nMoney or 0, TowerDefense.TryUseItem, TowerDefense)
+  end
+end
+
+function RaceMap:CloseUi(szUiName)
+  if "UINpcDialog" == szUiName and me.nMapTemplateId == TowerDefense.Cfg.nRaceMapTemplate then
+    Ui:CloseWindow("UIHudRightBottom")
+    Ui:CloseWindow("UIHudRightSkill")
+  end
+end
+
+function RaceMap:OnLeave()
+  Ui:CloseWindow("UIHUD_Tip")
+  Ui:CloseWindow("UIHUD_Tip")
+  Ui:CloseWindow("UIBattleRankQingming")
+  TowerDefense.nMoney = 0
+end
+
+function RaceMap:ShowPrepareUI(nTme)
+  FubenUIController:OpenDefaultFuBenUI("TowerDefenseHelp", {
+    {
+      nTme,
+      i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154%s")
+    }
+  }, {
+    i18n.EasyGet("\231\173\137\229\190\133\229\137\175\230\156\172\229\188\128\229\167\139")
+  })
+end
+
+local function SortByScore(tbDataA, tbDataB)
+  if tbDataA.nScore ~= tbDataB.nScore then
+    return tbDataA.nScore > tbDataB.nScore
+  end
+  return tbDataA.dwPlayerID > tbDataB.dwPlayerID
+end
+
+function RaceMap:OnSynData(nTime, nMoney, nBatch, nLeaveMonster, tbRank, nTittle)
+  TowerDefense.nMoney = nMoney
+  table.sort(tbRank, SortByScore)
+  local tbTime, tbContent = self:FormatContent(nTime, nMoney, nBatch, nLeaveMonster, tbRank, nTittle)
+  FubenUIController:OpenDefaultFuBenUI("TowerDefenseHelp", {tbTime}, tbContent)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UI_UIHUDTIP_UPDATE, nMoney)
+  self:OpenItemList()
+  if nTittle == TowerDefense.TITTLE.END then
+    Ui:CloseWindow("UIHUD_Tip")
+  end
+end
+
+RaceMap.tbTittle = {
+  [TowerDefense.TITTLE.NEXTRAOUND] = function()
+    return i18n.EasyGet("\228\184\139\232\189\174\230\128\170\231\137\169\229\136\176\229\156\186\239\188\154%s")
+  end,
+  [TowerDefense.TITTLE.LASTROUND] = function()
+    return i18n.EasyGet("\229\128\146\232\174\161\230\151\182\239\188\154%s")
+  end,
+  [TowerDefense.TITTLE.END] = function()
+    return i18n.EasyGet("\229\183\178\231\187\147\230\157\159\239\188\140\231\173\137\229\190\133\228\188\160\233\128\129\239\188\154%s")
+  end
+}
+
+function RaceMap:FormatContent(nTime, nMoney, nBatch, nLeaveMonster, tbRank, nTittle)
+  nTittle = nTittle or 1
+  local tbTime = {}
+  table.insert(tbTime, nTime)
+  table.insert(tbTime, self.tbTittle[nTittle]())
+  local tbContent = {}
+  local szMoney = i18n.EasyGet("<color=#{0}>\230\139\165\230\156\137\229\134\155\233\165\183\230\149\176\239\188\154{1}</color>", Ui.tbColor:GetColorHexByDefineName("BrightYellow"), nMoney)
+  table.insert(tbContent, szMoney)
+  table.insert(tbContent, i18n.EasyGet("\229\189\147\229\137\141\230\128\170\231\137\169\232\189\174\230\149\176\239\188\154{0}", nBatch))
+  table.insert(tbContent, i18n.EasyGet("\233\128\131\232\132\177\230\128\170\231\137\169\230\149\176\233\135\143\239\188\154{0}", nLeaveMonster))
+  local szTitle = i18n.EasyGet("\231\142\169\229\174\182\231\167\175\229\136\134\230\142\146\229\144\141")
+  for nRank, tbInfo in ipairs(tbRank) do
+    local szTemp = "\n" .. nRank .. "." .. string.format("%s    %d", tbInfo.szName, tbInfo.nScore)
+    if tbInfo.szName == me.szName then
+      szTemp = string.format("<color=#%s>%s</color>", Ui.tbColor:GetColorHexByDefineName("NewOrange"), szTemp)
+    end
+    szTitle = szTitle .. szTemp
+  end
+  table.insert(tbContent, szTitle)
+  return tbTime, tbContent
+end
+
+function RaceMap:ShowRank(tbRank)
+  local tbData = {}
+  tbData.tbTitle = {
+    i18n.EasyGet("\230\142\146\229\144\141"),
+    i18n.EasyGet("\229\144\141\229\173\151"),
+    i18n.EasyGet("\230\156\128\229\144\142\228\184\128\229\135\187"),
+    i18n.EasyGet("\231\167\175\229\136\134")
+  }
+  tbData.szPanelName = i18n.EasyGet("\229\174\136\230\138\164\229\133\136\231\165\150\228\185\139\233\173\130")
+  table.sort(tbRank, SortByScore)
+  tbData.tbRankData = {}
+  for nRank, tbInfo in ipairs(tbRank) do
+    tbData.tbRankData[nRank] = tbData.tbRankData[nRank] or {}
+    tbData.tbRankData[nRank].nParam1 = nRank
+    tbData.tbRankData[nRank].nParam2 = tbInfo.szName
+    tbData.tbRankData[nRank].nParam3 = tbInfo.nKillNums
+    tbData.tbRankData[nRank].nParam4 = tbInfo.nScore
+    if tbInfo.szName == me.szName then
+      tbData.nMyRank = nRank
+    end
+  end
+  Ui:OpenWindow("UIBattleRankQingming", tbData)
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_WND_CLOSED, RaceMap)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_WND_CLOSED, RaceMap.CloseUi, RaceMap)

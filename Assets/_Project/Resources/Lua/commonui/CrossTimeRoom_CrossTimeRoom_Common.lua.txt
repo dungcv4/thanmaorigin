@@ -1,0 +1,211 @@
+Require("CommonScript/CrossTimeRoom/CrossTimeRoomCfg.lua")
+CrossTimeRoom = CrossTimeRoom or {}
+CrossTimeRoom.nTotalTime = CrossTimeRoom.Def.nSettleTime + CrossTimeRoom.Def.nGameTime
+CrossTimeRoom.EndStateDef = {
+  NotEnd = 1,
+  SuccessEnd = 2,
+  FailEnd = 3
+}
+CrossTimeRoom.fileNpcSetting = "Setting/Map/yinyangshiguangdian_jitai/info/batch_npc_setting.txt"
+CrossTimeRoom.NpcDef = {
+  EnterMap = "EnterMap",
+  Trap = "Trap",
+  ZX = "zixuan",
+  ZFF = "zhuofeifan",
+  YTG = "yuantiangang",
+  NLZ = "nalanzhen",
+  BX = "baoxiang",
+  LCF = "lichunfeng",
+  FS = "fangshi",
+  SQC = "shangqingcao",
+  YYH = "yueyinghua",
+  YZZ = "yuanzhuzhe",
+  DGBP = "dinggubingpo",
+  XTJ = "xiaotaijian",
+  JMKL = "kuilei",
+  GJKL = "kuilei1",
+  YMQ = "youmingquan",
+  SHZ = "shenyuanshouhuzhe",
+  HS = "heishui",
+  DSM = "dasiming"
+}
+CrossTimeRoom.tbNpc2TID = {
+  [CrossTimeRoom.NpcDef.DSM] = 12227,
+  [CrossTimeRoom.NpcDef.YMQ] = 12229,
+  [CrossTimeRoom.NpcDef.SHZ] = 12232
+}
+CrossTimeRoom.tbClass = CrossTimeRoom.tbClass or {}
+CrossTimeRoom.tbExitNpcPos = {nX = 16539, nY = 30794}
+
+function CrossTimeRoom:LoadPositionSettings()
+  CrossTimeRoom.tbNpcSetting = {}
+  local tbNpcSetting = Lib:LoadTabFileEx(CrossTimeRoom.fileNpcSetting, "dsddddd", nil, {
+    "nStage",
+    "szType",
+    "NpcTemplateId",
+    "PosX",
+    "PosY",
+    "bEnd",
+    "nCamp"
+  }, nil, nil, false) or {}
+  if not tbNpcSetting then
+    error("[CrossTimeRoom]cannot read" .. CrossTimeRoom.fileNpcSetting)
+    return
+  end
+  for _, tbNpcInfo in ipairs(tbNpcSetting) do
+    CrossTimeRoom.tbNpcSetting[tbNpcInfo.nStage] = CrossTimeRoom.tbNpcSetting[tbNpcInfo.nStage] or {}
+    CrossTimeRoom.tbNpcSetting[tbNpcInfo.nStage][tbNpcInfo.szType] = CrossTimeRoom.tbNpcSetting[tbNpcInfo.nStage][tbNpcInfo.szType] or {}
+    table.insert(CrossTimeRoom.tbNpcSetting[tbNpcInfo.nStage][tbNpcInfo.szType], tbNpcInfo)
+  end
+end
+
+function CrossTimeRoom:LoadAwardSetting()
+  CrossTimeRoom.tbAwardLinkKey = {}
+  local tbCfg = Lib:EasyLoadTabFile("Setting/CrossTimeRoom/AwardLinkKey.tab")
+  if not tbCfg then
+    error("cannot read Setting/CrossTimeRoom/AwardLinkKey.tab")
+    return
+  end
+  local tbTemp = {}
+  for nIndex, tbInfo in pairs(tbCfg) do
+    tbTemp[tbInfo.nAwardKey] = tbTemp[tbInfo.nAwardKey] or {}
+    if tbInfo.nPrevValue > tbInfo.nNextValue then
+      LogErr("CrossTimeRoomAwardLinkKey.tab nPrevValue > nNextValue! nIndex, nAardKey:", nIndex, tbInfo.nAwardKey)
+    end
+    for i = tbInfo.nPrevValue, tbInfo.nNextValue do
+      if tbTemp[tbInfo.nAwardKey][i] then
+        LogErr("CrossTimeRoomAwardLinkKey.tab nAwardLinkKey repeat! nIndex, nAardKey:", nIndex, tbInfo.nAwardKey)
+      else
+        tbTemp[tbInfo.nAwardKey][i] = tbInfo.nLinkAwardKey
+      end
+    end
+  end
+  CrossTimeRoom.tbAwardLinkKey = tbTemp
+end
+
+function CrossTimeRoom:LoadLevelSetting()
+  CrossTimeRoom.tbNpcLvSetting = {}
+  local tbNpcSetting = Lib:EasyLoadTabFile("Setting/CrossTimeRoom/CrossTimeRoomNpcLv.tab", {
+    "nServerMaxLevel",
+    "nStage"
+  })
+  if not tbNpcSetting then
+    error("[CrossTimeRoom]cannot read Setting/CrossTimeRoom/CrossTimeRoomNpcLv.tab")
+    return
+  end
+  CrossTimeRoom.tbNpcLvSetting = tbNpcSetting
+end
+
+function CrossTimeRoom:LoadDialog()
+  local tbStartDialog = Lib:EasyLoadTabFile("Setting/CrossTimeRoom/StageStartDialog.tab", {"nStage", "nIndex"})
+  local tbEndDialog = Lib:EasyLoadTabFile("Setting/CrossTimeRoom/StageEndDialog.tab", {"nStage", "nIndex"})
+  if not tbStartDialog or not tbEndDialog then
+    error("[CrossTimeRoom]cannot read Dialog")
+    return
+  end
+  CrossTimeRoom.tbDialog = CrossTimeRoom.tbDialog or {}
+  CrossTimeRoom.tbDialog.Start = tbStartDialog
+  CrossTimeRoom.tbDialog.End = tbEndDialog
+end
+
+CrossTimeRoom:LoadPositionSettings()
+CrossTimeRoom:LoadAwardSetting()
+CrossTimeRoom:LoadLevelSetting()
+CrossTimeRoom:LoadDialog()
+
+function CrossTimeRoom:CheckCanEnter(pPlayer)
+  if self.GMOpen then
+    return true
+  end
+  if not TeamMgr:HasTeam(pPlayer) then
+    local szMsg = i18n.Get(CrossTimeRoom.Msg.ERR_NOTEAM)
+    return false, szMsg
+  end
+  if not TeamMgr:IsCaptain(pPlayer) then
+    return false, TeamMgr.OnlyCaptainCanJoinHintMsg()
+  end
+  local nTeamId = pPlayer.dwTeamID
+  local tbMembers = TeamMgr:GetMembers(nTeamId)
+  local nLimitMember = MODULE_GAMESERVER and CrossTimeRoom.Def.nMinMember or CrossTimeRoom.Def.nMinMember - 1
+  if nLimitMember > #tbMembers then
+    local szMsg = i18n.Get(CrossTimeRoom.Msg.ERR_LESSMEMBER, CrossTimeRoom.Def.nMinMember)
+    return false, szMsg
+  end
+  local bMemberCanEnter, szMsg = self:CheckMemberEnter(tbMembers)
+  return bMemberCanEnter, szMsg
+end
+
+function CrossTimeRoom:CheckMemberEnter(tbMembers)
+  if self.GMOpen then
+    return true
+  end
+  if not tbMembers then
+    return false
+  end
+  for index, value in ipairs(tbMembers) do
+    local dwPlayerId = MODULE_GAMESERVER and value or value.nPlayerID
+    local pMember = KPlayer.GetPlayerObjById(dwPlayerId)
+    if pMember then
+      if pMember.nLevel < CrossTimeRoom.Def.nOpenLevel then
+        local szMsg = i18n.Get(CrossTimeRoom.Msg.ERR_LEVELLIMIT_MEMBER, pMember.szName, CrossTimeRoom.Def.nOpenLevel)
+        return false, szMsg
+      end
+      if DegreeCtrl:GetDegree(pMember, "CrossTimeRoom") < 1 then
+        local szMsg = i18n.Get(CrossTimeRoom.Msg.ERR_NODEGREE_MEMBER, pMember.szName)
+        return false, szMsg
+      end
+      if self.tbPlayerState[pMember.dwID] then
+        local szMsg = i18n.Get(CrossTimeRoom.Msg.ERR_REQUESTREPEAT, pMember.szName)
+        return false, szMsg
+      end
+      local bRet, szErr = ActivityCheck:CheckCanEnterActivityEx(pMember, nil, nil, false, false, true, nil, nil, false)
+      if not bRet then
+        return false, i18n.EasyGet("\233\152\159\229\145\152{0}", pMember.szName) .. szErr
+      end
+    end
+  end
+  return true
+end
+
+function CrossTimeRoom:CreateClass(szNewClass, szBaseClass)
+  if szBaseClass and self.tbClass[szBaseClass] then
+    self.tbClass[szNewClass] = Lib:NewClass(self.tbClass[szBaseClass])
+  else
+    self.tbClass[szNewClass] = {}
+  end
+  local tbClassInst = self.tbClass[szNewClass]
+  return tbClassInst
+end
+
+function CrossTimeRoom:GetLevelClass(szClassName)
+  if self.tbClass[szClassName] then
+    return self.tbClass[szClassName]
+  else
+    LogErr("[CrossTimeRoom]tbClass Not Exsit!", szClassName)
+  end
+end
+
+function CrossTimeRoom:CheckCanShow()
+  return me.nLevel >= CrossTimeRoom.Def.nOpenLevel
+end
+
+function CrossTimeRoom:GetStudioAwardKey(pPlayer, nAwardKey)
+  if not pPlayer or not nAwardKey then
+    return
+  end
+  if not CrossTimeRoom.tbAwardLinkKey[nAwardKey] then
+    return
+  end
+  return CrossTimeRoom.tbAwardLinkKey[nAwardKey][Studio:GetRoleStudioValue(pPlayer.dwID)]
+end
+
+function CrossTimeRoom:GetCurCfgLevel()
+  local nLevel = 0
+  local nServerMaxLevel = GetMaxTotalLevel()
+  for nMaxLevel, tbInfo in pairs(CrossTimeRoom.tbNpcLvSetting) do
+    if nMaxLevel <= nServerMaxLevel and nMaxLevel > nLevel then
+      nLevel = nMaxLevel
+    end
+  end
+  return nLevel
+end

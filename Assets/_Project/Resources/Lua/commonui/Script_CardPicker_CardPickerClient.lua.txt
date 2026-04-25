@@ -1,0 +1,306 @@
+function CardPicker:OnLogin()
+  self:CheckRedPoint()
+end
+
+function CardPicker:RequestCardPick(szType)
+  if not CardPicker:CheckCardPickMoney(szType) then
+    return
+  end
+  RemoteServer.OnCardPickerRequest(szType)
+end
+
+function CardPicker:CheckCardPickMoney(szType)
+  local nItemCount = me.GetItemCountInBags(CardPicker.Def.nPartnerPickItemId)
+  local nSkillBookItemCount = me.GetItemCountInBags(CardPicker.Def.nPartnerSkillBookPickItemId)
+  local nLimitedCardPickTicketCount = me.GetItemCountInBags(CardPicker.Def.nPartnerLimitedPickItemId)
+  if "CoinTenPick" == szType then
+    if me.GetMoney("Coin") < CardPicker.Def.nCoinTenCost then
+      self:NoMoney("Coin")
+      return false
+    end
+  elseif "CoinPick" == szType then
+    if me.GetMoney("Coin") < CardPicker.Def.nCoinCost then
+      self:NoMoney("Coin")
+      return false
+    end
+  elseif "GoldTenPick" == szType and nItemCount > 0 and nItemCount < 10 then
+    local nYuanBaoNeed = (10 - nItemCount) * 188
+    if nYuanBaoNeed > me.GetMoney("YuanBao") then
+      self:NoMoney("YuanBao")
+      return false
+    else
+      self:UsePartnerPickItemButNotEnough(szType)
+      return false
+    end
+  elseif "GoldTenPick" == szType and nItemCount >= 10 then
+    return true
+  elseif "GoldTenPick" == szType then
+    if me.GetMoney("YuanBao") < CardPicker.Def.nGoldTenCost then
+      self:NoMoney("YuanBao")
+      return false
+    end
+  elseif "GoldPick" == szType then
+    if nItemCount > 0 then
+      return true
+    elseif me.GetMoney("YuanBao") < CardPicker.Def.nGoldCost then
+      self:NoMoney("YuanBao")
+      return false
+    end
+  elseif "SkillBookPick" == szType then
+    if nSkillBookItemCount > 0 then
+      return true
+    elseif me.GetMoney("YuanBao") < CardPicker.Def.nSkillBookCost then
+      self:NoMoney("YuanBao")
+      return false
+    end
+  elseif "SkillBookTenPick" == szType and nSkillBookItemCount > 0 and nSkillBookItemCount < 10 then
+    if CardPicker.bIsInSkillBookTenPickHalfPriceActivity then
+      local nLastTime = me.GetUserValue(CardPicker.Def.CARD_SAVE_GROUP, CardPicker.Def.SAVE_HALFPRICE_SKILLBOOK_PICK_TIME)
+      if Lib:IsDiffDay(14400, nLastTime) then
+        if nSkillBookItemCount >= 5 then
+          return true
+        else
+          local nYuanBaoNeed = (5 - nSkillBookItemCount) * 88
+          if nYuanBaoNeed > me.GetMoney("YuanBao") then
+            self:NoMoney("YuanBao")
+            return false
+          else
+            self:UsePartnerSkillBookPickItemButNotEnoughAtHalfPrice(szType)
+            return false
+          end
+        end
+      else
+        local nYuanBaoNeed = (10 - nSkillBookItemCount) * 88
+        if nYuanBaoNeed > me.GetMoney("YuanBao") then
+          self:NoMoney("YuanBao")
+          return false
+        else
+          self:UsePartnerSkillBookPickItemButNotEnough(szType)
+          return false
+        end
+      end
+    else
+      local nYuanBaoNeed = (10 - nSkillBookItemCount) * 88
+      if nYuanBaoNeed > me.GetMoney("YuanBao") then
+        self:NoMoney("YuanBao")
+        return false
+      else
+        self:UsePartnerSkillBookPickItemButNotEnough(szType)
+        return false
+      end
+    end
+  elseif "SkillBookTenPick" == szType and nSkillBookItemCount >= 10 then
+    return true
+  elseif "SkillBookTenPick" == szType then
+    if me.GetMoney("YuanBao") < CardPicker.Def.nSkillBookTenCost then
+      self:NoMoney("YuanBao")
+      return false
+    end
+  elseif "LimitedPick" == szType then
+    if nLimitedCardPickTicketCount < CardPicker.Def.nLimitedCost then
+      self:NoMoney("LimitedTicket")
+      return false
+    end
+  elseif "LimitedTenPick" == szType and nLimitedCardPickTicketCount < CardPicker.Def.nLimitedTenCost then
+    self:NoMoney("LimitedTicket")
+    return false
+  end
+  return true
+end
+
+function CardPicker:OnPickResult(tbItem, szType)
+  Ui:CloseWindow(Partner.szCardPickingUIClassName)
+  Ui:OpenWindow(Partner.szCardPickingResultUIClassName, tbItem, szType)
+end
+
+function CardPicker:OnTenPickResult(tbItems, szType)
+  Ui:CloseWindow(Partner.szCardPickingUIClassName)
+  Ui:OpenWindow(Partner.szCardPickingResultUIClassName, tbItems, szType)
+end
+
+function CardPicker:OnSkillBookPickResult(tbItem, szType)
+  Ui:CloseWindow("UISkillBookPicking")
+  Ui:OpenWindow("UISkillBookPickingResult", tbItem, szType)
+end
+
+function CardPicker:OnSkillBookTenPickResult(tbItems, szType)
+  Ui:CloseWindow("UISkillBookPicking")
+  Ui:OpenWindow("UISkillBookPickingResult", tbItems, szType)
+end
+
+function CardPicker:OnPartnerXinWuResult(tbItem, szType)
+  Ui:OpenWindow(Partner.szCardPickingResultUIClassName, tbItem, szType)
+end
+
+function CardPicker:NoMoney(szType)
+  local function funcCoinOK()
+    Ui:OpenWindow("UIWelfare", "PANEL_TYPE_MONEY_TREE")
+  end
+  
+  local function funcGoldOK()
+    GainCurrency:DirectJump("YuanBao")
+  end
+  
+  local function funcLimitedOK()
+    Shop:OpenShopBuyWid(self.Def.nPartnerLimitedPickItemId, true)
+  end
+  
+  local function funcCancel()
+  end
+  
+  if "Coin" == szType then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\232\142\183\229\143\150\239\188\159"), {
+      {funcCoinOK},
+      {funcCancel}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  elseif "YuanBao" == szType then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\229\133\131\229\174\157\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\232\142\183\229\143\150\239\188\159"), {
+      {funcGoldOK},
+      {funcCancel}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  elseif "LimitedTicket" == szType then
+    local szName = Item:GetName(CardPicker.Def.nPartnerLimitedPickItemId, me)
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\229\137\141\229\190\128\232\142\183\229\143\150\239\188\159", szName), {
+      {funcLimitedOK},
+      {funcCancel}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  end
+end
+
+function CardPicker:UsePartnerPickItemButNotEnough(szType)
+  local function funcCoinOK()
+    RemoteServer.OnCardPickerRequest(szType)
+  end
+  
+  local nItemCount = me.GetItemCountInBags(CardPicker.Def.nPartnerPickItemId)
+  local nYuanBaoNeed = (10 - nItemCount) * 188
+  local szName = Item:GetName(CardPicker.Def.nPartnerPickItemId, me)
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\230\182\136\232\128\151{1}\229\133\131\229\174\157\232\161\165\232\182\179\239\188\159", szName, nYuanBaoNeed), {
+    {funcCoinOK},
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function CardPicker:UsePartnerSkillBookPickItemButNotEnough(szType)
+  local function funcCoinOK()
+    RemoteServer.OnCardPickerRequest(szType)
+  end
+  
+  local nItemCount = me.GetItemCountInBags(CardPicker.Def.nPartnerSkillBookPickItemId)
+  local nYuanBaoNeed = (10 - nItemCount) * 88
+  local szName = Item:GetName(CardPicker.Def.nPartnerPickItemId, me)
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\230\182\136\232\128\151{1}\229\133\131\229\174\157\232\161\165\232\182\179\239\188\159", szName, nYuanBaoNeed), {
+    {funcCoinOK},
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function CardPicker:UsePartnerSkillBookPickItemButNotEnoughAtHalfPrice(szType)
+  local function funcCoinOK()
+    RemoteServer.OnCardPickerRequest(szType)
+  end
+  
+  local nItemCount = me.GetItemCountInBags(CardPicker.Def.nPartnerSkillBookPickItemId)
+  local nYuanBaoNeed = (5 - nItemCount) * 88
+  local szName = Item:GetName(CardPicker.Def.nPartnerPickItemId, me)
+  Ui:OpenWindow("UIMessageBox", i18n.EasyGet("{0}\228\184\141\232\182\179\239\188\140\230\152\175\229\144\166\230\182\136\232\128\151{1}\229\133\131\229\174\157\232\161\165\232\182\179\239\188\159", szName, nYuanBaoNeed), {
+    {funcCoinOK},
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function CardPicker:SetLimitedPoolActivityState(bOpenActivity, tbUpPartnerInfo, nEndTime)
+  CardPicker.bIsInLimitedPoolActivity = bOpenActivity
+  CardPicker.tbLimitedPoolUpInfo = tbUpPartnerInfo
+  CardPicker.nLimitedPoolActivityEndTime = nEndTime
+  self:CheckRedPoint()
+  Ui:CloseWindow("UICardPickingNew")
+end
+
+function CardPicker:CheckRedPoint()
+  local nCoinFreeTime = me.GetUserValue(CardPicker.Def.CARD_SAVE_GROUP, CardPicker.Def.SAVE_FREE_COIN_PICK_TIME)
+  local nGoldFreeTime = me.GetUserValue(CardPicker.Def.CARD_SAVE_GROUP, CardPicker.Def.SAVE_FREE_GOLD_PICK_TIME)
+  local nCurTime = GetTime()
+  local nLeftCoinSecond = 28800 - (nCurTime - nCoinFreeTime)
+  local nLeftGoldSecond = 86400 - (nCurTime - nGoldFreeTime)
+  if nLeftCoinSecond <= 0 then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.CardPickCoinFree)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.CardPickCoinFree)
+  end
+  if nLeftGoldSecond <= 0 then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.CardPickYuanBaoFree)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.CardPickYuanBaoFree)
+  end
+  if self.bIsInLimitedPoolActivity then
+    local nLimitedFreeTime = me.GetUserValue(CardPicker.Def.CARD_SAVE_GROUP, CardPicker.Def.SAVE_FREE_LIMITED_PICK_TIME)
+    local nLeftLimitedSecond = 86400 - (nCurTime - nLimitedFreeTime)
+    if nLeftLimitedSecond <= 0 then
+      RedPointMgr:LightRedPoint(RedPointMgr.EVENT.CardPickLimitedFree)
+    end
+  end
+  self:ResetRedPointCheckTimer()
+end
+
+function CardPicker:ResetRedPointCheckTimer()
+  Ui:RegTimer("CardPick_RedPointCheck", Env.GAME_FPS * 1800, function()
+    CardPicker:CheckRedPoint()
+  end)
+end
+
+function CardPicker:SendLog(szPickType, nQuantity)
+  Sdk:OnPickPartner(szPickType, nQuantity)
+end
+
+CardPicker.GoldPickData = CardPicker.GoldPickData or {}
+
+function CardPicker.GoldPickData:SetNotShowValue(bNotShowToday)
+  if bNotShowToday then
+    LocalData:SetRoleNumber("Partner_CloseGoldCardPickerNoticeTime", GetTime())
+  end
+end
+
+CardPicker.CoinPickData = CardPicker.CoinPickData or {}
+
+function CardPicker.CoinPickData:SetNotShowValue(bNotShowToday)
+  if bNotShowToday then
+    LocalData:SetRoleNumber("Partner_CloseCoinCardPickerNoticeTime", GetTime())
+  end
+end
+
+CardPicker.SkillBookPickData = CardPicker.SkillBookPickData or {}
+
+function CardPicker.SkillBookPickData:SetNotShowValue(bNotShowToday)
+  if bNotShowToday then
+    LocalData:SetRoleNumber("Partner_CloseSkillBookCardPickerNoticeTime", GetTime())
+  end
+end
+
+CardPicker.LimitedPickData = CardPicker.LimitedPickData or {}
+
+function CardPicker.LimitedPickData:SetNotShowValue(bNotShowToday)
+  if bNotShowToday then
+    LocalData:SetRoleNumber("Partner_CloseLimitedCardPickerNoticeTime", GetTime())
+  end
+end
+
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, CardPicker.OnLogin, CardPicker)

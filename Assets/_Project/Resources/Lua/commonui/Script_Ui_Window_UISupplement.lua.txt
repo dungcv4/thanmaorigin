@@ -1,0 +1,157 @@
+local tbWnd = Ui:CreateClass("UISupplement", "UIPanel")
+local tbControls = {
+  btnNormal = "btnList2/btnNormal",
+  btnPerfect = "btnList2/btnPerfect",
+  Template = "List/Viewport/Content/Template",
+  panelOnHook = "node/imgBG/Content/OnHook",
+  ItemGrid = "List/Viewport/Content/Element%d/item/UIItemGrid",
+  ExpGrid = "List/Viewport/Content/Element%d/itemExp/UIItemGrid",
+  txtEmpty = "txtEmpty",
+  btnHelp = "btnHelp",
+  btnGetAll = "btnGetAll"
+}
+tbWnd.tbControls = tbControls
+local tbTypeBtnIndex = {
+  [1] = tbControls.btnNormal,
+  [2] = tbControls.btnPerfect
+}
+local nDefaultType = SupplementAward.tbDefType.Perfect
+tbWnd.tbOnClick = {
+  btnGetAll = function()
+    SupplementAward:SupplementAll()
+  end
+}
+
+function tbWnd:OnClsoe()
+end
+
+function tbWnd:OnCreate()
+  self.tbSupplementTypeGroup = Ui:NewButtonGroup(self, tbTypeBtnIndex, true, function(self, nIndex)
+    self:OnSelect(nIndex)
+  end)
+  self.tbSuppleList = {}
+  self.tbSupplementList = Ui:NewScrollView(self, tbControls.Template, nil, false, true)
+  self.nDiscount = 1
+end
+
+function tbWnd:OnSelect(nIndex)
+  if nIndex == SupplementAward.tbDefType.Normal then
+    self.bNormal = true
+    self.pPanel:SetActive(tbControls.btnGetAll, false)
+  end
+  if nIndex == SupplementAward.tbDefType.Perfect then
+    self.bNormal = false
+    self.pPanel:SetActive(tbControls.btnGetAll, true)
+  end
+  self:UpdateView()
+end
+
+function tbWnd:OnOpen()
+  self.pPanel:SetActive(tbControls.btnHelp, false)
+  self.pPanel:SetActive(tbControls.btnGetAll, false)
+  self.tbSupplementTypeGroup:Select(nDefaultType)
+end
+
+function tbWnd:UpdateView()
+  if RedPointMgr:CheckEvent(RedPointMgr.EVENT.SupplementAward) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.SupplementAward)
+  end
+  self.tbSuppleList = SupplementAward:GetSupplementList()
+  self.pPanel:SetActive(tbControls.txtEmpty, false)
+  if 0 == #self.tbSuppleList then
+    self.pPanel:SetActive(tbControls.txtEmpty, true)
+  end
+  table.sort(self.tbSuppleList, function(a1, a2)
+    local nCanSup1 = SupplementAward:GetCanSupplementNum(a1.szKey)
+    local nCanSup2 = SupplementAward:GetCanSupplementNum(a2.szKey)
+    local bUp = false
+    if nCanSup1 > 0 and nCanSup2 > 0 and a1.nSort < a2.nSort then
+      bUp = true
+    end
+    if 0 == nCanSup1 and 0 == nCanSup2 and a1.nSort < a2.nSort then
+      bUp = true
+    end
+    return bUp or nCanSup1 > 0 and 0 == nCanSup2
+  end)
+  self:SetTemplate()
+end
+
+function tbWnd:SetTemplate()
+  self.tbSupplementList:Reset()
+  for i = 1, #self.tbSuppleList do
+    self.tbSupplementList:SetElement(i, function(tbElement)
+      self:UpdateTemplate(i, tbElement, self.tbSuppleList[i])
+    end)
+  end
+end
+
+function tbWnd:UpdateTemplate(i, tbElement, tbInfo)
+  local pPanel = tbElement.pPanel
+  pPanel:Label_SetText("txtActivityName", i18n.Parse(tbInfo.szName))
+  local nCanSup = SupplementAward:GetCanSupplementNum(tbInfo.szKey)
+  if nCanSup > 0 then
+    pPanel:Label_SetText("txtTimes", i18n.EasyGet("\230\137\190\229\155\158\230\172\161\230\149\176<color=#54ab4d>{0}</color>\230\172\161", nCanSup))
+  end
+  self.nDiscount = SupplementAward:GetDisCount(tbInfo.szKey)
+  if 1 ~= self.nDiscount then
+    local szDiscout = i18n.GetDiscountText(self.nDiscount * 10)
+    pPanel:Label_SetText("imgMark/txtDiscount", szDiscout)
+  end
+  if 1 == self.nDiscount then
+    pPanel:SetActive("PriceGroup/FullPrice", false)
+    pPanel:SetActive("PriceGroup/Price", true)
+    pPanel:SetActive("imgMark", false)
+  elseif self.nDiscount > 0 and self.nDiscount < 1 then
+    pPanel:SetActive("PriceGroup/FullPrice", true)
+    pPanel:SetActive("PriceGroup/Price", true)
+    pPanel:SetActive("imgMark", true)
+  end
+  local nFullPrice, nPrice, nAwardKey = 0, 0, 0
+  if self.bNormal then
+    nFullPrice = tbInfo.nPrice_Normal
+    nPrice = tbInfo.nPrice_Normal * self.nDiscount
+    nAwardKey = SupplementAward:GetAwardKeyByLinkKey(tbInfo.nAwardLinkKey_Normal)
+    pPanel:Label_SetText("PriceGroup/Price/txtPriceValue", tbInfo.nPrice_Normal)
+    local szIcon = Currency:GetIcon("Coin")
+    pPanel:Sprite_SetSprite("PriceGroup/Price/imgIcon", szIcon)
+    pPanel:Sprite_SetSprite("PriceGroup/FullPrice/imgIcon", szIcon)
+  else
+    nFullPrice = tbInfo.nPrice_Perfect
+    nPrice = tbInfo.nPrice_Perfect * self.nDiscount
+    nAwardKey = SupplementAward:GetAwardKeyByLinkKey(tbInfo.nAwardLinkKey_Perfect)
+    pPanel:Label_SetText("PriceGroup/Price/txtPriceValue", tbInfo.nPrice_Perfect)
+    local szIcon = Currency:GetIcon("YuanBao")
+    pPanel:Sprite_SetSprite("PriceGroup/Price/imgIcon", szIcon)
+    pPanel:Sprite_SetSprite("PriceGroup/FullPrice/imgIcon", szIcon)
+  end
+  pPanel:Label_SetText("PriceGroup/Price/txtPriceValue", nPrice)
+  pPanel:Label_SetText("PriceGroup/FullPrice/txtPriceValue", nFullPrice)
+  local tbAward = Award:GetAward(SupplementAward.AWARD_ID, nAwardKey)
+  if 1 == #tbAward then
+    pPanel:SetActive("item", false)
+  end
+  if #tbAward > 2 then
+    LogErr(string.format("SupplementAward Error!Award nums > 2!Awardkey: %d", nAwardKey))
+  end
+  for key, tbInfo in pairs(tbAward) do
+    if "BasicExp" == tbInfo[1] then
+      local szTemp = string.format(tbControls.ExpGrid, i)
+      local expGrid = Ui:NewExistItemGrid(self, szTemp)
+      expGrid:SetDigitalItem(tbInfo[1], tbInfo[2])
+      expGrid:SetClickEnable(false)
+    elseif "Item" == tbInfo[1] then
+      local szTemp = string.format(tbControls.ItemGrid, i)
+      local itemGrid = Ui:NewExistItemGrid(self, szTemp)
+      itemGrid:SetItemByTemplate(tbInfo[2], tbInfo[3], nil, nil, {bShowTip = true})
+      itemGrid:SetClickEnable(true)
+    elseif Currency:Valid(tbInfo[1]) then
+      local szTemp = string.format(tbControls.ItemGrid, i)
+      local itemGrid = Ui:NewExistItemGrid(self, szTemp)
+      itemGrid:SetDigitalItem(tbInfo[1], tbInfo[2])
+      itemGrid:SetClickEnable(true)
+    end
+  end
+  Ui:Button_BindEvent(pPanel, "btnGet", function()
+    Ui:OpenWindow("UISupplementBox", tbInfo.szKey, nCanSup, nPrice, self.bNormal)
+  end, self)
+end

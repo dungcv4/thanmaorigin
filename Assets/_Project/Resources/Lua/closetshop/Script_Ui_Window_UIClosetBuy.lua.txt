@@ -1,0 +1,585 @@
+local tbWnd = Ui:CreateWindow("UIClosetBuy")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  grid1 = "node/imgBG/Content/panelGoods/Clothes/UIItemGrid",
+  grid2 = "node/imgBG/Content/panelGoods/Hat/UIItemGrid",
+  secondItem = "node/imgBG/Content/panelGoods/Hat",
+  txtTips2 = "node/imgBG/Content/Tips/txtTips2",
+  btnBuy = "node/imgBG/Content/btnBuy",
+  txtPrice1 = "node/imgBG/Content/PriceGrid/Price1/txtPrice",
+  txtPrice2 = "node/imgBG/Content/PriceGrid/Price2/txtPrice",
+  objPrice2 = "node/imgBG/Content/PriceGrid/Price2",
+  imgMoney1 = "node/imgBG/Content/PriceGrid/Price1/imgGold",
+  imgMoney2 = "node/imgBG/Content/PriceGrid/Price2/imgGold",
+  toggle = "node/imgBG/Content/panelGoods/Hat/Toggle",
+  imgHave1 = "node/imgBG/Content/panelGoods/Clothes/UIItemGrid/imgHave",
+  imgHave2 = "node/imgBG/Content/panelGoods/Hat/UIItemGrid/imgHave",
+  haveTips = "node/imgBG/Content/haveTips",
+  txtHaveTips = "node/imgBG/Content/haveTips/txtSuitName",
+  GotoSuitTips = "node/imgBG/Content/TipsGrid",
+  btnGotoSuit = "node/imgBG/Content/TipsGrid/txtTips01/txtTips02",
+  RebateTips = "node/imgBG/Content/RebateTips",
+  txtRebateNum = "node/imgBG/Content/RebateTips/txtNum",
+  wndRebateChoice = "node/wndRebateChoice",
+  CouponTemplate = "node/wndRebateChoice/imgBG/List/Viewport/Content/Template",
+  Content = "node/wndRebateChoice/imgBG/List/Viewport/Content"
+}
+tbWnd.tbControls = tbControls
+local tbBuyType = {Single = 1, Suit = 2}
+tbWnd.tbColor = {szGreen = "54ab4d", szOrange = "c56d05"}
+tbWnd.tbTips = {
+  fnHaveFashion = function()
+    if Shop.Def.bOpenFashionCoupon then
+      return i18n.EasyGet("<color=#{0}>\230\173\164\229\164\150\232\167\130\229\183\178\230\139\165\230\156\137\239\188\140\232\180\173\228\185\176\229\143\175\231\148\168\228\186\142</color><color=#{1}>\232\181\160\233\128\129\228\187\150\228\186\186</color><color=#{2}>\228\184\148</color><color=#{3}>\228\184\141\229\143\175\228\189\191\231\148\168\230\138\152\230\137\163\229\136\184</color>", tbWnd.tbColor.szOrange, tbWnd.tbColor.szGreen, tbWnd.tbColor.szOrange, tbWnd.tbColor.szGreen)
+    else
+      return i18n.EasyGet("<color=#{0}>\230\173\164\229\164\150\232\167\130\229\183\178\230\139\165\230\156\137\239\188\140\232\180\173\228\185\176\229\143\175\231\148\168\228\186\142</color><color=#{1}>\232\181\160\233\128\129\228\187\150\228\186\186</color>", tbWnd.tbColor.szOrange, tbWnd.tbColor.szGreen)
+    end
+  end,
+  fnNotHaveFashion = function()
+    if Shop.Def.bOpenFashionCoupon then
+      return i18n.EasyGet("<color=#{0}>\230\173\164\229\164\150\232\167\130\230\156\170\230\139\165\230\156\137\239\188\140\232\180\173\228\185\176\229\143\175\231\148\168\228\186\142</color><color=#{1}>\232\181\160\233\128\129\228\187\150\228\186\186\227\128\129\228\189\191\231\148\168\230\191\128\230\180\187\227\128\129\228\189\191\231\148\168\230\138\152\230\137\163\229\136\184\232\180\173\228\185\176</color>", tbWnd.tbColor.szOrange, tbWnd.tbColor.szGreen)
+    else
+      return i18n.EasyGet("<color=#{0}>\230\173\164\229\164\150\232\167\130\230\156\170\230\139\165\230\156\137\239\188\140\232\180\173\228\185\176\229\143\175\231\148\168\228\186\142</color><color=#{1}>\232\181\160\233\128\129\228\187\150\228\186\186\227\128\129\228\189\191\231\148\168\230\191\128\230\180\187</color>", tbWnd.tbColor.szOrange, tbWnd.tbColor.szGreen)
+    end
+  end
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnBuy = function(self)
+    self:OnClickBuy()
+  end,
+  RebateTips = function(self)
+    self:OnClickRebateTips()
+  end,
+  btnGotoSuit = function(self)
+    self:OnClickGotoSuit()
+  end
+}
+tbWnd.tbOnToggleClick = {
+  toggle = function(self, isOn)
+    self:OnBuyToggleChange(isOn)
+    self.nCouponTemplateId = nil
+    self:UpdateCouponText()
+    self:UpdateCouponScrollView()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbFashionCouponScrollView = Ui:NewScrollView(self, tbControls.CouponTemplate, nil, false, true)
+end
+
+function tbWnd:OnDestroy()
+  self.tbFashionCouponScrollView = nil
+end
+
+function tbWnd:OnOpen(nBuyType, nId)
+  self.nBuyType = nBuyType
+  self:InitUI()
+  self:InitData(nId)
+  self:UpdateCouponText()
+  self:TryShowRebateChoice()
+  self:OnAutoSelectCanUseCoupon()
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:InitUI()
+  self.nCouponTemplateId = nil
+  self.wndCanUseCouponList = {}
+  self.bCouponScrollViewIsVisiable = false
+  self.pPanel:SetActive(tbControls.toggle, false)
+  self.pPanel:SetActive(tbControls.haveTips, true)
+  self.pPanel:SetActive(tbControls.RebateTips, Shop.Def.bOpenFashionCoupon)
+end
+
+function tbWnd:InitData(nId)
+  if self.nBuyType == tbBuyType.Single then
+    self.tbSingleItem = Shop:GetFashionItem(nId)
+    if not self.tbSingleItem then
+      LogErr("UIClosetBuy:InitData error. GetFashionItem is nil", self.nBuyType, nId)
+      return
+    end
+    self:SingleFashionShow()
+    self:SingleCheckSuitShow()
+  elseif self.nBuyType == tbBuyType.Suit then
+    self.tbSuitInfo = Shop:GetFashionSuit(nId)
+    if not self.tbSuitInfo then
+      LogErr("UIClosetBuy:InitData error. GetFashionSuit is nil", self.nBuyType, nId)
+      return
+    end
+    self.pPanel:SetActive(tbControls.secondItem, true)
+    self:SuitFashionShow()
+  end
+  self:ShopItemsShow()
+end
+
+function tbWnd:SingleFashionShow()
+  local tbFashionSetting = Fashion:GetFashionSetting(me, self.tbSingleItem.nFashionID)
+  if tbFashionSetting then
+    local nDiscountPrice = Shop:GetFashionItemDiscountPrice(self.tbSingleItem.nId)
+    if nDiscountPrice and nDiscountPrice > 0 then
+      self.pPanel:SetActive(tbControls.objPrice2, true)
+      self.pPanel:Label_SetText(tbControls.txtPrice1, nDiscountPrice)
+      self.pPanel:Label_SetText(tbControls.txtPrice2, self.tbSingleItem.nPrice)
+    else
+      self.pPanel:SetActive(tbControls.objPrice2, false)
+      self.pPanel:Label_SetText(tbControls.txtPrice1, self.tbSingleItem.nPrice)
+    end
+    local szIcon = Currency:GetIcon(self.tbSingleItem.szMoneyType)
+    self.pPanel:Sprite_SetSprite(tbControls.imgMoney1, szIcon)
+    self.pPanel:Sprite_SetSprite(tbControls.imgMoney2, szIcon)
+    local tbHaveFashion = Fashion:GetHaveFashions()
+    if tbHaveFashion[self.tbSingleItem.nId] then
+      self.pPanel:Label_SetText(tbControls.txtHaveTips, tbWnd.tbTips.fnHaveFashion())
+    else
+      self.pPanel:Label_SetText(tbControls.txtHaveTips, tbWnd.tbTips.fnNotHaveFashion())
+    end
+  else
+    LogErr("SingleFashionShow tbFashionSetting is nil or empty table:", tbFashionSetting, "by nFashionID:", self.tbSingleItem.nFashionID)
+    return
+  end
+end
+
+function tbWnd:SingleCheckSuitShow()
+  local tbSuitInfo = Shop:GetFashionSuitBySingleItemId(self.tbSingleItem.nId)
+  local tbFashionSetting = Fashion:GetFashionSetting(me, self.tbSingleItem.nFashionID)
+  if tbSuitInfo then
+    if Lib:IsEmptyTB(tbSuitInfo.tbGroup) then
+      LogErr("SingleCheckSuitShow. Can not get tbFashions by nSuitId", tbSuitInfo.nSuitId, "nShopItemId", self.tbSingleItem.nId)
+      return
+    end
+    self.tbSuitInfo = tbSuitInfo
+    self.pPanel:SetActive(tbControls.GotoSuitTips, true)
+    self.pPanel:SetActive(tbControls.toggle, true)
+    self.pPanel:SetActive(tbControls.secondItem, true)
+    self.pPanel:Toggle_SetChecked(tbControls.toggle, false)
+    self.pPanel:Label_SetText(tbControls.txtTips2, i18n.EasyGet("{0}\239\188\140\229\165\151\232\163\133\232\180\173\228\185\176\229\143\175\228\186\171\230\155\180\229\164\154\228\188\152\230\131\160", i18n.Parse(tbFashionSetting.szName)))
+  else
+    self.tbSuitInfo = nil
+    self.pPanel:SetActive(tbControls.toggle, false)
+    self.pPanel:SetActive(tbControls.secondItem, false)
+    self.pPanel:SetActive(tbControls.GotoSuitTips, false)
+    self.pPanel:Label_SetText(tbControls.txtTips2, i18n.Parse(tbFashionSetting.szName))
+  end
+end
+
+function tbWnd:SuitFashionShow()
+  local szIcon = Currency:GetIcon(self.tbSuitInfo.szMoneyType)
+  self.pPanel:Sprite_SetSprite(tbControls.imgMoney1, szIcon)
+  self.pPanel:Sprite_SetSprite(tbControls.imgMoney1, szIcon)
+  self.pPanel:SetActive(tbControls.objPrice2, true)
+  self.pPanel:SetActive(tbControls.GotoSuitTips, false)
+  self.pPanel:Label_SetText(tbControls.txtHaveTips, tbWnd.tbTips.fnNotHaveFashion())
+  self.pPanel:Label_SetText(tbControls.txtTips2, i18n.Parse(self.tbSuitInfo.szSuitName))
+  local tbHaveFashion = Fashion:GetHaveFashions()
+  for _, tbItem in ipairs(self.tbSuitInfo.tbGroup) do
+    local nFashionId = tbItem.nFashionID
+    if tbHaveFashion[nFashionId] then
+      self.pPanel:Label_SetText(tbControls.txtHaveTips, tbWnd.tbTips.fnHaveFashion())
+      break
+    end
+  end
+  local nDiscountPrice = Shop:GetFashionSuitDiscountPrice(self.tbSuitInfo.nSuitId)
+  if nDiscountPrice and nDiscountPrice > 0 then
+    self.pPanel:Label_SetText(tbControls.txtPrice1, nDiscountPrice)
+    self.pPanel:Label_SetText(tbControls.txtPrice2, self.tbSuitInfo.nPrice)
+  else
+    local nTotalPrice = 0
+    for _, tbItem in ipairs(self.tbSuitInfo.tbGroup) do
+      nTotalPrice = nTotalPrice + tbItem.nPrice
+    end
+    self.pPanel:Label_SetText(tbControls.txtPrice2, nTotalPrice)
+    self.pPanel:Label_SetText(tbControls.txtPrice1, self.tbSuitInfo.nPrice)
+  end
+end
+
+function tbWnd:ShopItemsShow()
+  local tbItems = {}
+  if self.tbSuitInfo then
+    tbItems = self.tbSuitInfo.tbGroup
+    if self.nBuyType == tbBuyType.Single then
+      for nIndex, tbItem in ipairs(tbItems) do
+        if tbItem.nId == self.tbSingleItem.nId then
+          local tbTemp = tbItems[nIndex]
+          tbItems[nIndex] = tbItems[1]
+          tbItems[1] = tbTemp
+        end
+      end
+    end
+  else
+    tbItems = {
+      self.tbSingleItem
+    }
+  end
+  local tbHaveFashion = Fashion:GetHaveFashions()
+  for nIndex, tbItem in ipairs(tbItems) do
+    local pGrid = Ui:NewExistItemGrid(self, tbControls["grid" .. nIndex])
+    local tbFashionSetting = Fashion:GetFashionSetting(me, tbItem.nFashionID)
+    if tbFashionSetting then
+      Fashion:InitFashionGrid(pGrid, tbFashionSetting)
+    else
+      LogErr("ShopItemsShow. tbFashionSetting get by nFashionID", tbItem.nFashionID, "is nil")
+      return
+    end
+    if tbHaveFashion[tbItem.nFashionID] then
+      self.pPanel:SetActive(tbControls["imgHave" .. nIndex], true)
+    else
+      self.pPanel:SetActive(tbControls["imgHave" .. nIndex], false)
+    end
+  end
+end
+
+function tbWnd:OnClickGotoSuit()
+  if not self.tbSuitInfo then
+    return
+  end
+  self:Close()
+  Ui:CloseWindow("UIClosetShopNew")
+  Ui:OpenWindow("UIClosetShopNew", tbBuyType.Suit, {
+    nShopId = self.tbSuitInfo.tbShopIds[1],
+    nSuitId = self.tbSuitInfo.nSuitId
+  })
+end
+
+function tbWnd:OnClickBuy()
+  if not self:BuyCheck() then
+    return
+  end
+  if not self.nCouponTemplateId then
+    if self.nBuyType == tbBuyType.Single then
+      Shop:BuyFashionItemReq(self.tbSingleItem.nId)
+    elseif self.nBuyType == tbBuyType.Suit then
+      Shop:BuyFashionSuitReq(self.tbSuitInfo.nSuitId)
+    end
+    self:Close()
+  else
+    self:BuyWithCoupon()
+  end
+end
+
+function tbWnd:BuyCheck()
+  if self.nBuyType == tbBuyType.Single and self.tbSingleItem then
+    local bRet, szMsg
+    if self.nCouponTemplateId then
+      bRet, szMsg = Shop:CanBuyFashionWareWithCoupon(me, self.tbSingleItem.nId, self.nCouponTemplateId)
+    else
+      bRet, szMsg = Shop:CanBuyFashionWare(me, self.tbSingleItem.nId)
+    end
+    if not bRet then
+      local szMoneyName = Currency:GetName(self.tbSingleItem.szMoneyType)
+      if i18n.Get(Shop.Terms.NotEnoughMoney, szMoneyName) == szMsg then
+        return false
+      end
+      if szMsg and "" ~= szMsg then
+        me.CenterMsg(szMsg)
+      end
+      return false
+    end
+  elseif self.nBuyType == tbBuyType.Suit then
+    local bRet, szMsg
+    if self.nCouponTemplateId then
+      bRet, szMsg = Shop:CanBuyFashionSuitWithCoupon(me, self.tbSuitInfo.nSuitId, self.nCouponTemplateId)
+    else
+      bRet, szMsg = Shop:CanBuyFashionSuit(me, self.tbSuitInfo.nSuitId)
+    end
+    if not bRet then
+      local tbFashions = self.tbSuitInfo.tbGroup
+      if tbFashions and not Lib:IsEmptyTB(tbFashions) then
+        local szMoneyName = Currency:GetName(tbFashions[1].szMoneyType)
+        if i18n.Get(Shop.Terms.NotEnoughMoney, szMoneyName) == szMsg then
+          return false
+        end
+      end
+      if szMsg and "" ~= szMsg then
+        me.CenterMsg(szMsg)
+      end
+      return false
+    end
+  else
+    LogErr("The self.nBuyType is illegal.", self.nBuyType)
+    return false
+  end
+  return true
+end
+
+function tbWnd:BuyWithCoupon()
+  local function funcOK()
+    if self.nBuyType == tbBuyType.Single then
+      Shop:BuyFashionItemWithCouponReq(self.tbSingleItem.nId, self.nCouponTemplateId)
+    elseif self.nBuyType == tbBuyType.Suit then
+      Shop:BuyFashionSuitWithCouponReq(self.tbSuitInfo.nSuitId, self.nCouponTemplateId)
+    end
+    self:Close()
+  end
+  
+  local szCouponName = Item:GetName(self.nCouponTemplateId, me)
+  local szText = i18n.EasyGet(string.format("\228\189\191\231\148\168\230\138\152\230\137\163\229\136\184\232\180\173\228\185\176\231\154\132\229\164\150\232\167\130\229\149\134\229\147\129\230\151\160\230\179\149\228\189\191\231\148\168\232\181\160\233\128\129\229\138\159\232\131\189\229\185\182\232\135\170\229\138\168\228\189\191\231\148\168\239\188\140\230\152\175\229\144\166\231\161\174\232\174\164\228\189\191\231\148\168\230\138\152\230\137\163\229\136\184\232\180\173\228\185\176\239\188\159\n<color=#%s>\229\189\147\229\137\141\230\173\163\229\156\168\228\189\191\231\148\168</color><color=#%s>\227\128\144{0}\227\128\145</color>", tbWnd.tbColor.szGreen, tbWnd.tbColor.szOrange), i18n.Parse(szCouponName))
+  Ui:OpenWindow("UIMessageBox", szText, {
+    {funcOK},
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function tbWnd:TryShowRebateChoice()
+  if not Shop.Def.bOpenFashionCoupon then
+    self.pPanel:SetActive(tbControls.wndRebateChoice, false)
+    return
+  end
+  local tbAllCoupon = FashionCoupon:GetAllCouponInBag(me)
+  if tbAllCoupon and #tbAllCoupon > 0 then
+    self:OnClickRebateTips()
+  else
+    self.pPanel:SetActive(tbControls.wndRebateChoice, false)
+  end
+end
+
+function tbWnd:OnClickRebateTips()
+  self.bCouponScrollViewIsVisiable = not self.bCouponScrollViewIsVisiable
+  self.pPanel:SetActive(tbControls.wndRebateChoice, self.bCouponScrollViewIsVisiable)
+  if self.bCouponScrollViewIsVisiable then
+    self:UpdateCouponScrollView()
+  else
+    self:OnToggleCoupon(nil, false)
+    self.nCouponTemplateId = nil
+  end
+end
+
+function tbWnd:OnAutoSelectCanUseCoupon()
+  local tbElement = self.tbFashionCouponScrollView:GetElement(1)
+  if tbElement then
+    tbElement.pPanel:Toggle_SetChecked("Toggle", true)
+  end
+end
+
+function tbWnd:UpdateCouponText()
+  if not Shop.Def.bOpenFashionCoupon then
+    return
+  end
+  local tbCanUseList = {}
+  if self.nBuyType == tbBuyType.Single then
+    tbCanUseList = FashionCoupon:GetCanUseCouponByFashionIdInBag(me, self.tbSingleItem.nId)
+  elseif self.nBuyType == tbBuyType.Suit then
+    tbCanUseList = FashionCoupon:GetCanUseCouponBySuitIdInBag(me, self.tbSuitInfo.nSuitId)
+  end
+  self.pPanel:Label_SetText(tbControls.txtRebateNum, Lib:CountTB(tbCanUseList))
+end
+
+function tbWnd:UpdateCouponScrollView()
+  if not Shop.Def.bOpenFashionCoupon then
+    return
+  end
+  self.tbFashionCouponScrollView:Clear()
+  local tbCanUseList = {}
+  local tbCanNotUseList = {}
+  local nScrollViewIndex = 1
+  if self.nBuyType == tbBuyType.Single then
+    tbCanUseList, tbCanNotUseList = FashionCoupon:GetCanUseCouponByFashionIdInBag(me, self.tbSingleItem.nId)
+    tbCanUseList = self:_SortCouponByFashionId(self.tbSingleItem.nId, tbCanUseList)
+  elseif self.nBuyType == tbBuyType.Suit then
+    tbCanUseList, tbCanNotUseList = FashionCoupon:GetCanUseCouponBySuitIdInBag(me, self.tbSuitInfo.nSuitId)
+    tbCanUseList = self:_SortCouponBySuitId(self.tbSuitInfo.nSuitId, tbCanUseList)
+  end
+  for _, pItem in ipairs(tbCanUseList) do
+    self.tbFashionCouponScrollView:SetElement(nScrollViewIndex, function(tbElement)
+      local nTemplateId = pItem.dwTemplateId
+      tbElement.pPanel:SetActive("Toggle", true)
+      tbElement.pPanel:SetActive("imgLock", false)
+      tbElement.pPanel:Label_SetText("txtRebateName", i18n.Parse(pItem.szName))
+      tbElement.pPanel:Toggle_SetChecked("Toggle", false)
+      Ui:Toggle_BindEvent(tbElement.pPanel, "Toggle", function(self, isOn)
+        self:OnToggleCoupon(nTemplateId, isOn)
+      end, self)
+    end)
+    table.insert(self.wndCanUseCouponList, nScrollViewIndex)
+    nScrollViewIndex = nScrollViewIndex + 1
+  end
+  for _, pItem in ipairs(tbCanNotUseList) do
+    self.tbFashionCouponScrollView:SetElement(nScrollViewIndex, function(tbElement)
+      tbElement.pPanel:SetActive("Toggle", false)
+      tbElement.pPanel:SetActive("imgLock", true)
+      tbElement.pPanel:Label_SetText("txtRebateName", i18n.Parse(pItem.szName))
+    end)
+    nScrollViewIndex = nScrollViewIndex + 1
+  end
+end
+
+function tbWnd:GetPrice()
+  local nPrice = 0
+  if self.nBuyType == tbBuyType.Single then
+    local tbFashion = self.tbSuitInfo.tbGroup[1]
+    nPrice = Shop:GetFashionItemDiscountPrice(tbFashion.nId)
+  elseif self.nBuyType == tbBuyType.Suit then
+    nPrice = Shop:GetFashionSuitDiscountPrice(self.tbSuitInfo.nSuitId)
+  end
+  return nPrice
+end
+
+function tbWnd:OnToggleCoupon(nTemplateId, bIsOnToggle)
+  if self.bOnlySuit then
+    self:UpdateOnlySuit(nTemplateId, bIsOnToggle)
+  else
+    self:UpdateFashionOrSuit(nTemplateId, bIsOnToggle)
+  end
+  if bIsOnToggle then
+    self.nCouponTemplateId = nTemplateId
+  else
+    self.nCouponTemplateId = nil
+  end
+end
+
+function tbWnd:UpdateOnlySuit(nTemplateId, bIsOnToggle)
+  local nPrice = 0
+  if bIsOnToggle then
+    nPrice = FashionCoupon:GetDiscountPrice4Coupon(me, self:GetPrice(), nTemplateId)
+    self.nCouponTemplateId = nTemplateId
+  else
+    nPrice = self:GetPrice()
+    self.nCouponTemplateId = nil
+  end
+  self.pPanel:Label_SetText(tbControls.txtPrice1, nPrice)
+end
+
+function tbWnd:UpdateFashionOrSuit(nTemplateId, bIsOnToggle)
+  if bIsOnToggle then
+    self:ShowPriceFashionOrSuitWithCoupon(nTemplateId)
+  else
+    self:ShowPriceFashionOrSuitWithNoCoupon()
+  end
+end
+
+function tbWnd:ShowPriceFashionOrSuitWithCoupon(nCouponTemplateId)
+  local nBeginPrice = 0
+  local nFinalPrice = 0
+  if self.nBuyType == tbBuyType.Single then
+    local nDiscountPrice = Shop:GetFashionItemDiscountPrice(self.tbSingleItem.nId)
+    nBeginPrice = self.tbSingleItem.nPrice
+    if nDiscountPrice and nDiscountPrice > 0 then
+      nFinalPrice = FashionCoupon:GetDiscountPrice4Coupon(me, nDiscountPrice, nCouponTemplateId)
+    else
+      nFinalPrice = FashionCoupon:GetDiscountPrice4Coupon(me, nBeginPrice, nCouponTemplateId)
+    end
+  elseif self.nBuyType == tbBuyType.Suit then
+    local nDiscountPrice = Shop:GetFashionSuitDiscountPrice(self.tbSuitInfo.nSuitId)
+    if nDiscountPrice and nDiscountPrice > 0 then
+      nBeginPrice = self.tbSuitInfo.nPrice
+      nFinalPrice = FashionCoupon:GetDiscountPrice4Coupon(me, nDiscountPrice, nCouponTemplateId)
+    else
+      local tbFashion1 = self.tbSuitInfo.tbGroup[1]
+      local tbFashion2 = self.tbSuitInfo.tbGroup[2]
+      nBeginPrice = tbFashion1.nPrice + tbFashion2.nPrice
+      nFinalPrice = FashionCoupon:GetDiscountPrice4Coupon(me, self.tbSuitInfo.nPrice, nCouponTemplateId)
+    end
+  end
+  self.pPanel:SetActive(tbControls.objPrice2, true)
+  self.pPanel:Label_SetText(tbControls.txtPrice2, nBeginPrice)
+  self.pPanel:Label_SetText(tbControls.txtPrice1, nFinalPrice)
+end
+
+function tbWnd:ShowPriceFashionOrSuitWithNoCoupon()
+  if self.nBuyType == tbBuyType.Single then
+    local nDiscountPrice = Shop:GetFashionItemDiscountPrice(self.tbSingleItem.nId)
+    if nDiscountPrice and nDiscountPrice > 0 then
+      self.pPanel:SetActive(tbControls.objPrice2, true)
+      self.pPanel:Label_SetText(tbControls.txtPrice1, nDiscountPrice)
+      self.pPanel:Label_SetText(tbControls.txtPrice2, self.tbSingleItem.nPrice)
+    else
+      self.pPanel:SetActive(tbControls.objPrice2, false)
+      self.pPanel:Label_SetText(tbControls.txtPrice1, self.tbSingleItem.nPrice)
+    end
+  elseif self.nBuyType == tbBuyType.Suit then
+    self.pPanel:SetActive(tbControls.objPrice2, true)
+    local nDiscountPrice = Shop:GetFashionSuitDiscountPrice(self.tbSuitInfo.nSuitId)
+    if nDiscountPrice and nDiscountPrice > 0 then
+      self.pPanel:Label_SetText(tbControls.txtPrice1, nDiscountPrice)
+      self.pPanel:Label_SetText(tbControls.txtPrice2, self.tbSuitInfo.nPrice)
+    else
+      local tbFashion1 = self.tbSuitInfo.tbGroup[1]
+      local tbFashion2 = self.tbSuitInfo.tbGroup[2]
+      self.pPanel:Label_SetText(tbControls.txtPrice2, tbFashion1.nPrice + tbFashion2.nPrice)
+      self.pPanel:Label_SetText(tbControls.txtPrice1, self.tbSuitInfo.nPrice)
+    end
+    self.pPanel:Label_SetText(tbControls.txtTips2, i18n.Parse(self.tbSuitInfo.szSuitName))
+  end
+end
+
+function tbWnd:_SortCouponByFashionId(nFashionId, tbCouponList)
+  local function fnComp(pCouponA, pCouponB)
+    local tbSettingA = FashionCoupon:GetCouponSetting(pCouponA.dwTemplateId)
+    
+    local tbSettingB = FashionCoupon:GetCouponSetting(pCouponB.dwTemplateId)
+    if tbSettingA.nDiscount ~= tbSettingB.nDiscount then
+      return tbSettingA.nDiscount > tbSettingB.nDiscount
+    end
+    local bIsExclusiveA = tbSettingA.nLimitFashionId and tbSettingA.nLimitFashionId == nFashionId
+    local bIsExclusiveB = tbSettingB.nLimitFashionId and tbSettingB.nLimitFashionId == nFashionId
+    if (bIsExclusiveA or bIsExclusiveB) and (not bIsExclusiveA or not bIsExclusiveB) then
+      return bIsExclusiveA
+    end
+    return true
+  end
+  
+  table.sort(tbCouponList, fnComp)
+  return tbCouponList
+end
+
+function tbWnd:_SortCouponBySuitId(nSuitId, tbCouponList)
+  local function fnComp(pCouponA, pCouponB)
+    local tbSettingA = FashionCoupon:GetCouponSetting(pCouponA.dwTemplateId)
+    
+    local tbSettingB = FashionCoupon:GetCouponSetting(pCouponB.dwTemplateId)
+    if tbSettingA.nDiscount ~= tbSettingB.nDiscount then
+      return tbSettingA.nDiscount > tbSettingB.nDiscount
+    end
+    local bIsExclusiveA = tbSettingA.nLimitFashionId and tbSettingA.nLimitFashionId == nSuitId
+    local bIsExclusiveB = tbSettingB.nLimitFashionId and tbSettingB.nLimitFashionId == nSuitId
+    if (bIsExclusiveA or bIsExclusiveB) and (not bIsExclusiveA or not bIsExclusiveB) then
+      return bIsExclusiveA
+    end
+    return true
+  end
+  
+  table.sort(tbCouponList, fnComp)
+  return tbCouponList
+end
+
+function tbWnd:OnBuyToggleChange(isOn)
+  if isOn then
+    self.nBuyType = tbBuyType.Suit
+    self.pPanel:SetActive(tbControls.objPrice2, true)
+    local nDiscountPrice = Shop:GetFashionSuitDiscountPrice(self.tbSuitInfo.nSuitId)
+    if nDiscountPrice and nDiscountPrice > 0 then
+      self.pPanel:Label_SetText(tbControls.txtPrice1, nDiscountPrice)
+      self.pPanel:Label_SetText(tbControls.txtPrice2, self.tbSuitInfo.nPrice)
+    else
+      local nTotalPrice = 0
+      for _, tbItem in ipairs(self.tbSuitInfo.tbGroup) do
+        nTotalPrice = tbItem.nPrice + nTotalPrice
+      end
+      self.pPanel:Label_SetText(tbControls.txtPrice2, nTotalPrice)
+      self.pPanel:Label_SetText(tbControls.txtPrice1, self.tbSuitInfo.nPrice)
+    end
+    self.pPanel:Label_SetText(tbControls.txtTips2, i18n.Parse(self.tbSuitInfo.szSuitName))
+  else
+    self.nBuyType = tbBuyType.Single
+    self.pPanel:Label_SetText(tbControls.txtPrice1, self.tbSingleItem.nPrice)
+    local nDiscountPrice = Shop:GetFashionItemDiscountPrice(self.tbSingleItem.nId)
+    if nDiscountPrice and nDiscountPrice > 0 then
+      self.pPanel:SetActive(tbControls.objPrice2, true)
+      self.pPanel:Label_SetText(tbControls.txtPrice1, nDiscountPrice)
+      self.pPanel:Label_SetText(tbControls.txtPrice2, self.tbSingleItem.nPrice)
+    else
+      self.pPanel:SetActive(tbControls.objPrice2, false)
+      self.pPanel:Label_SetText(tbControls.txtPrice1, self.tbSingleItem.nPrice)
+    end
+    local tbFashionSetting = Fashion:GetFashionSetting(me, self.tbSingleItem.nFashionID)
+    if tbFashionSetting then
+      self.pPanel:Label_SetText(tbControls.txtTips2, i18n.EasyGet("{0}\239\188\140\229\165\151\232\163\133\232\180\173\228\185\176\229\143\175\228\186\171\230\155\180\229\164\154\228\188\152\230\131\160", i18n.Parse(tbFashionSetting.szName)))
+    end
+  end
+end

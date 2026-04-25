@@ -1,0 +1,205 @@
+local tbWnd = Ui:CreateWindow("UIChristmasTips")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  btnRank = "node/imgBG/Content/Detail/btnRank",
+  btnGet = "node/imgBG/btn/btnGet",
+  wndJumpTo = "node/imgBG/wndJumpTo",
+  btnOk = "node/imgBG/btn/btnOk",
+  txtProgressValue = "node/imgBG/Content/Detail/ProgressInfo/txtProgressValue",
+  imgProgress = "node/imgBG/Content/Detail/Progress/imgBarBg/imgBar",
+  UIItemGrid = "node/imgBG/UIItemGrid",
+  timeWaring = "node/imgBG/wndJumpTo/imgBG/List/timeWaring",
+  timeTips = "node/imgBG/wndJumpTo/imgBG/List/timeTips",
+  MapTemplate = "node/imgBG/wndJumpTo/imgBG/List/Viewport/Content/Template",
+  txtOwnNum = "node/imgBG/txtRank",
+  TrailEffect = "node/imgBG/Content/Detail/Progress/TrailEffect",
+  txtProgressTip = "node/imgBG/Content/Detail/ProgressInfo/txtProgressTip",
+  txtSubmitCountTip = "node/imgBG/Content/Detail/txtSubmitCountTip",
+  txtTitle = "node/imgBG/txtTitle",
+  Progress = "node/imgBG/Content/Detail/Progress"
+}
+local tbMarkLevel = {
+  15000,
+  30000,
+  50000,
+  75000,
+  100000
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseByDefault()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.szXmasTipsHelpKey)
+  end,
+  btnRank = function(self)
+    Ui:OpenWindow("UITemporaryActivityRank", self.tbEntranceRankData, 2)
+  end,
+  btnGet = function(self)
+    self:OnClickBtnGet()
+  end,
+  btnOk = function(self)
+    self:OnClickBtnOk(self.szXmasTipsBtnCallBack, self.szXmasTipsBtnParam)
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_HANDINLOTTERY_DATA,
+      self.UpdateView,
+      self
+    }
+  }
+end
+
+function tbWnd:OnClickEmptyClose()
+  self.pPanel:SetActive(tbControls.wndJumpTo, false)
+end
+
+function tbWnd:OnCreate()
+  self.grid = Ui:NewExistItemGrid(self, tbControls.UIItemGrid)
+  self:SetClickEmptyCallback(tbControls.wndJumpTo)
+  self.pMapListScorllView = Ui:NewScrollView(self, tbControls.MapTemplate, function(_, nIndex, tbElement)
+    self:OnClickArrowBtn(tbElement.nMapId)
+  end, false, false)
+end
+
+function tbWnd:OnOpen(nEntranceIndex, nIndex)
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(nEntranceIndex)
+  local tbInfo = self.tbActivityList[nIndex]
+  if not tbInfo then
+    return 0
+  end
+  local tbExtraData = ActivityMgr.EntranceSchedule:GetExtraData(nEntranceIndex, nIndex) or {}
+  self.tbEntranceRankData = ActivityMgr.EntranceSchedule:GetEntranceRankData(nEntranceIndex)
+  self.nIndex = nIndex
+  self.szXmasTipsHelpKey = tbExtraData.szXmasTipsHelpKey
+  self.nHandInLotteryActivityId = tbExtraData.nHandInLotteryActivityId
+  self.nAddMonsterId = tbExtraData.nAddMonsterActivityId
+  self.szXmasTipsExplain = tbExtraData.szXmasTipsExplain
+  self.szXmasTipsBtnText = tbExtraData.szXmasTipsBtnText
+  self.szXmasTipsTitle = tbExtraData.szXmasTipsTitle
+  self.szXmasTipsSubTitle = tbExtraData.szXmasTipsSubTitle
+  self.szXmasTipsBtnCallBack = tbExtraData.szXmasTipsBtnCallBack or ""
+  self.szXmasTipsBtnParam = tbExtraData.szXmasTipsBtnParam or ""
+  self:UpdateView()
+end
+
+function tbWnd:UpdateView()
+  local pActInstance = ActivityMgr:GetInstanceById(self.nHandInLotteryActivityId)
+  if pActInstance and pActInstance:IsOpen() then
+    for nIndex, nMarkLevel in ipairs(tbMarkLevel) do
+      self.pPanel:Label_SetText(tbControls.Progress .. "/imgMark" .. nMarkLevel .. "/txt" .. nMarkLevel, pActInstance.tbConfig.tbLevel[nIndex])
+    end
+    local tbLotteryData = pActInstance:GetLotteryData()
+    self.pPanel:Label_SetText(tbControls.txtProgressValue, tbLotteryData.nTotalNum)
+    local nRate = self:GetProgressRate(tbLotteryData.nTotalNum, pActInstance)
+    self.pPanel:Sprite_SetFillAmount(tbControls.imgProgress, 0, nRate, 1)
+    local nFormulaId = pActInstance.tbConfig.nFormulaId
+    local tbMaterials = Compose:GetMaterialsByFormulaId(nFormulaId)
+    self.grid:SetGenericItem(tbMaterials[1])
+    self.grid:SetClickEnable(true)
+    local nHave = me.GetItemCountInBags(tbMaterials[1][2])
+    self.pPanel:Label_SetText(tbControls.txtOwnNum, nHave)
+    self:UpdateProgressEffect(nRate)
+  end
+  if self.szXmasTipsTitle then
+    self.pPanel:Label_SetText(tbControls.txtTitle, i18n.Get(self.szXmasTipsTitle))
+  end
+  if self.szXmasTipsExplain then
+    self.pPanel:Label_SetText(tbControls.txtSubmitCountTip, i18n.Get(self.szXmasTipsExplain))
+  end
+  if self.szXmasTipsBtnText then
+    self.pPanel:Button_SetText(tbControls.btnOk, i18n.Get(self.szXmasTipsBtnText), "Text")
+  end
+  if self.szXmasTipsSubTitle then
+    self.pPanel:Label_SetText(tbControls.txtProgressTip, i18n.Get(self.szXmasTipsSubTitle))
+  end
+end
+
+function tbWnd:UpdateProgressEffect(nFillAmount)
+  local nBegin, nEnd = -380, 380
+  self.pPanel:Object_SetLocalPosition(tbControls.TrailEffect, Ui.Vector3(nBegin, 0, 0))
+  local effectObj = self.pPanel:GetObject(tbControls.TrailEffect)
+  if not effectObj:GetComponent(Ui.UIDoTweenAnimation) then
+    effectObj:AddComponent(Ui.UIDoTweenAnimation)
+  end
+  local effectAnim = effectObj:GetComponent(Ui.UIDoTweenAnimation)
+  local rt = self.pPanel:GetTransform(tbControls.TrailEffect)
+  effectAnim:Init(rt)
+  local tweener = effectAnim:DOLocalMove(nFillAmount * (nEnd - nBegin) + nBegin, 0, 1)
+  effectAnim:Append(tweener)
+end
+
+function tbWnd:OnClickBtnGet()
+  local bIsNpcAppear = false
+  local tbActivity = ActivityMgr:GetInstanceById(self.nAddMonsterId)
+  if nil ~= tbActivity then
+    bIsNpcAppear = tbActivity.bIsNpcAppear
+  end
+  self.pPanel:SetActive(tbControls.wndJumpTo, true)
+  self.pPanel:SetActive(tbControls.timeWaring, not bIsNpcAppear)
+  self.pPanel:SetActive(tbControls.timeTips, bIsNpcAppear)
+  self:InitMapListScorllView(self.nAddMonsterId)
+end
+
+function tbWnd:OnClickBtnOk(szCallBack, szParam)
+  local fn = ActivityMgr.tbJumpFunc[szCallBack]
+  local tbParam = Lib:SplitStrTry2Num(szParam or "", "|")
+  if fn and tbParam and #tbParam > 0 then
+    fn(self.tbActivityList[self.nIndex].nId, table.unpack(tbParam))
+  end
+end
+
+function tbWnd:OnClickArrowBtn(nMapId)
+  ActivityMgr:GotoMap(nMapId)
+  self:Close()
+end
+
+function tbWnd:InitMapListScorllView(nLinkActivityId)
+  self.pMapListScorllView:Clear()
+  local tbActivity = ActivityMgr:GetInstanceById(nLinkActivityId)
+  if nil == tbActivity then
+    return
+  end
+  local tbMapList = tbActivity:GetMapList()
+  local nIndex = 1
+  for i, nMapId in pairs(tbMapList) do
+    self.pMapListScorllView:SetElement(nIndex, function(tbElement)
+      self:SetMapListScorllViewElementInfo(tbElement, nMapId)
+    end)
+    nIndex = nIndex + 1
+  end
+end
+
+function tbWnd:SetMapListScorllViewElementInfo(tbElement, nMapId)
+  tbElement.pPanel:Label_SetText("txtMapName", i18n.EasyGet("{0}", i18n.Parse(Map:GetMapSetting(nMapId).MapName)))
+  tbElement.nMapId = nMapId
+end
+
+function tbWnd:GetProgressRate(nTotalNum, pActInstance)
+  local nRate = 0
+  local singleRate = 1 / #pActInstance.tbConfig.tbLevel
+  local maxNum = pActInstance.tbConfig.tbLevel[#pActInstance.tbConfig.tbLevel]
+  if nTotalNum >= maxNum then
+    nRate = 1
+    return nRate
+  end
+  local nCurIndex = 0
+  local tbLevel = pActInstance.tbConfig.tbLevel
+  for i, nPhaseNum in ipairs(pActInstance.tbConfig.tbLevel) do
+    if nPhaseNum <= nTotalNum then
+      nCurIndex = i
+    end
+  end
+  local nNextIndex = math.min(nCurIndex + 1, #pActInstance.tbConfig.tbLevel)
+  if 0 == nCurIndex then
+    nRate = singleRate * (nCurIndex + (nTotalNum - 0) / (tbLevel[nNextIndex] - 0))
+  else
+    nRate = singleRate * (nCurIndex + (nTotalNum - tbLevel[nCurIndex]) / (tbLevel[nNextIndex] - tbLevel[nCurIndex]))
+  end
+  return nRate
+end

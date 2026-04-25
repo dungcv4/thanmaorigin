@@ -1,0 +1,135 @@
+Require("CommonScript/Activity/WuDuActivity/WuDuActivityCfg.lua")
+ActivityMgr.WuDuActivity = ActivityMgr.WuDuActivity or {}
+local WuDuActivity = ActivityMgr.WuDuActivity
+
+function WuDuActivity:BuildInstanceConfig(nId, szType)
+  local pInstance = ActivityMgr:GetInstanceById(nId)
+  if pInstance then
+    return pInstance:GetConfig(), pInstance
+  end
+  local tmpInstance = ActivityMgr:Create(szType)
+  if not tmpInstance then
+    return
+  end
+  tmpInstance:OnInit(ActivityMgr:GetConfigById(nId))
+  return tmpInstance:GetConfig()
+end
+
+local tbJumpFunc = {
+  [ActivityMgr.Def.ClassNameList.ShopSale] = function(nId)
+    if RedPointMgr:CheckEvent(RedPointMgr.EVENT.ShopSale) then
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ShopSale)
+    end
+    Ui:OpenWindow("UIShop", Shop.ShopType2ViewIndex.LimitBuy)
+  end,
+  [ActivityMgr.Def.ClassNameList.EMeiFireWork] = function(nId)
+    WuDuActivity:CheckGotoFireWorkMap(nId)
+    if RedPointMgr:CheckEvent(RedPointMgr.EVENT.EmeiFireWork) then
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.EmeiFireWork)
+      LocalData:SetRoleNumber("EMeiFireWorkRedPoint", GetTime())
+    end
+  end,
+  [ActivityMgr.Def.ClassNameList.UITemporaryActivity] = function(nId)
+    WuDuActivity:OnActive(nId)
+    local pInstance = ActivityMgr:GetInstanceById(nId)
+    if pInstance and 0 == Ui.PlayerPrefs.GetInt(pInstance:GetFirstOpenSz(), 0) then
+      Ui.PlayerPrefs.SetInt(pInstance:GetFirstOpenSz(), 1)
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.UITemporaryActivityFirstOpen)
+    end
+  end
+}
+
+function WuDuActivity:GetActivityList()
+  local tbList = {}
+  local tbConfig, szName, pInstance
+  for nId, szType in pairs(ActivityMgr.WuDuActivityCfg.ActivityList) do
+    tbConfig, pInstance = self:BuildInstanceConfig(nId, szType)
+    if tbConfig then
+      szName = tbConfig.szName and i18n.Parse(tbConfig.szName) or ""
+      table.insert(tbList, {
+        szClassName = szType,
+        nId = nId,
+        szName = szName,
+        szDesc = i18n.Parse(tbConfig.szDesc),
+        nLevel = tbConfig.nLevel or tbConfig.nJoinLevel,
+        tbAward = Award:GetAward(tbConfig.nShowAwardId or tbConfig.nAwardId or -1, tbConfig.nShowAwardKey or tbConfig.nAwardKey or -1) or {},
+        pFunc = tbJumpFunc[szType],
+        szShowTime = i18n.Parse(tbConfig.szShowTime or ""),
+        nSortValue = ActivityMgr.WuDuActivityCfg.SortList[nId] or 0,
+        tbRedPointEventId = pInstance and pInstance.GetRedPointEventId and pInstance:GetRedPointEventId()
+      })
+    end
+  end
+  table.sort(tbList, function(tbFirst, tbSecond)
+    return tbFirst.nSortValue > tbSecond.nSortValue
+  end)
+  return tbList
+end
+
+function WuDuActivity:OnActive(nId)
+  local pInstance = ActivityMgr:GetInstanceById(nId)
+  if not pInstance then
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return
+  end
+  if pInstance and pInstance.tbConfig and me.nLevel < pInstance.tbConfig.nLevel then
+    me.CenterMsg(i18n.EasyGet("\232\175\183\229\133\136\230\143\144\229\141\135\231\173\137\231\186\167\232\135\179{0}\231\186\167", pInstance.tbConfig.nLevel))
+    return
+  end
+  if pInstance:IsA(ActivityMgr.Def.ClassNameList.UITemporaryActivity) then
+    Ui:OpenWindow("UITemporaryActivity", nId)
+    return
+  end
+end
+
+function WuDuActivity:CheckGotoFireWorkMap(nId)
+  local pInstance = ActivityMgr:GetInstanceById(nId)
+  if pInstance and pInstance.tbConfig and pInstance.tbConfig.tbMapList then
+    if me.nLevel < pInstance.tbConfig.nLevel then
+      me.CenterMsg(i18n.EasyGet("\232\175\183\229\133\136\230\143\144\229\141\135\231\173\137\231\186\167\232\135\17912\231\186\167"))
+      return
+    end
+    local nMapId, _ = me.GetWorldPos()
+    if nMapId and pInstance.tbConfig.tbMapList[nMapId] then
+      me.CenterMsg(i18n.EasyGet("\229\183\178\229\156\168\230\180\187\229\138\168\229\156\176\229\155\190\228\184\173"))
+    else
+      local nRandMapId
+      local nRand = MathRandom(Lib:GetTableLength(pInstance.tbConfig.tbMapList))
+      local nCount = 1
+      for nMapTmpId, _ in pairs(pInstance.tbConfig.tbMapList) do
+        if nCount == nRand then
+          nRandMapId = nMapTmpId
+          break
+        end
+        nCount = nCount + 1
+      end
+      local tbMapDefaultPosInfo = Map.tbMapListEx[nRandMapId].tbDefaultPos
+      if not tbMapDefaultPosInfo then
+        return
+      end
+      if TeamMgr:IsFollowTeammate() then
+        TeamMgr:StopFollowMember()
+      end
+      if AFK:IsLeadFightRunning() then
+        AFK:Stop()
+      end
+      local nX, nY
+      for _, tbPos in pairs(tbMapDefaultPosInfo) do
+        if tbPos.PosX and tbPos.PosY then
+          nX = tbPos.PosX
+          nY = tbPos.PosY
+          break
+        end
+      end
+      AutoPath:GotoAndCallEx(nRandMapId, nX, nY)
+    end
+    if Ui:WindowVisible("UIWuDuActivity") then
+      local ui = Ui:GetWindow("UIWuDuActivity")
+      if ui then
+        ui:Close()
+      end
+    end
+  else
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\229\176\154\230\156\170\229\188\128\229\167\139"))
+  end
+end

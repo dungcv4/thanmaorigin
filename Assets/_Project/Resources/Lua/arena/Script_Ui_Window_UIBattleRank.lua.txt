@@ -1,0 +1,156 @@
+local tbWnd = Ui:CreateWindow("UIBattleRank")
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  RankTemplate = "node/imgBG/Content/imgList/Viewport/List/Template",
+  txtMyRank = "node/imgBG/Content/myInfo/txtRank",
+  imgMyFaction = "node/imgBG/Content/myInfo/imgFaction",
+  txtMyFaction = "node/imgBG/Content/myInfo/txtFaction",
+  txtMyName = "node/imgBG/Content/myInfo/txtName",
+  txtMyCamp = "node/imgBG/Content/myInfo/txtCamp",
+  txtMyScore = "node/imgBG/Content/myInfo/txtScore",
+  txtMyKill = "node/imgBG/Content/myInfo/txtKill",
+  txtMyCombo = "node/imgBG/Content/myInfo/txtCombo",
+  imgMyRankPanel = "node/imgBG/Content/myInfo/UIRankNo",
+  myInfo = "node/imgBG/Content/myInfo",
+  btnLeave = "node/imgBG/Content/btnLeave"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    if not self.bIsRankReport then
+      if me.bInBattleAlone then
+        RemoteServer.LeaveBattleAlone()
+      else
+        RemoteServer.LeaveBattle()
+      end
+    end
+    self:Close()
+  end,
+  btnLeave = function(self)
+    if me.bInBattleAlone then
+      RemoteServer.LeaveBattleAlone()
+    else
+      RemoteServer.LeaveBattle()
+    end
+    self:Close()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_BATTLE_RANK_REPORT,
+      self.OnUpdateRankData
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_BATTLE_REPORT,
+      self.UpdateSelfRankInfo
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.tbScrollView = Ui:NewLoopScrollView(self, tbControls.RankTemplate)
+  self.bIsOpen = false
+  self.pPanel:Label_SetText(tbControls.txtMyRank, 0)
+  self.pPanel:Label_SetText(tbControls.txtMyFaction, Faction:GetName(me.nFaction))
+  self.pPanel:Sprite_SetSprite(tbControls.imgMyFaction, Faction:GetIcon(me.nFaction))
+  self.pPanel:Label_SetText(tbControls.txtMyName, me.szName)
+  self.pPanel:Label_SetText(tbControls.txtMyCamp, "")
+  self.pPanel:Label_SetText(tbControls.txtMyScore, 0)
+  self.pPanel:Label_SetText(tbControls.txtMyKill, 0)
+  self.pPanel:Label_SetText(tbControls.txtMyCombo, 0)
+  self.pPanel:SetActive(tbControls.txtMyRank, true)
+end
+
+function tbWnd:OnOpen(bIsNovice, bIsRankReport)
+  self.bIsOpen = true
+  self.bIsNovice = bIsNovice
+  self.bIsRankReport = bIsRankReport
+  Timer:Register(5, function()
+    self.tbScrollView:GoTop()
+  end)
+  self:OnRequestRankData()
+  if Battle.tbSelfData then
+    self:UpdateSelfRankInfo(Battle.tbSelfData, Battle.nMyRank)
+  else
+    self:UpdateSelfRankInfo({
+      nFaction = me.nFaction,
+      szName = me.szName,
+      nTeamIndex = Battle.nTeamIndex or 1,
+      nScore = 0,
+      nKillCount = 0,
+      nMaxCombo = 0
+    }, 0)
+  end
+  self.nRankUpdataTimer = Timer:Register(Env.GAME_FPS, self.OnRequestRankData, self)
+  self.pPanel:SetActive(self.btnLeave, false)
+  self.pPanel:SetActive(self.btnClose, true)
+end
+
+function tbWnd:OnRequestRankData()
+  if me.bInBattleAlone then
+    BattleAlone:SyncAllRankInfo()
+  else
+    RemoteServer.RequestBattleRankInfo(Battle.nMapId)
+  end
+  return true
+end
+
+function tbWnd:OnUpdateRankData(tbBattleRank)
+  if self.bIsOpen == false then
+    return
+  end
+  if self.effectTimerId then
+    Timer:Close(self.effectTimerId)
+    self.effectTimerId = nil
+  end
+  self:CloseEffect()
+  if not tbBattleRank then
+    return
+  end
+  
+  local function fnSetItem(tbLoopScroll, nIndex)
+    local tbData = tbBattleRank[nIndex]
+    local tbElement = tbLoopScroll:GetElement(nIndex)
+    local pPanel = tbElement.pPanel
+    pPanel:Label_SetText("txtFaction", Faction:GetName(tbData.nFaction))
+    pPanel:Sprite_SetSprite("imgFaction", Faction:GetIcon(tbData.nFaction))
+    pPanel:Label_SetText("txtName", tbData.szName)
+    pPanel:Label_SetText("txtCamp", i18n.Get(Battle.Cfg.tbTeamIndex2CampName[tbData.nTeamIndex]))
+    pPanel:Label_SetText("txtScore", tbData.nScore)
+    pPanel:Label_SetText("txtKill", tbData.nKillCount)
+    pPanel:Label_SetText("txtCombo", tbData.nMaxCombo)
+    pPanel:Label_SetText("txtRank", nIndex)
+    pPanel:SetActive("txtRank", true)
+  end
+  
+  self.tbScrollView:SetElement(#tbBattleRank, fnSetItem)
+end
+
+function tbWnd:UpdateSelfRankInfo(tbMyInfo, nRank, tbTeamScore, nLeftTime)
+  self.pPanel:Label_SetText(tbControls.txtMyRank, nRank)
+  self.pPanel:Label_SetText(tbControls.txtMyFaction, Faction:GetName(tbMyInfo.nFaction))
+  self.pPanel:Sprite_SetSprite(tbControls.imgMyFaction, Faction:GetIcon(tbMyInfo.nFaction))
+  self.pPanel:Label_SetText(tbControls.txtMyName, tbMyInfo.szName)
+  self.pPanel:Label_SetText(tbControls.txtMyCamp, i18n.Get(Battle.Cfg.tbTeamIndex2CampName[tbMyInfo.nTeamIndex]))
+  self.pPanel:Label_SetText(tbControls.txtMyScore, tbMyInfo.nScore)
+  self.pPanel:Label_SetText(tbControls.txtMyKill, tbMyInfo.nKillCount)
+  self.pPanel:Label_SetText(tbControls.txtMyCombo, tbMyInfo.nMaxCombo)
+  self.pPanel:SetActive(tbControls.txtMyRank, true)
+end
+
+function tbWnd:CloseEffect()
+end
+
+function tbWnd:OnClose()
+  if self.effectTimerId then
+    Timer:Close(self.effectTimerId)
+    self.effectTimerId = nil
+  end
+  if self.nRankUpdataTimer then
+    Timer:Close(self.nRankUpdataTimer)
+    self.nRankUpdataTimer = nil
+  end
+  self.bIsOpen = false
+end

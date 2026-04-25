@@ -1,0 +1,89 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+Require("CommonScript/Activity/ActivityMgrDef.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.SnowFightActivity)
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/SnowFightActivity/SnowFightActCfg.tab"
+  local tbActivityConfig = Lib:EasyLoadTabFile(szFilepath, {"nConfigId"})
+  if not tbActivityConfig then
+    LogErr(string.format("%s not find", szFilepath))
+    return false
+  end
+  self.ACTIVITY_CONFIG = {}
+  for nConfigId, tbConfig in pairs(tbActivityConfig) do
+    self.ACTIVITY_CONFIG[nConfigId] = tbConfig
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+  self.bLoadConfig = true
+end
+
+function tbActivity:LoadConfigWithGroup(tbConfig)
+  local szGroupName = tbConfig.szGroupName
+  local szGroupSubType = tbConfig.szGroupSubType
+  local tbActCfg = ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  if not tbActCfg then
+    LogErr(string.format("tbActivity:LoadConfigWithGroup ERROR tbActCfg is nil szGroupName = %s, szGroupSubType = %s", szGroupName, szGroupSubType))
+  end
+  self.tbConfig = tbActCfg.Cfg
+  self.tbConfig = SetReadOnly(self.tbConfig, true)
+end
+
+function tbActivity:CheckConfigValid()
+  local tbConfig = self:GetConfig()
+  if Lib:IsEmptyStr(tbConfig.szLogWay) then
+    LogErr("[SnowFightActivity:CheckConfigValid] bad logway! please check it! szLogWay=", tbConfig.szLogWay, self:GetId())
+    return false
+  end
+  return true
+end
+
+tbActivity.SaveID = {
+  nLastJoinTime = 1,
+  nRemainJoinCount = 2,
+  nUseSpecialTicketCountToday = 3,
+  nTotalUseSpecialTicketCount = 4,
+  nHasRefreshJoinCountDay = 5
+}
+tbActivity.Protocol = {
+  ReqSignUp = 1,
+  SyncOpenStatusResp = 2,
+  SyncUpDateInfo = 3
+}
+tbActivity.ErrCode = {
+  SignUp = {
+    NoTicket = 1,
+    NoJoinCount = 2,
+    NotEnoughLevel = 3,
+    NotOpenTime = 4,
+    NotInSafeArea = 5
+  }
+}
+
+function tbActivity:GetRemainJoinCount(pPlayer)
+  if not pPlayer then
+    return 0
+  end
+  return pPlayer.GetUserValue(SnowFight.SaveKey, SnowFight.SaveID.nRemainJoinCount)
+end
+
+function tbActivity:CheckCanSign(pPlayer)
+  if not pPlayer then
+    return false
+  end
+  if not self.bOpen then
+    return false, self.ErrCode.SignUp.NotOpenTime
+  end
+  if pPlayer.nLevel < self.tbConfig.nJoinLevel then
+    return false, self.ErrCode.SignUp.NotEnoughLevel
+  end
+  if 0 ~= self.tbConfig.nTicketItemId and pPlayer.GetItemCountInBags(self.tbConfig.nTicketItemId) <= 0 then
+    return false, self.ErrCode.SignUp.NoTicket
+  end
+  if self:GetRemainJoinCount(pPlayer) <= 0 then
+    return false, self.ErrCode.SignUp.NoJoinCount
+  end
+  return true
+end

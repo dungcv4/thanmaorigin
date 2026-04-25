@@ -1,0 +1,314 @@
+local tbWnd = Ui:CreateClass("UIHudLeftPanelTask", "UIPanel")
+tbWnd.tbControls = {
+  itemMainTask = "panelAllTask/itemMainTask",
+  templateTask = "panelAllTask/panelOtherTask/Viewport/Content/templateTask",
+  UIItemGrid = "AwardItem/UIItemGrid"
+}
+
+function tbWnd:OnCreate()
+  self.nCurTrackTaskId = 0
+  self.tbTaskScrollView = Ui:NewLoopScrollView(self, self.templateTask)
+  self.tbItemGrid = Ui:NewExistItemGrid(self, self.UIItemGrid)
+  self:UpdateTaskPanel()
+  self.bNeedUpdateTaskPanel = false
+end
+
+function tbWnd:OnClose()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_UPDATE_TASK, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_YIJUNTASK_DATA, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_JIANXIACIDIAN_DATA, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_GUANFUTONGJI_DATA, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_LOCALIZE_CHANGE, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_UPDATE_COMMERCETASK, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_UPDATE_KINFREIGHTTASK_DATA, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SYNC_MARRY_DATA, self)
+  if self.nTimer and self.nTimer > 0 then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  if self.nTimer2 and self.nTimer2 > 0 then
+    Timer:Close(self.nTimer2)
+    self.nTimer2 = nil
+  end
+end
+
+function tbWnd:OnOpen()
+  self.nTimer = Timer:Register(Env.GAME_FPS, function()
+    self:timerUpdate()
+    return true
+  end)
+  self.nTimer2 = Timer:Register(1, function()
+    self:OnLateUpdate()
+    return true
+  end)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_UPDATE_TASK, self.UpdateTaskPanelEvent, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_YIJUNTASK_DATA, self.UpdateTaskPanelEvent, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_JIANXIACIDIAN_DATA, self.UpdateTaskPanelEvent, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_GUANFUTONGJI_DATA, self.UpdateTaskPanelEvent, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_LOCALIZE_CHANGE, self.UpdateTaskPanelEvent, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_UPDATE_COMMERCETASK, self.UpdateTaskPanelEvent, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_UPDATE_KINFREIGHTTASK_DATA, self.UpdateTaskPanelEvent, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_ITEM, self.UpdateTaskPanelEvent, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SYNC_MARRY_DATA, self.UpdateTaskPanelEvent, self)
+end
+
+function tbWnd:OnActivate()
+  self:UpdateTaskPanel()
+end
+
+function tbWnd:OnDeactivate()
+end
+
+function tbWnd:UpdateTaskPanelEvent()
+  self.bNeedUpdateTaskPanel = true
+end
+
+function tbWnd:OnLateUpdate()
+  if self.bNeedUpdateTaskPanel then
+    self:UpdateTaskPanel()
+    self.bNeedUpdateTaskPanel = false
+  end
+end
+
+function tbWnd:UpdateTaskPanel()
+  local tbBigTypeList = {
+    Task.TASK_TYPE_MAIN,
+    Task.TASK_TYPE_DAILY,
+    Task.TASK_TYPE_SUB,
+    Task.TASK_TYPE_ACT
+  }
+  local tbSubTypeInfoList = {}
+  for nBigType, _ in pairs(tbBigTypeList) do
+    tbSubTypeInfoList[nBigType] = {}
+  end
+  local tbPlayerTask = Task.tbTaskData or {}
+  tbPlayerTask.tbCurTaskList = tbPlayerTask.tbCurTaskList or {}
+  for _, tbInfo in pairs(tbPlayerTask.tbCurTaskList) do
+    local tbTaskCfg = Task:GetTaskCfg(tbInfo.nTaskId)
+    if tbTaskCfg and Task:IsEmptyTask(tbInfo.nTaskId) == false then
+      local szColorTitle = Task:GetTitleIncludeColor(Task:GetTitleWithPrefix(tbInfo.nTaskId), tbTaskCfg.nTaskType, "HudLeftPanelColor")
+      table.insert(tbSubTypeInfoList[tbTaskCfg.nTaskType], {
+        nTaskId = tbInfo.nTaskId,
+        szTitle = szColorTitle
+      })
+    end
+  end
+  for _, szKey in ipairs(Task.tbDailyTaskOrder) do
+    local tbInfo = Task.tbDailyTaskSettings[szKey]
+    if tbInfo and tbInfo:IsInCurTaskList() then
+      local szColorTitle = Task:GetTitleIncludeColor(tbInfo:GetTitleWithPrefix(), tbInfo.nTaskType, "HudLeftPanelColor")
+      table.insert(tbSubTypeInfoList[tbInfo.nTaskType], {szDailyKey = szKey, szTitle = szColorTitle})
+    end
+  end
+  self.tbSelectTask = {}
+  for _, nBigType in ipairs(tbBigTypeList) do
+    tbSubTypeInfoList[nBigType] = tbSubTypeInfoList[nBigType] or {}
+    for _, tbTask in ipairs(tbSubTypeInfoList[nBigType]) do
+      table.insert(self.tbSelectTask, tbTask)
+    end
+  end
+  self.nRecommendTaskId = Task:GetRecommedTaskId(me) or 0
+  local nRecommendTaskIndex = 0
+  for nIndex, tbInfo in pairs(self.tbSelectTask) do
+    if tbInfo.nTaskId and tbInfo.nTaskId == self.nRecommendTaskId then
+      nRecommendTaskIndex = nIndex
+      break
+    end
+  end
+  if nRecommendTaskIndex > 2 and Lib:CountTB(self.tbSelectTask) > 2 then
+    local tbRecommendTaskInfo = self.tbSelectTask[nRecommendTaskIndex]
+    for i = nRecommendTaskIndex, 3, -1 do
+      self.tbSelectTask[i] = self.tbSelectTask[i - 1]
+    end
+    self.tbSelectTask[2] = tbRecommendTaskInfo
+    nRecommendTaskIndex = 2
+  end
+  self.nRecommendTaskIndex = nRecommendTaskIndex
+  
+  local function funSetTaskData_MainTask(nTaskDataIndex)
+    assert(0 == nTaskDataIndex or 1 == nTaskDataIndex, string.format("nTaskDataIndex error:%s", nTaskDataIndex))
+    if 0 == nTaskDataIndex then
+      self.pPanel:SetActive(self.itemMainTask, false)
+      self.pPanel:SetActive(self.UIItemGrid, false)
+      return
+    end
+    local tbTaskInfo = self.tbSelectTask[1]
+    assert(tbTaskInfo, "Show MainTask, but no Task Data")
+    self.pPanel:SetActive(self.itemMainTask, true)
+    local nTaskId = tbTaskInfo.nTaskId
+    local szTitle = Task:GetTitleWithPrefix(nTaskId) .. " " .. Task:GetStepText(nTaskId)
+    szTitle = Task:GetTitleIncludeColor(szTitle, Task.TASK_TYPE_MAIN, "HudLeftPanelColor")
+    self.pPanel:Label_SetText(self.itemMainTask .. "/txtTitle", szTitle)
+    self.pPanel:Label_SetText(self.itemMainTask .. "/txtTarget", Task:GetTarget(nTaskId))
+    self.pPanel:SetActive(self.itemMainTask .. "/imgOngoing", nTaskId == self.nCurTrackTaskId)
+    Ui:Button_BindEvent(self.pPanel, self.itemMainTask .. "/btnTrack", self.onTrackTask, self, 0, 0)
+    local tbTaskCfg = Task:GetTaskCfg(nTaskId)
+    if tbTaskCfg and Lib:IsEmptyTB(tbTaskCfg.tbUiShowAward) == false then
+      self.pPanel:SetActive(self.UIItemGrid, true)
+      local tbShowAward = tbTaskCfg.tbUiShowAward[1]
+      self.tbItemGrid:SetGenericItem(tbShowAward)
+      self.tbItemGrid:SetClickEnable(true)
+    else
+      self.pPanel:SetActive(self.UIItemGrid, false)
+    end
+  end
+  
+  local function funSetTaskData_NormalTask(tbElement, nTaskDataIndex, nElementIndex)
+    local pPanel = tbElement.pPanel
+    local tbTaskInfo = self.tbSelectTask[nTaskDataIndex]
+    if not tbTaskInfo then
+      return
+    end
+    local nTaskId = tbTaskInfo.nTaskId
+    local szTitle = Task:GetTitleWithPrefix(nTaskId) .. " " .. Task:GetStepText(nTaskId)
+    szTitle = Task:GetTitleIncludeColor(szTitle, Task.TASK_TYPE_SUB, "HudLeftPanelColor")
+    pPanel:SetActive("Main", true)
+    pPanel:Label_SetText("txtTitle", szTitle)
+    pPanel:Label_SetText("txtTarget", Task:GetTarget(nTaskId))
+    tbElement.pPanel:SetActive("imgOngoing", nTaskId == self.nCurTrackTaskId)
+    Ui:Button_BindEvent(pPanel, "btnTrack", self.onTrackTask, self, nTaskDataIndex, nElementIndex)
+    tbElement.tbCellInfo.TikerGetTarget = nil
+    tbElement.tbCellInfo.nTaskId = nTaskId
+  end
+  
+  local function funSetTaskData_DailyTaskSetting(tbElement, nTaskDataIndex, nElementIndex)
+    local pPanel = tbElement.pPanel
+    local tbTaskInfo = self.tbSelectTask[nTaskDataIndex]
+    if not tbTaskInfo then
+      return
+    end
+    local szKey = tbTaskInfo.szDailyKey
+    local tbDaily = Task.tbDailyTaskSettings[szKey]
+    if not tbDaily then
+      pPanel:SetActive("Main", false)
+      return
+    end
+    local nTaskId = tbDaily.nTaskId
+    local szTitle = tbDaily.GetTitleWithPrefix() .. " " .. tbDaily.GetStepText()
+    szTitle = Task:GetTitleIncludeColor(szTitle, Task.TASK_TYPE_DAILY, "HudLeftPanelColor")
+    pPanel:SetActive("Main", true)
+    pPanel:Label_SetText("txtTitle", szTitle)
+    pPanel:Label_SetText("txtTarget", tbDaily.GetTarget())
+    tbElement.pPanel:SetActive("imgOngoing", nTaskId == self.nCurTrackTaskId)
+    Ui:Button_BindEvent(pPanel, "btnTrack", self.onTrackTask, self, nTaskDataIndex, nElementIndex)
+    tbElement.tbCellInfo.TikerGetTarget = tbDaily.TikerGetTarget
+    tbElement.tbCellInfo.nTaskId = nil
+  end
+  
+  local function funcSetItem(tbElement, nTaskDataIndex, nElementIndex)
+    local tbTaskInfo = self.tbSelectTask[nTaskDataIndex]
+    if not tbTaskInfo then
+      return
+    end
+    if tbTaskInfo.nTaskId then
+      funSetTaskData_NormalTask(tbElement, nTaskDataIndex, nElementIndex)
+    else
+      funSetTaskData_DailyTaskSetting(tbElement, nTaskDataIndex, nElementIndex)
+    end
+  end
+  
+  local nTaskNum = #self.tbSelectTask
+  local bHaveMainTask = false
+  if nTaskNum > 0 then
+    local tbFirstTask = self.tbSelectTask[1]
+    local nTaskId = tbFirstTask.nTaskId
+    if nTaskId and Task:GetTaskType(nTaskId) == Task.TASK_TYPE_MAIN then
+      bHaveMainTask = true
+    end
+  end
+  if bHaveMainTask then
+    funSetTaskData_MainTask(1)
+  else
+    funSetTaskData_MainTask(0)
+  end
+  local nCount = 0
+  if bHaveMainTask then
+    nCount = nTaskNum - 1
+  else
+    nCount = nTaskNum
+  end
+  self.tbTaskScrollView:SetElement(nCount, function(tbLoopScroll, nIndex)
+    local tbElement = tbLoopScroll:GetElement(nIndex)
+    local nTaskDataIndex = nIndex
+    if bHaveMainTask then
+      nTaskDataIndex = nIndex + 1
+    end
+    funcSetItem(tbElement, nTaskDataIndex, nIndex)
+  end)
+end
+
+function tbWnd:onTrackTask(nTaskDataIndex, nElementIndex)
+  Dungeon:CancelAutoEnter()
+  if 0 == nTaskDataIndex then
+    self:__onTrackTask_Main(nTaskDataIndex, nElementIndex)
+  else
+    self:__onTrackTask_Other(nTaskDataIndex, nElementIndex)
+  end
+end
+
+function tbWnd:__onTrackTask_Main(nTaskDataIndex, nElementIndex)
+  local tbInfo = self.tbSelectTask[1]
+  if not tbInfo then
+    return
+  end
+  local nCurStep, _ = Task:GetCurStepAndTotalStep(tbInfo.nTaskId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ON_CLICK_GOTO_TASK, tbInfo.nTaskId, nCurStep)
+  self.nCurTrackTaskId = tbInfo.nTaskId
+  if Task:CheckCondition(me, tbInfo.nTaskId) then
+    Task:DoAction_Client(me, tbInfo.nTaskId)
+  else
+    me.CenterMsg(Task:GetCondGuideMsg(tbInfo.nTaskId))
+  end
+  self.pPanel:SetActive(self.itemMainTask .. "/imgOngoing", tbInfo.nTaskId == self.nCurTrackTaskId)
+  local tbCellList = self.tbTaskScrollView:GetCellList()
+  for _, tbCell in pairs(tbCellList) do
+    local tbElement = self.tbTaskScrollView:GetElement(tbCell.nIndex)
+    if tbElement then
+      tbElement.pPanel:SetActive("imgOngoing", false)
+    end
+  end
+end
+
+function tbWnd:__onTrackTask_Other(nTaskDataIndex, nElementIndex)
+  local tbInfo = self.tbSelectTask[nTaskDataIndex]
+  if not tbInfo then
+    return
+  end
+  if tbInfo.nTaskId then
+    self.nCurTrackTaskId = tbInfo.nTaskId
+    local nTaskId = tbInfo.nTaskId
+    if Task:CheckCondition(me, nTaskId) then
+      Task:DoAction_Client(me, nTaskId)
+    else
+      me.CenterMsg(Task:GetCondGuideMsg(nTaskId))
+    end
+    local nCurStep, _ = Task:GetCurStepAndTotalStep(tbInfo.nTaskId)
+    EventNotify.OnNotify(EventNotify.emNOTIFY_ON_CLICK_GOTO_TASK, tbInfo.nTaskId, nCurStep)
+  else
+    local szKey = tbInfo.szDailyKey
+    local tbDaily = Task.tbDailyTaskSettings[szKey]
+    if tbDaily then
+      self.nCurTrackTaskId = tbDaily.nTaskId
+      tbDaily.OnTrack()
+    end
+  end
+  self.pPanel:SetActive(self.itemMainTask .. "/imgOngoing", false)
+  local tbCellList = self.tbTaskScrollView:GetCellList()
+  for _, tbCell in pairs(tbCellList) do
+    local tbElement = self.tbTaskScrollView:GetElement(tbCell.nIndex)
+    if tbElement then
+      tbElement.pPanel:SetActive("imgOngoing", tbCell.nIndex == nElementIndex)
+    end
+  end
+end
+
+function tbWnd:timerUpdate()
+  local tbCellList = self.tbTaskScrollView:GetCellList()
+  for _, tbCell in pairs(tbCellList) do
+    local tbElement = self.tbTaskScrollView:GetElement(tbCell.nIndex)
+    if tbElement and tbElement.tbCellInfo.TikerGetTarget then
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtTarget", tbElement.tbCellInfo.TikerGetTarget())
+    end
+  end
+end

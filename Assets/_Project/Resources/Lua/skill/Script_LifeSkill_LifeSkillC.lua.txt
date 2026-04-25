@@ -1,0 +1,248 @@
+Require("CommonScript/LifeSkill/LifeSkill.lua")
+Require("Script/Ui/Common/RedPointMgr.lua")
+local ErrorMsg = {
+  [LifeSkill.ERROR.NOT_LEARN_RECIPE] = LifeSkill.MSG.NOT_LEARN_RECIPE,
+  [LifeSkill.ERROR.NOT_ENOUGH_MATERIAL] = LifeSkill.MSG.NOT_ENOUGH_MATERIAL,
+  [LifeSkill.ERROR.NOT_ENOUGH_MONEY] = LifeSkill.MSG.NOT_ENOUGH_MONEY,
+  [LifeSkill.ERROR.NOT_ENOUGH_BAG] = LifeSkill.MSG.NOT_ENOUGH_BAG,
+  [LifeSkill.ERROR.NOT_LEARN_SKILL] = LifeSkill.MSG.NOT_LEARN_SKILL,
+  [LifeSkill.ERROR.MAX_SKILL_LEVEL] = LifeSkill.MSG.MAX_SKILL_LEVEL,
+  [LifeSkill.ERROR.NOT_SPECIAL_SKILL] = LifeSkill.MSG.NOT_SPECIAL_SKILL,
+  [LifeSkill.ERROR.LEVELUP_SUCCESS] = LifeSkill.MSG.LEVELUP_SUCCESS,
+  [LifeSkill.ERROR.NEXT_LEVEL_REQUIRE_TIPS] = LifeSkill.MSG.NEXT_LEVEL_REQUIRE_TIPS
+}
+LifeSkill.bUseNewPlan = true
+
+function LifeSkill:GetErrorMsg(nErrorCode, ...)
+  local szMsg = ErrorMsg[nErrorCode]
+  if szMsg then
+    return i18n.Get(szMsg, ...)
+  else
+    assert(szMsg, nErrorCode)
+  end
+end
+
+function LifeSkill:OnServerResult(nErrorCode, tbParam)
+  local szMsg = self:GetErrorMsg(nErrorCode, table.unpack(tbParam or {}))
+  if szMsg then
+    me.CenterMsg(szMsg, true)
+  end
+end
+
+function LifeSkill:C2SLevelUp(nSkillId)
+  local tbData = self:GetClientData()
+  local tbSkill = self.tbSkills[nSkillId]
+  if not tbSkill then
+    me.CenterMsg(i18n.Get(LifeSkill.MSG.NOT_LEARN_SKILL))
+    return
+  end
+  local nCurLevel = tbData.tbSkills[nSkillId]
+  if not nCurLevel then
+    me.CenterMsg(i18n.Get(LifeSkill.MSG.NOT_LEARN_SKILL))
+    return
+  end
+  local tbLevel = self.tbLevel[nSkillId][nCurLevel + 1]
+  if not tbLevel then
+    me.CenterMsg(i18n.Get(LifeSkill.MSG.MAX_SKILL_LEVEL))
+    return
+  end
+  if me.nTotalLevel < tbLevel.nPlayerLevel then
+    me.CenterMsg(i18n.Get(LifeSkill.MSG.NEXT_LEVEL_REQUIRE_TIPS, Lib:GetLevelText(tbLevel.nPlayerLevel)))
+    return
+  end
+  if me.GetMoney(LifeSkill.LevelUpCurrencyType) < tbLevel.nCost then
+    GainCurrency:ReadyForJump(LifeSkill.LevelUpCurrencyType)
+    return
+  end
+  RemoteServer.OnLifeSkillRequest(LifeSkill.Protocol.C2SLevelUp, nSkillId)
+end
+
+function LifeSkill:OnLevelUp(nSkillId, nLevel)
+  if not self.tbClientData then
+    return
+  end
+  self.tbClientData.tbSkills[nSkillId] = nLevel
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LIFESKILL_LEVELUP, nSkillId, nLevel)
+  self:HandleLifeSkillRedPoint()
+end
+
+function LifeSkill:C2SCraft(nRecipeId)
+  if not nRecipeId then
+    return
+  end
+  local tbRecipeInfo = self.tbRecipes[nRecipeId]
+  if not tbRecipeInfo then
+    return
+  end
+  local tbData = self:GetClientData()
+  if tbData.tbSkills[tbRecipeInfo.nSkill] < tbRecipeInfo.nLevel then
+    me.CenterMsg(i18n.Get(LifeSkill.MSG.NOT_LEARN_RECIPE))
+    return
+  end
+  if not self:CheckMaterial(tbRecipeInfo) then
+    me.CenterMsg(i18n.Get(LifeSkill.MSG.NOT_ENOUGH_MATERIAL))
+    return
+  end
+  local nCost = tbRecipeInfo.nCost
+  if tbData.nSpecialty ~= tbRecipeInfo.nSkill then
+    nCost = math.ceil(tbRecipeInfo.nCost * LifeSkill:GetCraftCostCoefficient())
+  end
+  if nCost > me.GetMoney(tbRecipeInfo.szCurrencyType) then
+    me.CenterMsg(i18n.Get(LifeSkill.MSG.NOT_ENOUGH_MONEY, nCost, Currency:GetName(tbRecipeInfo.szCurrencyType)))
+    return
+  end
+  if me.GetFreeBagCount() < tbRecipeInfo.nNeedBagCount then
+    me.CenterMsg(i18n.Get(LifeSkill.MSG.NOT_ENOUGH_BAG))
+    return
+  end
+  RemoteServer.OnLifeSkillRequest(LifeSkill.Protocol.C2SCraft, nRecipeId, self.bDoubleRate)
+end
+
+function LifeSkill:OnCraftResult(nProductTemplateId, nOtherTemplateId, nOtherNums)
+  if Ui:WindowVisible("UILifeSkill") then
+    Ui:GetWindow("UILifeSkill"):OnCraftResult(nProductTemplateId)
+  end
+  if nProductTemplateId then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LIFESKILL_CRAFT, nProductTemplateId)
+  end
+  if nOtherTemplateId then
+    local szName = KItem.GetItemShowInfo(nOtherTemplateId, me.nFaction, me.nFactionSect, me.nSex)
+    local szMsg = i18n.EasyGet("\230\130\168\232\142\183\229\190\151\228\186\134<{0}> * {1} (\232\163\133\229\164\135\230\137\147\233\128\160\239\188\137", szName, nOtherNums)
+    local tbLinkData = {
+      nLinkType = ChatMgr.LinkType.Item,
+      nFaction = me.nFaction,
+      nTemplateId = nOtherTemplateId,
+      nBodySex = me.nSex
+    }
+    ChatMgr:OnChannelMessage(ChatMgr.ChannelType.System, 0, ChatMgr.SystemMsgType.System, "", 0, 0, 0, szMsg, nil, nil, nil, tbLinkData)
+  end
+  local szName = KItem.GetItemShowInfo(nProductTemplateId, me.nFaction, me.nFactionSect, me.nSex)
+  local szMsg = i18n.EasyGet("\230\130\168\232\142\183\229\190\151\228\186\134<{0}> * {1} (\232\163\133\229\164\135\230\137\147\233\128\160\239\188\137", szName, 1)
+  local tbLinkData = {
+    nLinkType = ChatMgr.LinkType.Item,
+    nFaction = me.nFaction,
+    nTemplateId = nProductTemplateId,
+    nBodySex = me.nSex
+  }
+  ChatMgr:OnChannelMessage(ChatMgr.ChannelType.System, 0, ChatMgr.SystemMsgType.System, "", 0, 0, 0, szMsg, nil, nil, nil, tbLinkData)
+end
+
+function LifeSkill:OnModifySpecialty(nSkillId)
+  if not self.tbClientData then
+    return
+  end
+  if nSkillId then
+    self.tbClientData.nSpecialty = nSkillId
+  else
+    self.tbClientData.nSpecialty = nil
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_LIFESKILL_MODIFY_SPECIALTY)
+  self:HandleLifeSkillRedPoint()
+end
+
+function LifeSkill:RequestData()
+  RemoteServer.OnLifeSkillRequest(LifeSkill.Protocol.C2SRequestData)
+end
+
+function LifeSkill:OnSyncData(tbPlayerData)
+  self.tbClientData = tbPlayerData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_LIFESKILL_DATA)
+  self:HandleLifeSkillRedPoint()
+end
+
+function LifeSkill:OnLogin(bIsReconnect)
+  self.tbClientData = nil
+  self.bDoubleRate = false
+  self:RequestData()
+end
+
+function LifeSkill:GetDoubleRate()
+  return self.bDoubleRate
+end
+
+function LifeSkill:SetDoubleRate(bDoubleRate)
+  self.bDoubleRate = bDoubleRate
+end
+
+function LifeSkill:GetClientData()
+  return self.tbClientData
+end
+
+function LifeSkill:CanShow()
+  return self.tbClientData ~= nil and nil ~= next(self.tbClientData.tbSkills)
+end
+
+function LifeSkill:HandleLifeSkillRedPoint()
+  local tbPlayerData = LifeSkill:GetClientData()
+  if not tbPlayerData then
+    return
+  end
+  local nSpecialtySkill = tbPlayerData.nSpecialty
+  if not nSpecialtySkill or 0 == nSpecialtySkill then
+    return
+  end
+  local nLevel = tbPlayerData.tbSkills[nSpecialtySkill]
+  if not nLevel then
+    return
+  end
+  local isHaveRedPoint = LifeSkill:CheckIsCanLifeSkillLvUp(nSpecialtySkill, nLevel)
+  if true == isHaveRedPoint then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.LifeSkill)
+  else
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.LifeSkill)
+  end
+end
+
+function LifeSkill:OnPlayerLvChange()
+  self:HandleLifeSkillRedPoint()
+end
+
+function LifeSkill:OnMoneyChange()
+  self:HandleLifeSkillRedPoint()
+end
+
+function LifeSkill:ForgetSpecialty()
+  local function fnComfirm()
+    RemoteServer.OnLifeSkillRequest(LifeSkill.Protocol.C2SForgetSpecialty)
+  end
+  
+  if LifeSkill:IsCanFreeForgetSpecialty(me) then
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\232\167\146\232\137\178\231\173\137\231\186\167\229\156\168{0}\229\137\141\228\184\148\229\137\141{1}\230\172\161\233\129\151\229\191\152\228\184\147\231\178\190\229\143\175\229\133\141\232\180\185\230\147\141\228\189\156\239\188\140\230\130\168\231\161\174\229\174\154\233\156\128\232\166\129\233\129\151\229\191\152\229\189\147\229\137\141\228\184\147\231\178\190\230\138\128\232\131\189\229\144\151\239\188\159", LifeSkill.FreeForgetLevelLimit, LifeSkill.FreeForgetTimeLimit), {
+      {fnComfirm},
+      {}
+    }, {
+      i18n.szOk,
+      i18n.szCancel
+    })
+  else
+    Ui:OpenWindow("UISpecialForget")
+  end
+end
+
+function LifeSkill:OnS2CSetSpecialtyComfirm(nSkillId)
+  local function fnComfirm()
+    RemoteServer.OnLifeSkillRequest(LifeSkill.Protocol.C2SComfirmSetSpecialty, nSkillId)
+  end
+  
+  local tbInfo = self:GetLifeSkillInfo(nSkillId)
+  Ui:OpenWindow("UIMessageBox", i18n.Get(self.MSG.SET_SPECIALTY_COMFIRM, i18n.Parse(tbInfo.szName)), {
+    {fnComfirm},
+    {}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  })
+end
+
+function LifeSkill:SetNotShowValue(bIsNotShowToday)
+  RemoteServer.OnLifeSkillRequest(self.Protocol.C2SSetTodaySecondConfirm, not bIsNotShowToday)
+end
+
+function LifeSkill:OnSyncFlag(bUseNewPlan)
+  LifeSkill.bUseNewPlan = bUseNewPlan
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, LifeSkill)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_MONEY, LifeSkill.OnMoneyChange, LifeSkill)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, LifeSkill)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL, LifeSkill.OnPlayerLvChange, LifeSkill)

@@ -1,0 +1,150 @@
+local tbWnd = Ui:CreateWindow("UISkillBookPickingResult")
+tbWnd.tbControls = {
+  btnBG = "BG",
+  goOneBook = "imgBG/OneBook",
+  txtOneBookName = "imgBG/OneBook/Item/txtName",
+  goTenBook = "imgBG/TenBook",
+  txtTenBookName = "imgBG/TenBook/Item%d/txtName",
+  imgIconPick = "imgBG/bottom/IconPick",
+  imgIconTenPick = "imgBG/bottom/IconTenPick",
+  txtTenPickValue = "imgBG/bottom/IconTenPick/txtTenPickValue",
+  txtPickValue = "imgBG/bottom/IconPick/txtPickValue",
+  btnPick = "imgBG/bottom/btnPick",
+  btnTenPick = "imgBG/bottom/btnTenPick",
+  OneBookItemGrid = "imgBG/OneBook/Item/UIItemGrid",
+  TenBookItemGrid = "imgBG/TenBook/Item%d/UIItemGrid",
+  effectOneBookQuality1 = "imgBG/OneBook/Item/Effect/Quality1",
+  effectOneBookQuality2 = "imgBG/OneBook/Item/Effect/Quality2",
+  effectTenBookQuality1 = "imgBG/TenBook/Item%d/Effect/Quality1",
+  effectTenBookQuality2 = "imgBG/TenBook/Item%d/Effect/Quality2"
+}
+tbWnd.tbOnClick = {
+  btnBG = function(self)
+    self:Close()
+    Ui:OpenWindow("UISkillBookPickingNew")
+  end,
+  btnPick = function(self)
+    CardPicker:RequestCardPick("SkillBookPick")
+  end,
+  btnTenPick = function(self)
+    if not CardPicker:CheckCardPickMoney("SkillBookTenPick") then
+      return
+    end
+    local nLastTime = LocalData:GetRoleNumber("Partner_CloseSkillBookCardPickerNoticeTime", 0)
+    local bIsDiffDay = Lib:IsDiffDay(14400, nLastTime)
+    if not bIsDiffDay then
+      CardPicker:RequestCardPick("SkillBookTenPick")
+    else
+      local function fnCardPick()
+        CardPicker:RequestCardPick("SkillBookTenPick")
+      end
+      
+      Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\230\152\175\229\144\166\231\161\174\232\174\164\229\141\129\232\191\158\230\138\189\229\143\150\230\138\128\232\131\189\228\185\166\239\188\159"), {
+        {fnCardPick},
+        {}
+      }, {
+        i18n.szOk,
+        i18n.szCancel
+      }, "SkillBookCardPicker", nil, i18n.EasyGet("\228\187\138\230\151\165\228\184\141\229\134\141\230\143\144\233\134\146"))
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self:GetAllItemGrid()
+end
+
+function tbWnd:OnOpen(tbItems)
+  self.pPanel:Label_SetText(self.txtTenPickValue, CardPicker.Def.nSkillBookTenCost)
+  self.pPanel:Label_SetText(self.txtPickValue, CardPicker.Def.nSkillBookCost)
+  local szPickItemIconPath = "UI/icon/money/icon_JiNengbi54x54.png"
+  local szYuanbaoIconPath = "UI/icon/money/icon_yuanbao.png"
+  self.pPanel:Sprite_SetSprite(self.imgIconTenPick, szYuanbaoIconPath)
+  self.pPanel:Sprite_SetSprite(self.imgIconPick, szYuanbaoIconPath)
+  local nItemCount = me.GetItemCountInBags(CardPicker.Def.nPartnerSkillBookPickItemId)
+  if nItemCount > 0 then
+    self.pPanel:Label_SetText(self.txtPickValue, 1)
+    self.pPanel:Sprite_SetSprite(self.imgIconTenPick, szPickItemIconPath)
+    self.pPanel:Sprite_SetSprite(self.imgIconPick, szPickItemIconPath)
+    if nItemCount > 0 and nItemCount < 10 then
+      self.pPanel:Label_SetText(self.txtTenPickValue, string.format("%d/10", nItemCount))
+    else
+      self.pPanel:Label_SetText(self.txtTenPickValue, 10)
+    end
+  end
+  if 1 == Lib:CountTB(tbItems) then
+    self.pPanel:SetActive(self.goOneBook, true)
+    self.pPanel:SetActive(self.goTenBook, false)
+    self.pPanel:Label_SetText(self.txtOneBookName, Item:GetName(tbItems[1].nItemId, me))
+    local nQuality = Item:GetQuality(tbItems[1].nItemId)
+    if 6 == nQuality then
+      self.pPanel:SetActive(self.effectOneBookQuality2, true)
+    else
+      self.pPanel:SetActive(self.effectOneBookQuality2, false)
+    end
+    self.pPanel:SetActive(self.OneBookItemGrid, true)
+    self.tbOneItemGrid:SetItemByTemplate(tbItems[1].nItemId, 0)
+    self.tbOneItemGrid:SetClickEnable(true)
+  elseif 10 == Lib:CountTB(tbItems) then
+    self.pPanel:SetActive(self.goOneBook, false)
+    self.pPanel:SetActive(self.goTenBook, true)
+    for i = 1, 10 do
+      self.pPanel:Label_SetText(string.format(self.txtTenBookName, i), Item:GetName(tbItems[i].nItemId, me))
+      local nQuality = Item:GetQuality(tbItems[i].nItemId)
+      if 6 == nQuality then
+        self.pPanel:SetActive(string.format(self.effectTenBookQuality2, i), true)
+      else
+        self.pPanel:SetActive(string.format(self.effectTenBookQuality2, i), false)
+      end
+      self.pPanel:SetActive(string.format(self.TenBookItemGrid, i), true)
+      self.tbTenItemGrid[i]:SetItemByTemplate(tbItems[i].nItemId, 0)
+      self.tbTenItemGrid[i]:SetClickEnable(true)
+    end
+  end
+  if CardPicker.bIsInSkillBookTenPickHalfPriceActivity then
+    self:UpdateHalfPriceState(Lib:CountTB(tbItems))
+  end
+end
+
+function tbWnd:UpdateHalfPriceState(nPickCount)
+  local nItemCount = me.GetItemCountInBags(CardPicker.Def.nPartnerSkillBookPickItemId)
+  local nLastTime = me.GetUserValue(CardPicker.Def.CARD_SAVE_GROUP, CardPicker.Def.SAVE_HALFPRICE_SKILLBOOK_PICK_TIME)
+  if Lib:IsDiffDay(14400, nLastTime) then
+    if nItemCount > 0 then
+      if nItemCount < 5 then
+        self.pPanel:Label_SetText(self.txtTenPickValue, string.format("%d/5", nItemCount))
+      else
+        self.pPanel:Label_SetText(self.txtTenPickValue, 5)
+      end
+    else
+      self.pPanel:Label_SetText(self.txtTenPickValue, CardPicker.Def.nSkillBookHalfTenCost)
+    end
+  elseif nItemCount > 0 then
+    if nItemCount < 10 then
+      self.pPanel:Label_SetText(self.txtTenPickValue, string.format("%d/10", nItemCount))
+    else
+      self.pPanel:Label_SetText(self.txtTenPickValue, 10)
+    end
+  else
+    self.pPanel:Label_SetText(self.txtTenPickValue, CardPicker.Def.nSkillBookTenCost)
+  end
+  if nPickCount > 1 then
+    if nItemCount > 0 and nItemCount < 10 then
+      self.pPanel:Label_SetText(self.txtTenPickValue, string.format("%d/10", nItemCount))
+    elseif nItemCount >= 10 then
+      self.pPanel:Label_SetText(self.txtTenPickValue, 10)
+    else
+      self.pPanel:Label_SetText(self.txtTenPickValue, CardPicker.Def.nSkillBookTenCost)
+    end
+  end
+end
+
+function tbWnd:GetAllItemGrid()
+  self.tbOneItemGrid = {}
+  self.tbTenItemGrid = {}
+  self.tbOneItemGrid = Ui:NewExistItemGrid(self, self.OneBookItemGrid)
+  for i = 1, 10 do
+    local grid = Ui:NewExistItemGrid(self, string.format(self.TenBookItemGrid, i))
+    table.insert(self.tbTenItemGrid, grid)
+  end
+end

@@ -1,0 +1,188 @@
+Vip.tbPioneerHadGetNum = Vip.tbPioneerHadGetNum or {}
+Vip.tbVipViewShowMaxLevel = {
+  [0] = 5,
+  [1] = 5,
+  [2] = 5,
+  [3] = 5,
+  [4] = 5,
+  [5] = 8,
+  [6] = 8,
+  [7] = 8,
+  [8] = 11,
+  [9] = 11,
+  [10] = 11,
+  [11] = 14,
+  [12] = 14,
+  [13] = 14,
+  [14] = 18,
+  [15] = 18,
+  [16] = 18,
+  [17] = 18,
+  [18] = 18
+}
+Vip.szVipLevelGiftState = "szVipLevelGiftState"
+
+function Vip:CSGetPioneerHadGetNum(nVipLevel)
+  RemoteServer.RequestVip("GetPioneerHadGetNum", nVipLevel)
+end
+
+function Vip:CSGetPioneer(nVipLevel)
+  local bRet, szTip = self:CanGetPioneerState(me, nVipLevel)
+  if not bRet then
+    return me.CenterMsg(szTip)
+  end
+  RemoteServer.RequestVip("GetVipPioneerGiftBag", nVipLevel)
+end
+
+function Vip:CSBuyLevelGiftBag(nVipLevel)
+  local bState = Vip:GetLevelGiftBagState(me, nVipLevel)
+  if bState then
+    return me.CenterMsg(i18n.EasyGet("\231\164\188\229\140\133\229\183\178\232\180\173\228\185\176"))
+  end
+  RemoteServer.RequestVip("BuyLevelGiftBag", nVipLevel)
+end
+
+function Vip:SCOnVipLevelChange()
+  me.UpdateVipLevel()
+  EventNotify.OnNotify(EventNotify.emNOTIFY_VIP_LEVEL_CHANGE)
+end
+
+function Vip:GetPioneerGiftBagRsp()
+  if Ui:WindowVisible("UIShopPay") then
+    local UiWnd = Ui:GetWindow("UIShopPay")
+    UiWnd:UpdatePioneerGbInfo()
+  end
+end
+
+function Vip:BuyLevelGiftBagRsp(nVipLevel)
+  if Ui:WindowVisible("UIShopPay") then
+    local UiWnd = Ui:GetWindow("UIShopPay")
+    UiWnd:UpdateLevelGBInfo()
+    self:OnCheckVipNameRedPoint(nVipLevel)
+  end
+  local szVipName = Vip:GetVipName(nVipLevel)
+  local tbArgs = {
+    user_id = GetAccountName(),
+    role_id = tostring(me.dwID),
+    server_id = tostring(Sdk:GetServerId()),
+    item_vip_level = tostring(nVipLevel),
+    itemID = self.tbSetting[nVipLevel].nGiftItemId,
+    item_price = self.tbSetting[nVipLevel].nGiftRealPrice,
+    currency = "YuanBao",
+    item_name = i18n.EasyGet("{0}\231\164\188\229\140\133", szVipName)
+  }
+  Sdk:RecordCleverTapEvent("buy_vip_reward", tbArgs)
+end
+
+function Vip:GetPioneerHadGetNumRsp(nVipLevel, nHadGetNum)
+  self.tbPioneerHadGetNum[nVipLevel] = nHadGetNum
+  if Ui:WindowVisible("UIShopPay") then
+    local UiWnd = Ui:GetWindow("UIShopPay")
+    UiWnd:UpdatePioneerRemainNum()
+  end
+end
+
+function Vip:GetPioneerRemainNum(nVipLevel)
+  return self.tbPioneerHadGetNum[nVipLevel] or self.tbSetting[nVipLevel].nPioneerGBCount
+end
+
+function Vip:GetNextLevelNeedMoney(nCurVipLevel)
+  if nCurVipLevel >= #self.tbExpSetting then
+    return 0
+  end
+  local nCurTotalExp = self:GetTotoalExp(me)
+  local nNextTotalExp = self.tbExpSetting[nCurVipLevel + 1]
+  local nNeedExp = nNextTotalExp - nCurTotalExp
+  return math.floor(nNeedExp / Recharge.nMoney2ExpProportion)
+end
+
+function Vip:GetNextLevelNeedExp(nNextVipLevel)
+  local nNextVipLevel = self.tbExpSetting[nNextVipLevel] or 0
+  return nNextVipLevel
+end
+
+function Vip:OnLogin()
+  me.UpdateVipLevel()
+  LocalData:SetRoleNumber(Vip.szVipLevelGiftState, 0)
+  for i = 0, self.nMaxLevel do
+    self:OnCheckVipNameRedPoint(i)
+  end
+end
+
+function Vip:GetVipClickState(nVipLevel)
+  local nState = LocalData:GetRoleNumber(Vip.szVipLevelGiftState, 0)
+  nState = nState >> nVipLevel
+  nState = nState & 1
+  return nState
+end
+
+function Vip:SetVipClickState(nVipLevel)
+  local nClickState = LocalData:GetRoleNumber(Vip.szVipLevelGiftState, 0)
+  nClickState = nClickState | 1 << nVipLevel
+  LocalData:SetRoleNumber(Vip.szVipLevelGiftState, nClickState)
+  Vip:OnCheckVipNameRedPoint(nVipLevel)
+  Vip:OnCheckLevelBtnRedPoint(nVipLevel)
+end
+
+function Vip:OnCheckVipNameRedPoint(nVipLevel)
+  local nClickState = self:GetVipClickState(nVipLevel)
+  if 1 == nClickState then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.VipLevelGiftBagBegin + nVipLevel)
+  elseif not Vip:CanBugLevelGiftBag(me, nVipLevel) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.VipLevelGiftBagBegin + nVipLevel)
+  else
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.VipLevelGiftBagBegin + nVipLevel)
+  end
+end
+
+function Vip:OnCheckLevelBtnRedPoint(nVipLevel)
+  local nClickState = self:GetVipClickState(nVipLevel)
+  if 1 == nClickState then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.VipLevelGiftBagCommon)
+  elseif not Vip:CanBugLevelGiftBag(me, nVipLevel) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.VipLevelGiftBagCommon)
+  else
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.VipLevelGiftBagCommon)
+  end
+end
+
+function Vip:CanShowPioneerGift(pPlayer, nVipLevel)
+  if not pPlayer or nVipLevel < 0 or nVipLevel > Vip.nMaxLevel then
+    return false
+  end
+  if self.tbSetting[nVipLevel].bIsGivePioneerGB ~= "1" then
+    return false
+  end
+  local nState = pPlayer.GetUserValue(self.SAVE_GROUP, self.KEY_LEVEL_GIFT_BAG_STATE)
+  nState = nState & 1 << nVipLevel
+  if 1 == nState then
+    return false
+  end
+  local nPioneerGBDurationTime = self.tbSetting[nVipLevel].nPioneerGBDurationTime
+  local nServerCreateTime = GetServerCreateTime()
+  if GetTime() > nServerCreateTime + nPioneerGBDurationTime then
+    return false, i18n.EasyGet("\229\133\136\233\148\139\231\164\188\229\140\133\230\180\187\229\138\168\229\183\178\231\187\147\230\157\159")
+  end
+  return true
+end
+
+function Vip:SCRoleHeadVipLevelRsp(nPlayerID, nVipLevel)
+  local ui = Ui:GetWindow("UIHud")
+  if ui then
+    ui:OnVipLevelResp(nPlayerID or 0, nVipLevel or 0)
+  end
+end
+
+function Vip:CSRoleHeadReqVipLevel(nPlayerID)
+  if not nPlayerID then
+    self:SCRoleHeadVipLevelRsp()
+  end
+  RemoteServer.RequestVip("RoleHeadRspVipLevel", nPlayerID)
+end
+
+function Vip:ZoneRoleHeadInfoRsp(tbData)
+  local ui = Ui:GetWindow("UIHud")
+  if ui then
+    ui:OnZoneRoleHeadInfoRsp(tbData.dwRoleId, tbData)
+  end
+end

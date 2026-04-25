@@ -1,0 +1,590 @@
+local tbWnd = Ui:CreateClass("UIStoneTips", "UIPanel")
+
+function tbWnd:NotifyEvents()
+  return {}
+end
+
+local tbControls = {
+  txtName = "imgBG/Top/imgTitle/txtTitle",
+  ItemGrid = "imgBG/Top/UIItemGrid",
+  txtCount = "imgBG/Top/txtCount",
+  txtLevelRequire = "imgBG/Top/txtLevelRequire",
+  txtItemTime = "imgBG/Top/txtItemTime",
+  btnGroup = "imgBG/btnGroup",
+  txtNonTradable = "imgBG/txtNonTradable",
+  txtTradable = "imgBG/txtTradable",
+  txtPriceValue = "imgBG/txtPrice/txtPriceValue",
+  txtPrice = "imgBG/txtPrice",
+  imgMoney = "imgBG/txtPrice/imgMoney",
+  Template = "imgBG/LabelScrollView/Viewport/Content/Template",
+  line1 = "imgBG/LabelScrollView/Viewport/Content/Template/line1",
+  line2 = "imgBG/LabelScrollView/Viewport/Content/Template/line2",
+  line3 = "imgBG/LabelScrollView/Viewport/Content/Template/line3",
+  btnShare = "imgBG/btnGroup/btnShare",
+  btnHawk = "imgBG/btnGroup/btnHawk",
+  btnSell = "imgBG/btnGroup/btnSell",
+  btnMarketSell = "imgBG/btnGroup/btnMarketSell",
+  btnMoveToBox = "imgBG/btnGroup/btnMoveToBox",
+  btnCenter = "imgBG/btnGroup/btnCenter",
+  btnRight1 = "imgBG/btnGroup/btnRight1",
+  btnRight2 = "imgBG/btnGroup/btnRight2",
+  btnRight3 = "imgBG/btnGroup/btnRight3"
+}
+tbWnd.tbOnClick = {
+  btnSell = function(self)
+    self:SellItem()
+  end,
+  btnMarketSell = function(self)
+    if self.nMarketType and self.nItemId then
+      MarketStallBase:QuickSell(self.nMarketType, self.nItemId)
+      self:Close()
+    end
+  end,
+  btnCenter = function(self)
+    if self.fnCenter then
+      if type(self.fnCenter) == "string" then
+        local func = self[self.fnCenter]
+        if 1 == func(self, self.nItemId) then
+          self:Close()
+        end
+      elseif 1 == self.fnCenter(self, self.nItemId) then
+        self:Close()
+      end
+    end
+  end,
+  btnRight1 = function(self)
+    if self.fnRight1 then
+      if type(self.fnRight1) == "string" then
+        local func = self[self.fnRight1]
+        if 1 == func(self, self.nItemId) then
+          self:Close()
+        end
+      elseif 1 == self.fnRight1(self, self.nItemId) then
+        self:Close()
+      end
+    end
+  end,
+  btnRight2 = function(self)
+    if type(self.fnRight2) == "string" then
+      local func = self[self.fnRight2]
+      if 1 == func(self, self.nItemId) then
+        self:Close()
+      end
+    elseif 1 == self.fnRight2(self, self.nItemId) then
+      self:Close()
+    end
+  end,
+  btnRight3 = function(self)
+    if type(self.fnRight3) == "string" then
+      local func = self[self.fnRight3]
+      if 1 == func(self, self.nItemId) then
+        self:Close()
+      end
+    elseif 1 == self.fnRight3(self, self.nItemId) then
+      self:Close()
+    end
+  end,
+  btnShare = function(self)
+    Ui:SetItemToChat(self.nItemId)
+    Ui:CloseWindow("UIBag")
+    self:Close()
+  end,
+  btnHawk = function(self)
+    self:Hawk()
+  end,
+  btnMoveToBox = function(self)
+    local pItem = KItem.GetItemObj(self.nItemId)
+    if not pItem then
+      return
+    end
+    local tbBaseInfo = Item:GetItemBaseProp(pItem.dwTemplateId)
+    if tbBaseInfo.bForbidToBox and 1 == tbBaseInfo.bForbidToBox then
+      me.CenterMsg(i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\141\229\143\175\229\173\152\229\133\165\228\187\147\229\186\147"))
+      return
+    end
+    if me.GetFreeBoxCount() <= 0 then
+      me.CenterMsg(i18n.EasyGet("\229\176\145\228\190\160\228\187\147\229\186\147\229\183\178\230\187\161\239\188\140\230\151\160\230\179\149\229\173\152\229\133\165\231\137\169\229\147\129"))
+      return
+    end
+    if pItem.nPos ~= Item.EITEMPOS_BAG then
+      me.CenterMsg(i18n.EasyGet("\232\175\165\231\137\169\229\147\129\228\184\141\229\156\168\232\131\140\229\140\133\229\134\133"))
+      return
+    end
+    RemoteServer.MoveItemFromBagToBox(self.nItemId)
+    self:Close()
+  end
+}
+local tbTipTypeDef = {
+  Tittle = 1,
+  Attrib = 2,
+  Compose = 3,
+  Text = 4
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.itemGrid = Ui:NewExistItemGrid(self, tbControls.ItemGrid)
+  self.tbScrollView = Ui:NewScrollView(self, tbControls.Template, nil, false, true)
+  self.tbTradePanel = {}
+end
+
+function tbWnd:OnOpen(nItemId, nTemplateId, tbInfo)
+  self.pPanel:SetActive(tbControls.txtItemTime, false)
+  self.pPanel:SetActive(tbControls.txtNonTradable, false)
+  self.pPanel:SetActive(tbControls.txtTradable, false)
+  self.pPanel:SetActive(tbControls.btnShare, false)
+  self.pPanel:SetActive(tbControls.btnCenter, false)
+  self.pPanel:SetActive(tbControls.btnSell, false)
+  self.pPanel:SetActive(tbControls.btnMarketSell, false)
+  self.pPanel:SetActive(tbControls.btnMoveToBox, false)
+  self.pPanel:SetActive(tbControls.btnRight1, false)
+  self.pPanel:SetActive(tbControls.btnRight2, false)
+  self.pPanel:SetActive(tbControls.btnRight3, false)
+  self.nItemId = nItemId
+  self.nTemplateId = nTemplateId
+  self.szOpt = tbInfo.szItemOpt
+  self.tbItemExtParams = tbInfo.tbItemExtParams
+  if self.tbItemExtParams then
+    self.tbTradeInfo = self.tbItemExtParams.tbTradeInfo
+  end
+  self.nFactionSect = tbInfo.nFactionSect
+  self.nSex = tbInfo.nBodySex
+  self.nFaction = tbInfo.nFaction
+  local szStoneName, nIcon, nView, nQuality = KItem.GetItemShowInfo(nTemplateId, me.nFaction, me.nFactionSect, me.nSex)
+  self.nQuality = nQuality
+  if EDITOR then
+    self.szStoneName = string.format("%s (ID:%d)", i18n.Parse(szStoneName), nTemplateId)
+  else
+    self.szStoneName = i18n.Parse(szStoneName)
+  end
+  self:SetStone(self.nItemId, self.nTemplateId)
+  self:SetItemCount()
+  self:SetCanInsert()
+  local tbTips = self:GetAttrib(nItemId, nTemplateId)
+  self:SetTips(tbTips)
+  self:UpdateTradePanel()
+end
+
+function tbWnd:SetStone(nItemId, nTemplateId)
+  if not nTemplateId and not nItemId then
+    return
+  end
+  local pItem
+  if nItemId then
+    pItem = KItem.GetItemObj(nItemId)
+    if not pItem then
+      return
+    end
+    nTemplateId = pItem.dwTemplateId
+  end
+  local tbInfo = Item:GetItemBaseProp(nTemplateId)
+  if not tbInfo then
+    return
+  end
+  if self.szStoneName then
+    self.pPanel:SetActive(tbControls.txtName, true)
+    self.pPanel:Label_SetText(tbControls.txtName, self.szStoneName)
+  end
+  self.itemGrid:SetItem(nItemId, nTemplateId, {bShowTip = false})
+  if tbInfo.nRequireLevel then
+    local szRequiteLevel = i18n.EasyGet("\229\174\157\231\159\179\231\173\137\231\186\167\239\188\154{0}\231\186\167", tbInfo.nLevel)
+    self.pPanel:Label_SetText(tbControls.txtLevelRequire, szRequiteLevel)
+    self.pPanel:SetActive(tbControls.txtLevelRequire, true)
+  end
+  if pItem then
+    local bCanTrade, szTradeWay = self:GetItemTradeText(pItem)
+    self.pPanel:SetActive(tbControls.txtTradable, bCanTrade)
+    self.pPanel:SetActive(tbControls.txtNonTradable, not bCanTrade)
+    if bCanTrade then
+      self.pPanel:Label_SetText(tbControls.txtTradable, szTradeWay)
+    end
+  else
+    self.pPanel:SetActive(tbControls.txtTradable, false)
+    self.pPanel:SetActive(tbControls.txtNonTradable, false)
+  end
+  local bCanSell = true
+  if pItem then
+    bCanSell, _ = Item.tbItemSell:CheckCanSellItem(pItem.dwTemplateId)
+  else
+    bCanSell = false
+  end
+  if bCanSell then
+    local szCurrency, nPrice = Item.tbItemSell:GetSellCurrencyValue(self.nTemplateId)
+    if szCurrency then
+      self.pPanel:Label_SetText(tbControls.txtPriceValue, nPrice)
+      local szIcon = Currency:GetIcon(szCurrency)
+      self.pPanel:Sprite_SetSprite(tbControls.imgMoney, szIcon)
+      self.pPanel:SetActive(tbControls.txtPrice, true)
+    else
+      self.pPanel:SetActive(tbControls.txtPrice, false)
+    end
+  else
+    self.pPanel:SetActive(tbControls.txtPrice, false)
+  end
+  local bCanHawk = self:CanHawk()
+  self.pPanel:SetActive(tbControls.btnHawk, bCanHawk)
+  local bCanSell = self:CanSellItem(pItem)
+  self.pPanel:SetActive(tbControls.btnSell, bCanSell)
+  if pItem then
+    self.pPanel:SetActive(tbControls.btnShare, true)
+  else
+    self.pPanel:SetActive(tbControls.btnShare, false)
+  end
+  local nCanMarketStall = false
+  self.nMarketType = nil
+  nCanMarketStall, self.nMarketType = MarketStallBase:CheckMarketSellItemTypeSettings(pItem)
+  self.pPanel:SetActive(tbControls.btnMarketSell, nCanMarketStall)
+  local nCanMoveToBox = false
+  local nVipState = false
+  if pItem and self.szOpt == "ItemBox" then
+    local tbBaseInfo = Item:GetItemBaseProp(pItem.dwTemplateId)
+    if tbBaseInfo.bForbidToBox and 0 == tbBaseInfo.bForbidToBox then
+      nCanMoveToBox = true
+    end
+    local weekCardLeft = WeekMonthCard:GetWeekCardLeftDay(me)
+    local bMonthCardState = WeekMonthCard:CheckMonthCardState(me)
+    if weekCardLeft > 0 or bMonthCardState then
+      nVipState = true
+    end
+  end
+  self.pPanel:SetActive(self.btnMoveToBox, nCanMoveToBox and nVipState)
+  self.pPanel:Label_SetText(self.btnMoveToBox .. "/Text", i18n.EasyGet("\231\167\187\229\133\165\228\187\147\229\186\147"))
+  local szClassName = tbInfo.szClass
+  local tbClass = Item.tbClass[szClassName]
+  local tbUseSetting = tbClass:GetUseSetting(nTemplateId, nItemId, self.szOpt)
+  if tbUseSetting.bHideShareButton then
+    self.pPanel:SetActive(tbControls.btnShare, false)
+  end
+  if tbUseSetting.bHideHawkButton then
+    self.pPanel:SetActive(tbControls.btnHawk, false)
+  end
+  if tbUseSetting.bHideSellButton then
+    self.pPanel:SetActive(tbControls.btnSell, false)
+  end
+  if tbUseSetting.btnMarketSellButton then
+    self.pPanel:SetActive(tbControls.btnMarketSell, false)
+  end
+  if tbUseSetting.nComposeRedPointPosition then
+    self.nComposeRedPointPosition = tbUseSetting.nComposeRedPointPosition
+  end
+  self:SetButtonFunc(tbUseSetting.szFirstName, tbUseSetting.fnFirst, tbUseSetting.szSecondName, tbUseSetting.fnSecond, tbUseSetting.szThirdName, tbUseSetting.fnThird)
+  self:RegistRedPoint()
+end
+
+function tbWnd:SetStoneByTemplate(nTemplateId)
+end
+
+function tbWnd:SetItemCount()
+  local nHaveNum = 0
+  if Ui:WindowVisible("UIWarehouse") and self.szOpt == "Warehouse_ItemBox" then
+    nHaveNum = me.GetItemCountInBoxs(self.nTemplateId)
+  else
+    local nTradeLimitType
+    if self.nItemId then
+      local pItem = KItem.GetItemObj(self.nItemId)
+      if pItem then
+        nTradeLimitType = pItem.dwTradeLimitType
+      end
+    end
+    nHaveNum = me.GetItemCountInBags(self.nTemplateId, nil, nTradeLimitType)
+  end
+  self.pPanel:Label_SetText(tbControls.txtCount, i18n.EasyGet("\230\139\165\230\156\137<color=#ffb431> {0} </color>\228\187\182", nHaveNum or 0))
+  self.itemGrid:SetLabelSuffixText(tostring(nHaveNum))
+end
+
+function tbWnd:SetCanInsert()
+  local szText = i18n.EasyGet("\229\143\175\233\149\182\229\181\140\233\131\168\228\189\141\239\188\154")
+  for i = Item.EQUIP_HELM, Item.EQUIP_AMULET do
+    local nEquipPos = Item.EQUIPTYPE_POS[i]
+    if Item.Stone.tbEquipPos2Stone[nEquipPos][self.nTemplateId] then
+      szText = szText .. i18n.Get(Item:GetNotExtEquipName(i))
+    end
+  end
+  self.pPanel:SetActive(tbControls.txtItemTime, true)
+  self.pPanel:Label_SetText(tbControls.txtItemTime, szText)
+end
+
+function tbWnd:GetAttrib(nItemId, nTemplateId)
+  local tbTips = {}
+  local nType, szText, szColor
+  local tbStoneAttrib = Item.Stone:GetStoneAttri(nTemplateId)
+  if tbStoneAttrib and next(tbStoneAttrib) then
+    nType = tbTipTypeDef.Tittle
+    szText = i18n.EasyGet("\229\174\157\231\159\179\229\177\158\230\128\167")
+    table.insert(tbTips, {nType = nType, szText = szText})
+    for index, tbMA in ipairs(tbStoneAttrib) do
+      local szAttrib = FightSkill:GetMagicDesc(tbMA[1], {
+        tbMA[2],
+        tbMA[3],
+        tbMA[4]
+      })
+      nType = tbTipTypeDef.Attrib
+      szColor = Item:GetQualityColor(self.nQuality)
+      table.insert(tbTips, {
+        nType = nType,
+        szAttrib = szAttrib,
+        szColor = szColor
+      })
+    end
+  end
+  local tbCompose = {}
+  nType = tbTipTypeDef.Tittle
+  szText = i18n.EasyGet("\229\144\136\230\136\144\229\155\190\232\167\163")
+  table.insert(tbTips, {nType = nType, szText = szText})
+  local nComposeId = Item.Stone:GetComposeInfo(nTemplateId)
+  local bCanCompose = Item.Stone:IsStone(nComposeId)
+  local nBeComposedId = Item.Stone.tbStoneInfo[nTemplateId].nBeComposedId
+  local bCanBeComposed = Item.Stone:IsStone(nBeComposedId)
+  if not bCanCompose then
+    tbCompose.nSenior = nTemplateId
+    tbCompose.nMiddle = nBeComposedId
+    tbCompose.nJunior = Item.Stone.tbStoneInfo[nBeComposedId].nBeComposedId
+  elseif not bCanBeComposed then
+    tbCompose.nSenior = Item.Stone.tbStoneInfo[nComposeId].ComposeId
+    tbCompose.nMiddle = nComposeId
+    tbCompose.nJunior = nTemplateId
+  else
+    tbCompose.nSenior = nComposeId
+    tbCompose.nMiddle = nTemplateId
+    tbCompose.nJunior = nBeComposedId
+  end
+  nType = tbTipTypeDef.Compose
+  table.insert(tbTips, {nType = nType, tbCompose = tbCompose})
+  local tbInfo = Item:GetItemBaseProp(nTemplateId)
+  if tbInfo then
+    nType = tbTipTypeDef.Text
+    szText = i18n.Parse(tbInfo.szIntro)
+    table.insert(tbTips, {nType = nType, szText = szText})
+  end
+  if not bCanCompose then
+    nType = tbTipTypeDef.Text
+    szText = i18n.EasyGet("\229\183\178\229\144\136\230\136\144\232\135\179\230\156\128\233\171\152\231\186\167\229\174\157\231\159\179\239\188\140\230\151\160\230\179\149\231\187\167\231\187\173\229\144\136\230\136\144")
+    table.insert(tbTips, {nType = nType, szText = szText})
+  end
+  return tbTips
+end
+
+function tbWnd:SetTips(tbTips)
+  self.tbScrollView:Clear()
+  for i = 1, #tbTips do
+    self.tbScrollView:SetElement(i, function(tbElement)
+      self:SetText(tbElement, tbTips[i])
+    end)
+  end
+end
+
+function tbWnd:SetText(tbElement, tbDesc)
+  local pPanel = tbElement.pPanel
+  local nType = tbDesc.nType
+  pPanel:SetActive("line1", false)
+  pPanel:SetActive("line2", false)
+  pPanel:SetActive("line3", false)
+  if nType == tbTipTypeDef.Tittle then
+    pPanel:SetActive("line1", true)
+    pPanel:SetActive("line1/Attribute1", false)
+    pPanel:Label_SetText("line1/txtClass", tbDesc.szText)
+  elseif nType == tbTipTypeDef.Attrib then
+    pPanel:SetActive("line1", true)
+    pPanel:SetActive("line1/txtClass", false)
+    pPanel:SetActive("line1/Attribute1", true)
+    pPanel:Label_SetText("line1/Attribute1/txtAttr", tbDesc.szAttrib)
+    pPanel:Label_SetColorByName("line1/Attribute1/txtAttr", tbDesc.szColor)
+  elseif nType == tbTipTypeDef.Compose then
+    pPanel:SetActive("line2", true)
+    pPanel:SetActive("line2/txtClass", false)
+    pPanel:SetActive("line2/txtDesc", true)
+    tbElement.JuniorGrid = Ui:NewExistItemGrid(tbElement, "line2/Stone1/Stone1/UIItemGrid")
+    tbElement.MiddleGrid = Ui:NewExistItemGrid(tbElement, "line2/Stone1/Stone2/UIItemGrid")
+    tbElement.SeniorGrid = Ui:NewExistItemGrid(tbElement, "line2/Stone1/Stone3/UIItemGrid")
+    tbElement.JuniorGrid:SetItemByTemplate(tbDesc.tbCompose.nJunior)
+    tbElement.MiddleGrid:SetItemByTemplate(tbDesc.tbCompose.nMiddle)
+    tbElement.SeniorGrid:SetItemByTemplate(tbDesc.tbCompose.nSenior)
+    tbElement.JuniorGrid:SetClickEnable(true, self.TryCompare, self, tbDesc.tbCompose.nJunior)
+    tbElement.MiddleGrid:SetClickEnable(true, self.TryCompare, self, tbDesc.tbCompose.nMiddle)
+    tbElement.SeniorGrid:SetClickEnable(true, self.TryCompare, self, tbDesc.tbCompose.nSenior)
+  elseif nType == tbTipTypeDef.Text then
+    pPanel:SetActive("line3", true)
+    pPanel:SetActive("line3/txtLine", true)
+    pPanel:Label_SetText("line3/txtLine", tbDesc.szText)
+  end
+end
+
+function tbWnd:SetButtonFunc(szName1, func1, szName2, func2, szName3, func3, szName4, func4)
+  if not self.nItemId then
+    return
+  end
+  if not szName1 then
+    self.pPanel:SetActive(tbControls.btnCenter, false)
+    self.pPanel:SetActive(tbControls.btnRight1, false)
+    self.pPanel:SetActive(tbControls.btnRight2, false)
+    self.pPanel:SetActive(tbControls.btnRight3, false)
+    return
+  end
+  if szName1 and not szName2 and not szName3 and not szName4 then
+    self.pPanel:SetActive(tbControls.btnCenter, true)
+    self.pPanel:SetActive(tbControls.btnRight1, false)
+    self.pPanel:SetActive(tbControls.btnRight2, false)
+    self.pPanel:SetActive(tbControls.btnRight3, false)
+    self.fnCenter = func1
+    self.pPanel:Button_SetText(tbControls.btnCenter, szName1, "Text")
+    return
+  end
+  if szName1 then
+    self.pPanel:SetActive(tbControls.btnRight1, true)
+    self.fnRight1 = func1
+    self.pPanel:Button_SetText(tbControls.btnRight1, szName1, "Text")
+  else
+    self.pPanel:SetActive(tbControls.btnRight1, false)
+  end
+  if szName2 then
+    self.pPanel:SetActive(tbControls.btnRight2, true)
+    self.fnRight2 = func2
+    self.pPanel:Button_SetText(tbControls.btnRight2, szName2, "Text")
+  else
+    self.pPanel:SetActive(tbControls.btnRight2, false)
+  end
+  if szName3 then
+    self.pPanel:SetActive(tbControls.btnRight3, true)
+    self.fnRight3 = func3
+    self.pPanel:Button_SetText(tbControls.btnRight3, szName3, "Text")
+  else
+    self.pPanel:SetActive(tbControls.btnRight3, false)
+  end
+  if szName4 then
+    self.pPanel:SetActive(tbControls.btnCenter, true)
+    self.fnCenter = func4
+    self.pPanel:Button_SetText(tbControls.btnCenter, szName4, "Text")
+  else
+    self.pPanel:SetActive(tbControls.btnCenter, false)
+  end
+end
+
+function tbWnd:CanHawk()
+  do return false end
+  if not self.nItemId then
+    return false
+  end
+  local pItem = KItem.GetItemObj(self.nItemId)
+  if not pItem then
+    return false
+  end
+  local _, nPos = me.GetItemInAllSpace(self.nItemId)
+  if Item:IsInBag(nPos) then
+    local bRet = Item:GetItemTradeLimitDescBySettings(pItem.dwTemplateId, pItem.dwTradeLimitType)
+    if bRet or pItem.dwTradeLimitType == Item.eTRADELIMITTYPE.TRADE_TIMES and pItem.dwTradeLimitValue > 0 then
+      return true
+    end
+  end
+end
+
+function tbWnd:CanSellItem(pItem)
+  if not pItem then
+    return false
+  end
+  local bRet, _ = Item.tbItemSell:CheckCanSellItem(pItem.dwTemplateId)
+  return bRet
+end
+
+function tbWnd:UpdateTradePanel()
+  if not self.tbTradeInfo then
+    for _, szWndType in ipairs(self.tbTradePanel) do
+      self.pPanel:SetActive(szWndType, false)
+    end
+    self.pPanel:SetActive(tbControls.btnGroup, true)
+    return
+  end
+  self.pPanel:SetActive(tbControls.btnGroup, false)
+  local bNotInTBPanel = true
+  local szWndType = self.tbTradeInfo.szWndType
+  for k, v in ipairs(self.tbTradePanel) do
+    if szWndType == v then
+      bNotInTBPanel = false
+      break
+    end
+  end
+  if bNotInTBPanel then
+    local szWnd = Ui:CreatePanel(szWndType, szWndType, self)
+    table.insert(self.tbTradePanel, szWndType)
+    self.tbTradePanelObj = self.tbTradePanelObj or {}
+    self.tbTradePanelObj[szWndType] = szWnd
+  end
+  if "UIMarketStallBuyPanel" == szWndType then
+    self.tbTradePanelObj[szWndType]:OnOpen(self.tbTradeInfo.nStallType, self.tbTradeInfo.nSeTypeId, self.tbTradeInfo.nStallItemTempId, self.tbTradeInfo.tbItem)
+  elseif "UIMarketStallSellPanel" == szWndType then
+    self.tbTradePanelObj[szWndType]:OnOpen(self.tbTradeInfo.nStallType, self.tbTradeInfo.nShowType, self.tbTradeInfo.index, self.tbTradeInfo.bBag, self.tbTradeInfo.tbItem and self.tbTradeInfo.tbItem.nPrice, self.tbTradeInfo.nTimeout)
+  elseif "UITradeItemPanel" == szWndType then
+    self.tbTradePanelObj[szWndType]:OnOpen(self.tbTradeInfo.nItemId, self.tbTradeInfo.nOnTradeCount, self.tbTradeInfo.nMaxCount, self.tbTradeInfo.bOnTrade)
+  end
+  if tbWnd.szlastPanel then
+    self.pPanel:SetActive(tbWnd.szlastPanel, false)
+  end
+  tbWnd.szlastPanel = szWndType
+  self.pPanel:SetActive(szWndType, true)
+end
+
+function tbWnd:SellItem()
+  if not self.nItemId then
+    return
+  end
+  Ui:OpenWindow("UIItemSell", self.nItemId, self.nTemplateId)
+  self:Close()
+end
+
+function tbWnd:OnClose()
+  self:UnRegistRedPoint()
+  self.tbTradeInfo = nil
+end
+
+function tbWnd:GetItemTradeText(pItem)
+  if not pItem.IsInTradeLimit(Item.eTRADELIMITWAY.P2P) then
+    return true, i18n.EasyGet("\229\143\175\228\186\164\230\152\147")
+  end
+  if not pItem.IsInTradeLimit(Item.eTRADELIMITWAY.MARKETSTALL) then
+    return true, i18n.EasyGet("\229\143\175\230\145\134\230\145\138")
+  end
+  return false
+end
+
+function tbWnd:RegistRedPoint()
+  if 2 == self.nComposeRedPointPosition then
+    RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnRight2, {
+      RedPointMgr.EVENT.StoneCompose
+    })
+    if self:CheckRedPoint_HeCheng(self.nItemId) then
+      RedPointMgr:LightRedPoint(RedPointMgr.EVENT.StoneCompose)
+    else
+      RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.StoneCompose)
+    end
+  end
+end
+
+function tbWnd:UnRegistRedPoint()
+  if 2 == self.nComposeRedPointPosition then
+    RedPointMgr:DynamicUnRegist(self.pPanel, self.btnRight2)
+  end
+end
+
+function tbWnd:CheckRedPoint_HeCheng(nItemId)
+  if not nItemId or nItemId <= 0 then
+    return false
+  end
+  local pItem = me.GetItemInBag(nItemId)
+  if not pItem then
+    return false
+  end
+  local nPlayerCoin = me.GetMoney("Coin")
+  local nCost = Item.Stone.tbStoneInfo[pItem.dwTemplateId].CostCoin
+  if pItem.nCount >= Item.Stone.nComposeNeed and nPlayerCoin >= nCost then
+    return true
+  end
+  return false
+end
+
+function tbWnd:TryCompare(nNewTemplateId)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UPDATE_COMPARE_PANEL, nNewTemplateId)
+end
+
+function tbWnd:Close()
+  Ui:CloseWindow("UIStoneTipsCompare")
+end

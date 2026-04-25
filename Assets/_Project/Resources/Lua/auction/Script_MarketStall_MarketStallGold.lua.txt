@@ -1,0 +1,306 @@
+Require("Script/MarketStall/MarketStallBase.lua")
+if not MarketStallGold.init then
+  MarketStallGold = Lib:NewClass(MarketStallBase)
+end
+
+function MarketStallGold:init()
+  self:initBase()
+  self.szClassName = "MarketStallGold"
+  self.nStallType = self.tbStallType.Gold
+  self.szMoneyTip = i18n.EasyGet("\233\135\145\229\184\129")
+  self.tbTypeDefSettings = self.tbGoldTypeSetting
+  self.tbDetailType2TempId = self.tbGoldDetailType2TempId
+  self.tbDetailCountList = {}
+end
+
+function MarketStallGold:GetPriceInfo(nStallItemTempId)
+  local tbInfo = {}
+  tbInfo = (self.tbGoldStallItemSettings or {})[nStallItemTempId or 0]
+  if not tbInfo then
+    print("[x] MarketStall:GetPriceInfo failed", nStallItemTempId)
+    return
+  end
+  if tbInfo.szOpenTimeFrame and tbInfo.szOpenTimeFrame ~= "" and 1 ~= GetTimeFrameState(tbInfo.szOpenTimeFrame) then
+    return
+  end
+  if tbInfo.szEndTimeFrame and "" ~= tbInfo.szEndTimeFrame and 1 == GetTimeFrameState(tbInfo.szEndTimeFrame) then
+    return
+  end
+  if tbInfo.szNextTimeFrame and 1 == GetTimeFrameState(tbInfo.szNextTimeFrame) then
+    self:UpdatePrice(tbInfo)
+  end
+  return tbInfo.nPrice, tbInfo.tbAllowPrice, tbInfo.nMinPercent, tbInfo.nMaxPercent
+end
+
+function MarketStallGold:GetItemType(nStallItemTempId)
+  local tbInfo = {}
+  tbInfo = (self.tbGoldStallItemSettings or {})[nStallItemTempId or 0]
+  if not tbInfo then
+    return
+  end
+  return tbInfo.nSeType, tbInfo.nDetailType
+end
+
+function MarketStallGold:TryBuyStallItem(nSeType, nStallItemTempId, tbData, nCount)
+  self.nSeType = nSeType
+  return self:TryBuyStallItemBase(nSeType, nStallItemTempId, tbData, nCount)
+end
+
+function MarketStallGold:GetAvaliableItems()
+  local tbRet = {}
+  for _, nType in pairs(Ui.tbToggle) do
+    tbRet[nType] = {}
+  end
+  for nStallItemTempId, tbInfo in pairs(self.tbGoldStallItemSettings) do
+    local tbItems = me.GetItemListInBag(nStallItemTempId)
+    if tbItems and #tbItems > 0 then
+      for _, pItem in ipairs(tbItems) do
+        local nCount = pItem.nCount
+        local dwItemId = pItem.dwId
+        if nCount > 0 and self:CheckCanSellItem(me, dwItemId) then
+          local tbItem = {
+            nStallItemTempId = nStallItemTempId,
+            dwItemId = dwItemId,
+            nCount = pItem.nCount,
+            szClass = pItem.szClass
+          }
+          table.insert(tbRet[Ui.tbToggle.TogAll], tbItem)
+          local tbClassifyInfo = Item:GetDetailTypeClassify(pItem.nItemType, pItem.nDetailType)
+          if not tbClassifyInfo then
+            LogErr(string.format("DetailTypeClassify.tab: DetailType:%d%s not Define Classify!", pItem.nDetailType, i18n.Parse(pItem.szName)))
+            return
+          end
+          for key, nClassify in pairs(Ui.tbKey2Classify) do
+            if 1 == tbClassifyInfo[key] then
+              if "bInEquip" == key then
+                if not Item.ZhenYuan:IsZhenYuanEquip(pItem) then
+                  table.insert(tbRet[nClassify], tbItem)
+                end
+              else
+                table.insert(tbRet[nClassify], tbItem)
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  for _, tbItems in pairs(tbRet) do
+    table.sort(tbItems, function(a, b)
+      return a.nStallItemTempId < b.nStallItemTempId
+    end)
+  end
+  self.tbAvaliableItems = tbRet
+  return tbRet
+end
+
+function MarketStallGold:IsNeedRequestData()
+  return true
+end
+
+function MarketStallGold:RequestGetItemList(nDetailType, nPage, nSortType)
+  self.rpc(self.nStallType, "RPC_GetAllItems", nDetailType, nPage, nSortType)
+end
+
+function MarketStallGold:GetShowStallItems(nSeType, bHideEmpty)
+  self.nSeType = nSeType
+  if self.nSeType ~= nSeType then
+    return {}
+  end
+  self.rpc(self.nStallType, "RPC_GetGoldAllOnSellDetailCount", nSeType, bHideEmpty)
+  return nil
+end
+
+function MarketStallGold:AllStallCancelSell()
+  local nItemCount = #self.tbMyItems
+  if 0 == nItemCount then
+    return false, i18n.EasyGet("\230\154\130\230\151\160\229\143\175\228\184\139\230\158\182\229\149\134\229\147\129")
+  end
+  if nItemCount > me.GetFreeBagCount() then
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\229\176\134\232\190\190\229\136\176\228\184\138\233\153\144, \232\175\183\229\133\136\230\184\133\231\144\134\232\131\140\229\140\133"))
+    return false
+  end
+  local tbMyStallIdList = {}
+  for _, tbStallInfo in pairs(self.tbMyItems) do
+    table.insert(tbMyStallIdList, tbStallInfo.nStallId)
+    self.tbMgr.DelStallItem(tbStallInfo.nStallId)
+  end
+  self.rpc(self.nStallType, "RPC_AllCancelSellItem", tbMyStallIdList)
+  return true, i18n.EasyGet("\228\184\128\233\148\174\228\184\139\230\158\182\230\136\144\229\138\159")
+end
+
+function MarketStallGold:IsStar(nDetailType)
+  local tbMarketStall = me.GetScriptTable("MarketStallGold")
+  if not tbMarketStall.tbStars then
+    return
+  end
+  return tbMarketStall.tbStars and tbMarketStall.tbStars[nDetailType]
+end
+
+function MarketStallGold:AddStar(nDetailType)
+  if not nDetailType then
+    return
+  end
+  local tbMarketStall = me.GetScriptTable("MarketStallGold")
+  if tbMarketStall.nStarCount and tbMarketStall.nStarCount >= MarketStallBase.nMaxStarNum then
+    me.CenterMsg(i18n.EasyGet("\230\148\182\232\151\143\229\149\134\229\147\129\229\183\178\232\190\190\228\184\138\233\153\144"))
+    return
+  end
+  self.rpc(self.nStallType, "RPC_AddStar", nDetailType)
+  return true
+end
+
+function MarketStallGold:DelStar(nDetailType)
+  if not nDetailType then
+    return
+  end
+  self.rpc(self.nStallType, "RPC_DelStar", nDetailType)
+  return true
+end
+
+function MarketStallGold:OnGetItemList(nDetailType, nPage, bReverse, bRet, tbStallItemList)
+  Ui:CloseWindow("UILoadingTips")
+  if not bRet then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\229\136\134\231\177\187\229\149\134\229\147\129\229\183\178\229\148\174\231\189\132"))
+    EventNotify.OnNotify(EventNotify.emNOTIFY_MS_GOLD_ITEM_LIST_CHANGE, false)
+    return
+  end
+  for _, tbInfo in pairs(tbStallItemList) do
+    self.tbAllStall[tbInfo.nStallId] = tbInfo
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MS_GOLD_ITEM_LIST_CHANGE, true, nDetailType, nPage, bReverse, tbStallItemList, self.tbDetailCountList[nDetailType])
+end
+
+function MarketStallGold:GetOpenDetailType()
+  local tbOpenDetailType = {}
+  local tbStallInfo = self.tbGoldStallItemSettings
+  for nStallItemTempId, tbInfo in pairs(tbStallInfo) do
+    if (not tbInfo.szOpenTimeFrame or tbInfo.szOpenTimeFrame == "" or 1 == GetTimeFrameState(tbInfo.szOpenTimeFrame)) and (not tbInfo.szEndTimeFrame or "" == tbInfo.szEndTimeFrame or 1 ~= GetTimeFrameState(tbInfo.szEndTimeFrame)) then
+      tbOpenDetailType[tbInfo.nDetailType] = true
+    end
+  end
+  return tbOpenDetailType
+end
+
+function MarketStallGold:OnGetShowDetailInfo(nSeType, bHideEmpty, tbDetailCountList)
+  local tbTmp = {}
+  local tbRet = {}
+  if nSeType == self.nStarType then
+    local tbStall = me.GetScriptTable("MarketStallGold")
+    if tbStall.tbStars then
+      local nIndex = 0
+      for nDetailType, _ in pairs(tbStall.tbStars) do
+        nIndex = nIndex + 1
+        local tbDetailInfo = self.tbTypeDefSettings[nDetailType]
+        local tbInfo = {
+          nStallType = self.nStallType,
+          nSeType = nSeType,
+          nIndex = nIndex,
+          szDetailTypeName = tbDetailInfo.szDetailTypeName,
+          nStallItemTempId = 0,
+          nCount = tbDetailCountList[nDetailType] or 0,
+          nDetailTypeId = nDetailType,
+          szIcon = tbDetailInfo.szIcon,
+          szShowType = tbDetailInfo.szShowType,
+          tbItems = {}
+        }
+        table.insert(tbTmp, tbInfo)
+      end
+    end
+  else
+    for nIndex, tbDetailSettingInfo in pairs(self.tbGoldSeTypeSettings[nSeType]) do
+      tbTmp[nIndex] = {
+        nStallType = self.nStallType,
+        nSeType = nSeType,
+        nIndex = nIndex,
+        szDetailTypeName = tbDetailSettingInfo.szDetailTypeName,
+        nStallItemTempId = 0,
+        nCount = tbDetailCountList[tbDetailSettingInfo.nDetailTypeId] or 0,
+        nDetailTypeId = tbDetailSettingInfo.nDetailTypeId,
+        szIcon = tbDetailSettingInfo.szIcon,
+        szShowType = tbDetailSettingInfo.szShowType,
+        tbItems = {}
+      }
+    end
+  end
+  local tbOpenDetailType = MarketStallGold:GetOpenDetailType()
+  for _, tb in pairs(tbTmp) do
+    if (not bHideEmpty or tb.nCount > 0) and tbOpenDetailType[tb.nDetailTypeId] then
+      table.insert(tbRet, tb)
+    end
+  end
+  self.tbDetailCountList = tbDetailCountList
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MARKET_STALL_DETAILLIST_ARIVAL, tbRet)
+end
+
+function MarketStallGold:OnBuyItem(bResult, nStallItemTempId, nRes)
+  self:OnBuyItemBase(bResult, nStallItemTempId, nRes)
+  if bResult then
+    EventNotify.OnNotify(EventNotify.emNOTIFY_MARKET_STALL_GOLD_BUY_SUCCES)
+  end
+end
+
+function MarketStallGold:OnAddStar(nDetailType)
+  local tbMarketStall = me.GetScriptTable("MarketStallGold")
+  tbMarketStall.tbStars = tbMarketStall.tbStars or {}
+  tbMarketStall.nStarCount = tbMarketStall.nStarCount or 0
+  tbMarketStall.tbStars[nDetailType] = 1
+  tbMarketStall.nStarCount = tbMarketStall.nStarCount + 1
+  me.CenterMsg(i18n.EasyGet("\229\183\178\229\133\179\230\179\168"))
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MARKET_ADD_STAR)
+end
+
+function MarketStallGold:OnDelStar(nDetailType)
+  local tbMarketStall = me.GetScriptTable("MarketStallGold")
+  if not tbMarketStall.tbStars then
+    return
+  end
+  tbMarketStall.tbStars[nDetailType] = nil
+  if not next(tbMarketStall.tbStars) then
+    tbMarketStall.tbStars = nil
+  end
+  tbMarketStall.nStarCount = tbMarketStall.nStarCount - 1
+  me.CenterMsg(i18n.EasyGet("\229\183\178\229\143\150\230\182\136\229\133\179\230\179\168"))
+  EventNotify.OnNotify(EventNotify.emNOTIFY_MARKET_DEL_STAR)
+end
+
+function MarketStallGold:OnSyncStar(tbStars)
+  local tbMarketStall = me.GetScriptTable("MarketStallGold")
+  tbMarketStall.tbStars = tbStars
+  local nCount = 0
+  for nDetailType, _ in pairs(tbStars or {}) do
+    nCount = nCount + 1
+  end
+  tbMarketStall.nStarCount = nCount
+end
+
+function MarketStallGold:OnUpdateNP2PItem(nStallItemTempId, nItemId)
+  return
+end
+
+function MarketStallGold:ClearData()
+  MarketStallBase:ClearPageTimeData(me.dwID)
+  if self.tbMyItems and 0 ~= #self.tbMyItems then
+    for _, tbStallInfo in pairs(self.tbMyItems) do
+      self.tbMgr.DelStallItem(tbStallInfo.nStallId)
+    end
+    self.tbMyItems = {}
+  end
+  if self.tbAllStall and 0 ~= Lib:CountTB(self.tbAllStall) then
+    for nStallId, _ in pairs(self.tbAllStall) do
+      self.tbMgr.DelStallItem(nStallId)
+    end
+    self.tbAllStall = {}
+  end
+end
+
+function MarketStallGold:GetNextRefreshInterval()
+  return 0
+end
+
+function MarketStallGold:AutoRefresh(nSeType)
+  return false
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, MarketStallGold)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, MarketStallGold.ClearData, MarketStallGold)

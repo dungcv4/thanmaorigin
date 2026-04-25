@@ -1,0 +1,562 @@
+local UIPanel = {}
+Ui:SetClass("UIPanel", UIPanel)
+
+function UIPanel:InitWindow(transform, szWindowName, ...)
+  self:InitPanelAndOwner(transform, nil)
+  self.pPanel.UIPath = szWindowName
+  self:InitEvent(...)
+end
+
+function UIPanel:InitSubPanel(transform, tbOwner, szRelativePath, ...)
+  self:InitPanelAndOwner(transform, tbOwner)
+  if "Main" == szRelativePath then
+    self.pPanel.UIPath = tbOwner.szKey
+  else
+    self.pPanel.UIPath = string.format("%s/%s", tbOwner.pPanel.UIPath, szRelativePath)
+  end
+  self:InitEvent(...)
+  if not tbOwner.tbSubPanelList then
+    tbOwner.tbSubPanelList = {}
+  end
+  tbOwner.tbSubPanelList[self] = 1
+end
+
+function UIPanel:InitPanelAndOwner(transform, tbOwner)
+  self.transform = transform
+  self.pPanel = self.transform.gameObject:GetComponent(Ui.UIPanel)
+  if not self.pPanel then
+    self.pPanel = self.transform.gameObject:AddComponent(Ui.UIPanel)
+  end
+  self.tbOwner = tbOwner
+end
+
+function UIPanel:InitEvent(...)
+  if self.tbControls then
+    for k, v in pairs(self.tbControls) do
+      if self[k] then
+        LogErr(string.format("Window table [%s] has same member name [%s] in control list !", self.ClassName, v))
+      else
+        self[k] = v
+      end
+    end
+    self.tbControls = nil
+  end
+  self:InitButtonEvent()
+  self:InitToggleEvent()
+  self:InitSliderEvent()
+  self:InitInputEvent()
+  self:InitLongPressEndEvent()
+  self:InitLongPressLoopEvent()
+  self:InitLongPressUpEvent()
+  self:InitDoubleClickEvent()
+  self:InitDragEvent()
+  self:InitSwipeEvent()
+  self:InitAnimationEvent()
+  if self.OnCreate then
+    self:OnCreate(...)
+  end
+  if Ui.tbAllScreenWindow[self.pPanel.UIPath] then
+    Ui.tbUi[self.pPanel.UIPath].nCameraDefaultCullingMask = CS.UnityEngine.Camera.main.cullingMask
+  end
+end
+
+function UIPanel:UnInitPanel()
+  Ui.ClearUIPanel(self)
+  if self.OnDestroy then
+    self:OnDestroy()
+  end
+  self:UnInitInputEvent()
+  self:UnInitSliderEvent()
+  self:UnInitToggleEvent()
+  self:UnInitButtonEvent()
+  self:UnInitLongPressEndEvent()
+  self:UnInitLongPressLoopEvent()
+  self:UnInitLongPressUpEvent()
+  self:UnInitDoubleClickEvent()
+  self:UnInitDragEvent()
+  self:UnInitSwipeEvent()
+  self:UnInitAnimationEvent()
+  if self.tbOwner and self.tbOwner.tbSubPanelList then
+    self.tbOwner.tbSubPanelList[self] = nil
+  end
+  self.transform = nil
+  self.pPanel = nil
+  self.tbOwner = nil
+end
+
+function UIPanel:InitDoubleClickEvent()
+  if not self.tbOnDoubleClick then
+    return
+  end
+  for key, func in pairs(self.tbOnDoubleClick) do
+    if self[key] then
+      self.pPanel:SetDoubleClick(self[key], function()
+        func(self)
+      end)
+    else
+      LogErr(string.format("InitDoubleClickEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:UnInitDoubleClickEvent()
+  if not self.tbOnDoubleClick then
+    return
+  end
+  for key, _ in pairs(self.tbOnDoubleClick) do
+    if self[key] then
+      local doubleClick = self.pPanel:GetDoubleClick(self[key])
+      if doubleClick then
+        doubleClick:ResetDoubleClick()
+      else
+        LogErr(string.format("UnInitDoubleClickEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, self[key]))
+      end
+    else
+      LogErr(string.format("UnInitDoubleClickEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:InitDragEvent()
+  if self.tbOnDragBegin then
+    for key, func in pairs(self.tbOnDragBegin) do
+      if self[key] then
+        self.pPanel:SetDragBegin(self[key], function(nIdx)
+          func(self, nIdx)
+        end)
+      else
+        LogErr(string.format("InitDragPanelEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+      end
+    end
+  end
+  if self.tbOnDragEnd then
+    for key, func in pairs(self.tbOnDragEnd) do
+      if self[key] then
+        self.pPanel:SetDragEnd(self[key], function(fromIdx, toIdx)
+          func(self, fromIdx, toIdx)
+        end)
+      else
+        LogErr(string.format("InitDragPanelEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+      end
+    end
+  end
+end
+
+function UIPanel:UnInitDragEvent()
+  if self.tbOnDragBegin then
+    for key, _ in pairs(self.tbOnDragBegin) do
+      if self[key] then
+        local DragPanel = self.pPanel:GetDrag(self[key])
+        if DragPanel then
+          DragPanel:Clear()
+        else
+          LogErr(string.format("UnInitDragPanelEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, self[key]))
+        end
+      else
+        LogErr(string.format("UnInitDragPanelEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+      end
+    end
+  end
+  if self.tbOnDragEnd then
+    for key, _ in pairs(self.tbOnDragEnd) do
+      if self[key] then
+        local DragPanel = self.pPanel:GetDrag(self[key])
+        if DragPanel then
+          DragPanel:Clear()
+        end
+      else
+        LogErr(string.format("UnInitDragPanelEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+      end
+    end
+  end
+end
+
+function UIPanel:InitSwipeEvent()
+  if self.tbOnSwipe then
+    for key, func in pairs(self.tbOnSwipe) do
+      if self[key] then
+        self.pPanel:Swipe_BindEvent(self[key], function(position)
+          func(self, position)
+        end)
+      else
+        LogErr(string.format("InitSwipeEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+      end
+    end
+  end
+end
+
+function UIPanel:UnInitSwipeEvent()
+  if self.tbOnSwipe then
+    for key, _ in pairs(self.tbOnSwipe) do
+      if self[key] then
+        local swipe = self.pPanel:GetSwipe(self[key])
+        if swipe then
+          swipe:RemoveEvent()
+        end
+      else
+        LogErr(string.format("UnInitSwipeEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+      end
+    end
+  end
+end
+
+function UIPanel:InitAnimationEvent()
+  if self.tbOnAnimationEvent then
+    for key, func in pairs(self.tbOnAnimationEvent) do
+      if self[key] then
+        self.pPanel:BindAnimationEvent(self[key], function(v)
+          func(self, v)
+        end)
+      else
+        LogErr(string.format("InitAnimationEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+      end
+    end
+  end
+end
+
+function UIPanel:UnInitAnimationEvent()
+  if self.tbOnAnimationEvent then
+    for key, _ in pairs(self.tbOnAnimationEvent) do
+      if self[key] then
+        local dispatcher = self.pPanel:GetAnimationEventDispatcher(self[key])
+        if dispatcher then
+          dispatcher:RemoveEvent()
+        end
+      else
+        LogErr(string.format("UnInitAnimationEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+      end
+    end
+  end
+end
+
+function UIPanel:InitLongPressUpEvent()
+  if not self.tbOnLongPressUp then
+    return
+  end
+  for key, func in pairs(self.tbOnLongPressUp) do
+    if self[key] then
+      self.pPanel:Button_BindLongPressUp(self[key], function()
+        func(self)
+      end)
+    else
+      LogErr(string.format("InitLongPressUpEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:UnInitLongPressUpEvent()
+  if not self.tbOnLongPressUp then
+    return
+  end
+  for key, _ in pairs(self.tbOnLongPressUp) do
+    if self[key] then
+      local longPressEnd = self.pPanel:GetLongPressEnd(self[key])
+      if longPressEnd then
+        longPressEnd:ClearLongPressEnd()
+      else
+        LogErr(string.format("UnInitLongPressEndEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, self[key]))
+      end
+    else
+      LogErr(string.format("UnInitLongPressEndEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:InitLongPressEndEvent()
+  if not self.tbOnLongPressEnd then
+    return
+  end
+  for key, func in pairs(self.tbOnLongPressEnd) do
+    if self[key] then
+      self.pPanel:Button_BindLongPressEnd(self[key], function()
+        func(self)
+      end)
+    else
+      LogErr(string.format("InitLongPressEndEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:UnInitLongPressEndEvent()
+  if not self.tbOnLongPressEnd then
+    return
+  end
+  for key, _ in pairs(self.tbOnLongPressEnd) do
+    if self[key] then
+      local longPressEnd = self.pPanel:GetLongPressEnd(self[key])
+      if longPressEnd then
+        longPressEnd:ClearLongPressEnd()
+      else
+        LogErr(string.format("UnInitLongPressEndEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, self[key]))
+      end
+    else
+      LogErr(string.format("UnInitLongPressEndEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:InitLongPressLoopEvent()
+  if not self.tbOnLongPressLoop then
+    return
+  end
+  for key, func in pairs(self.tbOnLongPressLoop) do
+    if self[key] then
+      self.pPanel:Button_BindLongPressLoop(self[key], function()
+        func(self)
+      end)
+    else
+      LogErr(string.format("InitLongPressLoopEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:UnInitLongPressLoopEvent()
+  if not self.tbOnLongPressLoop then
+    return
+  end
+  for key, _ in pairs(self.tbOnLongPressLoop) do
+    if self[key] then
+      local longPressLoop = self.pPanel:GetLongPressLoop(self[key])
+      if longPressLoop then
+        longPressLoop:ClearLongPressLoop()
+      else
+        LogErr(string.format("UnInitLongPressLoopEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, self[key]))
+      end
+    else
+      LogErr(string.format("UnInitLongPressLoopEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:InitButtonEvent()
+  if not self.tbOnClick then
+    return
+  end
+  for key, func in pairs(self.tbOnClick) do
+    if self[key] then
+      Ui:Button_BindEvent(self.pPanel, self[key], func, self)
+    else
+      LogErr(string.format("InitButtonEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:UnInitButtonEvent()
+  if not self.tbOnClick then
+    return
+  end
+  for key, _ in pairs(self.tbOnClick) do
+    if self[key] then
+      local btn = self.pPanel:GetButton(self[key])
+      if btn then
+        btn.onClick:RemoveAllListeners()
+      else
+        LogErr(string.format("UnInitButtonEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, self[key]))
+      end
+    else
+      LogErr(string.format("UnInitButtonEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:InitToggleEvent()
+  if not self.tbOnToggleClick then
+    return
+  end
+  for key, func in pairs(self.tbOnToggleClick) do
+    if self[key] then
+      Ui:Toggle_BindEvent(self.pPanel, self[key], func, self)
+    else
+      LogErr(string.format("InitToggleEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:UnInitToggleEvent()
+  if not self.tbOnToggleClick then
+    return
+  end
+  for key, _ in pairs(self.tbOnToggleClick) do
+    if self[key] then
+      local toggle = self.pPanel:GetToggle(self[key])
+      if toggle then
+        toggle.onValueChanged:RemoveAllListeners()
+      else
+        LogErr(string.format("UnInitToggleEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, self[key]))
+      end
+    else
+      LogErr(string.format("UnInitToggleEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:InitSliderEvent()
+  if self.tbOnSliderClick then
+    for key, func in pairs(self.tbOnSliderClick) do
+      if self[key] then
+        local slider = self.pPanel:GetSlider(self[key])
+        if slider then
+          slider.onValueChanged:RemoveAllListeners()
+          slider.onValueChanged:AddListener(function(val)
+            func(self, val, table.unpack(arg or {}))
+          end)
+        else
+          LogErr(string.format("InitSliderEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, self[key]))
+        end
+      else
+        LogErr(string.format("InitSliderEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+      end
+    end
+  end
+  if self.tbOnUISliderPointUp then
+    for key, func in pairs(self.tbOnUISliderPointUp) do
+      if self[key] then
+        local uislider = self.pPanel:GetUISlider(self[key])
+        if uislider then
+          uislider.onPointerUp:RemoveAllListeners()
+          uislider.onPointerUp:AddListener(function(val)
+            func(self, val, table.unpack(arg or {}))
+          end)
+        else
+          LogErr(string.format("InitUISliderPointUpEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, self[key]))
+        end
+      else
+        LogErr(string.format("InitUISliderPointUpEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+      end
+    end
+  end
+end
+
+function UIPanel:UnInitSliderEvent()
+  if self.tbOnSliderClick then
+    for key, _ in pairs(self.tbOnSliderClick) do
+      if self[key] then
+        local slider = self.pPanel:GetSlider(self[key])
+        if slider then
+          slider.onValueChanged:RemoveAllListeners()
+        else
+          LogErr(string.format("UnInitSliderEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, self[key]))
+        end
+      else
+        LogErr(string.format("UnInitSliderEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+      end
+    end
+  end
+  if self.tbOnUISliderPointUp then
+    for key, _ in pairs(self.tbOnUISliderPointUp) do
+      if self[key] then
+        local uislider = self.pPanel:GetUISlider(self[key])
+        if uislider then
+          uislider.onPointerUp:RemoveAllListeners()
+        else
+          LogErr(string.format("UnUISliderPointUpEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, self[key]))
+        end
+      else
+        LogErr(string.format("UnUISliderPointUpEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+      end
+    end
+  end
+end
+
+function UIPanel:InitInputEvent()
+  if not self.tbOnInputEvent then
+    return
+  end
+  for key, func in pairs(self.tbOnInputEvent) do
+    if self[key] then
+      local input = self.pPanel:GetInput(self[key])
+      if input then
+        input.onValueChanged:RemoveAllListeners()
+        input.onValueChanged:AddListener(function(text)
+          func(self, text, table.unpack(arg or {}))
+        end)
+      else
+        LogErr(string.format("InitInputEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, self[key]))
+      end
+    else
+      LogErr(string.format("InitInputEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:UnInitInputEvent()
+  if not self.tbOnInputEvent then
+    return
+  end
+  for key, _ in pairs(self.tbOnInputEvent) do
+    if self[key] then
+      local input = self.pPanel:GetInput(self[key])
+      if input then
+        input.onValueChanged:RemoveAllListeners()
+      else
+        LogErr(string.format("UnInitInputEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, self[key]))
+      end
+    else
+      LogErr(string.format("UnInitInputEvent Error! Wnd=%s, key=%s not exist !", self.ClassName, key))
+    end
+  end
+end
+
+function UIPanel:SetClickEmptyToClose(szChildKey, bPassEvent)
+  local obj = Ui.GameObject("ClickEmptyToClose")
+  local trans = szChildKey and self.pPanel:GetTransform(szChildKey) or self.pPanel.transform
+  obj.transform:SetParent(trans)
+  local renderer = obj:AddComponent(Ui.CanvasRenderer)
+  renderer.cullTransparentMesh = nil
+  local btn = obj:AddComponent(Ui.Button)
+  obj:AddComponent(Ui.Empty4Raycast)
+  btn.transition = Ui.Transition
+  
+  local function pfunc()
+    if szChildKey then
+      self.pPanel:SetActive(szChildKey, false)
+    else
+      if self.OnClickEmptyClose then
+        self:OnClickEmptyClose()
+      end
+      self:Close()
+    end
+  end
+  
+  local rect = obj:GetComponent(Ui.RectTransform)
+  rect.anchorMin = Ui.Vector2.zero
+  rect.anchorMax = Ui.Vector2.one
+  rect.offsetMin = Ui.Vector2.zero
+  rect.offsetMax = Ui.Vector2.zero
+  rect.localScale = Ui.Vector3.one
+  obj.transform:SetSiblingIndex(0)
+  if bPassEvent then
+    local comp = obj:AddComponent(Ui.PointerPassEvent)
+    comp:SetParam(pfunc)
+  else
+    btn.onClick:RemoveAllListeners()
+    btn.onClick:AddListener(pfunc)
+  end
+end
+
+function UIPanel:SetClickEmptyCallback(szChildKey)
+  local obj = Ui.GameObject("ClickEmptyToClose")
+  local trans = szChildKey and self.pPanel:GetTransform(szChildKey) or self.pPanel.transform
+  obj.transform:SetParent(trans)
+  local renderer = obj:AddComponent(Ui.CanvasRenderer)
+  renderer.cullTransparentMesh = nil
+  local btn = obj:AddComponent(Ui.Button)
+  obj:AddComponent(Ui.Empty4Raycast)
+  btn.transition = Ui.Transition
+  local rect = obj:GetComponent(Ui.RectTransform)
+  rect.anchorMin = Ui.Vector2.zero
+  rect.anchorMax = Ui.Vector2.one
+  rect.offsetMin = Ui.Vector2.zero
+  rect.offsetMax = Ui.Vector2.zero
+  rect.localScale = Ui.Vector3.one
+  obj.transform:SetSiblingIndex(0)
+  
+  local function pfunc()
+    if self.OnClickEmptyClose then
+      self:OnClickEmptyClose()
+    end
+  end
+  
+  btn.onClick:RemoveAllListeners()
+  btn.onClick:AddListener(pfunc)
+end

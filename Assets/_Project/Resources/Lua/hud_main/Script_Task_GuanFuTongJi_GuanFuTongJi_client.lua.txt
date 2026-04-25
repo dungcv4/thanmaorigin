@@ -1,0 +1,191 @@
+Require("CommonScript/lib.lua")
+Require("CommonScript/Task/GuanFuTongJi/GuanFuTongJi_public.lua")
+GuanFuTongJi = GuanFuTongJi or {}
+GuanFuTongJi.tbTaskData = GuanFuTongJi.tbTaskData or {}
+
+function GuanFuTongJi:GetTitle()
+  return i18n.EasyGet("\229\174\152\229\186\156\233\128\154\231\188\137")
+end
+
+function GuanFuTongJi:GetTitleWithPrefix()
+  return i18n.EasyGet("[\229\184\184] \229\174\152\229\186\156\233\128\154\231\188\137")
+end
+
+function GuanFuTongJi:GetTarget()
+  if not self.tbTaskData then
+    return ""
+  end
+  if not self:IsFinishBeforeTask(me) then
+    local szTargetNpcName = Npc:GetNameByTemplateId(self.nTaskNpcTemplate)
+    return i18n.EasyGet("\229\137\141\229\190\128<color=#ffb431>{0}</color>\229\164\132\230\142\165\229\143\150\229\174\152\229\186\156\233\128\154\231\188\137\228\187\187\229\138\161", szTargetNpcName)
+  else
+    local tbInfo = self:GetTaskCfg(self.tbTaskData.nCurTaskId)
+    if not tbInfo then
+      return ""
+    end
+    local szNpcName = Npc:GetNameByTemplateId(tbInfo.nNpcTemplateId)
+    return i18n.EasyGet("\231\188\137\230\139\191\230\177\159\230\180\139\229\164\167\231\155\151<color=#ffb431>{0}</color>", szNpcName)
+  end
+end
+
+function GuanFuTongJi:IsDoingTask()
+  if not self.tbTaskData then
+    return false
+  end
+  if me.nLevel < self.nLevelLimit then
+    return
+  end
+  if not self:IsFinishBeforeTask(me) then
+    return false
+  else
+    if not self.tbTaskData then
+      return false
+    end
+    if self.tbTaskData.nCurTaskId <= 0 then
+      return false
+    end
+    if self.tbTaskData.nFinishCount >= self.nMaxCount then
+      return false
+    end
+    return true
+  end
+end
+
+function GuanFuTongJi:GetStepText()
+  if not self.tbTaskData then
+    return ""
+  end
+  if not self:IsFinishBeforeTask(me) then
+    return ""
+  else
+    if not self.tbTaskData then
+      return ""
+    end
+    local nCurNum = self.tbTaskData.nFinishCount + 1
+    nCurNum = nCurNum > self.nMaxCount and self.nMaxCount or nCurNum
+    return string.format("(%s/%s)", nCurNum, self.nMaxCount)
+  end
+end
+
+function GuanFuTongJi:GetShowTarget()
+  if not self.tbTaskData or not self.tbTaskData.nCurTaskId then
+    return {}
+  end
+  if not self:IsFinishBeforeTask(me) then
+    return {}
+  end
+  local nCurLevel = self.CFG_TASK[self.tbTaskData.nCurTaskId].nLevel
+  local szCurAwardKey = GuanFuTongJi.CFG_AWARD[nCurLevel][self.tbTaskData.nFinishCount + 1]
+  return Award:GetAward(GuanFuTongJi.nAwardId, szCurAwardKey)
+end
+
+function GuanFuTongJi:DoAction_Client()
+  local bRet, szMsg = ActivityCheck:CheckCanEnterActivityEx(me, nil, nil, false, false, false, nil, {
+    "UIBattleEntranceTime"
+  }, false)
+  if not bRet then
+    me.CenterMsg(szMsg)
+    return
+  end
+  if not self.tbTaskData then
+    return
+  end
+  if not self:IsFinishBeforeTask(me) then
+    local nCountMapId = #self.tbMapIDList
+    local nNpcMapId = self.tbMapIDList[math.random(nCountMapId)]
+    TeamMgr:StopFollowMember()
+    AFK:Stop()
+    GuanFuTongJi:GotoNpc(self.nTaskNpcTemplate, nNpcMapId, false)
+  else
+    if not self.tbTaskData then
+      return
+    end
+    local tbInfo = self:GetTaskCfg(self.tbTaskData.nCurTaskId)
+    if not tbInfo then
+      return
+    end
+    TeamMgr:StopFollowMember()
+    AFK:Stop()
+    GuanFuTongJi:GotoNpc(tbInfo.nNpcTemplateId, tbInfo.nMapTemplateId, true)
+  end
+end
+
+function GuanFuTongJi:OnSyncData(tbData)
+  self.tbTaskData = tbData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_GUANFUTONGJI_DATA, tbData)
+end
+
+function GuanFuTongJi:GotoNpc(nNpcTemplateId, nMapTemplateId, bAutoFight)
+  local nPosX, nPosY, nWalkNearLength = Npc:GetNpcPos(nNpcTemplateId, nMapTemplateId, true)
+  
+  local function fnCallback()
+    local function __timer_Callback()
+      if bAutoFight then
+        AFK:Start()
+      else
+        local nNpcId = KNpc.GetNpcIdByTemplateId(nNpcTemplateId)
+        if nNpcId then
+          Operation:SimpleTap(nNpcId)
+        end
+      end
+    end
+    
+    AFK:Stop()
+    Timer:Register(5, __timer_Callback)
+  end
+  
+  AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY, fnCallback, nWalkNearLength, nil, nNpcTemplateId)
+end
+
+function GuanFuTongJi:StartFollow(bStart)
+  if not bStart then
+    TeamMgr:StopFollowMember()
+    return
+  end
+  local tbCaptain = TeamMgr:GetCaptainData()
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  if tbCaptain then
+    TeamMgr:StartFollowMember(tbCaptain.nPlayerID, tbCaptain.nNpcID)
+  end
+end
+
+function GuanFuTongJi:HidePanel_Client(szAwardPanel)
+  Ui:CloseWindow(szAwardPanel)
+end
+
+function GuanFuTongJi:ShowInfo(bShow)
+  if self:IsFinishBeforeTask(me) then
+    self:DoAction_Client()
+    return
+  end
+  if bShow then
+    self:StartMatch()
+  else
+    self:DoAction_Client()
+  end
+end
+
+function GuanFuTongJi:StartMatch()
+  if not TeamMgr:HasTeam() then
+    Ui:OpenWindow("UITeam", TeamMgr.ACTIVITY_ID.GuanFuTongJi)
+    return
+  elseif not TeamMgr:IsCaptain(me.dwID) then
+    me.CenterMsg(TeamMgr.OnlyCaptainCanJoinHintMsg())
+    return
+  end
+  local tbMembers = TeamMgr:GetMembers()
+  local nActivityId = TeamMgr:GetActivityId("GuanFuTongJi", "GuanFuTongJi")
+  if TeamMgr:HasTeam() then
+    TeamMgr:SetTeamActivity(nActivityId)
+    Ui:OpenWindow("UITeam")
+  else
+    if not TeamMgr:CanTeam(me.nMapTemplateId) then
+      me.CenterMsg(i18n.Get(TeamMgr.Terms.MapLimitWhenJoin))
+      return
+    end
+    TeamMgr:CreateOnePersonTeam(nActivityId)
+    Ui:OpenWindow("UITeam")
+  end
+end

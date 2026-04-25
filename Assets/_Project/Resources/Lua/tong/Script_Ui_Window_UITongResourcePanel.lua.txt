@@ -1,0 +1,353 @@
+Require("CommonScript/Npc/NpcDefine.lua")
+local tbWnd = Ui:CreateClass("UITongResourcePanel", "UIPanel")
+local tbControls = {
+  txtTime = "txtTime",
+  txtTittle = "txtTittle",
+  svMineTemplate = "Left/Scroll View/Viewport/Content/Template",
+  txtNumR = "Right/txtNum",
+  txtInfoR = "Right/txtInfo",
+  btnOkR = "Right/btnOk",
+  btnGrayR = "Right/btnGray",
+  btnStore = "Right/btnStore",
+  svRewardTemplateR = "Right/Scroll View/Viewport/Content/Template"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnStore = function(self)
+    Ui:OpenWindowAsync("UIStore", Shop.ShopTypeStr.KuangMai)
+  end
+}
+tbWnd.tbKuangBgWuxing2Num = {
+  [Npc.emSERIES_TYPE.SERIES_METAL] = 2,
+  [Npc.emSERIES_TYPE.SERIES_WOOD] = 3,
+  [Npc.emSERIES_TYPE.SERIES_WATER] = 1,
+  [Npc.emSERIES_TYPE.SERIES_FIRE] = 4,
+  [Npc.emSERIES_TYPE.SERIES_EARTH] = 5
+}
+
+function tbWnd:OnCreate()
+  self.bActive = false
+  self.svMine = Ui:NewScrollView(self, self.svMineTemplate, nil, false, false)
+  self.svRewardPreview = Ui:NewScrollView(self, self.svRewardTemplateR)
+  self.nUIFrozenTime = 0
+end
+
+function tbWnd:UpdateUIFrozen(nSec)
+  local nCurTime = GetTime()
+  self.nUIFrozenTime = nCurTime + nSec
+end
+
+function tbWnd:CheckUIFrozen()
+  local nCurTime = GetTime()
+  return nCurTime >= self.nUIFrozenTime
+end
+
+function tbWnd:OnActivate(panelSelectPartner)
+  if self.bActive then
+    return
+  end
+  self.bActive = true
+  self.panelSelectPartner = panelSelectPartner
+  Partner:SetDelaySyncPartnerCallback({
+    function()
+      if not self.bActive then
+        return
+      end
+      self.panelSelectPartner:Update()
+    end
+  })
+  self:UpdateUI()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_RESOURCE_BATTLE_MINING_UPDATE, self.OnS2CUpdate, self)
+  RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.ResourceBattleMining_CanMine)
+end
+
+function tbWnd:UpdateUI()
+  self.tbMinerCxt = {}
+  self.tbMinerCxt.tbPos = self.tbMinerCxt.tbPos or {}
+  for nMineIndex, v in ipairs(ResourceBattleMining.SAVE_ID.MineCxt) do
+    self.tbMinerCxt.tbPos[nMineIndex] = self.tbMinerCxt.tbPos[nMineIndex] or {}
+    for nMinerPosIndex, _ in ipairs(v.Miners) do
+      self.tbMinerCxt.tbPos[nMineIndex][nMinerPosIndex] = ResourceBattleMining:GetPlayerCurMiner(me, nMineIndex, nMinerPosIndex)
+    end
+  end
+  self:UpdateMine()
+  self:UpdateReward()
+end
+
+function tbWnd:OnDeactivate()
+  if not self.bActive then
+    return
+  end
+  self.bActive = false
+  if self.panelSelectPartner then
+    self.panelSelectPartner:Hide(true)
+    self.panelSelectPartner = nil
+  end
+  self:ChangeMiningTimer(false)
+  self.nMiningLeftTimeCache = nil
+  self.tbMinerCxt = nil
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_RESOURCE_BATTLE_MINING_UPDATE, self)
+end
+
+function tbWnd:UpdateMine()
+  local tbMines = self:_GetShowMine()
+  local nMineLv = tbMines[1]
+  local tbWuxing = tbMines[2]
+  self.pPanel:Label_SetText(self.txtTittle, i18n.EasyGet("\231\159\191\229\140\186\231\173\137\231\186\167 {0}\231\186\167", nMineLv))
+  local tempCfg = ResourceBattleMining.Cfg.DAY_OPEN_TIME
+  local szOpenTime = string.format("%02d:%02d", tempCfg[1], tempCfg[2])
+  tempCfg = ResourceBattleMining.Cfg.DAY_CLOSE_TIME
+  local szCloseTime = string.format("%02d:%02d", 0 == tempCfg[1] and 24 or tempCfg[1], tempCfg[2])
+  self.pPanel:Label_SetText(self.txtTime, i18n.EasyGet("{0}-{1}\231\159\191\229\140\186\229\188\128\230\148\190", szOpenTime, szCloseTime))
+  for nIndex, nWuxing in ipairs(tbWuxing) do
+    self.svMine:SetElement(nIndex, function(tbElement, nIndex)
+      self:_SetMineElementInfo(tbElement, nIndex)
+    end)
+  end
+end
+
+function tbWnd:_GetShowMine()
+  if ResourceBattleMining:HasMined(me) then
+    return ResourceBattleMining:GetPlayerLastMine(me)
+  end
+  return ResourceBattleMining:GetTongMine()
+end
+
+function tbWnd:_SetMineElementInfo(tbElement, nMineIndex)
+  local tbMines = self:_GetShowMine()
+  local nMineLv = tbMines[1]
+  local tbWuxing = tbMines[2]
+  local nMineWuxing = tbWuxing[nMineIndex]
+  for nWuxing, szWuxingTxt in pairs(self.Wuxing2Txt) do
+    if nWuxing == nMineWuxing then
+      tbElement.pPanel:SetActive("btnSeriesText/" .. szWuxingTxt, true)
+    else
+      tbElement.pPanel:SetActive("btnSeriesText/" .. szWuxingTxt, false)
+    end
+  end
+  local nBgNum = self.tbKuangBgWuxing2Num[nMineWuxing] or 1
+  tbElement.pPanel:Sprite_SetSprite("ImgBg", string.format("UI/atlas/UITong/UITongBg0%d.png", nBgNum))
+  for i = 1, ResourceBattleMining.Def.MinerMax do
+    local szPre = string.format("PartnerInfo%d/", i)
+    local nPartnerId = self.tbMinerCxt.tbPos[nMineIndex][i]
+    if 0 == nPartnerId then
+      tbElement.pPanel:SetActive(szPre .. "PartnerName", false)
+    else
+      tbElement.pPanel:SetActive(szPre .. "PartnerName", true)
+      local tbPartnerInfo = Partner:GetPartnerInfo(nPartnerId)
+      tbElement.pPanel:Sprite_SetSprite(szPre .. "PartnerName/imgNameBg", Partner.tbPartnerNameBg[tbPartnerInfo.nQualityLevel])
+      tbElement.pPanel:Label_SetText(szPre .. "PartnerName/txtName", i18n.Parse(tbPartnerInfo.szName))
+      for nWuxing, szWuxingTxt in pairs(self.Wuxing2Txt) do
+        if nWuxing == tbPartnerInfo.nSeries then
+          tbElement.pPanel:SetActive(szPre .. "PartnerName/btnSeriesText/" .. szWuxingTxt, true)
+        else
+          tbElement.pPanel:SetActive(szPre .. "PartnerName/btnSeriesText/" .. szWuxingTxt, false)
+        end
+      end
+    end
+    if self.tbMinerCxt.nSelectMine == nMineIndex and self.tbMinerCxt.nSelectPos == i then
+      tbElement.pPanel:SetActive(szPre .. "imgSelect", true)
+    else
+      tbElement.pPanel:SetActive(szPre .. "imgSelect", false)
+    end
+    Ui:Button_BindEvent(tbElement.pPanel, szPre .. "BtnAdd", self.OnClickChangeMiner, self, nMineIndex, i, nMineWuxing)
+  end
+  local nBaseMul, nPartnerAwardMul = ResourceBattleMining:CalMineAwardMultiplier(nMineLv, nMineWuxing, self.tbMinerCxt.tbPos[nMineIndex])
+  if nPartnerAwardMul > 0 then
+    tbElement.pPanel:Label_SetText("txtNum", i18n.EasyGet("\229\165\150\229\138\177\231\179\187\230\149\176{0}%", nBaseMul))
+    tbElement.pPanel:Label_SetText("txtNum/txtNumPlus", "+" .. nPartnerAwardMul .. "%")
+  else
+    tbElement.pPanel:Label_SetText("txtNum", i18n.EasyGet("<color=#5C6668>\229\165\150\229\138\177\231\179\187\230\149\176{0}%</color>", nBaseMul))
+    tbElement.pPanel:Label_SetText("txtNum/txtNumPlus", "")
+  end
+end
+
+function tbWnd:UpdateReward()
+  local tbMines = self:_GetShowMine()
+  local nMineLv = tbMines[1]
+  local tbWuxing = tbMines[2]
+  local bIsMining = ResourceBattleMining:HasMined(me)
+  local tbAllMineInfo = {}
+  for nMineIndex, nWuxing in ipairs(tbWuxing) do
+    local temp = {}
+    temp.nMineLv = nMineLv
+    temp.nMineWuxing = nWuxing
+    temp.tbMinePos = self.tbMinerCxt.tbPos[nMineIndex]
+    table.insert(tbAllMineInfo, temp)
+  end
+  local tbAward, nTotalAwardMul = ResourceBattleMining:CalMineAward(tbAllMineInfo)
+  self.pPanel:Label_SetText(self.txtNumR, nTotalAwardMul .. "%")
+  self.svRewardPreview:Reset()
+  for i, item in ipairs(tbAward) do
+    self.svRewardPreview:SetElement(i, function(tbElement, i)
+      tbElement.tbGrid = tbElement.tbGrid or Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+      if "Item" == item[1] then
+        tbElement.tbGrid:SetItemByTemplate(item[2], item[3])
+      else
+        tbElement.tbGrid:SetDigitalItem(item[1], item[2])
+      end
+      tbElement.tbGrid:SetClickEnable(true)
+    end)
+  end
+  self.pPanel:SetActive(self.btnGrayR, false)
+  self.pPanel:SetActive(self.btnOkR, false)
+  if bIsMining then
+    if ResourceBattleMining:IsDoneMined(me) then
+      self.pPanel:SetActive(self.btnOkR, true)
+      self.pPanel:Label_SetText(self.btnOkR .. "/Text", i18n.EasyGet("\233\162\134\229\143\150\229\165\150\229\138\177"))
+      Ui:Button_BindEvent(self.pPanel, self.btnOkR, function()
+        ResourceBattleMining:C2SGetMiningAward()
+      end)
+      self.pPanel:Label_SetText(self.txtInfoR, i18n.EasyGet("\229\143\175\228\187\165\229\174\140\230\136\144\230\140\150\231\159\191"))
+    else
+      self.pPanel:SetActive(self.btnGrayR, true)
+      self.pPanel:Label_SetText(self.btnGrayR .. "/Text", i18n.EasyGet("\233\162\134\229\143\150\229\165\150\229\138\177"))
+      self:ChangeMiningTimer(true)
+    end
+  elseif ResourceBattleMining:IsDoMiningTime() then
+    if ResourceBattleMining:IsMinedToday(me) then
+      self.pPanel:SetActive(self.btnGrayR, true)
+      self.pPanel:Label_SetText(self.btnOkR .. "/Text", i18n.EasyGet("\229\188\128\229\167\139\230\140\150\231\159\191"))
+      self.pPanel:Label_SetText(self.txtInfoR, i18n.EasyGet("\228\187\138\230\151\165\229\183\178\229\174\140\230\136\144\230\140\150\231\159\191"))
+    elseif not ResourceBattleMining:IsMinerSet(me) then
+      self.pPanel:SetActive(self.btnGrayR, true)
+      self.pPanel:Label_SetText(self.btnOkR .. "/Text", i18n.EasyGet("\229\188\128\229\167\139\230\140\150\231\159\191"))
+      self.pPanel:Label_SetText(self.txtInfoR, i18n.EasyGet("\232\175\183\229\133\136\228\184\138\233\152\181\229\144\140\228\188\180"))
+    else
+      self.pPanel:SetActive(self.btnOkR, true)
+      self.pPanel:Label_SetText(self.btnOkR .. "/Text", i18n.EasyGet("\229\188\128\229\167\139\230\140\150\231\159\191"))
+      self.pPanel:Label_SetText(self.txtInfoR, i18n.EasyGet("\230\140\129\231\187\173{0}", Lib:TimeDesc12(ResourceBattleMining.Cfg.MINING_TIME)))
+      Ui:Button_BindEvent(self.pPanel, self.btnOkR, function()
+        ResourceBattleMining:C2SDoMining()
+      end)
+    end
+  else
+    self.pPanel:SetActive(self.btnGrayR, true)
+    self.pPanel:Label_SetText(self.btnOkR .. "/Text", i18n.EasyGet("\229\188\128\229\167\139\230\140\150\231\159\191"))
+    self.pPanel:Label_SetText(self.txtInfoR, i18n.EasyGet("\228\184\141\229\156\168\230\140\150\231\159\191\230\151\182\233\151\180"))
+  end
+end
+
+tbWnd.Wuxing2Txt = {
+  [Npc.emSERIES_TYPE.SERIES_METAL] = "txtMetal",
+  [Npc.emSERIES_TYPE.SERIES_WOOD] = "txtWood",
+  [Npc.emSERIES_TYPE.SERIES_WATER] = "txtWater",
+  [Npc.emSERIES_TYPE.SERIES_FIRE] = "txtFire",
+  [Npc.emSERIES_TYPE.SERIES_EARTH] = "txtEarth"
+}
+
+function tbWnd:OnClickChangeMiner(nIndex, nMinerIndex, nMineWuxing)
+  local bRet, szErr = ResourceBattleMining:CanSetMiner(me)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  if not self:CheckUIFrozen() then
+    return
+  end
+  self.tbMinerCxt.nSelectMine = nIndex
+  self.tbMinerCxt.nSelectPos = nMinerIndex
+  self:UpdateMine()
+  local nCurMiner = ResourceBattleMining:GetPlayerCurMiner(me, nIndex, nMinerIndex)
+  self.panelSelectPartner:Show(self, nCurMiner)
+end
+
+function tbWnd:OnClickPartner(nPartnerID)
+  if not self.tbMinerCxt then
+    return
+  end
+  if not self.tbMinerCxt.nSelectMine or not self.tbMinerCxt.nSelectPos then
+    return
+  end
+  local nSelectMine = self.tbMinerCxt.nSelectMine
+  local nSelectPos = self.tbMinerCxt.nSelectPos
+  local nOldPartnerID = self.tbMinerCxt.tbPos[nSelectMine][nSelectPos]
+  self.tbMinerCxt.tbPos[nSelectMine][nSelectPos] = nPartnerID
+  local bFound = false
+  if 0 == nOldPartnerID and 0 ~= nPartnerID then
+    for nMineIndex, v in ipairs(ResourceBattleMining.SAVE_ID.MineCxt) do
+      for nMinerPosIndex, _ in ipairs(v.Miners) do
+        if 0 == self.tbMinerCxt.tbPos[nMineIndex][nMinerPosIndex] then
+          self.tbMinerCxt.nSelectMine = nMineIndex
+          self.tbMinerCxt.nSelectPos = nMinerPosIndex
+          self.panelSelectPartner:Update()
+          bFound = true
+          break
+        end
+      end
+      if bFound then
+        break
+      end
+    end
+  end
+  self:UpdateMine()
+end
+
+function tbWnd:OnPartnerSelectEnd()
+  self.tbMinerCxt.nSelectMine = nil
+  self.tbMinerCxt.nSelectPos = nil
+  self:UpdateMine()
+  local bChange = false
+  for nMineIndex, v in ipairs(self.tbMinerCxt.tbPos) do
+    for nMinerPosIndex, _ in ipairs(v) do
+      if self.tbMinerCxt.tbPos[nMineIndex][nMinerPosIndex] ~= ResourceBattleMining:GetPlayerCurMiner(me, nMineIndex, nMinerPosIndex) then
+        bChange = true
+        break
+      end
+    end
+  end
+  if bChange then
+    ResourceBattleMining:C2SSetMinerAll(self.tbMinerCxt.tbPos)
+    self:UpdateUIFrozen(2)
+  end
+end
+
+function tbWnd:GetMinerCxt()
+  return self.tbMinerCxt
+end
+
+function tbWnd:GetPreferWuxing(nMineIndex)
+  local tbMines = self:_GetShowMine()
+  local tbWuxing = tbMines[2]
+  return tbWuxing[nMineIndex]
+end
+
+function tbWnd:OnS2CUpdate()
+  self:UpdateUI()
+  self:UpdateUIFrozen(0)
+end
+
+function tbWnd:ChangeMiningTimer(bActive)
+  if not bActive then
+    if self.nMiningTimer then
+      Timer:Close(self.nMiningTimer)
+      self.nMiningTimer = nil
+    end
+  else
+    if self.nMiningTimer then
+      self:ChangeMiningTimer(false)
+    end
+    local nLeftTime = ResourceBattleMining:CalLeftMineTime(me)
+    if nLeftTime > 0 then
+      self.nMiningLeftTimeCache = nLeftTime + 1
+      self:_OnMiningTimerUpdate()
+      self.nMiningTimer = Timer:Register(Env.GAME_FPS, function()
+        self.nMiningLeftTimeCache = self.nMiningLeftTimeCache - 1
+        if self:_OnMiningTimerUpdate() then
+          return true
+        end
+        self.nMiningTimer = nil
+        self:UpdateReward()
+        return false
+      end)
+    end
+  end
+end
+
+function tbWnd:_OnMiningTimerUpdate()
+  if self.nMiningLeftTimeCache > 0 then
+    self.pPanel:Label_SetText(self.txtInfoR, i18n.EasyGet("\230\140\150\231\159\191\230\151\182\233\151\180\239\188\154{0}", Lib:TimeDesc3(self.nMiningLeftTimeCache)))
+    return true
+  end
+  return false
+end

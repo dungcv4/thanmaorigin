@@ -1,0 +1,178 @@
+Require("Script/Activity/ActivityMgrC.lua")
+ActivityMgr.tbJumpType = {
+  GoToNPC = "GotoNPC",
+  GoToDynamicNpc = "GoToDynamicNpc",
+  OpenWindow = "OpenWindow",
+  OpenCommonActivityWnd = "OpenCommonActivityWnd",
+  OpenTemporaryStepWnd = "OpenTemporaryStepWnd",
+  Common = "Common",
+  GotoPos = "GotoPos",
+  GotoPos2 = "GotoPos2",
+  ReturnTong = "ReturnTong",
+  GetOBReward = "GetOBReward",
+  DoActivityFunc = "DoActivityFunc",
+  OpenShopBuy = "OpenShopBuy",
+  CallCmd = "CallCmd"
+}
+ActivityMgr.tbJumpFunc = {
+  [ActivityMgr.tbJumpType.GoToNPC] = function(nActivityId, nNpcTemplateId, nMapTemplateId)
+    if not nNpcTemplateId or not nMapTemplateId then
+      LogErr("ActivityMgr.tbJumpFunc.GotoNPC some wrong happened", nNpcTemplateId, nMapTemplateId)
+      return
+    end
+    ActivityMgr:GotoNpc(nNpcTemplateId, nMapTemplateId)
+  end,
+  [ActivityMgr.tbJumpType.GoToDynamicNpc] = function(nAddDecorationActId, nNpcTemplateId, nMapTemplateId)
+    local pActInstance = ActivityMgr:GetInstanceById(nAddDecorationActId)
+    if not pActInstance then
+      LogErr("ActivityMgr.tbJumpFunc.GoToDynamicNpc AddDecorationActId may be wrong", nAddDecorationActId)
+      return
+    end
+    if not nNpcTemplateId or not nMapTemplateId then
+      LogErr("ActivityMgr.tbJumpFunc.GoToDynamicNpc some wrong happened", nNpcTemplateId, nMapTemplateId)
+      return
+    end
+    local tbNpcPosInfo = pActInstance:GetNpcPosInfo()
+    if tbNpcPosInfo and tbNpcPosInfo[nMapTemplateId] then
+      for _, tbInfo in pairs(tbNpcPosInfo[nMapTemplateId]) do
+        if tbInfo.NpcTemplateId == nNpcTemplateId then
+          ActivityMgr:GotoPos(nNpcTemplateId, nMapTemplateId, tbInfo.PosX, tbInfo.PosY)
+          break
+        end
+      end
+    end
+  end,
+  [ActivityMgr.tbJumpType.GotoPos] = function(nActivityId, nNpcTemplateId, nMapTemplateId, nPosX, nPosY)
+    if not (nNpcTemplateId and nMapTemplateId and nPosX) or not nPosY then
+      LogErr("ActivityMgr.tbJumpFunc.GotoPos some wrong happened", nNpcTemplateId, nMapTemplateId, nPosX, nPosY)
+      return
+    end
+    ActivityMgr:GotoPos(nNpcTemplateId, nMapTemplateId, nPosX, nPosY)
+  end,
+  [ActivityMgr.tbJumpType.OpenWindow] = function(nActivityId, ...)
+    local pInstance = ActivityMgr:GetInstanceById(nActivityId)
+    if not pInstance or not pInstance:IsOpen() then
+      me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+      return
+    end
+    Ui:OpenWindow(...)
+  end,
+  [ActivityMgr.tbJumpType.OpenCommonActivityWnd] = function(nActivityId, szWndName)
+    local function func(tbWnd)
+      if not tbWnd then
+        return
+      end
+      local pInstance = ActivityMgr:GetInstanceById(nActivityId)
+      if not pInstance or not pInstance:IsOpen() then
+        me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+        return
+      end
+      if tbWnd.OnClickActivity then
+        tbWnd:OnClickActivity(nActivityId)
+      end
+    end
+    
+    if Ui:WindowVisible(szWndName) then
+      return func(Ui:GetWindow(szWndName))
+    end
+    Ui:OpenWindowWithCallback(szWndName, function(_, tbWnd)
+      func(tbWnd)
+    end)
+  end,
+  [ActivityMgr.tbJumpType.OpenTemporaryStepWnd] = function(nActivityId, szWndName, nStep)
+    local function func(tbWnd)
+      if not tbWnd then
+        return
+      end
+      if tbWnd.OnClickStep then
+        tbWnd:OnClickStep(nStep)
+      end
+    end
+    
+    if Ui:WindowVisible(szWndName) then
+      return func(Ui:GetWindow(szWndName))
+    end
+    Ui:OpenWindowWithCallback(szWndName, function(_, tbWnd)
+      func(tbWnd)
+    end, nil, nActivityId)
+  end,
+  [ActivityMgr.tbJumpType.Common] = function(nActivityId, nJumpToActivityId, ...)
+    local pInstance = ActivityMgr:GetInstanceById(nJumpToActivityId)
+    if not pInstance then
+      me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+      return
+    end
+    if not pInstance.DoCommonJump then
+      LogErr("function DoCommonJump not found", pInstance.szClassName, pInstance.nId)
+      return
+    end
+    pInstance:DoCommonJump(...)
+  end,
+  [ActivityMgr.tbJumpType.ReturnTong] = function(nActivityId, ...)
+    local pInstance = ActivityMgr:GetInstanceById(nActivityId)
+    if not pInstance then
+      me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+      return
+    end
+    Tong:ReqEnterTongMap()
+  end,
+  [ActivityMgr.tbJumpType.GetOBReward] = function(nActivityId, nOBRewardActId)
+    local pInstance = ActivityMgr:GetInstanceById(nActivityId)
+    if not pInstance then
+      me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+      return
+    end
+    local pInstance = ActivityMgr:GetInstanceById(nOBRewardActId)
+    ActivityMgr:CallServerScript(nOBRewardActId, pInstance.Protocol.GetReward)
+  end,
+  [ActivityMgr.tbJumpType.DoActivityFunc] = function(nActivityId, nJumpToActivityId, szFunc, ...)
+    local pInstance = ActivityMgr:GetInstanceById(nJumpToActivityId)
+    if not pInstance then
+      me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+      return
+    end
+    pInstance[szFunc](pInstance, ...)
+  end,
+  [ActivityMgr.tbJumpType.OpenShopBuy] = function(nActivityId, nItemTid, szPriorityShopType)
+    local pInstance = ActivityMgr:GetInstanceById(nActivityId)
+    if not pInstance or not pInstance:IsOpen() then
+      return
+    end
+    Shop:OpenShopBuyWid(nItemTid, true, szPriorityShopType)
+  end,
+  [ActivityMgr.tbJumpType.CallCmd] = function(nActivityId, szCmd)
+    Lib:DoString(szCmd)
+  end,
+  [ActivityMgr.tbJumpType.GotoPos2] = function(nActivityId, nMapTemplateId, nPosX, nPosY)
+    AutoPath:GotoAndCallEx(nMapTemplateId, nPosX, nPosY)
+  end
+}
+
+function ActivityMgr:IsJumpTypeExist(szJumpType)
+  return self.tbJumpFunc[szJumpType] and true or false
+end
+
+function ActivityMgr:DoCommonJump(szJumpType, ...)
+  if not szJumpType or not self:IsJumpTypeExist(szJumpType) then
+    LogErr("ActivityMgr:DoCommonJump jump type is not exist", szJumpType)
+    return false
+  end
+  self.tbJumpFunc[szJumpType](...)
+  return true
+end
+
+ActivityMgr.tbCanShowFunc = {
+  IsServerJinShanChannel = function(nActivityId, ...)
+    return ActivityMgr:CheckIsServerJinShanChannel()
+  end
+}
+
+function ActivityMgr:CheckCanShow(szCanShowType, nActivityId, ...)
+  if not szCanShowType then
+    return true
+  end
+  if not self.tbCanShowFunc[szCanShowType] then
+    return true
+  end
+  return self.tbCanShowFunc[szCanShowType](nActivityId, ...)
+end

@@ -1,0 +1,1376 @@
+Require("CommonScript/Item/ItemDefine.lua")
+Require("CommonScript/Validator.lua")
+Item.tbItemColor = Lib:LoadTabFileEx("Setting/Item/ItemColor.tab", "dssss", "Quality", {
+  "Quality",
+  "Color",
+  "TxtColor",
+  "LargeChatColor",
+  "SmallChatColor"
+})
+Item.MAX_STAR_LEVEL = 20
+Item.nExpBookItemId = 20349
+Item.nExpBookFinished = 20350
+Item.PROTOCOL_USEITEM = 20
+Item.tbTipsColorDef = Lib:LoadTabFileEx("Setting/Item/TipsColorDefine.tab", "ss", "szkey", {"szkey", "ColorName"})
+Item.tbDetailTypeClassify = Lib:LoadTabFileEx("Setting/Item/DetailTypeClassify.tab", "dddddddd", "nDetailType", {
+  "nDetailType",
+  "bInNormal",
+  "bInEquip",
+  "bInStone",
+  "bInPartner",
+  "bInJingMai",
+  "bInShenBingPu",
+  "bInLingZhu"
+})
+Item.eTRADELIMITTYPE = {
+  NONE = 0,
+  NORMAL = 1,
+  TRADE_TIMES = 2,
+  REFRESH_PROTECTED_TIME = 3
+}
+Item.eTRADELIMITWAY = {
+  P2P = 1,
+  MARKETSTALL = 2,
+  OTHER = 3
+}
+Item.eTRADELIMITWAY_DESC = {
+  [Item.eTRADELIMITWAY.P2P] = function()
+    return i18n.EasyGet("\228\184\170\228\186\186\228\186\164\230\152\147")
+  end,
+  [Item.eTRADELIMITWAY.MARKETSTALL] = function()
+    return i18n.EasyGet("\233\147\182\231\165\168\230\145\134\230\145\138")
+  end,
+  [Item.eTRADELIMITWAY.OTHER] = function()
+    return i18n.EasyGet("\230\156\170\231\159\165\228\186\164\230\152\147")
+  end
+}
+Item.eBINDTYPE = {
+  BIND = 0,
+  UNBIND = 1,
+  MONTHCARD_UNBIND = 2
+}
+Item.nUseEquipLimitCD = 36
+Item.nUseEquipLimitTime = 3
+if not Item.tbClassBase then
+  Item.tbClassBase = {}
+end
+if not Item.tbClass then
+  Item.tbClass = {
+    default = Item.tbClassBase,
+    [""] = Item.tbClassBase
+  }
+end
+
+function Item:Init()
+  self.tbForbidList = {}
+  self.tbUnForbidList = {}
+  self.tbForbidListGM = {}
+  self.tbItemBasePropCache = {}
+  self:LoadItemIcon()
+  self:LoadStarLevel()
+  self:LoadUnidentifyItem()
+  self:LoadRelateItem()
+  self:LoadFestivalDeleteItem()
+end
+
+function Item:SetForbidItem(nTemplateId, bUsable)
+  if not bUsable then
+    self.tbForbidListGM[nTemplateId] = true
+  else
+    self.tbForbidListGM[nTemplateId] = nil
+  end
+end
+
+function Item:LoadUnidentifyItem()
+end
+
+function Item:GetIdAfterIdentify(nUnidentifyId)
+  return self.tbUnidentifyToId[nUnidentifyId]
+end
+
+function Item:LoadItemIcon()
+  self.tbItemIcon = Lib:LoadTabFileEx("Setting/Item/ItemIcon.tab", "dss", "IconId", {
+    "IconId",
+    "Atlas",
+    "Sprite"
+  })
+  if not self.tbItemIcon then
+    Log("Load Item Icon Failed!!!!")
+    return
+  end
+end
+
+function Item:LoadRelateItem()
+  self.tbRelateItem = {}
+  self.tbRelateId = {}
+  local tbFile = Lib:LoadTabFileEx("Setting/Item/RelateItem.tab", "ddddddddddddddddddddd", nil, {
+    "RelateId",
+    "Buff1Id",
+    "Buff2Id",
+    "Buff3Id",
+    "Buff4Id",
+    "Buff5Id",
+    "Buff6Id",
+    "Buff7Id",
+    "Buff8Id",
+    "Buff9Id",
+    "Buff10Id",
+    "Buff11Id",
+    "Buff12Id",
+    "Buff13Id",
+    "Buff14Id",
+    "Buff15Id",
+    "Buff16Id",
+    "Buff17Id",
+    "Buff18Id",
+    "Buff19Id",
+    "Buff20Id"
+  })
+  for _, tbSetting in pairs(tbFile) do
+    local nRelateId = tbSetting.RelateId
+    self.tbRelateItem[nRelateId] = self.tbRelateItem[nRelateId] or {}
+    for i = 1, Item.MAX_RELATE_ITEM do
+      local nBuffId = tbSetting[table.concat({
+        "Buff",
+        i,
+        "Id"
+      })]
+      if nBuffId and nBuffId >= 0 then
+        table.insert(self.tbRelateItem[nRelateId], nBuffId)
+        self.tbRelateId[nBuffId] = nRelateId
+      end
+    end
+  end
+  self.tbRelateItem = SetReadOnly(self.tbRelateItem)
+  self.tbRelateId = SetReadOnly(self.tbRelateId)
+end
+
+function Item:GetRelateConf(nBuffId)
+  local nRelateId = self.tbRelateId[nBuffId]
+  if not nRelateId then
+    Lib:LogFormat("[Item] GetRelateConf cant find config, nBuffId:%d", nBuffId)
+    return
+  end
+  local tbSet = self.tbRelateItem[nRelateId]
+  if not tbSet then
+    Lib:LogFormat("[Item] GetRelateConf cant find config, nRelateId:%d", nRelateId)
+  end
+  return tbSet
+end
+
+function Item:LoadFestivalDeleteItem()
+  self.tbFestivalDeleteItem = Lib:EasyLoadTabFile("Setting/Item/FestivalDeleteItem.tab", {
+    "nTemplateId"
+  }, nil, 0, true)
+end
+
+function Item:GetItemBaseProp(nItemTemplateId)
+  if not self.tbItemBasePropCache then
+    self.tbItemBasePropCache = {}
+  end
+  local tbCache = self.tbItemBasePropCache[nItemTemplateId]
+  if not tbCache then
+    tbCache = SetReadOnly(KItem.GetItemBaseProp(nItemTemplateId))
+    self.tbItemBasePropCache[nItemTemplateId] = tbCache
+  end
+  return tbCache
+end
+
+function Item:IsExist(nItemTemplateId)
+  return Item:GetItemBaseProp(nItemTemplateId)
+end
+
+function Item:GetType(nItemId)
+  local tbBase = Item:GetItemBaseProp(nItemId)
+  return tbBase and tbBase.nItemType or 0
+end
+
+function Item:GetName(nItemId, pPlayer)
+  pPlayer = pPlayer or me
+  local tbBase = Item:GetItemBaseProp(nItemId)
+  local szName = KItem.GetItemShowInfo(nItemId, pPlayer.nFaction, pPlayer.nFactionSect, pPlayer.nSex)
+  if szName then
+    szName = i18n.Parse(szName)
+    local nEquipPos = KItem.GetEquipPos(nItemId)
+    if nEquipPos and nEquipPos >= Item.EQUIPPOS_HELM and nEquipPos <= Item.EQUIPPOS_AMULET then
+      local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(pPlayer, nEquipPos)
+      if nLianHuaLevel == tbBase.nLevel then
+        szName = string.format("%s\194\183%s", Item.EquipLianHua.tbEquipPos2NamePrefix[nEquipPos](), szName)
+      end
+    end
+  end
+  return szName and szName or ""
+end
+
+function Item:GetIntro(nItemId)
+  local tbBase = Item:GetItemBaseProp(nItemId)
+  return tbBase and i18n.Parse(tbBase.szIntro) or ""
+end
+
+function Item:GetQuality(nItemId)
+  local tbBase = Item:GetItemBaseProp(nItemId)
+  return tbBase and tbBase.nQuality or 0
+end
+
+function Item:GetValue(nItemId)
+  local tbBase = Item:GetItemBaseProp(nItemId)
+  return tbBase and tbBase.nValue or 0
+end
+
+function Item:GetLevel(nItemId)
+  local tbBase = Item:GetItemBaseProp(nItemId)
+  return tbBase and tbBase.nLevel or 0
+end
+
+function Item:GetIcon(nIconId)
+  local tbIcon = self.tbItemIcon[nIconId]
+  if not tbIcon then
+    Log("[Item] error. Item:GetIcon error, nIconId = ", nIconId)
+  end
+  return tbIcon and tbIcon.Atlas, tbIcon and tbIcon.Sprite
+end
+
+function Item:LoadStarLevel()
+  local szSetting = "Setting/Item/StarLevel.tab"
+  self.tbStarLevelValue = {}
+  local tbFile = Lib:LoadTabFile(szSetting, {ItemType = 1})
+  if not tbFile then
+    print("load " .. szSetting .. " failed!")
+    return
+  end
+  for _, tbRow in pairs(tbFile) do
+    if tbRow.ItemType then
+      self.tbStarLevelValue[tbRow.ItemType] = {}
+      for i = 1, self.MAX_STAR_LEVEL do
+        self.tbStarLevelValue[tbRow.ItemType][i] = tonumber(tbRow["StartLv" .. i]) or 0
+      end
+    end
+  end
+  self.tbStarLevelValue = SetReadOnly(self.tbStarLevelValue)
+end
+
+function Item:GetItemUseManyLimit(szClassName)
+  return Item.UseManyLimit[szClassName]
+end
+
+function Item:GetStarLevel(nItemType, nValue)
+  local nLevel = 0
+  if not self.tbStarLevelValue then
+    return 0
+  end
+  for i, nStar in ipairs(self.tbStarLevelValue[nItemType] or {}) do
+    if nStar <= nValue then
+      nLevel = i
+    else
+      break
+    end
+  end
+  return nLevel
+end
+
+function Item:GetQualityColor(nQuality)
+  local tbColor = self.tbItemColor[nQuality] or {}
+  if tbColor then
+    return tbColor.Color, tbColor.TxtColor
+  end
+end
+
+function Item:GetChatColor(nQuality)
+  local tbColor = self.tbItemColor[nQuality] or {}
+  if tbColor then
+    return tbColor.LargeChatColor, tbColor.SmallChatColor
+  end
+end
+
+function Item:GetClass(szClassName, bNotCreate)
+  local tbClass = self.tbClass[szClassName]
+  if not tbClass and 1 ~= bNotCreate then
+    tbClass = Lib:NewClass(self.tbClassBase)
+    self.tbClass[szClassName] = tbClass
+  end
+  return tbClass
+end
+
+function Item:NewClass(szClassName, szParent)
+  if self.tbClass[szClassName] then
+    print("[ITEM] class " .. tostring(szClassName) .. " already exist, please check out")
+    return
+  end
+  local tbParent = self.tbClass[szParent]
+  if not tbParent then
+    print("[ITEM] class" .. tostring(szParent) .. " already exist, please check out")
+    return
+  end
+  local tbClass = Lib:NewClass(tbParent)
+  self.tbClass[szClassName] = tbClass
+  return tbClass
+end
+
+function Item:OnCreate(szClassName, ...)
+  local tbClass = self.tbClass[szClassName] or self.tbClass.default
+  local bRet = tbClass:OnCreate(...)
+  return bRet
+end
+
+function Item:OnItemInit(szClassName, ...)
+  local tbClass = self.tbClass[szClassName] or self.tbClass.default
+  local bRet = tbClass:OnInit(...)
+  return bRet
+end
+
+function Item:BeforeDelete(pItem)
+  local tbClass = self.tbClass[pItem.szClass]
+  if tbClass and tbClass.BeforeDelete then
+    tbClass:BeforeDelete(pItem)
+  end
+end
+
+function Item:GiveBackEquip(nPlayerID, tbData)
+  local tbEquip = Item:GetClass("equip")
+  tbEquip:GiveBackEquip(nPlayerID, tbData)
+end
+
+function Item:CheckCanSell(pItem)
+  local tbClass = self.tbClass[pItem.szClass]
+  if not tbClass or not tbClass.CheckCanSell then
+    return true
+  end
+  return tbClass:CheckCanSell(pItem)
+end
+
+function Item:CheckUsable(pItem, szClassName)
+  local tbClass = self.tbClass[szClassName]
+  tbClass = tbClass or self.tbClass.default
+  local nTemplateId = pItem.dwTemplateId
+  if not (not self.tbForbidList[szClassName] or self.tbUnForbidList[szClassName]) or self.tbForbidListGM[nTemplateId] then
+    return 0, i18n.EasyGet("\229\190\136\233\129\151\230\134\190\239\188\140\231\179\187\231\187\159\230\163\128\230\181\139\229\136\176\232\175\165\233\129\147\229\133\183\229\188\130\229\184\184\239\188\140\230\154\130\230\151\182\230\151\160\230\179\149\228\189\191\231\148\168\227\128\130")
+  end
+  if pItem.nUseLevel > me.nTotalLevel then
+    return 0, i18n.EasyGet("{0}\231\186\167\228\185\139\229\144\142\229\143\175\228\189\191\231\148\168", Lib:GetLevelText(pItem.nUseLevel))
+  end
+  return tbClass:CheckUsable(pItem)
+end
+
+function Item:UseItemByPlayer(pPlayer, nId, ...)
+  local pItem, nPos = pPlayer.GetItemInAllSpace(nId)
+  if not pItem then
+    print("Unexsit Item " .. nId)
+    return
+  end
+  if not self:IsInBag(nPos) then
+    LogErr("UseItem Error, Item Id and Bag Id: ", nId, nPos)
+    return
+  end
+  local bIsDelay = self:CheckIsTimeDelay(pItem)
+  if bIsDelay then
+    pPlayer.CenterMsg(i18n.EasyGet("\229\187\182\230\151\182\233\129\147\229\133\183\229\176\154\230\156\170\229\136\176\228\189\191\231\148\168\230\151\182\233\151\180"))
+    return
+  end
+  local szClassName = pItem.szClass
+  local bRet, nOpenRetCode, bIgnoreLog = xpcall(self.OnUse, Lib.ShowStack, self, pItem, ...)
+  if not bRet then
+    self.tbUnForbidList[szClassName] = true
+    Log(nOpenRetCode)
+    Log(debug.traceback())
+  end
+end
+
+function Item:Zone_UseItem(nId, ...)
+  local pItem, nPos = me.GetItemInAllSpace(nId)
+  if not pItem then
+    print("Unexsit Item " .. nId)
+    return
+  end
+  if Item.TB_MEDICINE_LIST[pItem.dwTemplateId] or Item.tbZoneCanUseItem[pItem.dwTemplateId] then
+    Item:UseItem(nId)
+    if Item.TB_MEDICINE_LIST[pItem.dwTemplateId] then
+      local tbMedicineItem = Item:GetClass("MedicineItem")
+      if tbMedicineItem then
+        tbMedicineItem:UpdateUserValueOfZoneMedicineCount(me)
+      end
+    end
+  end
+end
+
+function Item:UseItem(nId, ...)
+  if type(nId) ~= "number" or nId <= 0 then
+    return
+  end
+  local pItem, nPos = me.GetItemInAllSpace(nId)
+  if not pItem then
+    return
+  end
+  if not self:IsInBag(nPos) then
+    return
+  end
+  local bIsDelay = self:CheckIsTimeDelay(pItem)
+  if bIsDelay then
+    me.CenterMsg(i18n.EasyGet("\229\187\182\230\151\182\233\129\147\229\133\183\229\176\154\230\156\170\229\136\176\228\189\191\231\148\168\230\151\182\233\151\180"))
+    return
+  end
+  local szClassName = pItem.szClass
+  local bRet, nOpenRetCode, bIgnoreLog = xpcall(self.OnUse, Lib.ShowStack, self, pItem, ...)
+  if not bRet then
+    self.tbUnForbidList[szClassName] = true
+    Log(nOpenRetCode)
+    Log(debug.traceback())
+  end
+end
+
+function Item:UseManyItem(nId, nCount, ...)
+  if not Lib:IsInteger(nCount) or nCount < 0 then
+    return
+  end
+  if 1 == nCount then
+    Item:UseItem(nId, ...)
+    return
+  end
+  local pItem, nPos = me.GetItemInAllSpace(nId)
+  if not pItem then
+    return
+  end
+  if not self:IsInBag(nPos) then
+    return
+  end
+  if nCount > pItem.nCount then
+    return
+  end
+  local szClassName = pItem.szClass
+  local nUseLimit = Item:GetItemUseManyLimit(szClassName)
+  if not nUseLimit then
+    me.CenterMsg(i18n.EasyGet("\228\184\141\229\143\175\230\137\185\233\135\143\228\189\191\231\148\168"))
+    return
+  end
+  if "RandItem" == szClassName or "GoldFuDai" == szClassName then
+    nUseLimit = Item.PROTOCOL_USEITEM
+  end
+  if nUseLimit > 0 and nCount > nUseLimit then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\233\129\147\229\133\183\228\184\128\230\172\161\230\156\128\229\164\154\228\189\191\231\148\168{0}\228\184\170", nUseLimit))
+    return
+  end
+  local bRet, nOpenRetCode, bIgnoreLog = xpcall(self.OnUseMany, Lib.ShowStack, self, pItem, nCount, ...)
+  if not bRet then
+    Log(nOpenRetCode)
+    Log(debug.traceback())
+  end
+end
+
+function Item:UseManyItemByTemplated(pPlayer, dwTemplateId, nCount, ...)
+  if nCount < 0 then
+    return
+  end
+  local nHave = pPlayer.GetItemCountByTypeInBag(dwTemplateId)
+  if nCount > nHave then
+    return
+  end
+  local tbInfo = Item:GetItemBaseProp(dwTemplateId)
+  local szClassName = tbInfo.szClass
+  local nUseLimit = Item:GetItemUseManyLimit(szClassName)
+  if not nUseLimit then
+    me.CenterMsg(i18n.EasyGet("\228\184\141\229\143\175\230\137\185\233\135\143\228\189\191\231\148\168"))
+    return
+  end
+  if nUseLimit > 0 and nCount > nUseLimit then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\233\129\147\229\133\183\228\184\128\230\172\161\230\156\128\229\164\154\228\189\191\231\148\168{0}\228\184\170", nUseLimit))
+    return
+  end
+  local bRet, nOpenRetCode, bIgnoreLog = xpcall(self.OnUseManyByTemplated, Lib.ShowStack, self, pPlayer, dwTemplateId, nCount, ...)
+  if not bRet then
+    Log(nOpenRetCode)
+    Log(debug.traceback())
+  end
+end
+
+function Item:OnUseManyByTemplated(pPlayer, dwTemplateId, nCount, ...)
+  local tbInfo = Item:GetItemBaseProp(dwTemplateId)
+  local szClassName = tbInfo.szClass
+  local tbClass = self.tbClass[szClassName] or self.tbClass.default
+  local dwPlayerId, szPlayerName, szItemName = pPlayer.dwID, pPlayer.szName, tbInfo.szName
+  if tbClass and tbClass.OnUseManyByTemplated then
+    local bOk, nRetCode, bIgnoreLog = xpcall(tbClass.OnUseManyByTemplated, Lib.ShowStack, tbClass, dwTemplateId, nCount, ...)
+    if bOk then
+      self:DoUseManyByTemplated(pPlayer, dwTemplateId, nRetCode, bIgnoreLog)
+    else
+      self:DoUseManyByTemplated(pPlayer, dwTemplateId, nCount, false)
+      LogErr("Item:OnUseManyByTemplated Err", dwPlayerId, szPlayerName, dwTemplateId, i18n.Parse(szItemName), debug.traceback())
+    end
+  else
+    LogErr("Item:OnUseManyByTemplated error: Item can't use many By Templated, TemplateId and ClassName = ", dwTemplateId, szClassName)
+  end
+end
+
+function Item:DoUseManyByTemplated(pPlayer, dwTemplateId, nRetCode, bIgnoreLog)
+  local nCount = nRetCode
+  if nRetCode and nRetCode > 0 then
+    local tbpItem = pPlayer.GetItemListInBag(dwTemplateId)
+    local tbpCanTradeItem, tbpLimitTradeItem = {}, {}
+    for index, pItem in ipairs(tbpItem) do
+      if 1 == pItem.dwTradeLimitType then
+        table.insert(tbpCanTradeItem, pItem)
+      else
+        table.insert(tbpLimitTradeItem, pItem)
+      end
+    end
+    for index, pItem in ipairs(tbpLimitTradeItem) do
+      if nRetCode > 0 then
+        local nCost = nRetCode < pItem.nCount and nRetCode or pItem.nCount
+        local nRealCostCount = pPlayer.ConsumeItem(pItem, nCost, Env.LogWay_UseItem, bIgnoreLog)
+        nRetCode = nRetCode - nRealCostCount
+        if nRealCostCount ~= nCost then
+          LogErr("DoUseManyByTemplated BindType UseCount Error", dwTemplateId, pPlayer.dwID)
+          Lib:LogFormat("DoUseManyByTemplated BindType Error dwTemplateId:%d, nRet:%s, player:%d, nBindCost:%d", dwTemplateId, nCount or "nil", pPlayer.dwID, nCount - nRetCode)
+        end
+      else
+        break
+      end
+    end
+    local nLimitTradeCost = nCount - nRetCode
+    for index, pItem in ipairs(tbpCanTradeItem) do
+      if nRetCode > 0 then
+        local nCost = nRetCode < pItem.nCount and nRetCode or pItem.nCount
+        local nRealCostCount = pPlayer.ConsumeItem(pItem, nCost, Env.LogWay_UseItem, bIgnoreLog)
+        nRetCode = nRetCode - nRealCostCount
+        if nRealCostCount ~= nCost then
+          LogErr("DoUseManyByTemplated not BindType UseCount Error", dwTemplateId, pPlayer.dwID)
+          Lib:LogFormat("DoUseManyByTemplated not BindType dwTemplateId:%d, nRet:%s, player:%d, nBindCost:%d", dwTemplateId, nCount or "nil", pPlayer.dwID, nLimitTradeCost)
+        end
+      else
+        break
+      end
+    end
+    if 0 == nRetCode then
+      Lib:LogFormat("Item:OnUseMany dwTemplateId:%d, nRet:%s, player:%d, nBindCost:%d", dwTemplateId, nCount or "nil", pPlayer.dwID, nLimitTradeCost)
+      return true
+    else
+      LogErr("DoUseManyByTemplated BindType UseCount Error", dwTemplateId, pPlayer.dwID, nRetCode, nCount)
+      Lib:LogFormat("Item:OnUseMany Count Error dwTemplateId:%d, nRet:%s, player:%d, nBindCost:%d", dwTemplateId, nCount or "nil", pPlayer.dwID, nLimitTradeCost)
+      return false
+    end
+  end
+end
+
+function Item:UseAllItem(nId)
+  local pItem, nPos = me.GetItemInAllSpace(nId)
+  if not pItem then
+    print("Unexsit Item " .. nId)
+    return
+  end
+  if not self:IsInBag(nPos) then
+    LogErr("UseAllItem Error, Item Id and Bag Id: ", nId, nPos)
+    return
+  end
+  local szClassName = pItem.szClass
+  local bRet, nOpenRetCode, bIgnoreLog = xpcall(self.OnUseAll, Lib.ShowStack, self, pItem)
+  if not bRet then
+    self.tbUnForbidList[szClassName] = true
+    Log(nOpenRetCode)
+    Log(debug.traceback())
+  end
+end
+
+function Item:ForceUseItem(nId)
+  local pItem, nPos = me.GetItemInAllSpace(nId)
+  if not pItem then
+    print("Unexsit Item " .. nId)
+    return
+  end
+  if not self:IsInBag(nPos) then
+    LogErr("ForceUseItem Error, Item Id and Bag Id: ", nId, nPos)
+    return
+  end
+  local szClassName = pItem.szClass
+  local bRet, nOpenRetCode, bIgnoreLog = xpcall(self.OnForceUse, Lib.ShowStack, self, pItem)
+  if not bRet then
+    self.tbUnForbidList[szClassName] = true
+    Log(nOpenRetCode)
+    Log(debug.traceback())
+  end
+end
+
+function Item:CheckUseCount(pItem)
+  local nCurCount = pItem.nCount
+  if nCurCount <= 0 then
+    LogErr("Item:CheckUseCount Error, Item Id and Bag Id: %d %d", pItem.dwTemplateId, me.dwID)
+    Log("ConsumeItem\tDelete", me.szName, me.dwID, pItem.dwTemplateId, nCurCount, Env.tbLogWaySubWays[Env.LogWay_UseItem] or "unkonwn", Env.tbLogWayDesc[Env.LogWay_UseItem] or "unkonwn", 0)
+    pItem.Delete(Env.LogWay_UseItem)
+    return false
+  end
+  return true
+end
+
+function Item:LogUseErr(pItem, pPlayer)
+  local dwItemId, szItemName, dwTemplateId = pItem.dwId, pItem.szName, pItem.dwTemplateId
+  local dwPlayerId, szPlayerName = pPlayer.dwID, pPlayer.szName
+  LogErr("Item:OnUse Err", dwPlayerId, szPlayerName, dwItemId, dwTemplateId, i18n.Parse(szItemName), debug.traceback())
+end
+
+function Item:OnUse(pItem, ...)
+  local szClassName = pItem.szClass
+  local nRet, szMsg = self:CheckUsable(pItem, szClassName)
+  if 1 ~= nRet then
+    if szMsg then
+      me.CenterMsg(szMsg)
+    end
+    return 0
+  end
+  local tbClass = self.tbClass[szClassName]
+  if tbClass and tbClass.OnUse then
+    local bCount = self:CheckUseCount(pItem)
+    if not bCount then
+      return 0
+    end
+    local bOk, nRetCode, bIgnoreLog = xpcall(tbClass.OnUse, Lib.ShowStack, tbClass, pItem, ...)
+    if not bOk then
+      nRetCode = pItem.nCount
+      bIgnoreLog = false
+      self:LogUseErr(pItem, me)
+    end
+    if MODULE_GAMESERVER and nRetCode and nRetCode > 0 then
+      if GlobalHangUp:IsGlobalHangUpMap(me.nMapTemplateId) then
+        Lib:CallBack({
+          FieldPractice.OnUseItem,
+          FieldPractice,
+          me,
+          pItem.dwTemplateId,
+          nRetCode
+        })
+      end
+      assert(me.ConsumeItem(pItem, nRetCode, Env.LogWay_UseItem, bIgnoreLog) == nRetCode)
+    end
+  end
+end
+
+function Item:OnUseMany(pItem, nCount, ...)
+  local szClassName = pItem.szClass
+  local nRet, szMsg = self:CheckUsable(pItem, szClassName)
+  if 1 ~= nRet then
+    if szMsg then
+      me.CenterMsg(szMsg)
+    end
+    return 0
+  end
+  local tbClass = self.tbClass[szClassName]
+  if tbClass and tbClass.OnUseMany then
+    local bCount = self:CheckUseCount(pItem)
+    if not bCount then
+      return 0
+    end
+    local bOk, nRetCode, bIgnoreLog = xpcall(tbClass.OnUseMany, Lib.ShowStack, tbClass, pItem, nCount, ...)
+    if not bOk then
+      nRetCode = pItem.nCount
+      bIgnoreLog = false
+      self:LogUseErr(pItem, me)
+    end
+    if nRetCode and nRetCode > 0 then
+      assert(me.ConsumeItem(pItem, nRetCode, Env.LogWay_UseItem, bIgnoreLog) == nRetCode)
+    end
+    Lib:LogFormat("Item:OnUseMany dwTemplateId:%d, nRet:%s, player:%d", pItem.dwTemplateId, nRetCode or "nil", me.dwID)
+  else
+    LogErr("Item:OnUseMany error: Item can't use many, TemplateId and ClassName = ", pItem.dwTemplateId, szClassName)
+  end
+end
+
+function Item:OnUseAll(pItem)
+  local szClassName = pItem.szClass
+  local nRet, szMsg = self:CheckUsable(pItem, szClassName)
+  if 1 ~= nRet then
+    if szMsg then
+      me.CenterMsg(szMsg)
+    end
+    return 0
+  end
+  local tbClass = self.tbClass[szClassName]
+  if tbClass and tbClass.OnUseAll then
+    local bCount = self:CheckUseCount(pItem)
+    if not bCount then
+      return 0
+    end
+    local bOk, nRetCode, bIgnoreLog = xpcall(tbClass.OnUseAll, Lib.ShowStack, tbClass, pItem)
+    if not bOk then
+      nRetCode = pItem.nCount
+      bIgnoreLog = false
+      self:LogUseErr(pItem, me)
+    end
+    if nRetCode and nRetCode > 0 then
+      assert(me.ConsumeItem(pItem, nRetCode, Env.LogWay_UseItem, bIgnoreLog) == nRetCode)
+    end
+  end
+end
+
+function Item:OnForceUse(pItem)
+  local szClassName = pItem.szClass
+  local nRet, szMsg = self:CheckUsable(pItem, szClassName)
+  if 1 ~= nRet then
+    if szMsg then
+      me.CenterMsg(szMsg)
+    end
+    return 0
+  end
+  local tbClass = self.tbClass[szClassName]
+  if tbClass and tbClass.OnForceUse then
+    local bCount = self:CheckUseCount(pItem)
+    if not bCount then
+      return 0
+    end
+    local bOk, nRetCode, bIgnoreLog = xpcall(tbClass.OnForceUse, Lib.ShowStack, tbClass, pItem)
+    if not bOk then
+      nRetCode = pItem.nCount
+      bIgnoreLog = false
+      self:LogUseErr(pItem, me)
+    end
+    if nRetCode and nRetCode > 0 then
+      assert(me.ConsumeItem(pItem, nRetCode, Env.LogWay_UseItem, bIgnoreLog) == nRetCode)
+    end
+    Lib:LogFormat("Item:OnForceUse dwTemplateId:%d, nRet:%s, player:%d", pItem.dwTemplateId, nRetCode or "nil", me.dwID)
+  end
+end
+
+function Item:IsMainEquipPos(nEquipPos)
+  if nEquipPos >= 0 and nEquipPos < Item.EQUIPPOS_MAIN_NUM then
+    return true
+  end
+  return false
+end
+
+local tbFubActiveReqDesc = {
+  [Item.emEquipActiveReq_Ride] = function(szMagicName, tbMagic)
+    return i18n.EasyGet("\228\184\138\233\169\172\230\191\128\230\180\187")
+  end
+}
+
+function Item:GetActiveReqDesc(nActiveReq)
+  local fnMsg = tbFubActiveReqDesc[nActiveReq]
+  if not fnMsg then
+    return
+  end
+  return fnMsg()
+end
+
+function Item:ForceUseEquip(pPlayer, nId)
+  pPlayer.UseEquip(nId, -1)
+end
+
+function Item:ResetUseEquipCD(pPlayer, pEquip)
+  if not pPlayer.tbUseEquipCD then
+    return
+  end
+  local nEquipPos = Item:LimitOptEquipPosChange(pEquip)
+  pPlayer.tbUseEquipCD[nEquipPos] = nil
+end
+
+function Item:CheckUseEquipCD(pPlayer, pEquip)
+  local nEquipPos = Item:LimitOptEquipPosChange(pEquip)
+  if not pPlayer.tbUseEquipCD then
+    pPlayer.tbUseEquipCD = {}
+  end
+  local nCurTime = GetTime()
+  if not pPlayer.tbUseEquipCD[nEquipPos] then
+    pPlayer.tbUseEquipCD[nEquipPos] = {
+      [1] = nCurTime,
+      [2] = nCurTime,
+      [3] = nCurTime,
+      nFirstIndex = 1,
+      nLastIndex = 0
+    }
+  end
+  local tbData = pPlayer.tbUseEquipCD[nEquipPos]
+  local nIndex = (tbData.nFirstIndex - 1) % self.nUseEquipLimitTime + 1
+  if tbData[nIndex] < nCurTime - self.nUseEquipLimitCD then
+    tbData.nFirstIndex = tbData.nFirstIndex + 1
+  end
+  if tbData.nLastIndex - tbData.nFirstIndex > 1 then
+    return true
+  end
+  return false
+end
+
+function Item:LimitOptEquipPosChange(pEquip)
+  local nEquipPos = pEquip.nEquipPos
+  if nEquipPos == Item.EQUIPPOS_EXTEND then
+    local nSlot = Item:GetExtEquipSlot(pEquip)
+    nEquipPos = nEquipPos + 100 + nSlot
+  end
+  return nEquipPos
+end
+
+function Item:OnUseEquipSuccessRsp(nEquipPos, dwId)
+  local pEquip = me.GetItemInAllSpace(dwId)
+  if not pEquip then
+    return
+  end
+  if nEquipPos == Item.EQUIPPOS_EXTEND then
+    local nSlot = Item:GetExtEquipSlot(pEquip)
+    EventNotify.OnNotify(EventNotify.emNOTIFY_EQUIP_USE, pEquip, nSlot)
+  else
+    EventNotify.OnNotify(EventNotify.emNOTIFY_EQUIP_USE, pEquip)
+  end
+end
+
+function Item:UseEquip(pPlayer, nId, bSlient, nEquipPos, bBreakMask)
+  nId = math.floor(nId)
+  local pEquip = pPlayer.GetItemInAllSpace(nId)
+  if not pEquip then
+    print("Unexsit Equip " .. nId)
+    return
+  end
+  if pEquip.nUseLevel > pPlayer.nTotalLevel then
+    return
+  end
+  local nEquipType = pEquip.nItemType
+  if nEquipType < Item.EQUIP_HELM or nEquipType > Item.EQUIP_EXTEND then
+    return
+  end
+  if nEquipType == Item.EQUIP_HORSE and pPlayer.GetDoing() == Npc.Doing.sit then
+    pPlayer.CenterMsg(i18n.EasyGet("\230\137\147\229\157\144\230\151\182\228\184\141\232\131\189\232\163\133\229\164\135\233\169\172\229\140\185"))
+    return
+  end
+  if not Lib:IsEmptyStr(pEquip.szClass) then
+    local tbEquipClass = Item:GetClass(pEquip.szClass)
+    if tbEquipClass.CheckUseEquip then
+      local bRet, szMsg = tbEquipClass:CheckUseEquip(pPlayer, pEquip)
+      if not bRet then
+        pPlayer.CenterMsg(szMsg)
+        return
+      end
+    else
+      nEquipPos = -1
+    end
+  else
+    nEquipPos = -1
+  end
+  if not bBreakMask and pPlayer.IsMaskPlayerAttr() then
+    return pPlayer.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\230\151\160\230\179\149\231\169\191\232\132\177\232\163\133\229\164\135"))
+  end
+  if pEquip.nEquipPos and self:CheckUseEquipCD(pPlayer, pEquip) then
+    return pPlayer.CenterMsg(i18n.EasyGet("\230\130\168\231\154\132\230\147\141\228\189\156\229\164\170\233\162\145\231\185\129\228\186\134\239\188\140\232\175\183\231\168\141\229\144\142\229\134\141\232\175\149\239\188\129"))
+  end
+  local nLimitCDEquipPos = Item:LimitOptEquipPosChange(pEquip)
+  if pPlayer.tbUseEquipCD and pPlayer.tbUseEquipCD[nLimitCDEquipPos] then
+    local tbData = pPlayer.tbUseEquipCD[nLimitCDEquipPos]
+    local nIndex = tbData.nLastIndex % self.nUseEquipLimitTime + 1
+    tbData.nLastIndex = tbData.nLastIndex + 1
+    tbData[nIndex] = GetTime()
+  end
+  local nResult = pPlayer.UseEquip(nId, nEquipPos or -1)
+  if 1 == nResult then
+    Event:OnEvent(Event.emEVENT_EQUIP_USE, pPlayer.dwID, pEquip.nEquipPos, pEquip.dwId)
+    pPlayer.CallClientScript("Item:OnUseEquipSuccessRsp", pEquip.nEquipPos, pEquip.dwId)
+    if pEquip.nEquipPos == Item.EQUIPPOS_HORSE then
+      local szEquipName = KItem.GetItemShowInfo(pEquip.dwTemplateId, pPlayer.nFaction, pPlayer.nFactionSect)
+      pPlayer.CenterMsg(i18n.EasyGet("{0}\228\184\138\233\152\181\230\136\144\229\138\159", szEquipName))
+      Horse:UpdataAsyncHorseGrade(pPlayer.dwID, Horse:GetHorseGrade(pPlayer))
+    end
+    if SERVER_RUNNING_MODE ~= SERVER_MODE.ZONE_SERVER then
+      self:DealEquipAchievement(pPlayer)
+    end
+    if nEquipType == Item.EQUIP_MANTLE then
+      Event:OnEvent(Event.emEVENT_EQUIP_MANTLE_USE, pPlayer.dwID)
+    elseif nEquipType == Item.EQUIP_HORSE then
+      Event:OnEvent(Event.emEVENT_EQUIP_HORSE_USE, pPlayer.dwID)
+    end
+  end
+  Lib:LogFormat("Item:UseEquip pPlayer:%d, dwTemplateId:%d, nId:%d, nPos:%d, nResult:%d", pPlayer.dwID, pEquip.dwTemplateId, nId, pEquip.nEquipPos, nResult)
+end
+
+function Item:OnUnUseEquipSuccessRsp(nEquipPos, dwId)
+  local pEquip = me.GetItemInAllSpace(dwId)
+  if not pEquip then
+    return
+  end
+  if nEquipPos == Item.EQUIPPOS_EXTEND then
+    local nSlot = Item:GetExtEquipSlot(pEquip)
+    EventNotify.OnNotify(EventNotify.emNOTIFY_EQUIP_UNUSE, pEquip, nSlot)
+  else
+    EventNotify.OnNotify(EventNotify.emNOTIFY_EQUIP_UNUSE, pEquip)
+  end
+end
+
+function Item:UnuseEquip(pPlayer, nPos)
+  if pPlayer.IsMaskPlayerAttr() then
+    return pPlayer.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\230\151\160\230\179\149\231\169\191\232\132\177\232\163\133\229\164\135"))
+  end
+  local pItem = pPlayer.GetEquipByPos(nPos)
+  if nil ~= pItem then
+    if pPlayer.CheckNeedArrangeBag() then
+      pPlayer.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\233\129\147\229\133\183\230\149\176\233\135\143\232\191\135\229\164\154\239\188\140\232\175\183\230\149\180\231\144\134\228\184\128\228\184\139\239\188\129"))
+      return
+    end
+    pPlayer.UnuseEquip(nPos)
+    Event:OnEvent(Event.emEVENT_EQUIP_UNUSE, pPlayer.dwID, nPos, pItem.dwId)
+    pPlayer.CallClientScript("Item:OnUnUseEquipSuccessRsp", pItem.nEquipPos, pItem.dwId)
+  end
+end
+
+function Item:UnuseEquipById(pPlayer, nId)
+  nId = math.floor(nId)
+  local pItem = pPlayer.GetItemInAllSpace(nId)
+  if not pItem then
+    return
+  end
+  local nEquipType = pItem.nItemType
+  if nEquipType < Item.EQUIP_HELM or nEquipType > Item.EQUIP_EXTEND then
+    return
+  end
+  local nEquipPos = pItem.nEquipPos
+  local nTemplateId = pItem.dwTemplateId
+  if pPlayer.CheckNeedArrangeBag() then
+    pPlayer.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\233\129\147\229\133\183\230\149\176\233\135\143\232\191\135\229\164\154\239\188\140\232\175\183\230\149\180\231\144\134\228\184\128\228\184\139\239\188\129"))
+    return
+  end
+  if pPlayer.IsMaskPlayerAttr() then
+    return pPlayer.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\230\151\160\230\179\149\231\169\191\232\132\177\232\163\133\229\164\135"))
+  end
+  pPlayer.UnuseEquipById(nId)
+  Event:OnEvent(Event.emEVENT_EQUIP_UNUSE, pPlayer.dwID, nEquipPos, nId)
+  pPlayer.CallClientScript("Item:OnUnUseEquipSuccessRsp", pItem.nEquipPos, pItem.dwId)
+end
+
+function Item:UseChooseItem(nId, tbChoose)
+  local pItem = me.GetItemInAllSpace(nId)
+  if not pItem then
+    print("UseChooseItem Error Unexsit Item ", nId)
+    return
+  end
+  local szClassName = pItem.szClass
+  local tbClass = self.tbClass[szClassName]
+  if tbClass and tbClass.OnSelectItem then
+    local bOk, nRetCode, bIgnoreLog = xpcall(tbClass.OnSelectItem, Lib.ShowStack, tbClass, pItem, tbChoose)
+    if not bOk then
+      nRetCode = pItem.nCount
+      bIgnoreLog = false
+      self:LogUseErr(pItem, me)
+    end
+    if nRetCode and nRetCode > 0 then
+      local nCurCount = pItem.nCount
+      if nRetCode <= nCurCount then
+        assert(me.ConsumeItem(pItem, nRetCode, Env.LogWay_UseItem, bIgnoreLog) == nRetCode)
+      else
+        assert(me.ConsumeItemInBag(pItem.dwTemplateId, nRetCode, Env.LogWay_UseItem) == nRetCode)
+      end
+    end
+  end
+  me.CallClientScript("Ui.QuickUse:UIQuickUseRemove")
+end
+
+function Item:getBoolStr(b)
+  if b then
+    return "true"
+  end
+  return "false"
+end
+
+Item.tbCanAutoUseItemClass = {
+  RandItem = 1,
+  FashionGoods = 1,
+  Speaker = 1,
+  FactionToken = 1,
+  RedPacket = 1,
+  TitleItem = 1,
+  XoyoGameCard = 1,
+  ZhenFaActive = 1,
+  FixedTimeFrameBox = 1,
+  SelectAward = 1,
+  SummerFish = 1,
+  RuHuaJiangShanCard = 1,
+  DingFengPKQuan = 1,
+  FixItem = 1,
+  LuckyBox = 1
+}
+
+function Item:CheckAutoRandItem(nItemTemplateId)
+  local tbItemInfo = Item:GetItemBaseProp(nItemTemplateId)
+  if not (tbItemInfo and tbItemInfo.szClass) or 1 ~= self.tbCanAutoUseItemClass[tbItemInfo.szClass] then
+    return false
+  end
+  local bCanAutoUse = KItem.GetItemCanAutoUse(nItemTemplateId)
+  if not bCanAutoUse then
+    return false
+  end
+  return true, tbItemInfo
+end
+
+function Item:AutoUseRandItem(pPlayer, nItemTemplateId, nCount, szMsg, tbItemExtParams, nLogReason, nLogReason2)
+  local bAutoUse, tbItemInfo = Item:CheckAutoRandItem(nItemTemplateId)
+  if not bAutoUse then
+    return false
+  end
+  assert(tbItemInfo)
+  local tbBaseInfo = Item:GetItemBaseProp(nItemTemplateId)
+  local bRetCode, tbAwards
+  local tbClass = self.tbClass[tbItemInfo.szClass]
+  if tbClass and tbClass.OnAutoUse then
+    bRetCode, tbAwards = tbClass:OnAutoUse(pPlayer, nItemTemplateId, nCount, szMsg, tbItemExtParams, nLogReason, nLogReason2)
+    if not bRetCode then
+      LogErr("Item:AutoUseRandItem error", pPlayer.dwID, nItemTemplateId, nCount)
+      return false
+    end
+  else
+    LogErr("Item:AutoUseRandItem error: ", tbItemInfo.szClass, pPlayer.dwID, nItemTemplateId, nCount)
+    return false
+  end
+  Log("Auto use item: ", pPlayer.szName, pPlayer.dwID, nItemTemplateId, nCount)
+  return true, tbAwards
+end
+
+function Item:GetRandItemUseResult(nItemTemplateId, nCount)
+  local bAutoUse, tbItemInfo = Item:CheckAutoRandItem(nItemTemplateId)
+  if not bAutoUse then
+    return
+  end
+  local tbClass = self.tbClass[tbItemInfo.szClass]
+  if tbClass and tbClass.GetAutoUseResult then
+    return true, tbClass:GetAutoUseResult(nItemTemplateId, nCount)
+  else
+    LogErr("Item:GetRandItemUseResult error", nItemTemplateId, nCount)
+    return true
+  end
+end
+
+function Item:AddT(pPlayer, nTemplateId)
+  local nResId = GetItemRes(nTemplateId, pPlayer.nFaction, pPlayer.nFactionSect, pPlayer.GetNpc().GetBodySex())
+  local pNpc = KNpc.GetById(pPlayer.GetNpc().nId)
+  pNpc.ChangePartEquip(Npc.NpcResPartsDef.npc_part_body, nResId)
+end
+
+function Item:AddHeadT(pPlayer, nTemplateId)
+  local nResId = GetItemRes(nTemplateId, pPlayer.nFaction, pPlayer.nFactionSect, pPlayer.GetNpc().GetBodySex())
+  local pNpc = KNpc.GetById(pPlayer.GetNpc().nId)
+  pNpc.ChangePartEquip(Npc.NpcResPartsDef.npc_part_head, nResId)
+end
+
+function Item:IsInBag(nPos)
+  return nPos == Item.EITEMPOS_BAG or nPos == Item.EITEMPOS_MEDICINEBAG
+end
+
+function Item:IsInWarehouse(nPos)
+  return nPos == Item.EITEMPOS_BOX
+end
+
+function Item:GetTimeDelay(pItem)
+  local nGenTime = GetItemGenTime(pItem.dwId)
+  local nTimeDelay = pItem.nUseDelayMins * 60
+  return nTimeDelay > 0, nGenTime, nTimeDelay
+end
+
+function Item:CheckIsTimeDelay(pItem)
+  local bIsDelay, nGenTime, nTimeDelay = self:GetTimeDelay(pItem)
+  if bIsDelay then
+    local nCurTime = GetTime()
+    if nCurTime < nGenTime + nTimeDelay then
+      return true, nGenTime, nTimeDelay
+    end
+  end
+  return false
+end
+
+function Item:GetItemGenTimeInfo(pItem)
+  local szRet
+  local bIsDelay, nGenTime, nTimeDelay = self:CheckIsTimeDelay(pItem)
+  if bIsDelay then
+    local nCurTime = GetTime()
+    local szRet = Lib:TimeDesc2(nGenTime + nTimeDelay - nCurTime)
+    return true, i18n.EasyGet("{0}\229\144\142\229\143\175\228\189\191\231\148\168", szRet)
+  end
+  return false
+end
+
+function Item:IsItemBornForTrade(pItem)
+  if not pItem then
+    return false
+  end
+  return pItem.dwTradeLimitType ~= self.eTRADELIMITTYPE.NONE
+end
+
+function Item:GetItemTradeWayDesc(dwTemplateTradeLimitWay)
+  local tbTradeDesc = {}
+  for i = Item.eTRADELIMITWAY.P2P, Item.eTRADELIMITWAY.OTHER do
+    local bWay = KLib.GetBit(dwTemplateTradeLimitWay, i)
+    if bWay > 0 then
+      tbTradeDesc[i] = Item.eTRADELIMITWAY_DESC[i]()
+    end
+  end
+  return tbTradeDesc
+end
+
+function Item:GetItemTradeLimitDescBySettings(dwTemplateId, dwTradeLimitType)
+  local szTradeWay = ""
+  local tbTradeDesc = {}
+  local nTradeLimitWay = Trade:GetTradeLimitWay(dwTemplateId)
+  if dwTradeLimitType > 0 and nTradeLimitWay > 0 then
+    tbTradeDesc = self:GetItemTradeWayDesc(nTradeLimitWay)
+  end
+  for i = Item.eTRADELIMITWAY.P2P, Item.eTRADELIMITWAY.OTHER do
+    if tbTradeDesc[i] then
+      if "" == szTradeWay then
+        szTradeWay = tbTradeDesc[i]
+      else
+        szTradeWay = szTradeWay .. "/" .. tbTradeDesc[i]
+      end
+    end
+  end
+  if "" == szTradeWay then
+    return false, i18n.EasyGet("\228\184\141\229\143\175\228\186\164\230\152\147")
+  end
+  return true, i18n.EasyGet("\228\186\164\230\152\147\230\184\160\233\129\147\239\188\154{0}", szTradeWay)
+end
+
+function Item:GetItemTradeLimitDesc(pItem, nItemId)
+  if not pItem then
+    return ""
+  end
+  local _, szDesc = self:GetItemTradeLimitDescBySettings(pItem.dwTemplateId, pItem.dwTradeLimitType)
+  return szDesc
+end
+
+function Item:IsItemBind(dwTradeLimitType, dwTradeLimitValue)
+  if not dwTradeLimitType or 0 == dwTradeLimitType then
+    return true
+  end
+  if 2 == dwTradeLimitType and 0 == dwTradeLimitValue then
+    return true
+  end
+  if 3 == dwTradeLimitType and dwTradeLimitValue > GetTime() then
+    return true
+  end
+  return false
+end
+
+function Item:CanEquip(pItem, pCurEquip)
+  local nEquipPos = KItem.GetEquipPos(pItem.dwTemplateId)
+  if nEquipPos == Item.EQUIPPOS_WEAPON and not KFightSkill.IsWeaponFitFactionSect(me.nFaction, me.nFactionSect, pItem.nWeaponType) then
+    return false
+  end
+  return true
+end
+
+function Item:IsHorseItem(nTemplateId)
+  local nPos = KItem.GetEquipPos(nTemplateId)
+  return nPos == Item.EQUIPPOS_HORSE
+end
+
+function Item:GiveItemSuceess()
+  if Ui:WindowVisible("UICommonGivePanel") then
+    Ui:GetWindow("UICommonGivePanel"):SetAddSubGroup()
+    Ui:GetWindow("UICommonGivePanel"):SetItemGird()
+  end
+end
+
+function Item:MoveItemFromBagToBox(pPlayer, nId)
+  local bNearNpc = false
+  local bVipState = false
+  local weekCardLeft = WeekMonthCard:GetWeekCardLeftDay(me)
+  local bMonthCardState = WeekMonthCard:CheckMonthCardState(me)
+  if weekCardLeft > 0 or bMonthCardState then
+    bVipState = true
+  end
+  local tbNpcList = KNpc.GetAroundNpcList(me.GetNpc(), GetNpcDialogDistance(12103)) or {}
+  for _, pNpc in pairs(tbNpcList) do
+    if pNpc.nTemplateId == 12103 then
+      bNearNpc = true
+      break
+    end
+  end
+  if not bVipState and not bNearNpc then
+    me.CenterMsg(i18n.EasyGet("\233\157\158\230\156\136\229\141\161\229\164\167\228\190\160\239\188\140\232\175\183\229\156\168\228\187\147\229\186\147\230\128\187\231\174\161\233\153\132\232\191\145\228\189\191\231\148\168\228\187\147\229\186\147"))
+    return
+  end
+  if not nId or type(nId) ~= "number" then
+    return
+  end
+  local pItem = pPlayer.GetItemInAllSpace(nId)
+  if not pItem then
+    return
+  end
+  if pPlayer.GetFreeBoxCount() <= 0 then
+    return
+  end
+  local tbBaseInfo = Item:GetItemBaseProp(pItem.dwTemplateId)
+  if tbBaseInfo.bForbidToBox and 1 == tbBaseInfo.bForbidToBox then
+    return
+  end
+  pPlayer.MoveItemFromBagToBox(nId)
+end
+
+function Item:MoveItemFromBoxToBag(pPlayer, nId)
+  local bNearNpc = false
+  local bVipState = false
+  local weekCardLeft = WeekMonthCard:GetWeekCardLeftDay(me)
+  local bMonthCardState = WeekMonthCard:CheckMonthCardState(me)
+  if weekCardLeft > 0 or bMonthCardState then
+    bVipState = true
+  end
+  local tbNpcList = KNpc.GetAroundNpcList(me.GetNpc(), GetNpcDialogDistance(12103)) or {}
+  for _, pNpc in pairs(tbNpcList) do
+    if pNpc.nTemplateId == 12103 then
+      bNearNpc = true
+      break
+    end
+  end
+  if not bVipState and not bNearNpc then
+    me.CenterMsg(i18n.EasyGet("\233\157\158\230\156\136\229\141\161\229\164\167\228\190\160\239\188\140\232\175\183\229\156\168\228\187\147\229\186\147\230\128\187\231\174\161\233\153\132\232\191\145\228\189\191\231\148\168\228\187\147\229\186\147"))
+    return
+  end
+  if not nId or type(nId) ~= "number" then
+    return
+  end
+  pPlayer.MoveItemFromBoxToBag(nId)
+end
+
+function Item:GetJiuSkillId()
+  local tbJiuClass = Item:GetClass("Jiu")
+  if tbJiuClass and tbJiuClass.nJiuSkillId then
+    return tbJiuClass.nJiuSkillId
+  end
+  return 0
+end
+
+Item.CommonTenPosSet = {
+  [Item.EQUIPPOS_HELM] = true,
+  [Item.EQUIPPOS_ARMOR] = true,
+  [Item.EQUIPPOS_BELT] = true,
+  [Item.EQUIPPOS_CUFF] = true,
+  [Item.EQUIPPOS_BOOTS] = true,
+  [Item.EQUIPPOS_WEAPON] = true,
+  [Item.EQUIPPOS_NECKLACE] = true,
+  [Item.EQUIPPOS_RING] = true,
+  [Item.EQUIPPOS_PENDANT] = true,
+  [Item.EQUIPPOS_AMULET] = true
+}
+
+function Item:IsCommonTenPos(nPos)
+  return self.CommonTenPosSet[nPos] ~= nil
+end
+
+function Item:GetCommonTenPosSet()
+  return Lib:CopyTB(self.CommonTenPosSet)
+end
+
+function Item:CanNotUseCallBack(szClassName, ...)
+  local tbClass = Item.tbClass[szClassName]
+  tbClass:HandleCanUseCallBack(...)
+end
+
+function Item:OnUseCallBack(szClassName, ...)
+  local tbClass = Item.tbClass[szClassName]
+  tbClass:OnUseCallBack(...)
+end
+
+function Item:GetChatLinkInfo(szClassName, pItem)
+  local tbClass = Item.tbClass[szClassName]
+  if not tbClass or not tbClass.GetChatLinkInfo then
+    return
+  end
+  return tbClass:GetChatLinkInfo(pItem)
+end
+
+function Item:CheckIsOpenManyUseUi(szClassName)
+  if Item.tbIgnoreUseManyUi[szClassName] ~= nil then
+    return false
+  else
+    return true
+  end
+end
+
+function Item:GetNotExtEquipName(nItemType)
+  return Item.EQUIPTYPE_NAME[nItemType]
+end
+
+function Item:GetEquipTypeName(nTemplateId)
+  local nEquipPos = KItem.GetEquipPos(nTemplateId)
+  if nEquipPos ~= Item.EQUIPPOS_EXTEND then
+    return self.EQUIPTYPE_NAME[Item:GetItemBaseProp(nTemplateId).nItemType]
+  else
+    return Item.ExtEquip.EXT_EQUIPTYPE_NAME[Item.ExtEquip:GetSlotByTemplateId(nTemplateId)]
+  end
+end
+
+function Item:GetDetailTypeClassify(nItemType, nDetailType)
+  if nItemType == Item.EQUIP_EXTEND then
+    if nDetailType >= Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE1 and nDetailType <= Item.ExtEquip.CFG.SLOT.HORSE_SKILL_STONE5 then
+      return {bInNormal = 1, bInHorseSkillStone = 1}
+    elseif nDetailType >= Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_WEAPON and nDetailType <= Item.ExtEquip.CFG.SLOT.PARTNER_EQUIP_BOOTS then
+      return {bInNormal = 1, bInPartnerEquip = 1}
+    elseif Item.ShenBingPu:CheckIsValidSlot(nDetailType) then
+      return {bInNormal = 1, bInShenBingPu = 1}
+    elseif Item.SecretBook.tbSlotToRank[nDetailType] then
+      return {bInNormal = 1}
+    else
+      return {
+        bInNormal = 1,
+        bInEquip = 1,
+        bInZhenYuanEquip = 1
+      }
+    end
+  else
+    return Item.tbDetailTypeClassify[nDetailType]
+  end
+end
+
+function Item:ItemTableCheck()
+  self.tbCheckTable = Lib:LoadTabFileEx("Setting/Item/Item.tab", "dsdddd", "TemplateId", {
+    "TemplateId",
+    "ClassName",
+    "ExtParam1",
+    "ExtParam2",
+    "ExtParam3",
+    "ExtParam4"
+  })
+  Validator:Register(function()
+    for _, tbAItemInfo in pairs(self.tbCheckTable) do
+      if tbAItemInfo.ClassName ~= "" and self.tbClass[tbAItemInfo.ClassName] == nil then
+        LogErr("Item ClassName: ", tbAItemInfo.ClassName, "is not exsit, TemplateId: ", tbAItemInfo.TemplateId)
+        return false
+      end
+      if tbAItemInfo.ClassName == "RandItem" then
+        local nAwardId = tbAItemInfo.ExtParam1
+        local nAwardKey = tbAItemInfo.ExtParam2
+        if nil == Award.tbAllAwards[nAwardId] or nil == Award.tbAllAwards[nAwardId].tbRandAwards[nAwardKey] then
+          LogErr("RandItem award is not exsit. nAwardId, nAwardKey: ", nAwardId, nAwardKey, ". TemplateId: ", tbAItemInfo.TemplateId)
+          return false
+        end
+      end
+      if tbAItemInfo.ClassName == "BuffItem" then
+        local nBuffId = tbAItemInfo.ExtParam1
+        if nil == FightSkill.tbAllSkillSetting[nBuffId] then
+          LogErr("BuffItem buff ID is not exsit. TemplateId: ", tbAItemInfo.TemplateId)
+          return false
+        end
+        local nBuffTime = tbAItemInfo.ExtParam3
+        local nTimeTooLongJudgeValue = 1800
+        if nBuffTime <= 0 then
+          LogErr("BuffItem buff time is less then or equal 0. TemplateId: ", tbAItemInfo.TemplateId)
+          return false
+        elseif nBuffTime > nTimeTooLongJudgeValue then
+          LogErr("BuffItem buff time is too long, more than ", nTimeTooLongJudgeValue, " second. TemplateId: ", tbAItemInfo.TemplateId)
+          return false
+        end
+      end
+      if tbAItemInfo.ClassName == "LuckyBox" then
+        local nAwardId = tbAItemInfo.ExtParam1
+        local nAwardKey = tbAItemInfo.ExtParam2
+        if nil == Award.tbAllAwards[nAwardId] or nil == Award.tbAllAwards[nAwardId].tbRandAwards[nAwardKey] then
+          LogErr("LuckyBox award is not exsit. nAwardId, nAwardKey: ", nAwardId, nAwardKey, ". TemplateId: ", tbAItemInfo.TemplateId)
+          return false
+        end
+        if not self.tbCheckTable[tbAItemInfo.ExtParam4] then
+          LogErr("LuckyBox Guaranteed is not exsit. GuaranteedTemplateId: ", tbAItemInfo.ExtParam4)
+          return false
+        end
+        local bHaveGuaranteed = false
+        local tbAllAward = Award:GetAllAwardNoRand(nAwardId, nAwardKey)
+        for _, tbAward in ipairs(tbAllAward) do
+          if tbAward[2] == tbAItemInfo.ExtParam4 then
+            bHaveGuaranteed = true
+          end
+        end
+        if not bHaveGuaranteed then
+          LogErr("LuckyBox Random rewards do not include guaranteed rewards. nAwardId, nAwardKey: ", nAwardId, nAwardKey, ". guaranteedTemplateId: ", tbAItemInfo.ExtParam4)
+          return false
+        end
+      end
+    end
+    return true
+  end)
+end
+
+Item:ItemTableCheck()

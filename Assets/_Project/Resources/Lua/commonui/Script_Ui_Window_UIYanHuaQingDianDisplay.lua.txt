@@ -1,0 +1,104 @@
+local tbWnd = Ui:CreateWindow("UIYanHuaQingDianDisplay")
+local tbControls = {
+  BtnCheer = "imgBG/Mask/Region/BtnCheer",
+  txtExpTimes = "imgBG/Mask/Region/GroupExpTimes/txtMain",
+  txtTimeRemain = "imgBG/Mask/Region/GroupRemaining/txtMain",
+  txtDesc = "imgBG/Mask/Region/ScrollDesc/Viewport/Content/txtDesc"
+}
+tbWnd.tbControls = tbControls
+tbWnd.nCloseDelay = 30
+tbWnd.tbOnClick = {
+  BtnCheer = function(self)
+    local szDesc = i18n.EasyGet("\231\161\174\229\174\154\232\138\177\232\180\185{0}\229\133\131\229\174\157\229\138\169\229\168\129\229\144\151\239\188\159\239\188\136\229\138\169\229\168\129\229\144\142\231\187\143\233\170\140\229\138\160\230\136\144\229\162\158\229\138\160{1}%\239\188\137", self.CheerPrice, self.CheerExpRate)
+    
+    local function pFunc()
+      local pInstance = ActivityMgr:GetInstanceById(self.nActId)
+      if pInstance then
+        pInstance:CheerReq()
+      end
+    end
+    
+    Ui:OpenWindow("UIMessageBox", szDesc, {
+      {pFunc},
+      {}
+    })
+  end
+}
+
+function tbWnd:OnOpen(nRemTime, nCheerCount, nId)
+  local pInstance = ActivityMgr:GetInstanceById(nId)
+  if not pInstance then
+    return
+  end
+  self.nActId = nId
+  self.CheerPrice = self.CheerPrice or pInstance.tbConfig.nCheerPrice
+  self.CheerExpRate = self.CheerExpRate or pInstance.tbConfig.nRatePerCheer
+  self.nPlayerMaxCheer = self.nPlayerMaxCheer or pInstance.tbConfig.nPlayerMaxCheer
+  self.szSmallPanelText = self.szSmallPanelText or pInstance.tbConfig.szSmallPanelText
+  if not nRemTime or not nCheerCount then
+    self:Close()
+  else
+    self.nRemTime = nRemTime
+    if self.nRemainTimer then
+      Timer:Close(self.nRemainTimer)
+    end
+    self.nRemainTimer = Timer:Register(Env.GAME_FPS, self.UpdateRemainTime, self)
+    self:UpdateExpTimes(nCheerCount * self.CheerExpRate)
+  end
+  if self.szSmallPanelText then
+    self.pPanel:Label_SetText(tbControls.txtDesc, i18n.Parse(self.szSmallPanelText))
+    self.pPanel:SetActive(tbControls.txtDesc, true)
+  else
+    self.pPanel:SetActive(tbControls.txtDesc, false)
+  end
+end
+
+function tbWnd:CheckIsEnableBtn()
+  local pInstance = ActivityMgr:GetInstanceById(self.nActId)
+  if self.nPlayerMaxCheer and pInstance and not pInstance:CanCheer(me) then
+    self.pPanel:Button_SetEnable(tbControls.BtnCheer, false)
+    self.pPanel:Button_SetText(tbControls.BtnCheer, i18n.EasyGet("\229\183\178\232\190\190\228\184\138\233\153\144"), "Text")
+  end
+end
+
+function tbWnd:UpdateRemainTime()
+  if self.nRemTime and self.nRemTime >= 0 then
+    local nMinute = math.floor(self.nRemTime / 60)
+    local nSec = self.nRemTime % 60
+    self.pPanel:Label_SetText(tbControls.txtTimeRemain, string.format("%02d:%02d", nMinute, nSec))
+    self.nRemTime = self.nRemTime - 1
+    return 1
+  else
+    self.pPanel:Label_SetText(tbControls.txtTimeRemain, i18n.EasyGet("\229\183\178\231\187\147\230\157\159"))
+    self.pPanel:Button_SetEnable(tbControls.BtnCheer, false)
+    if self.nCloseTimer then
+      Timer:Close(self.nCloseTimer)
+    end
+    self.nCloseTimer = Timer:Register(Env.GAME_FPS * self.nCloseDelay, function()
+      self:Close()
+      return 0
+    end)
+    return 0
+  end
+end
+
+function tbWnd:UpdateExpTimes(nCheerCount)
+  if nCheerCount then
+    self.pPanel:Label_SetText(tbControls.txtExpTimes, string.format("%d%%", 100 + nCheerCount))
+  end
+end
+
+function tbWnd:OnClose()
+  if self.nRemainTimer then
+    Timer:Close(self.nRemainTimer)
+    self.nRemainTimer = nil
+  end
+  if self.nCloseTimer then
+    Timer:Close(self.nCloseTimer)
+    self.nCloseTimer = nil
+  end
+  self.CheerPrice = nil
+  self.CheerExpRate = nil
+  self.nPlayerMaxCheer = nil
+  self.szSmallPanelText = nil
+end

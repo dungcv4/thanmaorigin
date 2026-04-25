@@ -1,0 +1,225 @@
+local NpcPartSlotID = luanet.import_type("NpcPartSlotID")
+
+function Player:ChangePkResult(bRet, nPeaceCD)
+  me.nPeaceCD = nPeaceCD
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_PK_MODE)
+end
+
+function Player:OnFightSkillLevelUp(...)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SKILL_LEVELUP, ...)
+end
+
+function Player:OnChangeMoney(szType, nPoint, nSetPoint)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_MONEY, szType, nPoint, nSetPoint)
+end
+
+function Player:SetActiveRunTimeData(szActiveName, tbData)
+  self.szActiveName = szActiveName
+  self.tbActiveData = tbData
+  EventNotify.OnNotify(EventNotify.emNOTIFY_ACTIVE_RUNTIME_DATA, szActiveName)
+end
+
+function Player:GetActiveRunTimeData()
+  return self.szActiveName, self.tbActiveData
+end
+
+function Player:OnLogin_SafeCall(nReconnect)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, nReconnect)
+end
+
+function Player:UseEquip(nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return false
+  end
+  if pItem.nUseLevel > me.nTotalLevel then
+    me.CenterMsg(i18n.EasyGet("\231\173\137\231\186\167\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\232\163\133\229\164\135"))
+    return false
+  end
+  if pItem.nEquipPos and Item:CheckUseEquipCD(me, pItem) then
+    me.CenterMsg(i18n.EasyGet("\230\130\168\231\154\132\230\147\141\228\189\156\229\164\170\233\162\145\231\185\129\228\186\134\239\188\140\232\175\183\231\168\141\229\144\142\229\134\141\232\175\149\239\188\129"))
+    return false
+  end
+  local nLimitCDEquipPos = Item:LimitOptEquipPosChange(pItem)
+  if me.tbUseEquipCD and me.tbUseEquipCD[nLimitCDEquipPos] then
+    local tbData = me.tbUseEquipCD[nLimitCDEquipPos]
+    local nIndex = tbData.nLastIndex % Item.nUseEquipLimitTime + 1
+    tbData.nLastIndex = tbData.nLastIndex + 1
+    tbData[nIndex] = GetTime()
+  end
+  RemoteServer.UseEquip(nItemId)
+  return true
+end
+
+Player.tbServerSyncData = Player.tbServerSyncData or {}
+
+function Player:ServerSyncData(szType, ...)
+  Player.tbServerSyncData[szType] = {
+    ...
+  }
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_DATA, szType)
+  if "CloseBigBoss" == szType then
+    local tbUserSet = Ui:GetPlayerSetting()
+    tbUserSet.nViewStoryYet = 0
+    tbUserSet.nLastViewTime = 0
+    LocalData:SetRoleTable("PlayerSetting", tbUserSet)
+  end
+end
+
+function Player:GetServerSyncData(szType)
+  local tbInfo = Player.tbServerSyncData[szType]
+  if not tbInfo then
+    return
+  end
+  return table.unpack(tbInfo)
+end
+
+function Player:OnPkExerciseRequest(szRequestName, nRequestId)
+  local function fnCallback(bResult)
+    RemoteServer.PkExerciseRespond(nRequestId, bResult)
+  end
+  
+  me.MsgBox(i18n.EasyGet("\227\128\140{0}\227\128\141\232\175\183\230\177\130\228\184\142\230\130\168\229\136\135\231\163\139\239\188\140\230\130\168\230\152\175\229\144\166\229\144\140\230\132\143\239\188\159", szRequestName), {
+    {
+      i18n.EasyGet("\229\144\140\230\132\143"),
+      fnCallback,
+      true
+    },
+    {
+      i18n.EasyGet("\230\139\146\231\187\157"),
+      fnCallback,
+      false
+    }
+  })
+end
+
+function Player:OnPkExerciseState(nState, varValue, bWin)
+  local AFKFightSetting = AFK:GetSetting():GetFightSetting()
+  if nState == self.PK_EXERCISE_READY then
+    Ui:OpenWindow("UIReadyGo", Player.nExerciseWaitTime - 1)
+  elseif nState == self.PK_EXERCISE_GO then
+    me.GetNpc().nExerciseNpcId = varValue
+  elseif nState == self.PK_EXERCISE_END then
+    if varValue then
+      me.CenterMsg(i18n.Parse(varValue))
+    end
+    local nTargetNpcId = me.GetNpc().nExerciseNpcId
+    if nTargetNpcId and nTargetNpcId > 0 then
+      local pTargetNpc = KNpc.GetById(nTargetNpcId)
+      if pTargetNpc then
+        pTargetNpc.nExerciseNpcId = 0
+      end
+      me.GetNpc().nExerciseNpcId = 0
+    end
+    AFKFightSetting:ResetFightPos()
+  end
+end
+
+Player.bLevelUpCache = false
+
+function Player:FlyChar(nNewLevel)
+  if Map:GetMapType(me.nMapTemplateId) == Map.emMap_Fuben and Tong.Def.nMainMapTemplateId ~= me.nMapTemplateId then
+    if nNewLevel then
+      self.bLevelUpCache = true
+    end
+    return
+  end
+  if not self.bLevelUpCache and not nNewLevel then
+    return
+  end
+  self.bLevelUpCache = false
+end
+
+function Player:ChangeSpeicalMove(PathID, nX, nY, IsUp, PathHighPoint, PathLowPoint, sFubenInfo, nOutIdx)
+  me.GetNpc().DoSpecicalMove(tonumber(PathID), tonumber(nX), tonumber(nY), 0, tonumber(IsUp), tonumber(PathHighPoint), tonumber(PathLowPoint), sFubenInfo, nOutIdx)
+end
+
+function Player:SetPosForTest(nX, nY)
+  GMCommand(string.format("me.SetPosition(%d, %d)", nX, nY))
+end
+
+function Player:GetMapMaxXY()
+  local nX, nY = me.GetNpc().GetMapMaxPosForTest()
+  Log(nX, nY)
+  return nX, nY
+end
+
+function Player:CallNpc(nMonsterTemplateId, nLevel, mapId, x, y, z)
+  GMCommand(string.format("KNpc.Add(%d, %d, -1, %d, %d, %d, 0);", nMonsterTemplateId, nLevel, mapId, x, y))
+end
+
+function Player:ForbidJumpIcon()
+  self.bForbinJump = true
+end
+
+function Player:IsForbinJumpIcon()
+  local bForbinJump = self.bForbinJump
+  local bChuanGong = me.bChuanGong
+  if nil == bForbinJump then
+    bForbinJump = false
+  end
+  if nil == bChuanGong then
+    bChuanGong = false
+  end
+  if bChuanGong or bForbinJump then
+    return true
+  end
+  return false
+end
+
+function Player:AllowSkillJumpIcon()
+  self.bForbinJump = false
+end
+
+function Player:ForbinQingkungIcon()
+  self.bForbinQingkung = true
+end
+
+function Player:IsForbinQingkungIcon()
+  local bForbinQingkung = self.bForbinQingkung
+  local bChuanGong = me.bChuanGong
+  if nil == bForbinQingkung then
+    bForbinQingkung = false
+  end
+  if nil == bChuanGong then
+    bChuanGong = false
+  end
+  if bChuanGong or bForbinQingkung then
+    return true
+  end
+  return false
+end
+
+function Player:AllowSkillQingkungIcon()
+  self.bForbinQingkung = false
+end
+
+function Player:IsFirstLogin()
+  if self.testFirstLogin == nil then
+    self.testFirstLogin = true
+  end
+  return self.testFirstLogin
+end
+
+function Player:SetFirstLogin(bFirst)
+  Log("SetFirstLogin", bFirst)
+  self.testFirstLogin = bFirst
+end
+
+function Player:DoFirstLogin(pPlayer)
+  if Player:IsFirstLogin() and Player:IsFirstPersonalFuben(pPlayer) then
+    Player:SetFirstLogin(false)
+  end
+end
+
+function Player:OnReturnToLogin(pPlayer)
+  if not pPlayer then
+    return
+  end
+  pPlayer.SyncWLZData = nil
+  FightSkill:ClearAllAttriKey()
+  local pNpc = pPlayer.GetNpc()
+  if pNpc then
+    pNpc.bUpdateWLZAttrForce = nil
+  end
+end

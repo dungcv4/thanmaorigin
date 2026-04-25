@@ -1,0 +1,340 @@
+Require("Script/Fuben/FubenUIController.lua")
+Require("CommonScript/Battle/BattleDefine.lua")
+Battle.tbSignUpMapTemplateId = {
+  [47] = true,
+  [304] = true,
+  [311] = true
+}
+Battle.tbBattleMapCenterPos = {
+  [3] = {56064, 62614},
+  [305] = {42069, 48615},
+  [310] = {42069, 48615}
+}
+
+function Battle:UpdateRankData(tbBattleRank)
+  self.tbBattleRank = tbBattleRank
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_BATTLE_RANK_REPORT, tbBattleRank)
+end
+
+function Battle:UpdateSelfData(nRank, tbSelfData, tbTeamScore, nLeftTime, nTeamIndex, tbFlagCommitResult)
+  self.nMyRank = nRank
+  self.tbSelfData = tbSelfData
+  self.tbTeamScore = tbTeamScore
+  self.nTime = nLeftTime
+  self.nEndTimeStamp = nLeftTime + GetTime()
+  if nTeamIndex then
+    self.nTeamIndex = nTeamIndex
+  end
+  if not Ui:WindowVisible("UIBattleInfo") and self.nTeamIndex then
+    Ui:OpenWindowWithCallback("UIBattleInfo", function(caller, tbWnd)
+      tbWnd:SetInfo(self.nTeamIndex)
+    end, self)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_BATTLE_REPORT, tbSelfData, nRank, tbTeamScore, nLeftTime, nTeamIndex, tbFlagCommitResult)
+end
+
+function Battle:OnSynWinTeam(nTeam)
+  self.nWinTeam = nTeam
+  Ui:OpenWindow("UIBattleRank", false, nil)
+  me.Msg(i18n.Get(self.Cfg.tbText.szSelfScoreAndRankTips, self.tbSelfData.nScore, Battle.nMyRank))
+end
+
+function Battle:OnMapLoaded(nMapTemplateId)
+  if 3 == nMapTemplateId then
+    if self.nTeamIndex then
+      Ui:OpenWindowWithCallback("UIBattleInfo", function(caller, tbWnd)
+        tbWnd:SetInfo(self.nTeamIndex)
+      end, self)
+    end
+    self.bEnterMapFinish = true
+  end
+end
+
+function Battle:CloseAllUI()
+  Ui:CloseWindow("UIBattleLeftInfo")
+  Ui:CloseWindow("UIBattleInfo")
+  Ui:CloseWindow("UIBattleRank")
+end
+
+function Battle:OnCloseBattleMap()
+  self:ClearData()
+  self:CloseAllUI()
+  AFK:Stop()
+end
+
+function Battle:ClearData()
+  self.tbBattleRank = nil
+  self.nWinTeam = nil
+  self.nTime = nil
+  self.nEndTimeStamp = nil
+  self.nMyRank = nil
+  self.tbSelfData = nil
+  self.tbTeamScore = nil
+  self.nTeamIndex = nil
+  self.bEnterMapFinish = nil
+  self.nMapId = nil
+  self.AutoStartAFK = false
+  self.nAutoRoadIndex = nil
+end
+
+function Battle:EnterFightMap(nTime, nTeamIndex, nMapId)
+  self.AutoStartAFK = true
+  self.tbBattleRank = nil
+  self.nWinTeam = nil
+  self.nTime = nTime
+  self.nEndTimeStamp = nTime + GetTime()
+  Ui:CloseWindow("UIBattleEntrance")
+  self.nTeamIndex = nTeamIndex
+  self.nMapId = nMapId
+  self.nAutoRoadIndex = nil
+  if self.bEnterMapFinish then
+    Ui:OpenWindowWithCallback("UIBattleInfo", function(caller, tbWnd)
+      tbWnd:SetInfo(self.nTeamIndex)
+    end, self)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_BATTLE_TIME, self.nEndTimeStamp)
+  if AFK:IsRunning() then
+    AFK:Stop()
+  end
+end
+
+function Battle:OnSyncOpenInfo(nRet, nWaitlistNum, bInList, nLeftTime, bKuaFu, szType)
+  if 0 == nRet then
+    if Ui:WindowVisible("UIBattleEntrance") then
+      Ui:CloseWindow("UIBattleEntrance")
+      me.CenterMsg(i18n.Get(self.Cfg.tbText.szActivityEnd))
+    else
+      me.CenterMsg(i18n.Get(self.Cfg.tbText.szActivityNotStart))
+    end
+  elseif not Ui:WindowVisible("UIBattleEntrance") then
+    Ui:OpenWindow("UIBattleEntrance")
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_SYNC_BATTLE_OPEN, nRet, nWaitlistNum, bInList, nLeftTime, bKuaFu, szType)
+end
+
+function Battle:WantSignUp()
+  if DegreeCtrl:GetDegree(me, "Battle") > 0 or BattleSignUpYD:CheckPlayerQualification(me) then
+    local function fCall()
+      if TeamMgr:HasTeam() then
+        local function fLeaveTeamAndSignUp()
+          TeamMgr:Quite()
+          
+          RemoteServer.SignUpBattle()
+        end
+        
+        Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\232\191\155\229\133\165\230\136\152\229\156\186\233\156\128\232\166\129\233\128\128\229\135\186\233\152\159\228\188\141\239\188\140\231\161\174\229\174\154\231\166\187\233\152\159\239\188\159"), {
+          {fLeaveTeamAndSignUp},
+          {}
+        }, {
+          i18n.szOk,
+          i18n.szCancel
+        })
+      else
+        RemoteServer.SignUpBattle()
+      end
+    end
+    
+    local bRet, szErr = ActivityCheck:CheckCanEnterActivityEx(me, nil, fCall, false, false, true, nil, {
+      "UIBattleEntrance"
+    }, false)
+    if not bRet then
+      me.CenterMsg(szErr)
+      return
+    end
+    return true
+  else
+    me.CenterMsg(i18n.Get(self.Cfg.tbText.szLackRemainTimes))
+  end
+end
+
+function Battle:OnSyncReadyMapInfo(nNum, nTime, nType)
+  local szIntro = i18n.Get(self.Cfg.tbText.szUILeftPeopleNum, nNum)
+  local szAppendNotice
+  if nType and Battle.Cfg.tbIntroText then
+    szAppendNotice = Battle.Cfg.tbIntroText[nType]
+  end
+  if szAppendNotice then
+    szIntro = szIntro .. "\n" .. i18n.Get(szAppendNotice)
+  end
+  FubenUIController:ShowDefaultInfo({
+    {
+      nTime,
+      i18n.Get(self.Cfg.tbText.szUILeftMatchTime)
+    }
+  }, {szIntro})
+end
+
+function Battle:IsNeedExitFubenButton()
+  if Battle.tbSignUpMapTemplateId[me.nMapTemplateId] then
+    return true
+  end
+  return false
+end
+
+function Battle:OnFubenMapLoaded(pPlayer)
+  if Battle.tbSignUpMapTemplateId[pPlayer.nMapTemplateId] then
+    FubenUIController:OpenDefaultFuBenUI()
+  elseif Battle.tbBattleMapTemplateId[pPlayer.nMapTemplateId] and not Battle.Test then
+    FubenUIController:OpenBattleUI()
+  end
+  if (pPlayer.nMapTemplateId == Battle.nBattleKFMapTemplateId or pPlayer.nMapTemplateId == Battle.nBattleYDMapTemplateId) and Sdk:GetOsType() == Sdk.eOSType_iOS then
+    Client:Quality_SetMaxShowPlayerCount(12, false)
+  end
+end
+
+function Battle:OnLeave()
+  if Battle.tbBattleMapTemplateId[me.nMapTemplateId] then
+    self:OnCloseBattleMap()
+  end
+  FubenUIController:CloseDefaultFubenUI()
+end
+
+function Battle:IsInFubenMap()
+  return true
+end
+
+function Battle:IsShowBtnScore(nMapTemplateId)
+  return Battle.tbBattleMapTemplateId[nMapTemplateId]
+end
+
+function Battle:OnManualChangeAFK(bFight)
+  self.AutoStartAFK = bFight
+end
+
+function Battle:AutoGoToMapCenter(nMapId, nRoad)
+  AFK:Stop()
+  self.nAutoRoadIndex = nRoad or self.nAutoRoadIndex or MathRandom(3)
+  if self.nAutoRoadIndex == Battle.tbRoad.Up then
+    Battle:AutoGoUpToMapCenter(nMapId)
+  elseif self.nAutoRoadIndex == Battle.tbRoad.Middle then
+    Battle:AutoGoMiddleToMapCenter(nMapId)
+  elseif self.nAutoRoadIndex == Battle.tbRoad.Down then
+    Battle:AutoGoDownToMapCenter(nMapId)
+  else
+    Battle:AutoGoMiddleToMapCenter(nMapId)
+  end
+end
+
+function Battle:AKFToMapCenter(nMapId)
+  AFK:Start()
+  local tbFightSetting = AFK:GetSetting():GetFightSetting()
+  if tbFightSetting then
+    Timer:Register(Env.GAME_FPS, function()
+      local tbCenterPos = Lib:RandTable(self.tbCenterFightPosList[me.nMapTemplateId])
+      if tbCenterPos then
+        tbFightSetting:SetFightPos(nMapId, tbCenterPos.PosX, tbCenterPos.PosY)
+      end
+    end)
+  end
+end
+
+function Battle:TryGetAutoPathPosData()
+  if not self.tbCenterFightPosList then
+    self.tbCenterFightPosList = {}
+  end
+  if not self.tbCenterFightPosList[me.nMapTemplateId] then
+    local szFightPosFile = Map:GetMapPosFile(me.nMapTemplateId, "center_fight_pos.txt")
+    self.tbCenterFightPosList[me.nMapTemplateId] = Lib:LoadTabFileEx(szFightPosFile, "dd", nil, {"PosX", "PosY"})
+  end
+  if not self.tbSongUpRoutePosList then
+    self.tbSongUpRoutePosList = {}
+  end
+  if not self.tbSongUpRoutePosList[me.nMapTemplateId] then
+    local szSongUpRouteFile = Map:GetMapPosFile(me.nMapTemplateId, "songleft_route_pos.txt")
+    self.tbSongUpRoutePosList[me.nMapTemplateId] = Lib:LoadTabFileEx(szSongUpRouteFile, "dd", nil, {"PosX", "PosY"})
+  end
+  if not self.tbSongDownRoutePosList then
+    self.tbSongDownRoutePosList = {}
+  end
+  if not self.tbSongDownRoutePosList[me.nMapTemplateId] then
+    local szSongDownRouteFile = Map:GetMapPosFile(me.nMapTemplateId, "songright_route_pos.txt")
+    self.tbSongDownRoutePosList[me.nMapTemplateId] = Lib:LoadTabFileEx(szSongDownRouteFile, "dd", nil, {"PosX", "PosY"})
+  end
+  if not self.tbJinUpRoutePosList then
+    self.tbJinUpRoutePosList = {}
+  end
+  if not self.tbJinUpRoutePosList[me.nMapTemplateId] then
+    local szJinUpRouteFile = Map:GetMapPosFile(me.nMapTemplateId, "jinright_route_pos.txt")
+    self.tbJinUpRoutePosList[me.nMapTemplateId] = Lib:LoadTabFileEx(szJinUpRouteFile, "dd", nil, {"PosX", "PosY"})
+  end
+  if not self.tbJinDownRoutePosList then
+    self.tbJinDownRoutePosList = {}
+  end
+  if not self.tbJinDownRoutePosList[me.nMapTemplateId] then
+    local szJinDownRouteFile = Map:GetMapPosFile(me.nMapTemplateId, "jinleft_route_pos.txt")
+    self.tbJinDownRoutePosList[me.nMapTemplateId] = Lib:LoadTabFileEx(szJinDownRouteFile, "dd", nil, {"PosX", "PosY"})
+  end
+end
+
+function Battle:AutoGoUpToMapCenter(nMapId)
+  if self.AutoStartAFK and not AFK:IsRunning() then
+    self:TryGetAutoPathPosData()
+    local tbPos
+    if 1 == self.nTeamIndex then
+      tbPos = Lib:RandTable(self.tbSongUpRoutePosList[me.nMapTemplateId])
+    else
+      tbPos = Lib:RandTable(self.tbJinUpRoutePosList[me.nMapTemplateId])
+    end
+    if tbPos then
+      AutoPath:GotoAndCallEx(nMapId, tbPos.PosX, tbPos.PosY, nil, nil, nil, nil, nil, nil, nil, function()
+        self:AKFToMapCenter(nMapId)
+      end)
+    end
+  end
+end
+
+function Battle:AutoGoMiddleToMapCenter(nMapId)
+  if self.AutoStartAFK and not AFK:IsRunning() then
+    self:TryGetAutoPathPosData()
+    local tbPos = Lib:RandTable(self.tbCenterFightPosList[me.nMapTemplateId])
+    if tbPos then
+      self:AKFToMapCenter(nMapId)
+    end
+  end
+end
+
+function Battle:AutoGoDownToMapCenter(nMapId)
+  if self.AutoStartAFK and not AFK:IsRunning() then
+    self:TryGetAutoPathPosData()
+    local tbPos
+    if 1 == self.nTeamIndex then
+      tbPos = Lib:RandTable(self.tbSongDownRoutePosList[me.nMapTemplateId])
+    else
+      tbPos = Lib:RandTable(self.tbJinDownRoutePosList[me.nMapTemplateId])
+    end
+    if tbPos then
+      AutoPath:GotoAndCallEx(nMapId, tbPos.PosX, tbPos.PosY, nil, nil, nil, nil, nil, nil, nil, function()
+        self:AKFToMapCenter(nMapId)
+      end)
+    end
+  end
+end
+
+function Battle:OnSyncNpcMsg(szMsg)
+  me.CenterMsg(i18n.Parse(szMsg))
+end
+
+function Battle:SyncBattleHuqiStatus(tbSyncInfo)
+  if not tbSyncInfo then
+    return
+  end
+  if tbSyncInfo.nMaxLife then
+    me.GetNpc().SetMaxLife(tbSyncInfo.nMaxLife)
+  end
+end
+
+function Battle:RegistEvent()
+  local tbMaps = {}
+  for nMapId in pairs(Battle.tbSignUpMapTemplateId) do
+    table.insert(tbMaps, nMapId)
+  end
+  for nMapId in pairs(Battle.tbBattleMapTemplateId) do
+    table.insert(tbMaps, nMapId)
+  end
+  FubenUIController:RegisterChecker(tbMaps, Battle)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, Battle.ClearData, Battle)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LOADED, Battle.OnMapLoaded, Battle)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_AFK_MANUAL_OPEN_CLOSE, Battle.OnManualChangeAFK, Battle)
+end
+
+Battle:RegistEvent()

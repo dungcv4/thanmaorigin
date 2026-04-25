@@ -1,0 +1,128 @@
+Item.SouvenirCard = Item.SouvenirCard or {}
+local SouvenirCard = Item.SouvenirCard
+SouvenirCard.nStartTimeSaveId = 1
+
+function SouvenirCard:InitConfig()
+  self.tbCardBook = Lib:EasyLoadTabFile("Setting/Item/SouvenirCardBook.tab", {"nId"})
+  for _, tbInfo in pairs(self.tbCardBook) do
+    tbInfo.nSaveKey = GetGroupKey(tbInfo.szSaveKey)
+    tbInfo.nStartTime = Lib:ParseDateTime(tbInfo.szStartTime)
+    if not tbInfo.nStartTime then
+      Lib:LogErrFormat("SouvenirCard: invalid szStartTime, nId = %d", tbInfo.nId)
+      return
+    end
+  end
+  local tbCard = Lib:EasyLoadTabFile("Setting/Item/SouvenirCard.tab")
+  for _, tbInfo in ipairs(tbCard) do
+    if tbInfo.nSaveId == self.nStartTimeSaveId then
+      Lib:LogErrFormat("SouvenirCard: Card nSaveId cannot be 1, nId = %d", tbInfo.nId)
+      return
+    end
+    self.tbCardBook[tbInfo.nId].tbSortList = self.tbCardBook[tbInfo.nId].tbSortList or {}
+    assert(self.tbCardBook[tbInfo.nId], string.format("SouvenirCard:InitConfig nId=%d not exist", tbInfo.nId))
+    self.tbCardBook[tbInfo.nId].tbCard = self.tbCardBook[tbInfo.nId].tbCard or {}
+    self.tbCardBook[tbInfo.nId].tbCard[tbInfo.nTemplateId] = tbInfo
+    table.insert(self.tbCardBook[tbInfo.nId].tbSortList, tbInfo)
+  end
+  self.tbCardBook = SetReadOnly(self.tbCardBook)
+end
+
+SouvenirCard:InitConfig()
+
+function SouvenirCard:GetCfgById(nId)
+  return self.tbCardBook[nId]
+end
+
+function SouvenirCard:GetSaveKey(nId)
+  local tbCardBook = self:GetCfgById(nId)
+  if tbCardBook then
+    return tbCardBook.nSaveKey
+  end
+end
+
+function SouvenirCard:GetSaveId(nId, nItemTemplateId)
+  local tbCardBook = self:GetCfgById(nId)
+  if tbCardBook and tbCardBook.tbCard[nItemTemplateId] then
+    return tbCardBook.tbCard[nItemTemplateId].nSaveId
+  end
+end
+
+function SouvenirCard:GetCollectNum(pPlayer, nId, nItemTemplateId)
+  local nSaveKey = self:GetSaveKey(nId)
+  local nSaveId = self:GetSaveId(nId, nItemTemplateId)
+  if nSaveId and nSaveKey then
+    return pPlayer.GetUserValue(nSaveKey, nSaveId)
+  end
+end
+
+function SouvenirCard:GetCollectTotalNum(pPlayer, nId)
+  local nSaveKey = self:GetSaveKey(nId)
+  local tbCardCfg = self:GetCfgById(nId)
+  local nTotalNum = 0
+  if nSaveKey and tbCardCfg and tbCardCfg.tbCard then
+    for _, tbInfo in pairs(tbCardCfg.tbCard) do
+      nTotalNum = nTotalNum + pPlayer.GetUserValue(nSaveKey, tbInfo.nSaveId)
+    end
+  end
+  return nTotalNum
+end
+
+function SouvenirCard:GetCollectKindNum(pPlayer, nId)
+  local nSaveKey = self:GetSaveKey(nId)
+  local tbCardCfg = self:GetCfgById(nId)
+  local nTotalNum = 0
+  if nSaveKey and tbCardCfg and tbCardCfg.tbCard then
+    for _, tbInfo in pairs(tbCardCfg.tbCard) do
+      nTotalNum = nTotalNum + Lib:IIF(pPlayer.GetUserValue(nSaveKey, tbInfo.nSaveId) > 0, 1, 0)
+    end
+  end
+  return nTotalNum
+end
+
+function SouvenirCard:GetCardKindNum(nId)
+  local tbCardCfg = self:GetCfgById(nId)
+  if tbCardCfg and tbCardCfg.tbCard then
+    return Lib:CountTB(tbCardCfg.tbCard)
+  else
+    return 0
+  end
+end
+
+function SouvenirCard:GetCardCollectNumByQuality(pPlayer, nId, nQuality)
+  local tbCardCfg = self:GetCfgById(nId)
+  local nCollectNum = 0
+  if tbCardCfg and tbCardCfg.tbCard then
+    for nItemTemplateId, _ in pairs(tbCardCfg.tbCard) do
+      if Item:GetQuality(nItemTemplateId) == nQuality then
+        nCollectNum = nCollectNum + self:GetCollectNum(pPlayer, nId, nItemTemplateId)
+      end
+    end
+  end
+  return nCollectNum
+end
+
+function SouvenirCard:UseBeautifulLandCard(dwId, nCount)
+  RemoteServer.UseManyItem(dwId, nCount)
+end
+
+function SouvenirCard:OnLogin()
+  self:ResetCardBookData(me)
+end
+
+function SouvenirCard:ResetCardBookData(pPlayer)
+  if not pPlayer then
+    return
+  end
+  for nId, tbInfo in pairs(self.tbCardBook) do
+    local nStartTime = pPlayer.GetUserValue(tbInfo.nSaveKey, self.nStartTimeSaveId)
+    if nStartTime < tbInfo.nStartTime then
+      Lib:LogFormat("SouvenirCard: ResetCardBookData, nPlayerId = %d, nCardBookId = %d", pPlayer.dwID, nId)
+      for _, tbCardInfo in pairs(tbInfo.tbCard) do
+        pPlayer.SetUserValue(tbInfo.nSaveKey, tbCardInfo.nSaveId, 0)
+      end
+      pPlayer.SetUserValue(tbInfo.nSaveKey, self.nStartTimeSaveId, tbInfo.nStartTime)
+    elseif nStartTime > tbInfo.nStartTime then
+      Lib:LogErrFormat("SouvenirCard: ResetCardBookData err, player's nStartTime bigger than cfg, nPlayerId = %d, nPlayerStartTime = %d, nCfgStartTime = %d", pPlayer.dwID, nStartTime, tbInfo.nStartTime)
+    end
+  end
+end

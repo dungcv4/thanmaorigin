@@ -1,0 +1,230 @@
+Vip.SAVE_GROUP = GetGroupKey("Vip")
+Vip.KEY_VIP_EXP = 1
+Vip.KEY_EX_VIP_EXP = 2
+Vip.KEY_LEVEL_PIONEER_STATE = 3
+Vip.KEY_LEVEL_GIFT_BAG_STATE = 4
+Vip.KEY_THIS_YEAR = 5
+Vip.KEY_THIS_YEAR_EXP = 6
+Vip.KEY_LAST_YEAR_EXP = 7
+Vip.nMaxExpLimit = Lib.nMaxCInt
+
+function Vip:GetPioneerState(pPlayer, nVipLevel)
+  local nState = pPlayer.GetUserValue(self.SAVE_GROUP, self.KEY_LEVEL_PIONEER_STATE)
+  nState = nState >> nVipLevel
+  nState = nState & 1
+  return 1 == nState
+end
+
+function Vip:GetLevelGiftBagState(pPlayer, nVipLevel)
+  local nState = pPlayer.GetUserValue(self.SAVE_GROUP, self.KEY_LEVEL_GIFT_BAG_STATE)
+  nState = nState >> nVipLevel
+  nState = nState & 1
+  return 1 == nState
+end
+
+function Vip:CanGetPioneerState(pPlayer, nVipLevel)
+  if type(nVipLevel) ~= "number" then
+    return false
+  end
+  if not pPlayer or nVipLevel < 0 or nVipLevel > Vip.nMaxLevel then
+    return false
+  end
+  if self.tbSetting[nVipLevel].bIsGivePioneerGB ~= "1" then
+    return false, i18n.EasyGet("\229\133\136\233\148\139\231\164\188\229\140\133\230\156\170\229\188\128\229\144\175")
+  end
+  if nVipLevel > pPlayer.GetVipLevel() then
+    return false, i18n.EasyGet("VIP\231\173\137\231\186\167\228\184\141\232\182\179")
+  end
+  if self:GetPioneerState(pPlayer, nVipLevel) then
+    return false, i18n.EasyGet("\229\133\136\233\148\139\231\164\188\229\140\133\229\183\178\233\162\134\229\143\150")
+  end
+  local nPioneerGBDurationTime = self.tbSetting[nVipLevel].nPioneerGBDurationTime
+  local nServerCreateTime = GetServerCreateTime()
+  if GetTime() > nServerCreateTime + nPioneerGBDurationTime then
+    return false, i18n.EasyGet("\229\133\136\233\148\139\231\164\188\229\140\133\230\180\187\229\138\168\229\183\178\231\187\147\230\157\159")
+  end
+  return true
+end
+
+function Vip:LoadSetting()
+  local tbField = {
+    "nVipLevel",
+    "nTotalExp",
+    "szVipName",
+    "szTimeFrame",
+    "nGiftShowPrice",
+    "nGiftRealPrice",
+    "nGiftItemId",
+    "bIsGivePioneerGB",
+    "nPioneerGBCount",
+    "nPioneerGBDurationTime",
+    "nPioneerGBDaySubNum",
+    "nPioneerGBGiftId",
+    "nFriendNum",
+    "nPublicChatNum",
+    "nPublicChatCD",
+    "nApprenticeLevelMinus",
+    "nChuanGongNum",
+    "nChuanGongLevelMinus",
+    "nChuanGongCD",
+    "nKinDonateNum",
+    "nKinDonateContributeInc",
+    "nKinGiftNum",
+    "nAddImity",
+    "nExtArenaNum",
+    "nFreightAssistNum",
+    "nFreightSeekHelpCount",
+    "nCanRefreshMarketStall",
+    "nMoneyTreeBonus",
+    "nCanUseSpecialBaiJuWan",
+    "nOnHookBonus",
+    "nXiuLianDanMaxNum",
+    "nBaiGuoLuNum",
+    "nChangeFactionCD",
+    "nSendWaiZhuang"
+  }
+  self.tbSetting = Lib:EasyLoadTabFile("Setting/Vip/Vip.tab", {"nVipLevel"}, tbField)
+  self.nMaxLevel = #self.tbSetting
+  self.tbExpSetting = {}
+  for i = 1, self.nMaxLevel do
+    self.tbExpSetting[i] = self.tbSetting[i].nTotalExp
+  end
+  self.nMinCanRefreshMarketStallLevel = 0
+  for nVipLevel = 0, self.nMaxLevel do
+    if 1 == self.tbSetting[nVipLevel].nCanRefreshMarketStall then
+      self.nMinCanRefreshMarketStallLevel = nVipLevel
+      break
+    end
+  end
+end
+
+Vip:LoadSetting()
+
+function Vip:GetExp(pPlayer)
+  return pPlayer.GetUserValue(self.SAVE_GROUP, self.KEY_VIP_EXP)
+end
+
+function Vip:GetTotoalExp(pPlayer)
+  return pPlayer.GetUserValue(self.SAVE_GROUP, self.KEY_VIP_EXP) + pPlayer.GetUserValue(self.SAVE_GROUP, self.KEY_EX_VIP_EXP)
+end
+
+function Vip:GetThisYearExp(pPlayer)
+  self:SwitchYearExp(pPlayer)
+  return pPlayer.GetUserValue(self.SAVE_GROUP, self.KEY_THIS_YEAR_EXP)
+end
+
+function Vip:GetLastYearExp(pPlayer)
+  self:SwitchYearExp(pPlayer)
+  return pPlayer.GetUserValue(self.SAVE_GROUP, self.KEY_LAST_YEAR_EXP)
+end
+
+function Vip:SwitchYearExp(pPlayer)
+  local nSaveYear = pPlayer.GetUserValue(self.SAVE_GROUP, self.KEY_THIS_YEAR)
+  local nThisYear = Lib:GetLocalYear()
+  if 0 == nSaveYear then
+    pPlayer.SetUserValue(self.SAVE_GROUP, self.KEY_THIS_YEAR, nThisYear)
+    return
+  end
+  if nSaveYear == nThisYear then
+    return
+  end
+  local nThisExp = pPlayer.GetUserValue(self.SAVE_GROUP, self.KEY_THIS_YEAR_EXP)
+  local nLastExp = pPlayer.GetUserValue(self.SAVE_GROUP, self.KEY_LAST_YEAR_EXP)
+  pPlayer.SetUserValue(self.SAVE_GROUP, self.KEY_THIS_YEAR, nThisYear)
+  pPlayer.SetUserValue(self.SAVE_GROUP, self.KEY_THIS_YEAR_EXP, 0)
+  pPlayer.SetUserValue(self.SAVE_GROUP, self.KEY_LAST_YEAR_EXP, nThisExp)
+  Log("Vip:SwitchYearExp", pPlayer.szName, string.format("lastExp:%d->%d", nLastExp, nThisExp), string.format("thisExp:%d->0", nThisExp))
+end
+
+function Vip:GetCurTimeframeMaxLevel()
+  local nRet = 0
+  for i, v in ipairs(self.tbExpSetting) do
+    local szTimeFrameNeed = self.tbSetting[i].szTimeFrame
+    if szTimeFrameNeed and ("" == szTimeFrameNeed or 1 ~= GetTimeFrameState(szTimeFrameNeed)) then
+      break
+    end
+    nRet = i
+  end
+  return nRet
+end
+
+function Vip:CalcLevel(nTotalExp)
+  local nVipLevel = 0
+  for i, v in ipairs(self.tbExpSetting) do
+    local szTimeFrameNeed = self.tbSetting[i].szTimeFrame
+    if (not szTimeFrameNeed or "" ~= szTimeFrameNeed and 1 == GetTimeFrameState(szTimeFrameNeed)) and v <= nTotalExp then
+      nVipLevel = i
+    else
+      break
+    end
+  end
+  return nVipLevel
+end
+
+function Vip:GetVipAddKinFreightAssistNum(nVipLevel)
+  return self.tbSetting[nVipLevel] and self.tbSetting[nVipLevel].nFreightAssistNum or 0
+end
+
+function Vip:GetVipAddKinFreightSeekHelpNum(nVipLevel)
+  return self.tbSetting[nVipLevel] and self.tbSetting[nVipLevel].nFreightSeekHelpCount or 0
+end
+
+function Vip:GetVipAddXiuLianDanNum(nVipLevel)
+  return self.tbSetting[nVipLevel] and self.tbSetting[nVipLevel].nXiuLianDanMaxNum or 0
+end
+
+function Vip:GetVipAddBaiGuoLuNum(nVipLevel)
+  return self.tbSetting[nVipLevel] and self.tbSetting[nVipLevel].nBaiGuoLuNum or 0
+end
+
+function Vip:GetVipAddFriendNum(nVipLevel)
+  return self.tbSetting[nVipLevel] and self.tbSetting[nVipLevel].nFriendNum or 0
+end
+
+function Vip:GetVipAddOnHookPercent(nVipLevel)
+  return self.tbSetting[nVipLevel] and self.tbSetting[nVipLevel].nOnHookBonus / 100 or 0
+end
+
+function Vip:GetVipAddMoneyTreePercent(nVipLevel)
+  return self.tbSetting[nVipLevel] and self.tbSetting[nVipLevel].nMoneyTreeBonus / 100 or 0
+end
+
+function Vip:GetVipCanUseSpecialBaiJuWWanLevel()
+  for nVipLevel, tbV in ipairs(self.tbSetting) do
+    if 1 == tbV.nCanUseSpecialBaiJuWan then
+      return nVipLevel
+    end
+  end
+  return #self.tbSetting
+end
+
+function Vip:CanBugLevelGiftBag(pPlayer, nVipLevel)
+  if nVipLevel < 0 or nVipLevel > Vip.nMaxLevel then
+    return false
+  end
+  if nVipLevel > pPlayer.GetVipLevel() then
+    return false, i18n.EasyGet("VIP\231\173\137\231\186\167\228\184\141\232\182\179")
+  end
+  local bState = Vip:GetLevelGiftBagState(pPlayer, nVipLevel)
+  if bState then
+    return false, i18n.EasyGet("\231\164\188\229\140\133\229\183\178\232\180\173\228\185\176")
+  end
+  return true
+end
+
+function Vip:GetVipXiSuiDaoCDTime(nVipLevel)
+  return self.tbSetting[nVipLevel] and self.tbSetting[nVipLevel].nChangeFactionCD or -1
+end
+
+function Vip:GetVipName(nVipLevel)
+  return self.tbSetting[nVipLevel] and i18n.Parse(self.tbSetting[nVipLevel].szVipName) or ""
+end
+
+function Vip:GetVipOpenTimeframe(nVipLevel)
+  local szTimeFrameNeed = self.tbSetting[nVipLevel].szTimeFrame
+  if szTimeFrameNeed and ("" == szTimeFrameNeed or 1 ~= GetTimeFrameState(szTimeFrameNeed)) then
+    local nMaxLevel = Calendar:GetWorldLevelByTimeframe(szTimeFrameNeed)
+    return i18n.EasyGet("\231\173\137\231\186\167\228\184\138\233\153\144{0}\231\186\167\230\151\182\229\188\128\230\148\190", nMaxLevel)
+  end
+  return ""
+end

@@ -1,0 +1,257 @@
+local tbWnd = Ui:CreateClass("UIQiXiActivity", "UICommonActWndBase")
+local tbControls = {
+  btnClose = "node/imgBg/btnClose",
+  txtTitle = "node/imgBg/Title/txtTitle",
+  wndActivityiTips = "wndActivityiTips",
+  btnLiuLi = "node/imgBg/btnList/Viewport/Content/btnLiuLi",
+  btnTongXin = "node/imgBg/btnList/Viewport/Content/btnTongXin",
+  ActivityInfo = "wndActivityiTips/imgBg/ActivityInfo",
+  btnJoin = "wndActivityiTips/imgBg/btnJoin",
+  ItemTemplate = "wndActivityiTips/imgBg/ActivityInfo/AwardList/Viewport/Content/ItemTemplate",
+  wndJumpTo = "wndJumpTo",
+  MapTemplate = "wndJumpTo/imgBG/List/Viewport/Content/Template",
+  txtMapWndTitle = "wndJumpTo/imgBG/txtTitle",
+  txtTongxin = "node/imgBg/btnTongxinguo/txtTongxin",
+  btnHelp = "node/imgBg/Title/btnHelp",
+  btnTongxinguo = "node/imgBg/btnTongxinguo",
+  AwardTemplate = "wndExtraAwardDetail/imgBg/GetAwards/AwardList/Viewport/Content/ItemTemplate",
+  wndExtraAwardDetail = "wndExtraAwardDetail",
+  Empty4Raycast = "wndJumpTo/Empty4Raycast"
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_UPDATE_EXTRA_AWARD,
+      self.DealExtraAward,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_MAP_ENTER,
+      self.CloseByDefault,
+      self
+    }
+  }
+end
+
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseByDefault()
+  end,
+  btnHelp = function(self)
+    Ui:OpenWindow("UIGeneralHelp", "QiXiActivity")
+  end,
+  btnLiuLi = function(self)
+    self:OnClickActivityHelper(50)
+  end,
+  btnTongXin = function(self)
+    self:OnClickActivityHelper(56)
+  end,
+  btnTongxinguo = function(self)
+    if not self.pPanel:IsActive(tbControls.wndExtraAwardDetail) then
+      self:DealExtraAward()
+      self.pPanel:SetActive(tbControls.wndExtraAwardDetail, true)
+    end
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbShowAwardScrollView = Ui:NewItemGridScrollView(self, self.ItemTemplate, 1, 1)
+  self.tbMapScrollView = Ui:NewSuperListView(self, tbControls.MapTemplate, self.SetMapInfoList, nil, self.OnClickGoToMap)
+  self.pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.AchieveAward)
+  self.tbExtraAwardScrollView = Ui:NewScrollView(self, tbControls.AwardTemplate)
+  self:SetClickEmptyCallback(self.wndActivityiTips)
+  self:SetClickEmptyCallback(tbControls.wndExtraAwardDetail)
+  self:SetClickEmptyCallback(tbControls.wndJumpTo)
+end
+
+function tbWnd:OnOpen(nEntranceIndex)
+  self.pPanel:SetActive(tbControls.Empty4Raycast, false)
+  self.nEntranceIndex = nEntranceIndex
+  self.pPanel:Label_SetText(tbControls.txtTitle, ActivityMgr.EntranceSchedule:GetTitle(self.nEntranceIndex))
+  self:UpdateActivityList()
+  self.pPanel:SetActive(tbControls.wndActivityiTips, false)
+  if RedPointMgr:CheckEvent(RedPointMgr.EVENT.SeventhFirstOpen) then
+    RedPointMgr:FadeRedPoint(RedPointMgr.EVENT.SeventhFirstOpen)
+    local pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.SeventhEvening)
+    if pInstance then
+      LocalData:SetRoleNumber("SeventhEvening", pInstance.nStartTime)
+    end
+  end
+  if not self.pInstance or not self.pInstance:IsOpen() then
+    self.pPanel:SetActive(tbControls.btnTongxinguo, false)
+  else
+    self.pPanel:SetActive(tbControls.btnTongxinguo, true)
+  end
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnTongxinguo, {
+    RedPointMgr.EVENT.SeventhExtraAward
+  })
+  self.pPanel:Label_SetText(tbControls.txtTongxin, i18n.EasyGet("\228\190\160\228\190\163\229\144\140\229\191\131\230\158\156"))
+end
+
+function tbWnd:UpdateActivedStatus(nActivityId, bStatus)
+  local szKey = ""
+  if 50 == nActivityId then
+    szKey = tbControls.btnLiuLi
+  elseif 56 == nActivityId then
+    szKey = tbControls.btnTongXin
+  end
+  self.pPanel:SetActive(szKey .. "/txtNormal", not bStatus)
+  self.pPanel:SetActive(szKey .. "/txtSelected", bStatus)
+  self.pPanel:SetActive(szKey .. "/default", not bStatus)
+  self.pPanel:SetActive(szKey .. "/pitchon", bStatus)
+  local obj = self.pPanel:GetObject(szKey)
+  local trans = obj:GetComponent(Ui.BGroupTrans)
+  if trans then
+    if bStatus then
+      trans:OnSelected()
+    else
+      self.pPanel:Button_SetEnable(szKey, true)
+      trans:OnUnSelected()
+    end
+  end
+end
+
+function tbWnd:UpdateActivityList()
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(self.nEntranceIndex)
+  self.nCurActivityId = nil
+  for _, tbInfo in ipairs(self.tbActivityList) do
+    if 50 == tbInfo.nId then
+      self:UpdateBtnInfo(tbControls.btnLiuLi, tbInfo.nId, tbInfo)
+    elseif 56 == tbInfo.nId then
+      self:UpdateBtnInfo(tbControls.btnTongXin, tbInfo.nId, tbInfo)
+    end
+  end
+end
+
+function tbWnd:UpdateBtnInfo(szKey, nId, tbInfo)
+  local pInstance = ActivityMgr:GetInstanceById(nId)
+  local bOpening = pInstance and pInstance:IsOpen()
+  self.pPanel:SetActive(szKey .. "/txtNormal", bOpening)
+  self.pPanel:SetActive(szKey .. "/imgLock", false)
+  self.pPanel:SetActive(szKey .. "/txtSelected", false)
+  if me.nLevel < tbInfo.nLevel or not bOpening then
+    self.pPanel:SetActive(szKey .. "/txtLock", true)
+  else
+    self.pPanel:SetActive(szKey .. "/txtLock", false)
+  end
+  self.pPanel:Label_SetText(szKey .. "/txtNormal", tbInfo.szName)
+  self.pPanel:Label_SetText(szKey .. "/txtSelected", tbInfo.szName)
+  self.pPanel:Label_SetText(szKey .. "/txtLock", tbInfo.szName)
+  RedPointMgr:DynamicUnRegist(self.pPanel, szKey .. "/imgRedPoint")
+  self.pPanel:SetActive(szKey .. "/imgRedPoint", false)
+  if tbInfo.tbRedPointEventId then
+    self.pPanel:SetActive(szKey .. "/imgRedPoint", true)
+    RedPointMgr:DynamicRegisteRedPoint(self.pPanel, szKey .. "/imgRedPoint", tbInfo.tbRedPointEventId)
+  end
+end
+
+function tbWnd:DealJumpTo(tbMapInfoList)
+  self:ShowJumpToWnd(tbMapInfoList)
+end
+
+function tbWnd:OnClickGoToMap(tbElement, tbInfo, nIndex)
+  if tbInfo.nMapTemplateId == me.nMapTemplateId then
+    me.CenterMsg(i18n.EasyGet("\229\183\178\229\156\168\232\175\165\229\156\176\229\155\190\228\184\173"))
+  else
+    AutoPath:GotoAndCallEx(tbInfo.nMapTemplateId, tbInfo.nPosX, tbInfo.nPosY)
+    self:Close()
+  end
+end
+
+function tbWnd:SetMapInfoList(tbElement, tbInfo, nIndex)
+  tbElement.pPanel:Label_SetText("txtMapName", tbInfo.szName)
+end
+
+function tbWnd:ShowJumpToWnd(tbMapInfoList)
+  if self.pPanel:IsActive(tbControls.wndJumpTo) then
+    self.pPanel:SetActive(tbControls.wndJumpTo, false)
+    return
+  end
+  self.pPanel:Label_SetText(tbControls.txtMapWndTitle, i18n.EasyGet("\232\183\179\232\189\172\229\156\176\229\155\190"))
+  self.pPanel:SetActive(tbControls.wndJumpTo, true)
+  self.tbMapScrollView:SetAllElement(tbMapInfoList)
+end
+
+function tbWnd:OnClickJoinBtn(func, nActivityId, ...)
+  if 56 ~= nActivityId then
+    self:OnClickEmptyClose()
+  end
+  func(nActivityId, ...)
+end
+
+function tbWnd:OnClickEmptyClose()
+  if self.nCurActivityId then
+    self:OnClickActivity(self.nCurActivityId)
+  end
+  self.pPanel:SetActive(tbControls.wndActivityiTips, false)
+  self.pPanel:SetActive(tbControls.wndJumpTo, false)
+  self.pPanel:SetActive(tbControls.wndExtraAwardDetail, false)
+end
+
+function tbWnd:OnClickActivity(nId)
+  local tbInfo
+  for _, tbTmpInfo in ipairs(self.tbActivityList) do
+    if tbTmpInfo.nId == nId then
+      tbInfo = tbTmpInfo
+      break
+    end
+  end
+  if not tbInfo then
+    return
+  end
+  if nId == self.nCurActivityId then
+    self.pPanel:SetActive(self.wndActivityiTips, false)
+    self:UpdateActivedStatus(self.nCurActivityId, false)
+    self.nCurActivityId = nil
+    return
+  end
+  self.nCurActivityId = nId
+  self:UpdateActivedStatus(self.nCurActivityId, true)
+  self:DealActivityDetail(tbInfo)
+end
+
+function tbWnd:DealExtraAward()
+  local tbAllExtraAward = self.pInstance:GetExtraAwardList()
+  self.tbExtraAwardScrollView:Clear()
+  for nIndex, tbInfo in ipairs(tbAllExtraAward) do
+    self.tbExtraAwardScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("AwardTips/txtAwardTip1", i18n.Parse(tbInfo.szInfo))
+      local tbItemGrid = tbElement.tbItemGrid
+      if not tbItemGrid then
+        tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbItemGrid:SetClickEnable(true)
+        tbElement.tbItemGrid = tbItemGrid
+      end
+      local szShowCurCount = ""
+      if tbInfo.nFinishCount < tbInfo.nNeedCount then
+        szShowCurCount = string.format("<color=#b60000>%s</color>", tbInfo.nFinishCount)
+      else
+        szShowCurCount = string.format("<color=#54ab4d>%s</color>", tbInfo.nFinishCount)
+      end
+      pPanel:Label_SetText("AwardTips/txtAwardTip2", i18n.EasyGet("{0}/{1}", szShowCurCount, tbInfo.nNeedCount))
+      tbItemGrid:SetGenericItem(tbInfo.tbAward[1])
+      pPanel:SetActive("btnGet", not tbInfo.bHasAward)
+      pPanel:SetActive("MarkRecieved", tbInfo.bHasAward)
+      Ui:Button_BindEvent(pPanel, "btnGet", self.OnGetExtraAward, self, tbInfo.nAchieveId)
+      pPanel:Button_SetEnable("btnGet", tbInfo.bSuccess and not tbInfo.bHasAward)
+    end)
+  end
+end
+
+function tbWnd:OnGetExtraAward(nAchieveId)
+  if self.pInstance and self.pInstance:IsOpen() then
+    self.pInstance:GetExtraAward(nAchieveId)
+  else
+    me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+  end
+end
+
+function tbWnd:CloseByDefault()
+  self.pPanel:SetActive(tbControls.wndActivityiTips, false)
+  self.pPanel:SetActive(tbControls.wndJumpTo, false)
+  self.pPanel:SetActive(tbControls.wndExtraAwardDetail, false)
+  self:Close()
+end

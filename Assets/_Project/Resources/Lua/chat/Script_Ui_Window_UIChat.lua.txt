@@ -1,0 +1,461 @@
+Require("CommonScript/Chat/ChatDef.lua")
+local tbWnd = Ui:CreateWindow("UIChat")
+local tbControls = {
+  MainPanel = "imgBG/Frame",
+  btnClose = "imgBG/Frame/btnClose",
+  btnSetting = "imgBG/Frame/btnSetting",
+  InputList = "imgBG/Frame/InputList",
+  ChatContainer = "imgBG/Frame/ChatContainer",
+  MailView = "imgBG/Frame/Mail",
+  MailDetail = "imgBG/MailDetail",
+  btnSystem = "imgBG/Frame/ChannelList/btnSystem",
+  btnWorld = "imgBG/Frame/ChannelList/btnWorld",
+  btnNearBy = "imgBG/Frame/ChannelList/btnNearBy",
+  btnTong = "imgBG/Frame/ChannelList/btnTong",
+  btnTeam = "imgBG/Frame/ChannelList/btnTeam",
+  btnFriend = "imgBG/Frame/ChannelList/btnFriend",
+  btnPrivate = "imgBG/Frame/ChannelList/btnPrivate",
+  btnKin = "imgBG/Frame/ChannelList/btnFamily",
+  btnFaction = "imgBG/Frame/ChannelList/btnFaction",
+  btnServer = "imgBG/Frame/ChannelList/btnServer",
+  btnLegion = "imgBG/Frame/ChannelList/btnLegion",
+  btnMail = "imgBG/Frame/btnMail",
+  MailNew = "imgBG/Frame/btnMail/New",
+  txtMailNewAmount = "imgBG/Frame/btnMail/New/txtAmount",
+  toggleLockChat = "imgBG/Frame/toggleLockChat",
+  NewMsg = "imgBG/Frame/NewMsgNum",
+  btnNewMsg = "imgBG/Frame/NewMsgNum/imgBg",
+  txtNewMsgNum = "imgBG/Frame/NewMsgNum/imgBg/NewMsg",
+  panelMail = "imgBG/Frame/panelMail",
+  btnRecieveAll = "imgBG/Frame/panelMail/btnRecieveAll",
+  btnDeleteAll = "imgBG/Frame/panelMail/btnDeleteAll"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnSetting = function(self)
+    Ui:OpenWindow("UIChatSetting")
+  end,
+  btnMail = function(self)
+    if not self.pPanel:IsActive(self.MailView) then
+      self:SwitchMailViewPanel(true)
+    end
+  end,
+  btnNewMsg = function(self)
+    ChatMgr:SetUnReadChannelMsg(self.nChannelId, nil)
+    self.ChatViewPanel:ScrollToBottom()
+    self:UpdateChannelNew(self.nChannelId)
+    self:UpdateChannelBubble(self.nChannelId)
+  end,
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnRecieveAll = function(self)
+    self.MailViewPanel:OnClickRecieveAll()
+  end,
+  btnDeleteAll = function(self)
+    self.MailViewPanel:OnClickDeleteAll()
+  end
+}
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_LEAVE,
+      self.Close
+    },
+    {
+      EventNotify.emNOTIFY_CHAT_NEW_MSG,
+      self._NewChatMsg
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_KIN_DATA,
+      self.UpdateKinInfo
+    },
+    {
+      EventNotify.emNoTIFY_NEW_PRIVATE_MSG,
+      self.NewFriendMsg
+    },
+    {
+      EventNotify.emREALTIME_KIN_CANSPEAKER_CHANGE,
+      self.UpdateKinInfo
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_MAIL_DATA,
+      self.SyncMailData
+    },
+    {
+      EventNotify.emNOTIFY_NOTIFY_NEW_MAIL,
+      self.UpdateMailNew
+    },
+    {
+      EventNotify.emNOTIFY_CHAT_DATA_CHANGE,
+      self.onChatDataCahnged
+    },
+    {
+      EventNotify.emNOTIFY_CHAT_LINK_UPDATE,
+      self.OnChatLinkUpdate
+    }
+  }
+end
+
+function tbWnd:OnCreate()
+  self.pPanel:SetActive(tbControls.MailDetail, false)
+  self:SetClickEmptyToClose()
+  self.InputListPanel = Ui:CreatePanel("UIChatInput", tbControls.InputList, self)
+  self.ChatViewPanel = Ui:CreatePanel("UIChatContainer", tbControls.ChatContainer, self)
+  self.MailViewPanel = Ui:CreatePanel("UIMailView", tbControls.MailView, self)
+  self.MailDetailPanel = Ui:CreatePanel("UIMailDetail", tbControls.MailDetail, self)
+  self.ChannelType2Btn = {
+    [ChatMgr.ChannelType.System] = tbControls.btnSystem,
+    [ChatMgr.ChannelType.Public] = tbControls.btnWorld,
+    [ChatMgr.ChannelType.Nearby] = tbControls.btnNearBy,
+    [ChatMgr.ChannelType.Kin] = tbControls.btnKin,
+    [ChatMgr.ChannelType.Tong] = tbControls.btnTong,
+    [ChatMgr.ChannelType.Team] = tbControls.btnTeam,
+    [ChatMgr.ChannelType.Friend] = tbControls.btnFriend,
+    [ChatMgr.ChannelType.Private] = tbControls.btnPrivate,
+    [ChatMgr.ChannelType.Faction] = tbControls.btnFaction,
+    [ChatMgr.ChannelType.Zone] = tbControls.btnServer,
+    [ChatMgr.ChannelType.Zone_Legion] = tbControls.btnLegion
+  }
+  self.nChannelId = ChatMgr.ChannelType.System
+  self.tbChannelGroup = Ui:NewButtonGroup(self, self.ChannelType2Btn, true, function(self, channel)
+    self:SwitchChatPanel(channel)
+  end)
+  self.nNewChatMsgTimer = {}
+  self.bHadNewMsg = {}
+end
+
+function tbWnd:OnOpen(nChannelId, ...)
+  local tbParam = {
+    ...
+  }
+  self.ChannelType2RedPoint = {
+    [ChatMgr.ChannelType.System] = false,
+    [ChatMgr.ChannelType.Public] = false,
+    [ChatMgr.ChannelType.Nearby] = false,
+    [ChatMgr.ChannelType.Kin] = false,
+    [ChatMgr.ChannelType.Tong] = false,
+    [ChatMgr.ChannelType.Team] = false,
+    [ChatMgr.ChannelType.Friend] = false,
+    [ChatMgr.ChannelType.Private] = false,
+    [ChatMgr.ChannelType.Faction] = false,
+    [ChatMgr.ChannelType.Zone] = false,
+    [ChatMgr.ChannelType.Zone_Legion] = false
+  }
+  self.pPanel:Toggle_SetChecked(tbControls.toggleLockChat, false)
+  self.nChannelId = nChannelId or self.nChannelId
+  self.tbChannelGroup:Select(self.nChannelId)
+  if nChannelId == ChatMgr.ChannelType.Private then
+    local nFriendId, tbFriendInfo = table.unpack(tbParam)
+    if nFriendId then
+      if tbFriendInfo then
+        self.tbChatTargetInfo = tbFriendInfo
+      end
+      self.nFriendId = nFriendId
+      self:ShowFriendChat(self.nFriendId, self.tbChatTargetInfo)
+    end
+  end
+  ChatMgr:CheckUpdateStrangerState()
+  self:UpdateAllChannelNew()
+  self:UpdateMailNew()
+  self:UpdateChannelBubble(self.nChannelId)
+  if nChannelId == ChatMgr.ChannelType.System then
+    local bShowMail = table.unpack(tbParam)
+    if bShowMail then
+      self:SwitchMailViewPanel(true)
+    end
+  end
+end
+
+function tbWnd:GetKinMemberData(dwPlayerId)
+  local tbMember = Kin:GetMemberData(dwPlayerId)
+  if not tbMember then
+    return
+  end
+  return {
+    dwID = dwPlayerId,
+    dwKinId = me.dwKinId,
+    nFaction = tbMember.nFaction,
+    nHonorLevel = tbMember.nHonorLevel,
+    nLastOnlineTime = tbMember.nLastOnlineTime,
+    nLevel = tbMember.nLevel,
+    nPortrait = tbMember.nPortrait,
+    nSex = tbMember.nSex,
+    nVipLevel = tbMember.nVipLevel,
+    szName = tbMember.szName
+  }
+end
+
+function tbWnd:AddItem(nItemId)
+  self.InputListPanel:AddItem(nItemId)
+end
+
+function tbWnd:AddHawk(nItemId)
+  self.InputListPanel:AddHawk(nItemId)
+end
+
+function tbWnd:AddRecruit()
+  self.InputListPanel:AddRecruit()
+end
+
+function tbWnd:AddRecruitMsg(szMsg)
+  self.InputListPanel:AddRecruitMsg(szMsg)
+end
+
+function tbWnd:AddMultiPvPRecruit(nTeamId, szTeamName, nCurMember, nTeamSize)
+  self.InputListPanel:AddMultiPvPRecruit(nTeamId, szTeamName, nCurMember, nTeamSize)
+end
+
+function tbWnd:AddWuLinDaHuiRecruit(nTeamId, szTeamName, nCurMember, nTeamSize)
+  self.InputListPanel:AddWuLinDaHuiRecruit(nTeamId, szTeamName, nCurMember, nTeamSize)
+end
+
+function tbWnd:AddDingFengPKRecruit(nTeamId, szTeamName, nCurMember, nTeamSize)
+  self.InputListPanel:AddDingFengPKRecruit(nTeamId, szTeamName, nCurMember, nTeamSize)
+end
+
+function tbWnd:SwitchChatPanel(nChannelId)
+  self:SwitchMailViewPanel(false, nChannelId)
+  self.InputListPanel:SwitchInput(nChannelId)
+  self.ChatViewPanel:SwitchChatView(nChannelId)
+  self.nChannelId = nChannelId
+  Timer:Register(5, function()
+    if not self.pPanel:Toggle_GetChecked(tbControls.toggleLockChat) or self.ChatViewPanel:IsScrollAtBottom() then
+      ChatMgr:SetUnReadChannelMsg(self.nChannelId, nil)
+    end
+    self:UpdateChannelNew(nChannelId)
+    self:UpdateChannelBubble(nChannelId)
+  end)
+end
+
+function tbWnd:ShowFriendChat(nFriendId, tbChatTargetInfo)
+  if self.nChannelId ~= ChatMgr.ChannelType.Private then
+    self.tbChannelGroup:Select(ChatMgr.ChannelType.Private)
+  end
+  tbChatTargetInfo = FriendShip:GetFriendDataInfo(nFriendId) or self:GetKinMemberData(nFriendId) or tbChatTargetInfo
+  if tbChatTargetInfo then
+    self.ChatViewPanel:UpdateCurTargetInfo(nFriendId, tbChatTargetInfo)
+    self.ChatViewPanel:Switch2PrivateChat(nil)
+  end
+end
+
+function tbWnd:onChatDataCahnged()
+  self.bChatDataChanged = true
+end
+
+function tbWnd:_NewChatMsg(nChannelId)
+  if self.nNewChatMsgTimer[nChannelId] then
+    self.bHadNewMsg[nChannelId] = true
+    return
+  end
+  self:NewChatMsg(nChannelId)
+  self.nNewChatMsgTimer[nChannelId] = Timer:Register(9, self._NewChatMsgTimerCall, self, nChannelId)
+end
+
+function tbWnd:_NewChatMsgTimerCall(nChannelId)
+  self.nNewChatMsgTimer[nChannelId] = nil
+  if self.bHadNewMsg[nChannelId] then
+    self.bHadNewMsg[nChannelId] = false
+    self:NewChatMsg(nChannelId)
+  end
+end
+
+function tbWnd:NewChatMsg(nChannelId)
+  if self.nNewChatMsgTimer[nChannelId] then
+    Timer:Close(self.nNewChatMsgTimer[nChannelId])
+    self.nNewChatMsgTimer[nChannelId] = nil
+  end
+  if not self:Visible() then
+    return
+  end
+  if not nChannelId then
+    return
+  end
+  if nChannelId ~= self.nChannelId then
+    self:UpdateChannelNew(nChannelId)
+  else
+    self.ChatViewPanel:UpdateNewMsg(nChannelId)
+    if not self.pPanel:Toggle_GetChecked(tbControls.toggleLockChat) or self.ChatViewPanel:IsScrollAtBottom() then
+      ChatMgr:SetUnReadChannelMsg(self.nChannelId, nil)
+    end
+  end
+  self:UpdateChannelBubble(nChannelId)
+end
+
+function tbWnd:NewFriendMsg(dwSender)
+  if self.nChannelId == ChatMgr.ChannelType.Private then
+    self.ChatViewPanel:UpdateNewFriendMsg(dwSender)
+  end
+  self:UpdateChannelNew(ChatMgr.ChannelType.Private)
+end
+
+function tbWnd:UpdateAllChannelNew()
+  for nChannelId, _ in pairs(self.ChannelType2Btn) do
+    self:UpdateChannelNew(nChannelId)
+  end
+end
+
+function tbWnd:UpdateChannelBubble(nChannelId)
+  if nChannelId ~= self.nChannelId then
+    return
+  end
+  if nChannelId == ChatMgr.ChannelType.Private then
+    self.pPanel:SetActive(tbControls.NewMsg, false)
+    return
+  end
+  if self.ChatViewPanel:IsScrollAtBottom() then
+    self.pPanel:SetActive(tbControls.NewMsg, false)
+    return
+  end
+  local nNum = ChatMgr:CountUnReadChannelMsg(nChannelId)
+  if nNum > 0 then
+    self.pPanel:SetActive(tbControls.NewMsg, true)
+    self.pPanel:Label_SetText(tbControls.txtNewMsgNum, i18n.EasyGet("\230\130\168\230\156\137{0}\230\157\161\230\156\170\232\175\187\230\182\136\230\129\175", nNum))
+  else
+    self.pPanel:SetActive(tbControls.NewMsg, false)
+  end
+end
+
+function tbWnd:UpdateChannelNew(nChannelId)
+  local szNewKey = string.format("%s/New", self.ChannelType2Btn[nChannelId])
+  self.pPanel:SetActive(szNewKey, false)
+  if nChannelId == ChatMgr.ChannelType.Private then
+    local nNum = ChatMgr:GetUnReadPrivateMsgNum()
+    if nNum > 0 then
+      if not self.ChannelType2RedPoint[nChannelId] then
+        self.ChannelType2RedPoint[nChannelId] = true
+        RedPointMgr:ForceLightRedPoint(self.pPanel, self.ChannelType2Btn[nChannelId])
+      end
+    elseif self.ChannelType2RedPoint[nChannelId] then
+      self.ChannelType2RedPoint[nChannelId] = false
+      RedPointMgr:ForceFadeRedPoint(self.pPanel, self.ChannelType2Btn[nChannelId])
+    end
+  elseif nChannelId == ChatMgr.ChannelType.Kin or nChannelId == ChatMgr.ChannelType.Tong or nChannelId == ChatMgr.ChannelType.Team or nChannelId == ChatMgr.ChannelType.Zone_Legion or nChannelId == ChatMgr.ChannelType.Friend then
+    local nNum = ChatMgr:CountUnReadChannelMsg(nChannelId)
+    if nNum > 0 then
+      if not self.ChannelType2RedPoint[nChannelId] then
+        self.ChannelType2RedPoint[nChannelId] = true
+        RedPointMgr:ForceLightRedPoint(self.pPanel, self.ChannelType2Btn[nChannelId])
+      end
+    elseif self.ChannelType2RedPoint[nChannelId] then
+      self.ChannelType2RedPoint[nChannelId] = false
+      RedPointMgr:ForceFadeRedPoint(self.pPanel, self.ChannelType2Btn[nChannelId])
+    end
+  elseif self.ChannelType2RedPoint[nChannelId] then
+    self.ChannelType2RedPoint[nChannelId] = false
+    RedPointMgr:ForceFadeRedPoint(self.pPanel, self.ChannelType2Btn[nChannelId])
+  end
+end
+
+function tbWnd:UpdateMailNew(bNewMail)
+  local nNum = Mail:GetUnreadCount()
+  if nNum > 0 then
+    self.pPanel:SetActive(tbControls.MailNew, true)
+    if nNum <= 99 then
+      self.pPanel:Label_SetText(tbControls.txtMailNewAmount, nNum)
+    else
+      self.pPanel:Label_SetText(tbControls.txtMailNewAmount, "...")
+    end
+  else
+    self.pPanel:SetActive(tbControls.MailNew, false)
+  end
+  if bNewMail and self.pPanel:IsActive(tbControls.MailView) then
+    self.MailViewPanel:UpdateMailList()
+  end
+end
+
+function tbWnd:UpdateKinInfo(szDataType)
+  self.ChatViewPanel:RefreshKinLive()
+end
+
+function tbWnd:LockChat(bLock)
+  self.pPanel:Toggle_SetChecked(tbControls.toggleLockChat, bLock)
+end
+
+function tbWnd:IsLockChat()
+  return self.pPanel:Toggle_GetChecked(tbControls.toggleLockChat)
+end
+
+function tbWnd:SwitchMailViewPanel(bShow, nChannelId)
+  if bShow == self.pPanel:IsActive(tbControls.MailView) then
+    return
+  end
+  self.pPanel:SetActive(tbControls.panelMail, bShow)
+  self.pPanel:SetActive(tbControls.InputList, not bShow)
+  self.pPanel:SetActive(tbControls.ChatContainer, not bShow)
+  self.pPanel:SetActive(tbControls.MailView, bShow)
+  self.pPanel:SetActive(tbControls.MailDetail, false)
+  if bShow then
+    self.MailViewPanel:OnShow()
+    self.pPanel:SetActive(tbControls.NewMsg, false)
+    self.tbChannelGroup:ClearSelected()
+  elseif nChannelId then
+    self.tbChannelGroup:Select(nChannelId)
+  end
+end
+
+function tbWnd:SwitchMailDetailPanel(bShow, ...)
+  if bShow ~= self.pPanel:IsActive(tbControls.MailDetail) then
+    self.pPanel:SetActive(tbControls.MailDetail, bShow)
+  end
+  if bShow then
+    self.MailDetailPanel:OnShow(...)
+  end
+end
+
+function tbWnd:CallMailViewPanel(szCmd, ...)
+  if not self.pPanel:IsActive(tbControls.MailView) then
+    return
+  end
+  self.MailViewPanel[szCmd](self.MailViewPanel, ...)
+end
+
+function tbWnd:SyncMailData(nMailId, bSuccess, nNextMailId)
+  if self.pPanel:IsActive(tbControls.MailView) then
+    self.MailViewPanel:SyncMailData(nMailId, bSuccess)
+  end
+  if self.pPanel:IsActive(tbControls.MailDetail) then
+    self.MailDetailPanel:SyncMailData(nMailId, bSuccess, nNextMailId)
+  end
+end
+
+function tbWnd:OuterSetChatInput(szCurTab, szMsg, tbChatLink)
+  self.InputListPanel:DealOuterInput(szCurTab, szMsg, tbChatLink)
+end
+
+function tbWnd:OnClose()
+  self.ChatViewPanel:OnClose()
+  for _, nTimeHandle in pairs(self.nNewChatMsgTimer) do
+    Timer:Close(nTimeHandle)
+  end
+  self.nNewChatMsgTimer = {}
+  self.bHadNewMsg = {}
+end
+
+function tbWnd:GetMainSize()
+  local trans = self.pPanel:GetRectTransform(tbControls.MainPanel)
+  return trans.sizeDelta.x, trans.sizeDelta.y
+end
+
+function tbWnd:SetIconsShow()
+  self.pPanel:SetActive(tbControls.btnMail, not Ui.bInZone)
+end
+
+function tbWnd:OnLoginZone()
+  self:SetIconsShow()
+end
+
+function tbWnd:OnLogoutZone()
+  self:SetIconsShow()
+end
+
+function tbWnd:OnChatLinkUpdate()
+  if not self:Visible() then
+    return
+  end
+  if not Lib:Is_include(self.nChannelId, ChatMgr.LinkUpdateChannel) then
+    return
+  end
+  self.ChatViewPanel:UpdateNewMsg(self.nChannelId)
+end

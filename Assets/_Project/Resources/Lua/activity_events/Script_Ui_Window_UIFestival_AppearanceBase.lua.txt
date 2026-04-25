@@ -1,0 +1,214 @@
+local tbWnd = Ui:CreateWindow("UIFestival_AppearanceBase")
+tbWnd.tbAppearanceType = {
+  Horse = "Horse",
+  Suit = "Suit",
+  Mantle = "Mantle"
+}
+tbWnd.tbAppearancePos = {
+  Cloth = 0,
+  Mantle = 2,
+  Horse = 3,
+  Hat = 4
+}
+
+function tbWnd:RegistNotify()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_UPDATE_EXTRA_AWARD, self.UpdateButton, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_SHOP_BUY_RESULT, self.UpdateBuyButton, self)
+end
+
+function tbWnd:UnRegistNotify()
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_UPDATE_EXTRA_AWARD, self)
+  EventNotify:UnRegistNotify(EventNotify.emNOTIFY_SHOP_BUY_RESULT, self)
+end
+
+function tbWnd:OnCreate()
+  self.tbAppearanceScrollView = Ui:NewScrollView(self, self.ApperanceTemplate)
+  self.awardItemGrid = Ui:NewExistItemGrid(self, self.itemGrid)
+end
+
+function tbWnd:OnOpen(nEntranceIndex, nIndex)
+  self:RegistNotify()
+  self.nEntranceIndex = nEntranceIndex or self.nEntranceIndex
+  if self.nEntranceIndex then
+    self:UpdateInfo(self.nEntranceIndex, nIndex)
+  end
+  self:UpdateButton()
+end
+
+tbWnd.tbOnClick = {
+  btnGet = function(self)
+    self:RequestAchievementAward()
+  end,
+  btnLeft = function(self)
+    local nNewPage = math.max(1, self.nPage - 1)
+    if nNewPage ~= self.nPage then
+      self.nPage = nNewPage
+      self:UpdatePage()
+    end
+  end,
+  btnRight = function(self)
+    local nNewPage = math.min(self.nMaxPageNum, self.nPage + 1)
+    if nNewPage ~= self.nPage then
+      self.nPage = nNewPage
+      self:UpdatePage()
+    end
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.szHelpKey)
+  end
+}
+
+function tbWnd:UpdateButton()
+  self.pAchieveInstance = ActivityMgr:GetInstanceById(self.nAchieveActId)
+  if not self.pAchieveInstance then
+    return
+  end
+  self.tbAchieveData = self.pAchieveInstance:GetAchieveData()
+  local bAchieved = self.pAchieveInstance:CheckIsAwardById(self.nAchieveGroupId, me, self.tbAchieveData)
+  self.pPanel:SetActive(self.btnGet, not bAchieved)
+  self.pPanel:SetActive(self.imgFinished, bAchieved)
+  RedPointMgr:DynamicUnRegist(self.pPanel, self.btnGet)
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, self.btnGet, {
+    RedPointMgr.EVENT[self.pAchieveInstance.tbConfig.szRedPointEvent]
+  })
+end
+
+function tbWnd:UpdateInfo(nEntranceIndex, nIndex)
+  self.tbActivityList = ActivityMgr.EntranceSchedule:GetActivityList(nEntranceIndex)
+  self.nId = self.nId or self.tbActivityList[nIndex].nId
+  self.tbSetting = self.tbSetting or ActivityMgr.CommonEntryLinkData[self.nId].tbSetting
+  self.tbAppearanceList = self.tbAppearanceList or ActivityMgr.CommonEntryLinkData[self.nId].tbAppearanceList
+  self.nMaxPageNum = math.floor((#self.tbAppearanceList + self.nPageElementCount - 1) / self.nPageElementCount)
+  self.nPage = self.nPage or 1
+  local szShowTime = ActivityMgr.EntranceSchedule:GetSmallTitle(nEntranceIndex)
+  self.szTitle = self.szTitle or self.tbActivityList[nIndex].szName
+  self.pPanel:Label_SetText(self.txtPanelTitle, self.szTitle)
+  local nEndTime = Lib:GetConfigDate2Time(ActivityMgr.EntranceScheduleCfg[nEntranceIndex].szEndTime)
+  if nEndTime > GetTime() then
+    local nDiff = nEndTime - GetTime()
+    local szTime = i18n.EasyGet("<color=#1FFB24>{0}</color> {1}\229\144\142\231\187\147\230\157\159", szShowTime, Lib:TimeDesc2(nDiff))
+    self.pPanel:Label_SetText(self.txtTime, szTime)
+  end
+  self.pPanel:Label_SetText(self.txtPanelSubTitle, i18n.Get(self.tbSetting.szSubTitleInfo))
+  self.pPanel:Label_SetText(self.txtInfo, i18n.Get(self.tbSetting.szHintInfo))
+  self.awardItemGrid:SetItemByTemplate(self.tbSetting.nItemId, 0)
+  self.awardItemGrid:SetClickEnable(true)
+  self:UpdateScrollViewList()
+  self:UpdatePage()
+end
+
+function tbWnd:UpdateBuyButton()
+  for nIndex, tbInfo in ipairs(self.tbAppearanceList) do
+    local tbElement = self.tbAppearanceScrollView:GetElement(nIndex)
+    local tbWare = Shop:GetAWare2(Shop.ShopTypeStr.LimitBuy, tbInfo.nItemId)
+    local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+    if -1 ~= nRemainCount and nRemainCount <= 0 then
+      tbElement.pPanel:SetActive(self.tbTemplateElement.btnBuy, false)
+      tbElement.pPanel:SetActive(self.tbTemplateElement.imgDiscountsBg, false)
+      tbElement.pPanel:SetActive(self.tbTemplateElement.imgSoldOutMark, true)
+      tbElement.pPanel:SetActive(self.tbTemplateElement.imgSoldOutBg, true)
+    else
+      tbElement.pPanel:SetActive(self.tbTemplateElement.btnBuy, true)
+      tbElement.pPanel:SetActive(self.tbTemplateElement.imgDiscountsBg, true)
+      tbElement.pPanel:SetActive(self.tbTemplateElement.imgSoldOutMark, false)
+      tbElement.pPanel:SetActive(self.tbTemplateElement.imgSoldOutBg, false)
+      tbElement.pPanel:Button_SetText(self.tbTemplateElement.btnBuy, i18n.EasyGet("\232\180\173\228\185\176"), "Text")
+      Ui:Button_BindEvent(tbElement.pPanel, self.tbTemplateElement.btnBuy, function(nItemId)
+        Shop:OpenShopBuyWidDefault(nItemId)
+      end, tbInfo.nItemId)
+    end
+  end
+end
+
+function tbWnd:UpdateScrollViewList()
+  self.tbAppearanceScrollView:Clear()
+  for nIndex, tbInfo in ipairs(self.tbAppearanceList) do
+    self.tbAppearanceScrollView:SetElement(nIndex, function(tbElement)
+      tbElement.pPanel:Label_SetText(self.tbTemplateElement.txtTemplateName, i18n.Get(tbInfo.szTemplateName))
+      tbElement.pPanel:Label_SetText(self.tbTemplateElement.txtTitle, i18n.Get(tbInfo.szTitleName))
+      tbElement.pPanel:Sprite_SetSprite(self.tbTemplateElement.imgCostPast, Currency:GetIcon(tbInfo.szCostType))
+      tbElement.pPanel:Sprite_SetSprite(self.tbTemplateElement.imgCostNow, Currency:GetIcon(tbInfo.szCostType))
+      tbElement.pPanel:Label_SetText(self.tbTemplateElement.txtCostPast, i18n.Get(tbInfo.szCostPast))
+      tbElement.pPanel:Label_SetText(self.tbTemplateElement.txtCostNow, i18n.Get(tbInfo.szCostNow))
+      tbElement.pPanel:Label_SetText(self.tbTemplateElement.txtCostCountPast, tbInfo.nCostCountPast)
+      tbElement.pPanel:Label_SetText(self.tbTemplateElement.txtCostCountNow, tbInfo.nCostCountNow)
+      tbElement.pPanel:Label_SetText(self.tbTemplateElement.txtDiscounts, i18n.Get(tbInfo.szDiscounts))
+      tbElement.pPanel:SetActive(self.tbTemplateElement.txtCont, false)
+      tbElement.objResPreview = tbElement.pPanel:GetObject(self.tbTemplateElement.szNpcModelPath)
+      Fashion:Preview_Init(tbElement.objResPreview)
+      local tbWare = Shop:GetAWare2(Shop.ShopTypeStr.LimitBuy, tbInfo.nItemId)
+      local nRemainCount = Shop:GetShopRemainCount(tbWare, me)
+      if -1 ~= nRemainCount and nRemainCount <= 0 then
+        tbElement.pPanel:SetActive(self.tbTemplateElement.btnBuy, false)
+        tbElement.pPanel:SetActive(self.tbTemplateElement.imgDiscountsBg, false)
+        tbElement.pPanel:SetActive(self.tbTemplateElement.imgSoldOutMark, true)
+        tbElement.pPanel:SetActive(self.tbTemplateElement.imgSoldOutBg, true)
+      else
+        tbElement.pPanel:SetActive(self.tbTemplateElement.btnBuy, true)
+        tbElement.pPanel:SetActive(self.tbTemplateElement.imgDiscountsBg, true)
+        tbElement.pPanel:SetActive(self.tbTemplateElement.imgSoldOutMark, false)
+        tbElement.pPanel:SetActive(self.tbTemplateElement.imgSoldOutBg, false)
+        tbElement.pPanel:Button_SetText(self.tbTemplateElement.btnBuy, i18n.EasyGet("\232\180\173\228\185\176"), "Text")
+        Ui:Button_BindEvent(tbElement.pPanel, self.tbTemplateElement.btnBuy, function(nItemId)
+          Shop:OpenShopBuyWidDefault(nItemId)
+        end, tbInfo.nItemId)
+      end
+      local bCurFashionState = Fashion.bHorse
+      if tbInfo.szType == self.tbAppearanceType.Suit then
+        Fashion.bHorse = false
+        Fashion:Preview_TryOnAFashion(self.tbAppearancePos.Cloth, tbInfo.nAppearanceId1)
+        Fashion:Preview_TryOnAFashion(self.tbAppearancePos.Hat, tbInfo.nAppearanceId2)
+        Fashion:Preview_RefreshPreview()
+      elseif tbInfo.szType == self.tbAppearanceType.Horse then
+        Fashion.bHorse = true
+        Fashion:Preview_TryOnAFashion(self.tbAppearancePos.Horse, tbInfo.nAppearanceId1)
+        Fashion:Preview_RefreshPreview_AllPart()
+      elseif tbInfo.szType == self.tbAppearanceType.Mantle then
+        Fashion.bHorse = false
+        Fashion:Preview_TryOnAFashion(self.tbAppearancePos.Mantle, tbInfo.nAppearanceId1)
+        Fashion:Preview_RefreshPreview()
+      end
+      Ui:Button_BindEvent(tbElement.pPanel, self.tbTemplateElement.btnLeft, function()
+        Fashion.objResPreview = tbElement.objResPreview
+        Fashion.comResPreview = tbElement.objResPreview:GetComponent(Ui.UINpcModel)
+        Fashion:Preview_TurnLeft()
+      end)
+      Ui:Button_BindEvent(tbElement.pPanel, self.tbTemplateElement.btnRight, function()
+        Fashion.objResPreview = tbElement.objResPreview
+        Fashion.comResPreview = tbElement.objResPreview:GetComponent(Ui.UINpcModel)
+        Fashion:Preview_TurnRight()
+      end)
+      Fashion.bHorse = bCurFashionState
+    end)
+  end
+  self.tbAppearanceScrollView:PlayItemGridAnimation()
+end
+
+function tbWnd:UpdatePage()
+  self.pPanel:Label_SetText(self.txtPageNum, string.format("%s/%s", self.nPage, self.nMaxPageNum))
+  for i = 1, #self.tbAppearanceList do
+    if i > (self.nPage - 1) * self.nPageElementCount and i <= self.nPage * self.nPageElementCount then
+      self.pPanel:SetActive(string.format(self.ApperanceElement, i), true)
+    else
+      self.pPanel:SetActive(string.format(self.ApperanceElement, i), false)
+    end
+  end
+end
+
+function tbWnd:OnClose()
+  self:UnRegistNotify()
+  self.tbAppearanceScrollView:Clear()
+end
+
+function tbWnd:RequestAchievementAward()
+  self.pAchieveInstance = ActivityMgr:GetInstanceById(self.nAchieveActId)
+  if not self.pAchieveInstance or not self.pAchieveInstance:IsOpen() then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return
+  end
+  if not self.nAchieveGroupId then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\230\180\187\229\138\168\230\156\170\229\188\128\229\144\175"))
+    return
+  end
+  self.pAchieveInstance:GetExtraAward(self.nAchieveGroupId)
+end

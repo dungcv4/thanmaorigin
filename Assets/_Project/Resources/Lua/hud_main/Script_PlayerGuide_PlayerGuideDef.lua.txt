@@ -1,0 +1,271 @@
+PlayerGuide.tbGuide = {}
+PlayerGuide.tbGuideType = {
+  UIActivity = "UIActivity",
+  UIActivityDetail = "UIActivityDetail",
+  UISocial = "UISocial",
+  UIBag = "UIBag"
+}
+PlayerGuide.tbGuideContent = PlayerGuide.tbGuideContent or {}
+
+local function LoadFile()
+  local tbFile = Lib:LoadTabFileEx("Setting/Calendar/PlayerGuide.tab", "sddssssdssssss", nil, {
+    "szFuncName",
+    "nLevel",
+    "nSort",
+    "szBeginTimeFrame",
+    "szCloseTimeFrame",
+    "szWeekFlag",
+    "szParam",
+    "nActivityId",
+    "szName",
+    "szDesc",
+    "szGuideFunc",
+    "szGuideParam",
+    "szJoinCount",
+    "szCheckFunc"
+  }, nil, nil, nil, false)
+  assert(tbFile, "[PlayerGuide] LoadFile Error")
+  for _, tbInfo in ipairs(tbFile) do
+    if not tbInfo.szWeekFlag or Lib:IsEmptyStr(tbInfo.szWeekFlag) then
+      tbInfo.szWeekFlag = "1234567"
+    end
+    table.insert(PlayerGuide.tbGuide, tbInfo)
+  end
+  PlayerGuide.tbGuide = SetReadOnly(PlayerGuide.tbGuide)
+  Validator:Register(function()
+    for _, tbInfo in ipairs(PlayerGuide.tbGuide) do
+      if not Calendar:GetActInfo(tbInfo.nActivityId) then
+        error(string.format("load PlayerGuide.tab error nActivityId=%d not found", tbInfo.nActivityId))
+        return false
+      end
+    end
+    return true
+  end)
+end
+
+LoadFile()
+
+local function SplitParams(szFuncName, szParam)
+  local tbParam = {}
+  local tbData = Lib:SplitStr(szParam, ";")
+  table.insert(tbParam, tbData[1])
+  if "LevelOrAch" == szFuncName then
+    local szAchData = tbData[2]
+    if not Lib:IsEmptyStr(szAchData) then
+      local tbAch = Lib:SplitStr(szAchData, ":")
+      table.insert(tbParam, tbAch[1])
+      table.insert(tbParam, tbAch[2])
+    end
+  elseif "OpenServerDay" == szFuncName or "ActivityForeshow" == szFuncName then
+    local tbTime = Lib:SplitStr(tbData[2], "-")
+    local nBegin = Lib:ParseTodayTime(tbTime[1])
+    local nEnd = Lib:ParseTodayTime(tbTime[2])
+    table.insert(tbParam, nBegin)
+    table.insert(tbParam, nEnd)
+  end
+  return tbParam
+end
+
+function PlayerGuide:InitGuideContent()
+  for i, v in ipairs(PlayerGuide.tbGuide) do
+    local tbParam = SplitParams(v.szFuncName, v.szParam)
+    local tbInfo = {
+      nId = i,
+      szFuncName = v.szFuncName,
+      nLevel = tonumber(v.nLevel),
+      nSort = tonumber(v.nSort),
+      szBeginTimeFrame = v.szBeginTimeFrame,
+      szCloseTimeFrame = v.szCloseTimeFrame,
+      szWeekFlag = tostring(v.szWeekFlag),
+      tbParam = tbParam,
+      nActivityId = v.nActivityId,
+      szName = v.szName,
+      szDesc = v.szDesc,
+      szGuideFunc = v.szGuideFunc,
+      szGuideParam = v.szGuideParam,
+      szJoinCount = v.szJoinCount,
+      szCheckFunc = v.szCheckFunc
+    }
+    table.insert(PlayerGuide.tbGuideContent, tbInfo)
+  end
+  table.sort(PlayerGuide.tbGuideContent, function(a1, a2)
+    if a1.nSort == a2.nSort then
+      return a1.nId < a2.nId
+    end
+    return a1.nSort < a2.nSort
+  end)
+end
+
+PlayerGuide:InitGuideContent()
+PlayerGuide.tbActLimitTimes = {
+  Other = function(szJoinCount)
+    local nCurNum = DegreeCtrl:GetDegree(me, szJoinCount) or 0
+    return nCurNum
+  end,
+  TieFuCheng = function()
+    return TieFuCheng:IsMeetTimeFrame() and 1 or 0
+  end,
+  ResourceBattle = function()
+    return ResourceBattle:CheckIsOpen() and 1 or 0
+  end
+}
+PlayerGuide.tbButtonFuncs = {
+  OpenUi = function(...)
+    local tbParams = Lib:SplitStr((...), "|")
+    if not tbParams then
+      return
+    end
+    if PlayerGuide.tbGuideType.UIActivity == tbParams[1] then
+      if tbParams[2] then
+        Calendar:OpenCalendarToActId(tonumber(tbParams[2]))
+      else
+        Ui:OpenWindow(tbParams[1])
+      end
+    elseif PlayerGuide.tbGuideType.UIActivityDetail == tbParams[1] or PlayerGuide.tbGuideType.UIBag == tbParams[1] or PlayerGuide.tbGuideType.UISocial == tbParams[1] then
+      if tbParams[2] then
+        Ui:OpenWindow(tbParams[1], tonumber(tbParams[2]))
+      else
+        Ui:OpenWindow(tbParams[1])
+      end
+    else
+      Ui:OpenWindow(table.unpack(tbParams))
+    end
+  end,
+  JoinDomainBattle = function(...)
+    DomainBattle:OnCalendarAction(...)
+  end,
+  JoinBattle = function(...)
+    RemoteServer.GetBattleSignUpInfo()
+  end,
+  DoTongChallenge = function(...)
+    if TeamMgr:IsFollowTeammate() then
+      TeamMgr:StopFollowMember()
+    end
+    TongChallenge:OnJoinTongChallange()
+  end,
+  DoTongParty = function(...)
+    if TeamMgr:IsFollowTeammate() then
+      TeamMgr:StopFollowMember()
+    end
+    TongParty:OnJoinTongParty()
+  end,
+  DoUIGoldBossEntrance = function(...)
+    WuLinGaoShou:OnJoinWuLinGaoShou("Boss")
+  end,
+  DoUIKeYiMen = function(...)
+    KeYiMen.C:OnJoin()
+  end,
+  DoUIQinShiHuangLing = function(...)
+    QinShiHuangLing:OnJoinQinShiHuangLing()
+  end,
+  DoUIQinShiHuangLingRiChang = function(...)
+    QinShiHuangLing:OnJoinQinShiHuangLingRiChang()
+  end,
+  LeaveForBaiHuTang = function(...)
+    BaiHuTang:GotoEntrance()
+  end,
+  LeaveForShiYueDao = function()
+    ShiYueDao:GoToShiYueDaoNPC()
+  end,
+  LeaveForGlobalShiYueDao = function()
+    ShiYueDao:GoToShiYueDaoNPC()
+  end,
+  OpenUISongjin = function()
+    RemoteServer.GetBattleSignUpInfo()
+  end,
+  LeaveForKinLevel = function()
+    KinLevel:RequestSignKinLevel()
+  end,
+  LeaveForMenPaiJingJi = function()
+    FactionBattle:Join()
+  end,
+  LeaveForZhaiXingLou = function()
+    ZhaiXingLou:JoinZhaiXingLou()
+  end,
+  OpenUIHanWu = function()
+    Ui:OpenWindow("UIBattleEntranceHanWu")
+  end,
+  OpenZhaiXingLouActivityView = function()
+    local nZhaiXingLouActivityId = 21
+    Calendar:OpenCalendarToActId(nZhaiXingLouActivityId)
+  end,
+  OpenUIMultiPvP = function()
+    MultiPvP:ApplyOpenLianSaiUI()
+  end,
+  OpenDaShiXiong = function()
+    FactionBigBrother:OpenDaShiXiongUI()
+  end,
+  DoGongPinRobber = function()
+    local pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.JingWangJiuXiActivity)
+    if not pInstance then
+      return
+    end
+    pInstance:DoGongPinRobber()
+  end,
+  DoTieFuCheng = function()
+    TieFuCheng:AttendReq()
+  end,
+  OpenTieFuChengActivityView = function()
+    Calendar:OpenCalendarToActId(TieFuCheng.CONSTANTS.ACTIVITY_ID)
+  end,
+  DoHanHaiMiCheng = function()
+    HanHaiMiCheng:TryGetInfo()
+  end,
+  DoTwoAreaBattle = function()
+    TwoAreaBattle:TrySignUp()
+  end,
+  DoMultiFactionFight = function()
+    MultiFactionFight:TrySignUp()
+  end,
+  DoGlobalDomainBattle = function()
+    Ui:OpenWindow("UILegion", "ACTIVITY")
+  end,
+  DoShouWeiXiangYang = function()
+    GuardXiangYangMgr:DoEnterFuben()
+  end,
+  DoResourceBattle = function()
+    ResourceBattle:SignUp()
+  end
+}
+PlayerGuide.tbGuideFunc = {
+  ActivityForeshow = function(tbParam)
+    local tbNeedCheckOpenState = {
+      WuLinGaoShou = true,
+      MultiPvP = true,
+      TongParty = true,
+      KeYiMen = true,
+      HanWu = true
+    }
+    local tbNeedCheckWhichOpen = {
+      MenPaiJingJi = "KuaFuMenPaiJingJi",
+      Battle = "BattleYD"
+    }
+    if nil == tbParam then
+      return
+    end
+    if nil == tbParam[1] then
+      return
+    end
+    local nActivityID = tonumber(tbParam[1])
+    local szKey = Calendar:GetActivityStringKey(nActivityID)
+    if tbNeedCheckOpenState[szKey] then
+      local bOpenState = Calendar:IsActivityInOpenState(szKey)
+      if not bOpenState then
+        return
+      end
+    end
+    if tbNeedCheckWhichOpen[szKey] and Calendar.tbCheckQualified[tbNeedCheckWhichOpen[szKey]]() then
+      return
+    end
+    local nCurTime = Lib:GetLocalDayTime()
+    return nCurTime >= tbParam[2] and nCurTime < tbParam[3]
+  end
+}
+PlayerGuide.tbCheckFunc = {
+  DomainBattle = function()
+    return not GlobalDomainBattle:IsMeetTimeFrame()
+  end,
+  GlobalDomainBattle = function()
+    return GlobalDomainBattle:IsMeetTimeFrame()
+  end
+}

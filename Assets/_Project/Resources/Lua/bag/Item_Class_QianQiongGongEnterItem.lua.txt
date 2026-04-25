@@ -1,0 +1,112 @@
+local tbItem = Item:GetClass("QianQiongGongEnterItem")
+local QianQiongGongMgrS = QianQiongGongMgr or {}
+tbItem.tbItemParam = {FormulaId = 1}
+
+local function CloseUI()
+  me.CallClientScript("Ui:CloseWindow", "UIBag")
+  me.CallClientScript("Ui:CloseWindow", "UIItemTips")
+end
+
+function tbItem:OnClientUse(pItem)
+  if not QianQiongGongMgrS:CheckIsLimitMap(me.nMapTemplateId) then
+    local nTemplateId = QianQiongGongMgrS:GetRandomFieldMapTemplateID()
+    Map:SwitchMap(nTemplateId)
+    CloseUI()
+    Ui:OpenQuickUseItem(pItem.dwId, i18n.EasyGet("\228\189\191\231\148\168"))
+    return 0
+  end
+  return 1
+end
+
+function tbItem:OnUse(pItem)
+  if not pItem then
+    return 0
+  end
+  local nTemplateId = pItem.dwTemplateId
+  local nItemId = pItem.dwId
+  if not nTemplateId or not nItemId then
+    return 0
+  end
+  local nFubenType = QianQiongGongMgr.Cfg.tbEntranceItem2FubenType[nTemplateId]
+  if not QianQiongGongMgr:CheckFubenType(nFubenType) then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\233\129\147\229\133\183\230\151\160\230\179\149\229\188\128\229\144\175\229\137\175\230\156\172"))
+    return 0
+  end
+  if not QianQiongGongMgrS:IsOpen() then
+    me.CenterMsg(i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\229\144\175"))
+    return 0
+  end
+  if not self:CheckTimeFrame() then
+    me.CenterMsg(i18n.EasyGet("\231\179\187\231\187\159\230\156\170\229\188\128\229\144\175"))
+    return 0
+  end
+  local tbBaseInfo = Item:GetItemBaseProp(nTemplateId)
+  local nRequireLevel = tbBaseInfo.nRequireLevel
+  if nRequireLevel > me.nLevel or QianQiongGongMgrS.Cfg.nLimitLevel > me.nLevel then
+    me.CenterMsg(i18n.EasyGet("\229\176\145\228\190\160\233\152\133\229\142\134\229\176\154\230\181\133\239\188\140\233\156\128\232\166\129\231\173\137\231\186\167\232\190\190\229\136\176{0}\231\186\167", nRequireLevel))
+    return 0
+  end
+  local bRet, szMsg = ActivityCheck:CheckCanEnterActivityEx(me, nil, nil, false, false, false, nil, {}, false)
+  if not bRet then
+    me.CenterMsg(szMsg)
+    return 0
+  end
+  if Map:IsFuben(me.nMapTemplateId) then
+    me.CenterMsg(i18n.EasyGet("\232\175\165\229\156\186\230\153\175\230\151\160\230\179\149\228\189\191\231\148\168\239\188\140\232\175\183\229\156\168\233\135\142\229\164\150\229\156\176\229\155\190\228\189\191\231\148\168\227\128\130"))
+    return 0
+  end
+  if not QianQiongGongMgrS:CheckIsLimitMap(me.nMapTemplateId) then
+    CloseUI()
+    me.CenterMsg(i18n.EasyGet("\232\175\183\229\137\141\229\190\128\230\140\135\229\174\154\229\156\176\229\155\190\231\154\132\230\136\152\230\150\151\229\140\186\229\159\159\229\188\128\229\144\175\229\141\131\231\144\188\229\174\171"))
+    me.CallClientScript("Ui:OpenQuickUseItem", nItemId, i18n.EasyGet("\228\189\191\231\148\168"))
+    return 0
+  end
+  if me.nFightMode == Npc.FIGHT_MODE.emFightMode_None then
+    CloseUI()
+    me.CenterMsg(i18n.EasyGet("\232\175\183\231\167\187\230\173\165\229\136\176\230\156\172\229\156\176\229\155\190\230\136\152\230\150\151\229\140\186\229\159\159\229\188\128\229\144\175\229\141\131\231\144\188\229\174\171\239\188\129"))
+    me.CallClientScript("Ui:OpenQuickUseItem", pItem.dwId, i18n.EasyGet("\228\189\191\231\148\168"))
+    return 0
+  end
+  bRet, szMsg = QianQiongGongMgrS:CheckCanCreateEntrance(me)
+  if not bRet then
+    me.CallClientScript("Ui:CloseWindow", "UIItemTips")
+    me.CenterMsg(szMsg)
+    return 0
+  end
+  CloseUI()
+  Progress:BeginProgress(me, i18n.EasyGet("\229\141\131\231\144\188\229\174\171\229\188\128\229\144\175\228\184\173"), 3, self.OnEndProgress, {
+    self,
+    me.dwID,
+    nItemId
+  })
+  return 0
+end
+
+function tbItem:CheckTimeFrame()
+  return 1 == GetTimeFrameState("OpenLevel39")
+end
+
+function tbItem:OnEndProgress(nPlayerId, nItemId)
+  local pItem = KItem.GetItemObj(nItemId)
+  if not pItem then
+    return
+  end
+  local pPlayer = KPlayer.GetPlayerObjById(nPlayerId)
+  if not pPlayer then
+    return
+  end
+  local nConsumeCount = pPlayer.ConsumeItem(pItem, 1, Env.LogWay_LingShuMiKu)
+  if 1 ~= nConsumeCount then
+    LogErr("[LingShuEnterItem:OnEndProgress] consume item failed!", nPlayerId, pItem.dwTemplateId, nItemId)
+    return
+  end
+  QianQiongGongMgrS:CreateEntranceNpc(pPlayer, pItem.dwTemplateId)
+  pPlayer.CallClientScript("Ui:CloseWindow", "UIQuickUseItem")
+end
+
+function tbItem:GetTip(pItem)
+  local nMaxUseCount = DegreeCtrl:GetMaxDegree("QianQiongGong", me)
+  local nHaveCount = DegreeCtrl:GetDegree(me, "QianQiongGong")
+  local szUseCount = i18n.EasyGet("\229\183\178\229\141\143\229\138\169\230\172\161\230\149\176\239\188\154{0}/{1}", nMaxUseCount - nHaveCount, nMaxUseCount)
+  return szUseCount
+end

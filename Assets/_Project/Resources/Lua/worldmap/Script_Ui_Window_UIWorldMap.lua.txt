@@ -1,0 +1,121 @@
+local tbWnd = Ui:CreateWindow("UIWorldMap")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_CHANGE_PLAYER_LEVEL,
+      self.OnLevelChange
+    }
+  }
+end
+
+tbWnd.emMapType_Town = 1
+tbWnd.emMapType_Outdoor = 2
+tbWnd.emMapType_All = 3
+local tbControls = {
+  btnClose = "imgBG/btnClose",
+  objTarget = "imgBG/Mask/Viewport/imgMap/target",
+  goWorldPage = "imgBG/Mask/Viewport/imgMap/maps"
+}
+tbWnd.tbControls = tbControls
+local btnWorldIcon = "imgBG/Mask/Viewport/imgMap/maps/%s/btnMap"
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end
+}
+
+function tbWnd:OnCreate()
+  for _, szUIKey in ipairs(Map.tbUnOpenMap) do
+    local szPath = string.format(btnWorldIcon, szUIKey)
+    self.pPanel:SetActive(szPath, false)
+  end
+end
+
+function tbWnd:OnOpen()
+  for nMapTemplateId, tbMap in pairs(Map.tbSwitchMap) do
+    local szPath = string.format(btnWorldIcon, tbMap.szUIKey)
+    local nMapLevel = Map:GetMapLevel(nMapTemplateId)
+    local nEnterLevel = Map:GetEnterLevel(nMapTemplateId)
+    local bOpenTimeFrame = Map:IsOpenTimeFrame(nMapTemplateId)
+    local bShowTimeFrame = Map:IsShowTimeFrame(nMapTemplateId)
+    self.pPanel:SetActive(szPath, bShowTimeFrame)
+    if tbMap.nMapType == self.emMapType_Outdoor or GlobalHangUp:IsGlobalHangUpMap(nMapTemplateId) then
+      self:SetOutdoorMapLevelAndName(szPath, nMapLevel, Map:GetMapName(nMapTemplateId))
+    else
+      self.pPanel:Label_SetText(szPath .. "/ScaleGroup/imgTxtBg/Name", Map:GetMapName(nMapTemplateId))
+    end
+    Ui:Button_BindEvent(self.pPanel, szPath, self.OnClickWorld, self, nMapTemplateId)
+    if Map:GetForcePkMode(nMapTemplateId) > 0 then
+      self.pPanel:SetActive(szPath .. "/ScaleGroup/imgFightMark", true)
+    end
+    self.pPanel:Button_SetEnable(szPath, true)
+    self.pPanel:ButtonGroup_SetSelect(szPath, nEnterLevel <= me.nTotalLevel and bOpenTimeFrame)
+    if nMapTemplateId == Darting.Cfg.nMapTemplateId then
+      self.pPanel:SetActive(szPath .. "/ScaleGroup/img_State", Calendar:IsActivityInOpenState("Darting"))
+    end
+  end
+  self:ShowTarget()
+end
+
+function tbWnd:SetOutdoorMapLevelAndName(szPath, nMapLevel, szMapName)
+  local bMaster = false
+  if nMapLevel >= GameSetting.MAX_PLAYER_LEVEL then
+    bMaster = true
+  end
+  self.pPanel:SetActive(szPath .. "/ScaleGroup/layoutGroup/imgLvBg/Level", not bMaster)
+  self.pPanel:SetActive(szPath .. "/ScaleGroup/layoutGroup/imgLvBg/LevelMaster", bMaster)
+  self.pPanel:Label_SetText(szPath .. "/ScaleGroup/layoutGroup/imgLvBg/Level", nMapLevel)
+  self.pPanel:Label_SetText(szPath .. "/ScaleGroup/layoutGroup/imgLvBg/LevelMaster", nMapLevel - GameSetting.MAX_PLAYER_LEVEL)
+  self.pPanel:Label_SetText(szPath .. "/ScaleGroup/layoutGroup/imgTxtBg/Name", string.format("%s", szMapName))
+end
+
+function tbWnd:ShowTarget()
+  local nMapTemplateId = me.nMapTemplateId
+  local mapTrans
+  if self.pPanel:IsActive(tbControls.goWorldPage) then
+    local tbMap = Map.tbSwitchMap[nMapTemplateId]
+    if tbMap then
+      mapTrans = self.pPanel:GetTransform(string.format("imgBG/Mask/Viewport/imgMap/maps/%s", tbMap.szUIKey))
+    end
+  end
+  local objTrans = self.pPanel:GetTransform(tbControls.objTarget)
+  if mapTrans then
+    objTrans.localPosition = Ui.Vector3(mapTrans.localPosition.x, mapTrans.localPosition.y, 0)
+    self.pPanel:SetActive(tbControls.objTarget, true)
+  else
+    self.pPanel:SetActive(tbControls.objTarget, false)
+  end
+end
+
+function tbWnd:OnClickWorld(nMapId)
+  if me.nMapId == nMapId then
+    me.CenterMsg(i18n.EasyGet("\230\130\168\229\183\178\231\187\143\229\156\168\229\189\147\229\137\141\229\156\176\229\155\190\228\186\134\227\128\130"))
+    return
+  end
+  local bOk, szMsg = Map:CanSwitchMap(me.nTotalLevel, nMapId)
+  if not bOk then
+    me.CenterMsg(szMsg)
+    return
+  end
+  bOk, szMsg = GlobalHangUp:OnSwitchMap(me.nMapTemplateId, nMapId)
+  if not bOk then
+    me.CenterMsg(szMsg)
+    self:Close()
+    return
+  end
+  AFK:Stop()
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  Map:SwitchMap(nMapId)
+  self:Close()
+end
+
+function tbWnd:OnLevelChange()
+  for nMapTemplateId, tbMap in pairs(Map.tbSwitchMap) do
+    local szPath = string.format(btnWorldIcon, tbMap.szUIKey)
+    local nMapLevel = Map:GetMapLevel(nMapTemplateId)
+    self.pPanel:ButtonGroup_SetSelect(szPath, nMapLevel <= me.nTotalLevel)
+  end
+end

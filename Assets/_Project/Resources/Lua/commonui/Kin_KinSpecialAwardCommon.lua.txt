@@ -1,0 +1,309 @@
+local AwardKeyBase = 100000
+Kin.SpecialAward = Kin.SpecialAward or {}
+Kin.SpecialAward.tbSetting = Kin.SpecialAward.tbSetting or {}
+local SpecialAward = Kin.SpecialAward
+local SpecialAwardSetting = Kin.SpecialAward.tbSetting
+SpecialAwardSetting.tbAwardList = SpecialAwardSetting.tbAwardList or {}
+SpecialAwardSetting.tbAwards = SpecialAwardSetting.tbAwards or {}
+SpecialAwardSetting.szAwardsFile = "Setting/AwardKinSpecial/AwardList.tab"
+
+function SpecialAwardSetting:LoadSetting()
+  self.tbAwardList = {}
+  self.tbAwards = {}
+  self:LoadAwards()
+end
+
+function SpecialAwardSetting:LoadAwards()
+  local tbFile = Lib:LoadTabFileEx(self.szAwardsFile, "dsd", nil, {
+    "Id",
+    "AwardFile",
+    "IsAddByMemberNum"
+  })
+  if not tbFile then
+    Log("SpecialAwardSetting:LoadAwards error, szFile path = ", self.szAwardsFile)
+    return
+  end
+  for _, v in pairs(tbFile) do
+    if self:IsAwardExist(v.Id) then
+      Log("SpecialAwardSetting:LoadAwards error, AwardId repeat, AwardId = ", v.Id)
+    end
+    if v.AwardFile == "" then
+      Log("SpecialAwardSetting:LoadAwards error, AwardFile is empty")
+    end
+    self.tbAwardList[v.Id] = v
+  end
+  self.tbAwardList = SetReadOnly(self.tbAwardList)
+end
+
+function SpecialAwardSetting.ValueTableCompare(left, right)
+  return left.Rank > right.Rank
+end
+
+function SpecialAwardSetting.MemberAddCompare(left, right)
+  return left.Member < right.Member
+end
+
+function SpecialAwardSetting.BaseWorthCompare(left, right)
+  return Lib:CalcTimeFrameOpenTime(left.TimeFrameStart) > Lib:CalcTimeFrameOpenTime(right.TimeFrameStart)
+end
+
+function SpecialAwardSetting:LoadAwardInfo(nAwardId)
+  self.tbAwards[nAwardId] = nil
+  local tbInfo = self:GetAwardFileInfo(nAwardId)
+  local szAwardPath = tbInfo.AwardFile
+  local txt = ReadTxtFile(szAwardPath)
+  local func, err = load(txt, "SpecialAwardSetting:LoadAwardInfo")
+  if err or not func then
+    Log("SpecialAwardSetting:LoadAwardInfo error, file can't open. szFile = ", szAwardPath)
+    return
+  end
+  local tbBaseWorth, tbMemberAdd, tbAwards = func()
+  if not tbBaseWorth or not tbAwards then
+    Log("SpecialAwardSetting:LoadAwardInfo error, not exist BaseWorth or Awards. AwardId,AwardFile = ", nAwardId, szAwardPath)
+    return
+  end
+  for _, v in pairs(tbBaseWorth) do
+    if not v.ValueTable then
+      Log("SpecialAwardSetting:LoadAwardInfo error, BaseWorth not exist ValueTable")
+    else
+      table.sort(v.ValueTable, self.ValueTableCompare)
+    end
+  end
+  table.sort(tbBaseWorth, self.BaseWorthCompare)
+  table.sort(tbMemberAdd, self.MemberAddCompare)
+  self.tbAwards[nAwardId] = {}
+  self.tbAwards[nAwardId].tbBaseWorth = tbBaseWorth
+  if not tbInfo.IsAddByMemberNum or tbInfo.IsAddByMemberNum < 1 then
+    self.tbAwards[nAwardId].tbMemberAdd = tbMemberAdd
+  end
+  self.tbAwards[nAwardId].tbAward = tbAwards
+  local tbKeys = self:CreateAwardKeyByAwards(nAwardId, tbAwards)
+  if not tbKeys then
+    Log("SpecialAwardSetting:LoadAwardInfo error, Award format error. AwardId = ", nAwardId)
+    return
+  end
+  self.tbAwards[nAwardId].tbKeys = tbKeys
+  self.tbAwards[nAwardId] = SetReadOnly(self.tbAwards[nAwardId])
+  return self.tbAwards[nAwardId]
+end
+
+function SpecialAwardSetting:CreateAwardKeyByAwards(nAwardId, tbAwards)
+  local tbKeys = {}
+  for _, v in pairs(tbAwards) do
+    if not v.AwardTable then
+      Log("SpecialAwardSetting:CreateAwardKeyByAwards error, not AwardTable. AwardId = ", nAwardId)
+      return
+    end
+    for _, award in pairs(v.AwardTable) do
+      if not award.AwardType or not award.AwardSubType then
+        Log("SpecialAwardSetting:CreateAwardKeyByAwards error, AwardType or AwardSubType not exist. AwardId = ", nAwardId)
+        return
+      end
+      if Player.AwardType[award.AwardType] ~= Player.award_type_item then
+        Log("SpecialAwardSetting:CreateAwardKeyByAwards error, AwardType not item: ", nAwardId, award.AwardType)
+        return
+      end
+      if #award.AwardSubType < 1 then
+        Log("SpecialAwardSetting:CreateAwardKeyByAwards error, AwardSubType error: ", nAwardId, award.AwardSubType)
+        return
+      end
+      local nId = self:GetAwardKey(award.AwardType, award.AwardSubType)
+      tbKeys[nId] = 1
+    end
+  end
+  return tbKeys
+end
+
+function SpecialAwardSetting:IsAwardExist(nAwardId)
+  return self.tbAwardList[nAwardId]
+end
+
+function SpecialAwardSetting:GetAwardFileInfo(nAwardId)
+  return self.tbAwardList[nAwardId]
+end
+
+function SpecialAwardSetting:GetAwardInfo(nAwardId)
+  if not self:IsAwardExist(nAwardId) then
+    return
+  end
+  return self.tbAwards[nAwardId] or self:LoadAwardInfo(nAwardId)
+end
+
+function SpecialAwardSetting:IsAddByMemberNum(nAwardId)
+  local tbAwardInfo = self:GetAwardFileInfo(nAwardId)
+  return tbAwardInfo and tbAwardInfo.IsAddByMemberNum and tbAwardInfo.IsAddByMemberNum > 0
+end
+
+function SpecialAwardSetting:GetAwardKey(szAwardType, tbAwardSubType)
+  return Player.AwardType[szAwardType] * AwardKeyBase + tbAwardSubType[1]
+end
+
+function SpecialAward:LoadSetting()
+  self.tbSetting:LoadSetting()
+end
+
+function SpecialAward:IsAwardExist(nAwardId)
+  return self.tbSetting:IsAwardExist(nAwardId)
+end
+
+function SpecialAward:GetAwardFileInfo(nAwardId)
+  return self.tbSetting:GetAwardFileInfo(nAwardId)
+end
+
+function SpecialAward:GetAwardInfo(nAwardId)
+  return self.tbSetting:GetAwardInfo(nAwardId)
+end
+
+function SpecialAward:IsAddByMemberNum(nAwardId)
+  return self.tbSetting:IsAddByMemberNum(nAwardId)
+end
+
+function SpecialAward:IsTimeFrameMatch(szTimeFrame)
+  if "" == szTimeFrame then
+    return true
+  end
+  return GetTimeFrameState(szTimeFrame) > 0
+end
+
+function SpecialAward:IsAwardTimeFrameMatch(szTimeFrameStart, szTimeFrameEnd)
+  local bStartTimeFrameReach = true
+  local bEndTimeFrameReach = true
+  if szTimeFrameStart and "" ~= szTimeFrameStart then
+    bStartTimeFrameReach = self:IsTimeFrameMatch(szTimeFrameStart)
+  end
+  if szTimeFrameEnd and "" ~= szTimeFrameEnd then
+    bEndTimeFrameReach = not self:IsTimeFrameMatch(szTimeFrameEnd)
+  end
+  return bStartTimeFrameReach and bEndTimeFrameReach
+end
+
+function SpecialAward:GetAwardStudioKey(nAwardId)
+  local szKey = "Boss"
+  local tbAwardInfo = self:GetAwardInfo(nAwardId)
+  if not tbAwardInfo or tbAwardInfo.tbBaseWorth then
+    return szKey
+  end
+  for k, v in pairs(tbAwardInfo.tbBaseWorth) do
+    if self:IsAwardTimeFrameMatch(v.TimeFrameStart, v.TimeFrameEnd) then
+      szKey = v.StudioKey or "Boss"
+      break
+    end
+  end
+  return szKey
+end
+
+function SpecialAward:GetAwardBaseWorthByAwardId(nAwardId, nKey, isStudio)
+  local tbAwardInfo = self:GetAwardInfo(nAwardId)
+  if not tbAwardInfo then
+    return
+  end
+  return self:GetAwardBaseWorth(tbAwardInfo.tbBaseWorth, nKey, isStudio)
+end
+
+function SpecialAward:GetAwardBaseWorth(tbBaseWorth, nKey, isStudio)
+  local tbWorth
+  for k, v in pairs(tbBaseWorth) do
+    if self:IsAwardTimeFrameMatch(v.TimeFrameStart, v.TimeFrameEnd) then
+      tbWorth = v.ValueTable
+      break
+    end
+  end
+  if not tbWorth or 0 == #tbWorth then
+    return
+  end
+  local nWorth = 0
+  local bStudio = isStudio or false
+  for _, v in pairs(tbWorth) do
+    if nKey <= v.Rank then
+      if bStudio then
+        nWorth = v.Worth_s or 0
+      else
+        nWorth = v.Worth or 0
+      end
+    else
+      break
+    end
+  end
+  return nWorth
+end
+
+function SpecialAward:GetMemberAddWorthRateByAwardId(nAwardId, nMember)
+  if self:IsAddByMemberNum(nAwardId) then
+    return nMember
+  end
+  local tbAwardInfo = self:GetAwardInfo(nAwardId)
+  if not tbAwardInfo then
+    return
+  end
+  return self:GetMemberAddWorthRate(tbAwardInfo.tbMemberAdd, nMember)
+end
+
+function SpecialAward:GetMemberAddWorthRate(tbMemberAdd, nMember)
+  if not tbMemberAdd or 0 == #tbMemberAdd then
+    return 0
+  end
+  local nRate = tbMemberAdd[1].Rate
+  for _, v in pairs(tbMemberAdd) do
+    if nMember >= v.Member then
+      nRate = v.Rate
+    else
+      break
+    end
+  end
+  return nRate
+end
+
+function SpecialAward:GetAwardTableIndex(tbBaseWorth, nKey, isStudio)
+  local tbWorth
+  for k, v in pairs(tbBaseWorth) do
+    if self:IsAwardTimeFrameMatch(v.TimeFrameStart, v.TimeFrameEnd) then
+      tbWorth = v.ValueTable
+      break
+    end
+  end
+  if not tbWorth or 0 == #tbWorth then
+    return
+  end
+  local nAwardTableIndexh = 0
+  local bStudio = isStudio or false
+  for _, v in pairs(tbWorth) do
+    if nKey <= v.Rank then
+      if bStudio then
+        nAwardTableIndexh = v.AwardTableIndex_s or 0
+      else
+        nAwardTableIndexh = v.AwardTableIndex or 0
+      end
+    else
+      break
+    end
+  end
+  return nAwardTableIndexh
+end
+
+function SpecialAward:GetAwardTableIndexByAwardId(nAwardId, nKey, isStudio)
+  local tbAwardInfo = self:GetAwardInfo(nAwardId)
+  if not tbAwardInfo then
+    return
+  end
+  return self:GetAwardTableIndex(tbAwardInfo.tbBaseWorth, nKey, isStudio)
+end
+
+function SpecialAward:GetCurAwardTable(tbMatchAward, nAwardTabelIndex)
+  local tbAwardTable = tbMatchAward.AwardTable or {}
+  if 1 == nAwardTabelIndex then
+    tbAwardTable = tbMatchAward.AwardTable1 or {}
+  elseif 2 == nAwardTabelIndex then
+    tbAwardTable = tbMatchAward.AwardTable2 or {}
+  elseif 3 == nAwardTabelIndex then
+    tbAwardTable = tbMatchAward.AwardTable3 or {}
+  elseif 4 == nAwardTabelIndex then
+    tbAwardTable = tbMatchAward.AwardTable4 or {}
+  end
+  return tbAwardTable
+end
+
+function SpecialAward:GetAwardKey(szAwardType, tbAwardSubType)
+  return self.tbSetting:GetAwardKey(szAwardType, tbAwardSubType)
+end
+
+SpecialAward:LoadSetting()

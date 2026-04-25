@@ -1,0 +1,119 @@
+local tbWnd = Ui:CreateClass("UIPartnerNew_ZFReplace", "UIPanel")
+local tbControls = {
+  Template = "imgBG/ZhenFa/ScrollView/Viewport/Content/Template"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:OnCreate()
+  self.tbListView = Ui:NewSuperListView(self, tbControls.Template)
+end
+
+function tbWnd:OnClose()
+  if self.nCDCountDownTimer then
+    Timer:Close(self.nCDCountDownTimer)
+    self.nCDCountDownTimer = nil
+  end
+end
+
+function tbWnd:UpdateData()
+  self.tbCurPosCfg = PartnerZhenFa:GetPosGroupCfg(me)
+  if not self.tbCurPosCfg then
+    LogErr("UIPartnerNew_ZFReplace:UpdateData Error. GetCurPosGroupCfg is nil")
+    return
+  end
+  self.tbZFList = {
+    self.tbCurPosCfg
+  }
+  self.nSwitchCDTime = PartnerZhenFa:GetSwitchCDTime(me)
+  local nZFCount = PartnerZhenFa:GetZFCount()
+  for nIndex = 1, nZFCount do
+    if nIndex ~= self.tbCurPosCfg.nPos then
+      local tbPosCfg = PartnerZhenFa:GetPosGroupCfg(me, nIndex)
+      if tbPosCfg then
+        table.insert(self.tbZFList, tbPosCfg)
+      else
+        LogErr("UIPartnerNew_ZFReplace:UpdateData Error. GetPosGroupCfg is nil by nIndex", nIndex)
+        return
+      end
+    end
+  end
+end
+
+function tbWnd:UpdateView()
+  if not PartnerZhenFa:IsZFActivate(me) then
+    self.pPanel:SetActive("Main", false)
+    self:OnClose()
+    return
+  end
+  self:UpdateData()
+  self.tbListView:SetAllElement(self.tbZFList, self._SetElement)
+  self.tbListView:MovePanelToFirstItem()
+  self:TryStartCDCountDownTimer()
+end
+
+function tbWnd:_SetElement(tbElement, tbPosCfg)
+  local pPanel = tbElement.pPanel
+  if tbPosCfg.nPos == self.tbCurPosCfg.nPos then
+    pPanel:SetActive("btnSwitch", false)
+    pPanel:SetActive("txtNowTips", true)
+    pPanel:SetActive("txtCD", false)
+  else
+    pPanel:SetActive("btnSwitch", true)
+    pPanel:SetActive("txtNowTips", false)
+    local nCountDownTime = self.nSwitchCDTime - GetTime()
+    if nCountDownTime > 0 then
+      pPanel:SetActive("txtCD", true)
+      pPanel:Button_SetEnable("btnSwitch", false)
+      pPanel:Label_SetText("txtCD", self:GetCDCountDownDesc(nCountDownTime))
+    else
+      pPanel:SetActive("txtCD", false)
+      pPanel:Button_SetEnable("btnSwitch", true)
+    end
+    Ui:Button_BindEvent(pPanel, "btnSwitch", function()
+      local tbParam = {
+        tbPosCfg.nPos
+      }
+      PartnerZhenFa:SendClientReq(PartnerZhenFa.Protocol.ReqChangeZF, tbParam, tbParam)
+    end)
+  end
+  pPanel:Label_SetText("txtZhenFaName", i18n.Parse(tbPosCfg.szName))
+  for nFixIndex = 1, PartnerZhenFa.nFixAttrCount do
+    local tbFixBaseAttr = PartnerZhenFa:GetFixBaseAttrDesc(tbPosCfg.nPos, nFixIndex)
+    pPanel:Label_SetText("Attr/txtAttr" .. nFixIndex, tbFixBaseAttr)
+  end
+end
+
+function tbWnd:TryStartCDCountDownTimer()
+  if self.nSwitchCDTime <= GetTime() then
+    return
+  end
+  if self.nCDCountDownTimer then
+    Timer:Close(self.nCDCountDownTimer)
+    self.nCDCountDownTimer = nil
+  end
+  self.nCDCountDownTimer = Timer:Register(Env.GAME_FPS, function()
+    local nCurTime = GetTime()
+    local nCountDownTime = self.nSwitchCDTime - nCurTime
+    local bInCD = nCountDownTime > 0
+    for nIndex = 1, #self.tbZFList do
+      local tbElement, tbPosCfg = self.tbListView:GetElement(nIndex)
+      if not tbPosCfg or not tbElement then
+        return
+      end
+      if tbPosCfg.nPos ~= self.tbCurPosCfg.nPos then
+        tbElement.pPanel:SetActive("txtCD", bInCD)
+        tbElement.pPanel:Button_SetEnable("btnSwitch", not bInCD)
+        tbElement.pPanel:Label_SetText("txtCD", self:GetCDCountDownDesc(nCountDownTime))
+      end
+    end
+    return not bInCD
+  end)
+end
+
+function tbWnd:GetCDCountDownDesc(nCountDownTime)
+  if nCountDownTime > 60 then
+    return i18n.EasyGet("{0}\229\136\134\229\144\142\229\143\175\229\136\135\230\141\162", math.ceil(nCountDownTime / 60))
+  else
+    return i18n.EasyGet("{0}\231\167\146\229\144\142\229\143\175\229\136\135\230\141\162", nCountDownTime)
+  end
+end

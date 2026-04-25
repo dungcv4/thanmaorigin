@@ -1,0 +1,614 @@
+Require("Script/EventSystem/EventNotify.lua")
+Require("CommonScript/BehaviorTree/BehaviorTree.lua")
+Require("Script/Common/AFK_Setting.lua")
+Require("Script/Common/AFK_SkillMgr.lua")
+Require("Script/Common/AFK_AutoFight.lua")
+Require("Script/Common/AFK_AutoMedicine.lua")
+Require("Script/Common/AFK_AutoFollowFight.lua")
+local AFKSkillMgr = AFK.AFKSkillMgr
+local AFKMedicineSetting = AFK:GetSetting():GetMedicineSetting()
+local AFKFightSetting = AFK:GetSetting():GetFightSetting()
+local AFKAutoFollowFight = AFK.AFKAutoFollowFight
+local AFKAutoFight = AFK.AFKAutoFight
+AFK.FightTypeTB = {
+  emNone = -1,
+  emLeadFight = 0,
+  emFollowFight = 1,
+  emCount = 2
+}
+AFK.LeadFightModeTB = {
+  emNone = -1,
+  emSimple = 0,
+  emComplex = 1,
+  emCount = 2
+}
+AFK.LeadFightStateTB = {
+  emStart = -2,
+  emStop = -1,
+  emNone = 0,
+  emGoToFightPos = 1,
+  emAutoFight = 2,
+  emGoToSafePos = 3,
+  emSupplyWare = 4
+}
+AFK.FollowFightStateTB = {
+  emStart = -2,
+  emStop = -1,
+  emFollowFight = 1
+}
+AFK.DefaultGoToSafePosMapId = 1
+AFK.GoToSafePosMapIdTB = {
+  [25] = 9
+}
+AFK.LeadFightTimerTickTB = {
+  [AFK.LeadFightStateTB.emNone] = 3,
+  [AFK.LeadFightStateTB.emGoToFightPos] = 18,
+  [AFK.LeadFightStateTB.emAutoFight] = 1,
+  [AFK.LeadFightStateTB.emGoToSafePos] = 18,
+  [AFK.LeadFightStateTB.emSupplyWare] = 36
+}
+AFK.Debug = true
+AFK.AutoPathNearLength = 40
+
+function AFK:Init()
+  self.bAutoPathFlag = false
+  self.nCurFightType = self.FightTypeTB.emNone
+  self.nCurLeadFightMode = self.LeadFightModeTB.emNone
+  self.nCurLeadFightState = self.LeadFightStateTB.emNone
+  self.nCurFollowFightState = self.FollowFightStateTB.emNone
+  self.bIsRunning = false
+  self.nMainTick = 0
+  self.nMainTimer = nil
+  self.tbLastFightPos = nil
+  self.nFollowTeammateIdCache = nil
+  self.afkResumeTimer = nil
+end
+
+function AFK:Start(nFightType, nFightParam)
+  if not Login.bEnterGame then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\228\184\141\229\143\175\229\188\128\229\167\139\230\140\130\230\156\186\239\188\140\232\175\183\231\168\141\229\144\142\229\134\141\232\175\149\239\188\129"))
+    return
+  end
+  if not Login.bSyncPlayerDataFinish then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\231\138\182\230\128\129\228\184\141\229\143\175\229\188\128\229\167\139\230\140\130\230\156\186\239\188\140\232\175\183\231\168\141\229\144\142\229\134\141\232\175\149\239\188\129"))
+    return
+  end
+  if self.bIsRunning then
+    self:Stop()
+  end
+  self.nCurFightType = nFightType or self.FightTypeTB.emLeadFight
+  if not self:_CheckFightType(self.nCurFightType) then
+    return false
+  end
+  self.bIsRunning = true
+  if self.nCurFightType == self.FightTypeTB.emLeadFight then
+    self.nCurLeadFightMode = nFightParam or self.LeadFightModeTB.emSimple
+    if self.nCurLeadFightMode == self.LeadFightModeTB.emComplex then
+      self.tbLastFightPos = AFKFightSetting:ChooseGoToMap()
+    else
+      self.tbLastFightPos = AFKFightSetting:GetFightPos()
+    end
+  else
+    self:ClearLastFightPos()
+    AutoPath:ClearSwitchMapCache()
+    AFKAutoFollowFight:Start(nFightParam)
+  end
+  AFKSkillMgr:UpdateSkill()
+  self.nMainTimer = Timer:Register(1, self._ActivateMainShell, self)
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_AFK_STATE, self.LeadFightStateTB.emStart)
+end
+
+function AFK:RawStop()
+  if self.nMainTimer then
+    Timer:Close(self.nMainTimer)
+  end
+  self.nMainTimer = nil
+  self.nMainTick = 0
+  self.bIsRunning = false
+  self.nCurFightType = self.FightTypeTB.emNone
+  self.nCurLeadFightMode = self.LeadFightModeTB.emNone
+  self.nCurLeadFightState = self.LeadFightStateTB.emNone
+  self.nCurFollowFightState = self.FollowFightStateTB.emNone
+  self.bAutoPathFlag = false
+  self.tbLastFightPos = nil
+  AFKAutoFight:Stop()
+  AFKAutoFollowFight:Stop()
+  AutoPath:StopGoto()
+  AFKFightSetting:ClearFightPos()
+  if self.afkResumeTimer then
+    Timer:Close(self.afkResumeTimer)
+    self.afkResumeTimer = nil
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_AFK_STATE, self.LeadFightStateTB.emStop)
+end
+
+function AFK:Stop()
+  if TeamMgr:IsFollowTeammate() then
+    TeamMgr:StopFollowMember()
+  end
+  self:RawStop()
+end
+
+function AFK:IsRunning()
+  return self.bIsRunning
+end
+
+function AFK:Suspend()
+  local bInFightStep = self:IsInFightStep()
+  if bInFightStep then
+    AFKAutoFight:Suspend()
+  end
+end
+
+function AFK:Resume()
+  local bInFightStep = self:IsInFightStep()
+  if bInFightStep then
+    AFKAutoFight:Resume()
+  end
+end
+
+function AFK:WaitTime(nTime)
+  if self:IsLeadFightRunning() then
+    AFKAutoFight:WaitTime(nTime)
+  elseif self:IsFollowFightRunning() then
+    AFKAutoFollowFight:WaitTime(nTime)
+  end
+end
+
+function AFK:IsLeadFightRunning()
+  return self.bIsRunning and self.nCurFightType == self.FightTypeTB.emLeadFight
+end
+
+function AFK:IsFollowFightRunning()
+  return self.bIsRunning and self.nCurFightType == self.FightTypeTB.emFollowFight
+end
+
+function AFK:IsLeadFightInFightStep()
+  if not self.bIsRunning then
+    return false
+  end
+  if self.nCurFightType == self.FightTypeTB.emLeadFight then
+    return self.nCurLeadFightState == self.LeadFightStateTB.emAutoFight
+  end
+  return false
+end
+
+function AFK:IsFollowFightInFightStep()
+  if not self.bIsRunning then
+    return false
+  end
+  if self.nCurFightType == self.FightTypeTB.emFollowFight then
+    return self.nCurFollowFightState == self.FollowFightStateTB.emFollowFight
+  end
+  return false
+end
+
+function AFK:IsInFightStep()
+  if not self.bIsRunning then
+    return false
+  end
+  if self.nCurFightType == self.FightTypeTB.emLeadFight then
+    return self.nCurLeadFightState == self.LeadFightStateTB.emAutoFight
+  end
+  if self.nCurFightType == self.FightTypeTB.emFollowFight then
+    return self.nCurFollowFightState == self.FollowFightStateTB.emFollowFight
+  end
+  return false
+end
+
+function AFK:SetFollowTeammateIdCache(nMemberId)
+  self.nFollowTeammateIdCache = nMemberId
+end
+
+function AFK:GetFollowTeammateIdCache()
+  return self.nFollowTeammateIdCache
+end
+
+function AFK:GetFightType()
+  return self.nCurFightType
+end
+
+function AFK:GetLeadFightMode()
+  return self.nCurLeadFightMode
+end
+
+function AFK:IsInLeadFightComplexMode()
+  if not self.bIsRunning then
+    return false
+  end
+  if self.nCurLeadFightMode ~= self.LeadFightModeTB.emComplex then
+    return false
+  end
+  return true
+end
+
+function AFK:SetRideHorse(bNeedRideHorse)
+  bNeedRideHorse = bNeedRideHorse or false
+  if self:IsLeadFightInFightStep() then
+    if AFKAutoFight.tbAutoFightAI then
+      local tbBlackboard = AFKAutoFight.tbAutoFightAI:GetBlackboard()
+      if tbBlackboard then
+        tbBlackboard.bNeedRideHorse = bNeedRideHorse
+      end
+    end
+  elseif self:IsFollowFightInFightStep() and AFKAutoFollowFight.tbFollowFightAI then
+    local tbBlackboard = AFKAutoFollowFight.tbFollowFightAI:GetBlackboard()
+    if tbBlackboard then
+      tbBlackboard.bNeedRideHorse = bNeedRideHorse
+    end
+  end
+end
+
+function AFK:_ActivateMainShell()
+  self.nMainTick = self.nMainTick + 1
+  if not Client.SceneModule.IsLoading() then
+    self:_ActivateMain()
+  end
+  return true
+end
+
+function AFK:_ActivateMain()
+  if self.nCurFightType == self.FightTypeTB.emLeadFight then
+    self:_ActivateLeadFight()
+    return
+  end
+  if self.nCurFightType == self.FightTypeTB.emFollowFight then
+    self:_ActivateFollowFight()
+    return
+  end
+end
+
+function AFK:_DoNoneOfLeadFightState()
+  if not self.nMainTick or 0 ~= self.nMainTick % self.LeadFightTimerTickTB[self.LeadFightStateTB.emNone] then
+    return
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_AFK_STATE, self.LeadFightStateTB.emNone)
+  local bHasMedicine = MedicineMgr:HasMedicine()
+  local bLastFightPosValid = self:_IsLastFightPosValid()
+  if self.nCurLeadFightMode == self.LeadFightModeTB.emSimple then
+    if 0 ~= me.nFightMode then
+      AFKAutoFight:Start()
+      self.nCurLeadFightState = self.LeadFightStateTB.emAutoFight
+      return
+    end
+    if AFKMedicineSetting.bOpenReplyMedicine then
+      self.nCurLeadFightState = self.LeadFightStateTB.emSupplyWare
+      return
+    end
+    if bLastFightPosValid then
+      self.nCurLeadFightState = self.LeadFightStateTB.emGoToFightPos
+      return
+    end
+    self:Stop()
+    return
+  end
+  if self.nCurLeadFightMode == self.LeadFightModeTB.emComplex then
+    if 0 ~= me.nFightMode then
+      if bLastFightPosValid then
+        self.nCurLeadFightState = self.LeadFightStateTB.emGoToFightPos
+        return
+      end
+      AFKAutoFight:Start()
+      self.nCurLeadFightState = self.LeadFightStateTB.emAutoFight
+      return
+    end
+    if AFKMedicineSetting.bOpenReplyMedicine then
+      self.nCurLeadFightState = self.LeadFightStateTB.emSupplyWare
+      return
+    end
+    if bLastFightPosValid then
+      self.nCurLeadFightState = self.LeadFightStateTB.emGoToFightPos
+      return
+    end
+    self:Stop()
+    return
+  end
+  self:Stop()
+end
+
+function AFK:InterruptStep_GoToFightPos()
+  if self.nCurLeadFightState ~= self.LeadFightStateTB.emGoToFightPos then
+    return
+  end
+  self:Stop()
+end
+
+function AFK:_DoGoToFightPosOfLeadFightState()
+  if not self.nMainTick or 0 ~= self.nMainTick % self.LeadFightTimerTickTB[self.LeadFightStateTB.emGoToFightPos] then
+    return
+  end
+  local bLastFightPosValid = self:_IsLastFightPosValid()
+  if not bLastFightPosValid then
+    AutoPath:StopGoto()
+    if 0 ~= me.nFightMode then
+      self.nCurLeadFightState = self.LeadFightStateTB.emGoToSafePos
+      return
+    end
+    self:Stop()
+    return
+  end
+  if self.bAutoPathFlag and AutoPath:IsPathing() then
+    return
+  end
+  self.bAutoPathFlag = true
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_AFK_STATE, self.LeadFightStateTB.emGoToFightPos)
+  AutoPath:DelayGotoAndCallEx(5, self.tbLastFightPos.nMapId, self.tbLastFightPos.x, self.tbLastFightPos.y, function()
+    self.bAutoPathFlag = false
+    self.nCurLeadFightState = self.LeadFightStateTB.emAutoFight
+    AFKAutoFight:Start()
+    Operation:ClickMap(self.tbLastFightPos.x, self.tbLastFightPos.y)
+  end, self.AutoPathNearLength)
+end
+
+function AFK:_DoAutoFightOfLeadFightState()
+  if not self.nMainTick or 0 ~= self.nMainTick % self.LeadFightTimerTickTB[self.LeadFightStateTB.emAutoFight] then
+    return
+  end
+  AFKAutoFight:Activate(self.nMainTick)
+end
+
+function AFK:_DoGoToSafePosOfLeadFightState()
+  if not self.nMainTick or 0 ~= self.nMainTick % self.LeadFightTimerTickTB[self.LeadFightStateTB.emGoToSafePos] then
+    return
+  end
+  local bCanDoTownPortal = TownPortal:CanDoTownPortal(true)
+  if bCanDoTownPortal then
+    AutoPath:StopGoto()
+    TownPortal:DoTownPortal()
+    return
+  end
+  if self.bAutoPathFlag and AutoPath:IsPathing() then
+    return
+  end
+  local nMapTemplateId = self:_ChooseSafePosMap(me.nMapTemplateId)
+  if not self:_CheckMapCanTrans(nMapTemplateId) then
+    self:Stop()
+    return
+  end
+  local nX, nY = Map:GetDefaultPos(nMapTemplateId)
+  local _, nMeX, nMeY = me.GetWorldPos()
+  local nDisSquare = Lib:GetDistsSquare(nMeX, nMeY, nX, nY)
+  local nDisRequired = 2500.0
+  if nDisSquare <= nDisRequired then
+    AutoPath:StopGoto()
+    self.bAutoPathFlag = false
+    self.nCurLeadFightState = self.LeadFightStateTB.emSupplyWare
+    if AFKMedicineSetting.bOpenReplyMedicine then
+      MedicineMgr:OpenShop(nil)
+    end
+    return
+  end
+  self.bAutoPathFlag = true
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_AFK_STATE, self.LeadFightStateTB.emGoToSafePos)
+  AutoPath:DelayGotoAndCallEx(5, nMapTemplateId, nX, nY, function()
+    self.bAutoPathFlag = false
+    self.nCurLeadFightState = self.LeadFightStateTB.emSupplyWare
+    if AFKMedicineSetting.bOpenReplyMedicine then
+      MedicineMgr:OpenShop()
+    end
+  end, self.AutoPathNearLength)
+end
+
+function AFK:_DoSupplyWareOfLeadFightState()
+  if not self.nMainTick or 0 ~= self.nMainTick % self.LeadFightTimerTickTB[self.LeadFightStateTB.emSupplyWare] then
+    return
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_AFK_STATE, self.LeadFightStateTB.emSupplyWare)
+  AutoPath:StopGoto()
+  if not AFKMedicineSetting.bOpenReplyMedicine then
+    self:Stop()
+    return
+  end
+  AFK:GetAutoMedicine():ReplyMedicineDirectly()
+  if not MedicineMgr:HasMedicine() then
+    return
+  end
+  self.nCurLeadFightState = self.LeadFightStateTB.emGoToFightPos
+  return
+end
+
+function AFK:_ActivateLeadFight()
+  if self.nCurLeadFightState == self.LeadFightStateTB.emNone then
+    self:_DoNoneOfLeadFightState()
+    return
+  end
+  if self.nCurLeadFightState == self.LeadFightStateTB.emGoToFightPos then
+    self:_DoGoToFightPosOfLeadFightState()
+    return
+  end
+  if self.nCurLeadFightState == self.LeadFightStateTB.emAutoFight then
+    self:_DoAutoFightOfLeadFightState()
+    return
+  end
+  if self.nCurLeadFightState == self.LeadFightStateTB.emGoToSafePos then
+    self:_DoGoToSafePosOfLeadFightState()
+    return
+  end
+  if self.nCurLeadFightState == self.LeadFightStateTB.emSupplyWare then
+    self:_DoSupplyWareOfLeadFightState()
+    return
+  end
+end
+
+function AFK:_DoNoneOfFollowFightState()
+  self.nCurFollowFightState = self.FollowFightStateTB.emFollowFight
+  return
+end
+
+function AFK:_DoFollowFightOfFollowFightState()
+  AFKAutoFollowFight:Activate(self.nMainTick)
+  self.nCurFollowFightState = self.FollowFightStateTB.emFollowFight
+  return
+end
+
+function AFK:_ActivateFollowFight()
+  if self.nCurFollowFightState == self.FollowFightStateTB.emNone then
+    self:_DoNoneOfFollowFightState()
+    return
+  end
+  if self.nCurFollowFightState == self.FollowFightStateTB.emFollowFight then
+    self:_DoFollowFightOfFollowFightState()
+    return
+  end
+end
+
+function AFK:_CheckFightType(nFightType)
+  if not nFightType then
+    return false
+  end
+  if nFightType <= self.FightTypeTB.emNone then
+    return false
+  end
+  if nFightType >= self.FightTypeTB.emCount then
+    return false
+  end
+  return true
+end
+
+function AFK:ClearLastFightPos()
+  self.tbLastFightPos = nil
+end
+
+function AFK:_IsLastFightPosValid()
+  if not self.tbLastFightPos then
+    return false
+  end
+  if not self.tbLastFightPos.nMapId or self.tbLastFightPos.nMapId < 0 then
+    return false
+  end
+  if not self.tbLastFightPos.x or self.tbLastFightPos.x < 0 then
+    return false
+  end
+  if not self.tbLastFightPos.y or self.tbLastFightPos.y < 0 then
+    return false
+  end
+  return true
+end
+
+function AFK:_ChooseSafePosMap(nCurMapTemplateId)
+  if not nCurMapTemplateId or nCurMapTemplateId <= 0 then
+    return self.DefaultGoToSafePosMapId
+  end
+  local nGoToSafePosMapId = self.GoToSafePosMapIdTB[nCurMapTemplateId]
+  if nGoToSafePosMapId then
+    return nGoToSafePosMapId
+  end
+  return nCurMapTemplateId
+end
+
+function AFK:_CheckMapCanTrans(nMapTemplateId)
+  if Map:IsFuben(nMapTemplateId) then
+    return false
+  end
+  local tbMapSetting = Map:GetMapSetting(nMapTemplateId)
+  if 1 == tbMapSetting.TransForbidden then
+    return false
+  end
+  if not me.CanTranOpt() then
+    return false
+  end
+  return true
+end
+
+function AFK:_OnReplyMedicine()
+  if not Login.bEnterGame then
+    return
+  end
+  if not Login.bSyncPlayerDataFinish then
+    return
+  end
+  if not self.bIsRunning then
+    return
+  end
+  if 1 == IsAlone() then
+    return
+  end
+  if self.nCurLeadFightState == self.LeadFightStateTB.emGoToSafePos then
+    return
+  end
+  if self.nCurLeadFightState == self.LeadFightStateTB.emSupplyWare then
+    return
+  end
+  self.nCurLeadFightState = self.LeadFightStateTB.emGoToSafePos
+  if self.nCurLeadFightMode == self.LeadFightModeTB.emSimple then
+    local tbFightPos = AFKFightSetting:GetFightPos()
+    self.tbLastFightPos = {
+      nMapId = me.nMapId,
+      x = tbFightPos.x,
+      y = tbFightPos.y
+    }
+  end
+  return
+end
+
+function AFK:_OnMapLoaded()
+  if not Login.bEnterGame then
+    return
+  end
+  if not Login.bSyncPlayerDataFinish then
+    return
+  end
+  local bIsRunning = self:IsRunning()
+  if not bIsRunning then
+    return
+  end
+  local bIsInFightStep = self:IsInFightStep()
+  if bIsInFightStep then
+    AFKFightSetting:ResetFightPos()
+  end
+end
+
+function AFK:OnPlayerDeath()
+  self:Log("AFK:OnPlayerDeath() invoked!")
+  local bIsLeadFightRunning = self:IsLeadFightRunning()
+  if bIsLeadFightRunning then
+    local bIsFuBen = Map:IsFuben(me.nMapTemplateId)
+    if not bIsFuBen then
+      if Map:IsTongMap(me.nMapTemplateId) and TongChallenge:IsChanllengeRunning() then
+        return
+      end
+      if WuLinGaoShou:IsPlayerInActivityStart() then
+        return
+      end
+      if Ui:GetIsAutoBackFightPosAfterRevive() then
+        return
+      end
+      self:Log("AFK:OnPlayerDeath() stop AFK!!!!!!!!!!!!!!!!!")
+      self:Stop()
+    end
+  end
+end
+
+function AFK:Log(...)
+  if self.Debug then
+    Log("[AFK Debug]", ...)
+  end
+end
+
+function AFK:AfkTimerMgr()
+  if TeamMgr:IsFollowTeammate() then
+    AFKAutoFollowFight:Suspend()
+    if self.afkResumeTimer then
+      Timer:Close(self.afkResumeTimer)
+      self.afkResumeTimer = nil
+    end
+    self.afkResumeTimer = Timer:Register(54, AFK.AfkTimerCallBack, AFK)
+  end
+end
+
+function AFK:AfkTimerCallBack()
+  AFKAutoFollowFight:Resume()
+  return false
+end
+
+PlayerEvent:UnRegister(me, "OnDeath", AFK.nOnDeathRegID)
+AFK.nOnDeathRegID = PlayerEvent:Register(me, "OnDeath", AFK.OnPlayerDeath, AFK)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_AFK_AUTOMEDICINE_NO_MEDICINE, AFK)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_AFK_AUTOMEDICINE_NO_MEDICINE, AFK._OnReplyMedicine, AFK)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_LOADED, AFK)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LOADED, AFK._OnMapLoaded, AFK)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_USE_SKILL, AFK)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_USE_SKILL, AFK.AfkTimerMgr, AFK)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_TRY_USE_JUMP, AFK)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_TRY_USE_JUMP, AFK.AfkTimerMgr, AFK)
+AFK:Init()

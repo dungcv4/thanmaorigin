@@ -1,0 +1,116 @@
+local tbWnd = Ui:CreateWindow("UISkillShow_MasterSkill")
+local tbControls = {
+  imgIcon = "imgBG/Top/imgIconBG/imgIcon",
+  txtName = "imgBG/Top/txtName",
+  txtLevel = "imgBG/Top/txtLevel",
+  txtNotLearn = "imgBG/Top/txtNotLearn",
+  btnLevelUp = "imgBG/Top/btnLevelUp",
+  btnBack = "imgBG/Top/btnBack",
+  txtDesc = "imgBG/Bottom/txtDescScroll/txtDesc",
+  txtLevelUpTips = "imgBG/Top/txtLevelUpTips",
+  txtBackTips = "imgBG/Top/txtBackTips",
+  txtTips = "imgBG/txtTips"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnLevelUp = function(self)
+    local bCanDo, szMsg = ZongShiSkill:CheckCanLearnSkill(me, self.nSkillId, true)
+    if not bCanDo then
+      me.CenterMsg(szMsg)
+      return
+    end
+    RemoteServer.RequestZongShiSkill("RequestSkillAddOnePoint", self.nSkillId)
+  end,
+  btnBack = function(self)
+    local bCanDo, szMsg = ZongShiSkill:CheckCanLearnSkill(me, self.nSkillId, false)
+    if not bCanDo then
+      me.CenterMsg(szMsg)
+      return
+    end
+    RemoteServer.RequestZongShiSkill("RequestSkillRemoveOnePoint", self.nSkillId)
+  end
+}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+end
+
+function tbWnd:OnOpen(nSkillId, bOnlyShow)
+  self.nSkillId = nSkillId
+  self.bOnlyShow = bOnlyShow
+  self.tbSkillInfo = ZongShiSkill.tbZongShiSkillSetting[nSkillId]
+  self:UpdateUIShow()
+end
+
+function tbWnd:OnClose()
+end
+
+function tbWnd:UpdateUIShow()
+  local tbFightSkillInfo = FightSkill.tbAllSkillSetting[self.nSkillId]
+  self.nTotalSkillPointNum, self.nUsedSkillPointNum = ZongShiSkill:GetZongShiPoint(me)
+  self.nSkillLevel, self.nSkillMaxLevel = ZongShiSkill:GetSkillLevelInfoById(me, self.nSkillId)
+  local szIconAltlas = FightSkill:GetSkillIconAtlas(self.nSkillId)
+  self.pPanel:Sprite_SetSprite(tbControls.imgIcon, szIconAltlas)
+  self.pPanel:Label_SetText(tbControls.txtName, i18n.Parse(self.tbSkillInfo.szName))
+  self.pPanel:SetActive(tbControls.txtNotLearn, self.nSkillLevel <= 0)
+  self.pPanel:SetActive(tbControls.txtLevel, self.nSkillLevel > 0)
+  if self.nSkillLevel > 0 then
+    self.pPanel:Label_SetText(tbControls.txtLevel, string.format("%d/%d", self.nSkillLevel, self.nSkillMaxLevel))
+  end
+  local bCanLearn, szErrMsg = ZongShiSkill:CheckCanLearnSkill(me, self.nSkillId, true)
+  if bCanLearn then
+    self.pPanel:Label_SetText(tbControls.txtNotLearn, i18n.EasyGet("<color=#{0}>\229\143\175\228\185\160\229\190\151</color>", Ui:GetDisplayColorHexStr("Yellow")))
+  else
+    self.pPanel:Label_SetText(tbControls.txtNotLearn, i18n.EasyGet("\230\156\170\228\185\160\229\190\151"))
+  end
+  self.pPanel:Button_SetEnable(tbControls.btnBack, self.nSkillLevel and self.nSkillLevel > 0)
+  self.pPanel:SetActive(tbControls.txtBackTips, self.nSkillLevel and self.nSkillLevel > 0)
+  if self.nSkillLevel and self.nSkillLevel > 0 then
+    self.pPanel:Label_SetText(tbControls.txtBackTips, i18n.EasyGet("\230\182\136\232\128\151{0}\229\133\131\229\174\157", ZongShiSkill.Cfg.ZONGSHI_SKILL_LEVEL_DOWN_COST))
+  else
+    self.pPanel:Label_SetText(tbControls.txtBackTips, "")
+  end
+  self.pPanel:Button_SetEnable(tbControls.btnLevelUp, bCanLearn)
+  self.pPanel:SetActive(tbControls.txtLevelUpTips, bCanLearn)
+  if not bCanLearn then
+    self.pPanel:Label_SetText(tbControls.txtLevelUpTips, szErrMsg)
+  elseif self.nSkillLevel and self.nSkillLevel > 0 then
+    self.pPanel:Label_SetText(tbControls.txtLevelUpTips, "")
+  else
+    self.pPanel:Label_SetText(tbControls.txtLevelUpTips, i18n.EasyGet("\231\130\185\229\135\187\230\140\137\233\146\174\232\191\155\232\161\140\229\141\135\231\186\167"))
+  end
+  local bShowTips = false
+  local szTips = ""
+  if not bCanLearn and 0 == self.nSkillLevel then
+    bShowTips = true
+    szTips = szErrMsg or ""
+  end
+  self.pPanel:SetActive(tbControls.btnBack, not bShowTips)
+  self.pPanel:SetActive(tbControls.btnLevelUp, not bShowTips)
+  self.pPanel:SetActive(tbControls.txtLevelUpTips, not bShowTips)
+  self.pPanel:SetActive(tbControls.txtTips, bShowTips)
+  self.pPanel:Label_SetText(tbControls.txtTips, szTips)
+  local szDesc = string.format([[
+<color=#%s>[%s]</color>
+%s
+
+]], Ui:GetDisplayColorHexStr("Yellow"), i18n.Parse(self.tbSkillInfo.szTypeDesc), i18n.Parse(tbFightSkillInfo.szDesc))
+  local szCurLevelSkillDesc = ""
+  local szNextLevelSkillDesc = ""
+  if self.nSkillLevel > 0 then
+    local tmp = FightSkill:GetSkillMagicDesc(self.nSkillId, self.nSkillLevel)
+    szCurLevelSkillDesc = i18n.EasyGet("<color=#{0}>[\229\189\147\229\137\141\231\173\137\231\186\167]</color>{1}\n", Ui:GetDisplayColorHexStr("Yellow"), tmp)
+  end
+  if self.nSkillLevel < self.nSkillMaxLevel then
+    local tmp = FightSkill:GetSkillMagicDesc(self.nSkillId, self.nSkillLevel + 1)
+    szNextLevelSkillDesc = i18n.EasyGet("<color=#{0}>[\228\184\139\228\184\128\231\173\137\231\186\167]</color><color=#{1}>{2}</color>", Ui:GetDisplayColorHexStr("Yellow"), Ui:GetDisplayColorHexStr("Red"), tmp)
+  end
+  self.pPanel:Label_SetText(tbControls.txtDesc, szDesc .. szCurLevelSkillDesc .. szNextLevelSkillDesc)
+  if self.bOnlyShow then
+    self.pPanel:SetActive(tbControls.txtBackTips, false)
+    self.pPanel:SetActive(tbControls.btnBack, false)
+    self.pPanel:SetActive(tbControls.btnLevelUp, false)
+    self.pPanel:SetActive(tbControls.txtLevelUpTips, false)
+    self.pPanel:SetActive(tbControls.txtTips, false)
+  end
+end

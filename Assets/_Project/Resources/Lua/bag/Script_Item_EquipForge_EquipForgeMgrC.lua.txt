@@ -1,0 +1,138 @@
+Require("CommonScript/Item/EquipForge/EquipForgeCfg.lua")
+local EquipForge = Item.EquipForge
+
+function EquipForge:SellReq(pPlayer, nItemId)
+  local bRet, szErr = self:CanSell(pPlayer, nItemId)
+  if not bRet then
+    pPlayer.CenterMsg(szErr)
+    return
+  end
+  RemoteServer.RequestEquipForge("SellReq", nItemId)
+end
+
+function EquipForge:IdentifyReq(pPlayer, nItemId, nSeries, nCount)
+  local bRet, szErr = self:CanIdentify(pPlayer, nItemId, nSeries, nCount)
+  if not bRet then
+    if nil ~= szErr then
+      pPlayer.CenterMsg(szErr)
+    end
+    return
+  end
+  RemoteServer.RequestEquipForge("IdentifyReq", nItemId, nSeries, nCount)
+end
+
+function EquipForge:TransferReq(pPlayer, nSrcEquipId, nSrcAttrIdx, nDstEquipId, nDstAttrIdx)
+  local bRet, szErr = self:CanTransfer(pPlayer, nSrcEquipId, nSrcAttrIdx, nDstEquipId, nDstAttrIdx)
+  if not bRet then
+    if szErr == i18n.EasyGet("\233\147\182\228\184\164\228\184\141\232\182\179") then
+      GainCurrency:ReadyForJump("Coin")
+    else
+      pPlayer.CenterMsg(szErr)
+    end
+    return
+  end
+  RemoteServer.RequestEquipForge("TransferReq", nSrcEquipId, nSrcAttrIdx, nDstEquipId, nDstAttrIdx)
+end
+
+function EquipForge:TransferRsp(nSrcEquipId, tbSrcOrgAttrList, tbSrcNewAttrList, nDstEquipId, tbDstOrgAttrList, tbDstNewAttrList)
+  Ui:GetWindow("UIReplaceAttrib"):NotifyTransfer(nSrcEquipId, nDstEquipId)
+  local tbSeriesList = self:StatSeries(me)
+  local pSrcEquip = me.GetItemInAllSpace(nSrcEquipId)
+  local pNpc = me.GetNpc()
+  if pSrcEquip and pSrcEquip.nPos == pSrcEquip.nEquipPos then
+    local nEquipSeries = pSrcEquip.GetSeries()
+    self:UpdatePerEquipAttr(pNpc, tbSrcOrgAttrList, tbSeriesList, nEquipSeries, me.nFaction, false)
+    self:UpdatePerEquipAttr(pNpc, tbSrcNewAttrList, tbSeriesList, nEquipSeries, me.nFaction, true)
+    local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, pSrcEquip.nEquipPos)
+    if nLianHuaLevel == pSrcEquip.nLevel then
+      Item.EquipLianHua:UpdatePerEquipAttr(pNpc, tbSrcOrgAttrList, nEquipSeries, pSrcEquip.nEquipPos, pSrcEquip.nLevel, false)
+      Item.EquipLianHua:UpdatePerEquipAttr(pNpc, tbSrcNewAttrList, nEquipSeries, pSrcEquip.nEquipPos, pSrcEquip.nLevel, true)
+    end
+  end
+  local pDstEquip = me.GetItemInAllSpace(nDstEquipId)
+  if pDstEquip and pDstEquip.nPos == pDstEquip.nEquipPos then
+    local nEquipSeries = pDstEquip.GetSeries()
+    self:UpdatePerEquipAttr(pNpc, tbDstOrgAttrList, tbSeriesList, nEquipSeries, me.nFaction, false)
+    self:UpdatePerEquipAttr(pNpc, tbDstNewAttrList, tbSeriesList, nEquipSeries, me.nFaction, true)
+    local nLianHuaLevel = Item.EquipLianHua:GetLianHuaLevel(me, pDstEquip.nEquipPos)
+    if nLianHuaLevel == pDstEquip.nLevel then
+      Item.EquipLianHua:UpdatePerEquipAttr(pNpc, tbDstOrgAttrList, nEquipSeries, pDstEquip.nEquipPos, pDstEquip.nLevel, false)
+      Item.EquipLianHua:UpdatePerEquipAttr(pNpc, tbDstNewAttrList, nEquipSeries, pDstEquip.nEquipPos, pDstEquip.nLevel, true)
+    end
+  end
+  if not self:IsHadTransferAttr(pSrcEquip, pDstEquip) then
+    local function fnOk()
+      RemoteServer.OnItemSellRequest("SellPer", nSrcEquipId, 1)
+      
+      Ui:CloseWindow("UIReplaceAttrib")
+    end
+    
+    local function fnCanCle()
+      if Ui:WindowVisible("UIBag") then
+        Ui:GetWindow("UIBag"):UpdateOneItem(nSrcEquipId)
+      end
+    end
+    
+    Ui:OpenWindow("UIMessageBox", i18n.EasyGet("\232\163\133\229\164\135\229\183\178\230\151\160\229\143\175\230\180\151\231\187\131\229\177\158\230\128\167\239\188\140\230\152\175\229\144\166\229\135\186\229\148\174\239\188\159"), {
+      {fnOk},
+      {fnCanCle}
+    })
+  end
+end
+
+function EquipForge:FactionChange(nOldFaction, nFaction)
+  local tbEquipList = {}
+  for i = Item.EQUIPPOS_HELM, Item.EQUIPPOS_AMULET do
+    local pEquip = me.GetEquipByPos(i)
+    if pEquip then
+      tbEquipList[i] = pEquip
+    end
+  end
+  local tbSeriesList = self:StatSeries(me)
+  Item.EquipForge:UpdateAllEquipAttr(me.GetNpc(), tbSeriesList, tbEquipList, false, nOldFaction)
+  Item.EquipForge:UpdateAllEquipAttr(me.GetNpc(), tbSeriesList, tbEquipList, true, nFaction)
+end
+
+function EquipForge:IsHadTransferAttr(pSrcEquip, pDstEquip)
+  if not self.IS_SYS_OPEN then
+    return false
+  end
+  if not pSrcEquip or not pDstEquip then
+    return false
+  end
+  if pSrcEquip.nEquipPos ~= pDstEquip.nEquipPos then
+    return false
+  end
+  if pDstEquip.nLevel < pSrcEquip.nLevel then
+    return false
+  end
+  local tbSrcAttrList = self:GetAttr(pSrcEquip)
+  local tbDstAttrList = self:GetAttr(pDstEquip)
+  for _, tbSrcAttr in pairs(tbSrcAttrList) do
+    local nSrcGroupId, nSrcLevel = table.unpack(tbSrcAttr)
+    if nSrcGroupId > 0 then
+      local nSameIdx = 0
+      for nIdx, tbAttr in ipairs(tbDstAttrList) do
+        if tbAttr[1] == nSrcGroupId then
+          nSameIdx = nIdx
+          break
+        end
+      end
+      if nSameIdx > 0 then
+        if nSrcLevel > tbDstAttrList[nSameIdx][2] then
+          return true
+        end
+      else
+        for nIdx, tbAttr in ipairs(tbDstAttrList) do
+          if 0 == tbAttr[1] or nSrcLevel >= tbAttr[2] then
+            return true
+          end
+        end
+      end
+    end
+  end
+  return false
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CHANGE_FACTION, EquipForge)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CHANGE_FACTION, EquipForge.FactionChange, EquipForge)

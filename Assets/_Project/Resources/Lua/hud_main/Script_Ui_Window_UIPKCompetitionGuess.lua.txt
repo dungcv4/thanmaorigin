@@ -1,0 +1,247 @@
+local tbWnd = Ui:CreateWindow("UIPKCompetitionGuess")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_DINGFENGPK_SYNC_FINAL,
+      self.UpdatePanel,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_DINGFENGPK_SYNC_GUESS,
+      self.UpdatePanel,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      self.OnSyncItem,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnTipClose",
+  btnHelp = "node/imgBG/txtTitle/btnHelp",
+  TabTemplate = "node/imgBG/TabScrollView/Viewport/Content/Template",
+  btnReward = "node/imgBG/btnReward",
+  UIMoneyPanel = "node/imgBG/node/imgBG/UIMoneyPanel",
+  MatchTabTemplate = "node/imgBG/node/Scroll View/Viewport/Content/Template",
+  resourcesCell = "node/imgBG/node/resourcesCell",
+  imgIcon01 = "node/imgBG/node/resourcesHaveCell/resources01/imgIcon",
+  imgIcon02 = "node/imgBG/node/resourcesHaveCell/resources02/imgIcon",
+  txtNum01 = "node/imgBG/node/resourcesHaveCell/resources01/txtNum",
+  txtNum02 = "node/imgBG/node/resourcesHaveCell/resources02/txtNum",
+  btnAdd01 = "node/imgBG/node/resourcesHaveCell/resources01/btnAdd",
+  btnAdd02 = "node/imgBG/node/resourcesHaveCell/resources02/btnAdd",
+  txtTime = "node/imgBG/node/txtTime",
+  Cont_txtInfo_L = "node/imgBG/node/Cont_txtInfo_L"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnReward = function(self)
+    Ui:OpenWindow("UIReward_Newyear", DingFengPK.GuessGrade)
+  end,
+  btnAdd01 = function(self)
+    Shop:OpenShopBuyWidDefault(DingFengPK.GuessCfg.nLaBaItemId)
+  end,
+  btnAdd02 = function(self)
+    Shop:OpenShopBuyWidDefault(DingFengPK.GuessCfg.nLuoGuItemId)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbTabList = Ui:NewScrollView(self, tbControls.TabTemplate, self.OnSwitchTab)
+  local nIcon, szIconSprite
+  _, nIcon, _, _ = KItem.GetItemShowInfo(DingFengPK.GuessCfg.nLaBaItemId)
+  _, szIconSprite = Item:GetIcon(nIcon)
+  self.pPanel:Sprite_SetSprite(tbControls.MatchTabTemplate .. "/Cont_GuessL01/imgIcon01", szIconSprite)
+  self.pPanel:Sprite_SetSprite(tbControls.MatchTabTemplate .. "/Cont_GuessL02/imgIcon01", szIconSprite)
+  _, nIcon, _, _ = KItem.GetItemShowInfo(DingFengPK.GuessCfg.nLuoGuItemId)
+  _, szIconSprite = Item:GetIcon(nIcon)
+  self.pPanel:Sprite_SetSprite(tbControls.MatchTabTemplate .. "/Cont_GuessL01/imgIcon02", szIconSprite)
+  self.pPanel:Sprite_SetSprite(tbControls.MatchTabTemplate .. "/Cont_GuessL02/imgIcon02", szIconSprite)
+  self.tbScrollViewTemplate = Ui:NewScrollView(self, tbControls.MatchTabTemplate)
+end
+
+function tbWnd:OnOpen(nSelect)
+  self.pPanel:SetActive(tbControls.btnHelp, false)
+  self:SetTabScrollView()
+  self:UpdateIcon()
+  self:UpdateItemCount()
+  self.tbTabList:SelectElement(nSelect or 1)
+  self.pPanel:SetActive(tbControls.resourcesCell, false)
+  self.pPanel:SetActive(tbControls.UIMoneyPanel, false)
+  DingFengPK:RequestFinalMatch()
+  DingFengPK:RequestGuessData()
+end
+
+function tbWnd:OnClose()
+  if self.nTimer ~= nil then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+end
+
+function tbWnd:SetTabScrollView()
+  self.tbTabList:Clear()
+  for nIndex, tbGuessCfg in ipairs(DingFengPK.tbGuessSetting) do
+    self.tbTabList:SetElement(nIndex, function(tbElement)
+      tbElement.pPanel:Button_BindEvent("", self.OnClickTab, self, nIndex)
+      local tbSetting = DingFengPK.FINAL_SETTING[DingFengPK.OPEN_TYPE.FINAL_DAY1 + nIndex]
+      if tbSetting and tbSetting[1] and tbSetting[1].nPhase then
+        tbElement.pPanel:Label_SetText("txtName", tbSetting[1].funcTitle())
+      end
+    end)
+  end
+end
+
+function tbWnd:OnSwitchTab(nIndex)
+  self.nIndex = nIndex
+  self:UpdatePanel()
+  if self.nTimer ~= nil then
+    Timer:Close(self.nTimer)
+    self.nTimer = nil
+  end
+  self:UpdateTime()
+  self.nTimer = Timer:Register(Env.GAME_FPS, self.UpdateTime, self)
+end
+
+function tbWnd:UpdatePanel()
+  local tbGuessCfg = DingFengPK.tbGuessSetting[self.nIndex]
+  if not tbGuessCfg then
+    return
+  end
+  local bInGuessTime = true
+  if GetTime() < Lib:GetConfigDate2Time(tbGuessCfg.nStartTime) or GetTime() >= Lib:GetConfigDate2Time(tbGuessCfg.nEndTime) then
+    bInGuessTime = false
+  end
+  if not DingFengPK.tbFinalMatchData or not DingFengPK.tbFinalTeamData then
+    return
+  end
+  local nPhase = tbGuessCfg.nPhase
+  self.tbScrollViewTemplate:Reset()
+  if not DingFengPK.tbFinalMatchData[nPhase] then
+    return
+  end
+  for nIndex, tbMatchData in ipairs(DingFengPK.tbFinalMatchData[nPhase]) do
+    if nIndex <= nPhase / 2 then
+      local nRightIndex = nPhase - nIndex + 1
+      local tbLeftData = tbMatchData
+      local tbRightData = DingFengPK.tbFinalMatchData[nPhase][nRightIndex]
+      self.tbScrollViewTemplate:SetElement(nIndex, function(tbElement)
+        local pPanel = tbElement.pPanel
+        local tbGuessData = DingFengPK.tbGuessData and DingFengPK.tbGuessData[nPhase] and DingFengPK.tbGuessData[nPhase][nIndex]
+        if tbLeftData and DingFengPK.tbFinalTeamData[tbLeftData.nTeamId] then
+          local tbLeftTeamData = DingFengPK.tbFinalTeamData[tbLeftData.nTeamId]
+          pPanel:Label_SetText("txtName01", tbLeftData.szTeamName)
+          pPanel:SetActive("txtFighting01", false)
+          pPanel:Label_SetText("txtFighting01/txtFightingNum01", tbLeftTeamData.nFightPower)
+          pPanel:Label_SetText("txtServer01", i18n.EasyGet("\230\156\141\229\138\161\229\153\168\239\188\154{0}", tbLeftTeamData.szServerName))
+          pPanel:SetActive("imgWin01", tbLeftData.nResult == DingFengPK.Win)
+          if tbGuessData and tbGuessData.nTeamId == tbLeftData.nTeamId then
+            pPanel:SetActive("Cont_GuessL01", true)
+            pPanel:Label_SetText("Cont_GuessL01/txtGuessNumber01", tbGuessData.tbGuessCount[DingFengPK.GuessCfg.nLaBaItemId] or 0)
+            pPanel:Label_SetText("Cont_GuessL01/txtGuessNumber02", tbGuessData.tbGuessCount[DingFengPK.GuessCfg.nLuoGuItemId] or 0)
+          else
+            pPanel:SetActive("Cont_GuessL01", false)
+          end
+          local bCanGuess = bInGuessTime and 0 == tbLeftData.nResult
+          pPanel:SetActive("btnCheer01", bCanGuess)
+          if bCanGuess then
+            Ui:Button_BindEvent(pPanel, "btnCheer01", function()
+              Ui:OpenWindow("UIPKCompetitionGuess_Tip", nPhase, nIndex, tbLeftData.nTeamId)
+            end)
+          end
+        else
+          pPanel:Label_SetText("txtName01", i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+          pPanel:SetActive("imgWin01", false)
+          pPanel:SetActive("btnCheer01", false)
+          pPanel:Label_SetText("txtServer01", "")
+          pPanel:SetActive("txtFighting01", false)
+          pPanel:SetActive("Cont_GuessL01", false)
+        end
+        if tbRightData and DingFengPK.tbFinalTeamData[tbRightData.nTeamId] then
+          local tbRightTeamData = DingFengPK.tbFinalTeamData[tbRightData.nTeamId]
+          pPanel:Label_SetText("txtName02", tbRightData.szTeamName)
+          pPanel:SetActive("txtFighting02", false)
+          pPanel:Label_SetText("txtFighting02/txtFightingNum01", tbRightTeamData.nFightPower)
+          pPanel:Label_SetText("txtServer02", i18n.EasyGet("\230\156\141\229\138\161\229\153\168\239\188\154{0}", tbRightTeamData.szServerName))
+          pPanel:SetActive("imgWin02", tbRightData.nResult == DingFengPK.Win)
+          if tbGuessData and tbGuessData.nTeamId == tbRightData.nTeamId then
+            pPanel:SetActive("Cont_GuessL02", true)
+            pPanel:Label_SetText("Cont_GuessL02/txtGuessNumber01", tbGuessData.tbGuessCount[DingFengPK.GuessCfg.nLaBaItemId] or 0)
+            pPanel:Label_SetText("Cont_GuessL02/txtGuessNumber02", tbGuessData.tbGuessCount[DingFengPK.GuessCfg.nLuoGuItemId] or 0)
+          else
+            pPanel:SetActive("Cont_GuessL02", false)
+          end
+          local bCanGuess = bInGuessTime and 0 == tbRightData.nResult
+          pPanel:SetActive("btnCheer02", bCanGuess)
+          if bCanGuess then
+            Ui:Button_BindEvent(pPanel, "btnCheer02", function()
+              Ui:OpenWindow("UIPKCompetitionGuess_Tip", nPhase, nIndex, tbRightData.nTeamId)
+            end)
+          end
+        else
+          pPanel:Label_SetText("txtName02", i18n.EasyGet("\232\153\154\228\189\141\228\187\165\229\190\133"))
+          pPanel:SetActive("imgWin02", false)
+          pPanel:SetActive("btnCheer02", false)
+          pPanel:Label_SetText("txtServer02", "")
+          pPanel:SetActive("txtFighting02", false)
+          pPanel:SetActive("Cont_GuessL02", false)
+        end
+      end)
+    end
+  end
+end
+
+function tbWnd:UpdateTime()
+  local tbGuessCfg = DingFengPK.tbGuessSetting[self.nIndex]
+  if not tbGuessCfg then
+    self.pPanel:Label_SetText(self.txtTime, "")
+    return false
+  end
+  if Lib:GetConfigDate2Time(tbGuessCfg.nStartTime) > GetTime() then
+    self.pPanel:Label_SetText(self.txtTime, i18n.EasyGet("\231\171\158\231\140\156\229\188\128\229\167\139\230\151\182\233\151\180\239\188\154\n{0}", Lib:TimeDesc11(Lib:GetConfigDate2Time(tbGuessCfg.nStartTime))))
+    return false
+  end
+  local nTime = Lib:GetConfigDate2Time(tbGuessCfg.nEndTime) - GetTime()
+  if nTime <= 0 then
+    self.pPanel:Label_SetText(self.txtTime, i18n.EasyGet("\231\171\158\231\140\156\229\183\178\231\187\147\230\157\159"))
+    return false
+  end
+  self.pPanel:Label_SetText(self.txtTime, i18n.EasyGet("\231\171\158\231\140\156\229\128\146\232\174\161\230\151\182\239\188\154{0}", Lib:TimeDesc2(nTime)))
+  return true
+end
+
+function tbWnd:UpdateIcon()
+  local nIcon, szIconSprite
+  _, nIcon, _, _ = KItem.GetItemShowInfo(DingFengPK.GuessCfg.nLaBaItemId)
+  _, szIconSprite = Item:GetIcon(nIcon)
+  self.pPanel:Sprite_SetSprite(tbControls.imgIcon01, szIconSprite)
+  _, nIcon, _, _ = KItem.GetItemShowInfo(DingFengPK.GuessCfg.nLuoGuItemId)
+  _, szIconSprite = Item:GetIcon(nIcon)
+  self.pPanel:Sprite_SetSprite(tbControls.imgIcon02, szIconSprite)
+end
+
+function tbWnd:OnSyncItem(nItemId)
+  if nItemId then
+    local pItem = KItem.GetItemObj(nItemId)
+    if not pItem then
+      return false
+    end
+    if pItem.dwTemplateId == DingFengPK.GuessCfg.nLaBaItemId or pItem.dwTemplateId == DingFengPK.GuessCfg.nLuoGuItemId then
+      self:UpdateItemCount()
+    end
+  end
+end
+
+function tbWnd:UpdateItemCount()
+  local nNum1 = me.GetItemCountByTypeInBag(DingFengPK.GuessCfg.nLaBaItemId)
+  self.pPanel:Label_SetText(tbControls.txtNum01, nNum1)
+  local nNum2 = me.GetItemCountByTypeInBag(DingFengPK.GuessCfg.nLuoGuItemId)
+  self.pPanel:Label_SetText(tbControls.txtNum02, nNum2)
+end

@@ -1,0 +1,103 @@
+ChatMgr.KinCommand = ChatMgr.KinCommand or {}
+local tbKinCommand = ChatMgr.KinCommand
+tbKinCommand.tbOpenKinCommand = tbKinCommand.tbOpenKinCommand or {}
+tbKinCommand.Type = {}
+
+function tbKinCommand:OnLogin(pPlayer)
+  local dwKinId = pPlayer.dwKinId
+  if self:IsKinOpenCommand(pPlayer.dwKinId) then
+    pPlayer.CallClientScript("ChatMgr.KinCommand:OpenKinCommand", dwKinId, self:GetKinOpenCommandValue(dwKinId))
+  else
+    pPlayer.CallClientScript("ChatMgr.KinCommand:CloseKinCommand", dwKinId)
+  end
+end
+
+function tbKinCommand:NotifySetCommanderExtra(pPlayer, nExtra)
+  if not self:CanChatInCommand(pPlayer) then
+    return
+  end
+  local szMsg = i18n.EasyGet("\229\184\174\228\188\154\231\165\173\232\140\182\239\188\154{0}{1}\230\140\135\230\140\165", pPlayer.szName, 1 == nExtra and i18n.EasyGet("\229\138\160\229\133\165") or i18n.EasyGet("\233\128\128\229\135\186"))
+  ChatMgr:SendSystemMsg(ChatMgr.SystemMsgType.KinCommander, szMsg, pPlayer.dwKinId)
+end
+
+function tbKinCommand:OpenKinCommand(dwKinId, nValue)
+  if self:IsKinOpenCommand(dwKinId) then
+    return
+  end
+  if nil ~= nValue then
+    self.tbOpenKinCommand[dwKinId] = nValue
+  else
+    self.tbOpenKinCommand[dwKinId] = true
+  end
+  if MODULE_GAMECLIENT then
+    ChatMgr:ClearChannelChatData(ChatMgr.ChannelType.Kin, 1)
+    EventNotify.OnNotify(EventNotify.emKIN_COMMANDER_OPEN)
+  else
+    self:CallKinClientScript(dwKinId, "ChatMgr.KinCommand:OpenKinCommand", nValue)
+    ChatMgr:SendSystemMsg(ChatMgr.SystemMsgType.KinCommander, i18n.EasyGet("\230\140\135\230\140\165\233\162\145\233\129\147\229\183\178\229\188\128\229\144\175\239\188\140\229\184\174\228\188\154\231\174\161\231\144\134\229\143\175\228\187\165\230\136\144\228\184\186\230\140\135\230\140\165\230\155\180\230\150\185\228\190\191\231\154\132\231\187\132\231\187\135\230\180\187\229\138\168\227\128\130"), dwKinId)
+  end
+end
+
+function tbKinCommand:CallKinClientScript(dwKinId, szFunc, nValue)
+  local kinData = Kin:GetKinById(dwKinId)
+  if not kinData then
+    return
+  end
+  kinData:TraverseMembers(function(memberData)
+    local pPlayer = KPlayer.GetPlayerObjById(memberData.nMemberId)
+    if pPlayer then
+      pPlayer.CallClientScript(szFunc, dwKinId, nValue)
+    end
+    return true
+  end)
+end
+
+function tbKinCommand:CloseKinCommand(dwKinId)
+  self.tbOpenKinCommand[dwKinId] = nil
+  if MODULE_GAMECLIENT then
+    self:SetExtra(nil)
+    EventNotify.OnNotify(EventNotify.emKIN_COMMANDER_CLOSE)
+  else
+    self:CallKinClientScript(dwKinId, "ChatMgr.KinCommand:CloseKinCommand", dwKinId)
+  end
+end
+
+function tbKinCommand:CanChatInCommand(pPlayer)
+  if nil == pPlayer then
+    return false
+  end
+  if not self:IsKinOpenCommand(pPlayer.dwKinId) then
+    return false
+  end
+  if MODULE_GAMECLIENT then
+    return Kin:CheckCanChatInCommand()
+  else
+    local meMemberData = Kin:GetMemberData(pPlayer.dwID)
+    return meMemberData:CheckCanChatInCommand()
+  end
+end
+
+function tbKinCommand:IsKinOpenCommand(dwKinId)
+  return dwKinId and dwKinId > 0 and self.tbOpenKinCommand[dwKinId] ~= nil
+end
+
+function tbKinCommand:GetKinOpenCommandValue(dwKinId)
+  if dwKinId and dwKinId > 0 then
+    return self.tbOpenKinCommand[dwKinId]
+  end
+end
+
+if MODULE_GAMECLIENT then
+  function tbKinCommand:SetExtra(nExtra)
+    self.nExtra = nExtra
+    
+    RemoteServer.SetCommanderExtra(nExtra)
+  end
+  
+  function tbKinCommand:GetExtra()
+    if self:CanChatInCommand(me) then
+      return self.nExtra
+    end
+    return nil
+  end
+end

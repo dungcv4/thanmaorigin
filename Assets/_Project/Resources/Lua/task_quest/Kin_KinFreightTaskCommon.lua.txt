@@ -1,0 +1,160 @@
+KinFreightTask.szOpenTimeFrame = "OpenLevel49H"
+KinFreightTask.tbAssistType = {Item = 1, Money = 2}
+KinFreightTask.nAwardId = 901
+KinFreightTask.tbSeekHelpStatus = {SHS_NONE = 0, SHS_HELP = 1}
+
+function KinFreightTask:LoadKinFreightInfo()
+  local tbParam = {
+    "nTemplateId",
+    "nNum",
+    "nColor",
+    "szCurrencyType",
+    "nCost",
+    "szObtain",
+    "szObtainFunc"
+  }
+  local tbCfg = Lib:LoadTabFileEx("Setting/Kin/KinFreightTask.tab", "dddsdss", nil, {
+    table.unpack(tbParam)
+  })
+  self.tbKinFreight = {}
+  self.tbColor2TemplateId = {}
+  for i, v in ipairs(tbCfg) do
+    if not self.tbKinFreight[v.nTemplateId] then
+      self.tbColor2TemplateId[v.nColor] = self.tbColor2TemplateId[v.nColor] or {}
+      self.tbKinFreight[v.nTemplateId] = v
+      table.insert(self.tbColor2TemplateId[v.nColor], v.nTemplateId)
+    end
+  end
+  Validator:Register(self.CheckKinFreightTask, self)
+end
+
+function KinFreightTask:CheckKinFreightTask()
+  for nTemplateId, v in pairs(self.tbKinFreight) do
+    if not Item:IsExist(nTemplateId) then
+      LogErr(string.format("load KinFreightTask.tab failed, nTemplateId %d not exist", nTemplateId))
+      return false
+    end
+  end
+  return true
+end
+
+KinFreightTask:LoadKinFreightInfo()
+
+function KinFreightTask:IsKFTOpen(pPlayer)
+  if 1 ~= GetTimeFrameState(KinFreightTask.szOpenTimeFrame) then
+    return false, i18n.EasyGet("\229\188\128\230\156\141\231\172\172\228\186\140\229\164\169\230\187\16131\231\186\167\229\143\175\233\162\134\229\143\150")
+  end
+  if pPlayer and pPlayer.dwKinId <= 0 then
+    return false, i18n.EasyGet("\229\176\154\230\156\170\229\138\160\229\133\165\229\174\182\230\151\143")
+  end
+  if pPlayer and pPlayer.nLevel < KinFreightTask.KinFreightTaskCfg.nLevelLimit then
+    return false, i18n.EasyGet("{0}\231\186\167\230\137\141\229\143\175\229\143\130\228\184\142", KinFreightTask.KinFreightTaskCfg.nLevelLimit)
+  end
+  return true
+end
+
+function KinFreightTask:GetKinContribCfg(nColor)
+  local nRet = self.KinFreightTaskCfg.tbColor2KinContrib[nColor] or 0
+  return nRet
+end
+
+function KinFreightTask:CanAcceptTask(pPlayer)
+  local bRet, szErr = self:IsKFTOpen(pPlayer)
+  if not bRet then
+    return false, szErr
+  end
+  local tbData = self:GetKinFreightData(pPlayer)
+  tbData.nAcceptCount = tbData.nAcceptCount or 0
+  if tbData.nAcceptCount >= self.KinFreightTaskCfg.nDayAcceptCount then
+    return false, i18n.Get(self.KinFreightTaskCfg.szNotHadCommitTime)
+  end
+  if tbData.tbFreightTask and Lib:CountTB(tbData.tbFreightTask) > 0 then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\232\180\167\232\191\144\228\187\187\229\138\161\230\156\170\229\174\140\230\136\144\239\188\129")
+  end
+  return true
+end
+
+function KinFreightTask:CanCommitTask(pPlayer)
+  local bRet, szErr = self:IsKFTOpen(pPlayer)
+  if not bRet then
+    return false, szErr
+  end
+  local tbData = self:GetKinFreightData(pPlayer)
+  if not tbData.tbFreightTask or Lib:CountTB(tbData.tbFreightTask) <= 0 then
+    return false, i18n.EasyGet("\230\156\170\230\142\165\229\143\151\228\187\187\229\138\161")
+  end
+  local nCount = self:GetFillingTaskCount(pPlayer)
+  if nCount < self.KinFreightTaskCfg.nFreightMinCount then
+    return false, i18n.EasyGet("\232\180\167\231\137\169\232\163\133\229\161\171\228\184\141\229\164\159")
+  end
+  return true
+end
+
+function KinFreightTask:GetFillingTaskCount(pPlayer)
+  local tbData = self:GetKinFreightData(pPlayer)
+  if not tbData.tbFreightTask or Lib:CountTB(tbData.tbFreightTask) <= 0 then
+    return 0
+  end
+  local nCount = 0
+  for i, v in ipairs(tbData.tbFreightTask) do
+    if v.nFilling and 1 == v.nFilling then
+      nCount = nCount + 1
+    end
+  end
+  return nCount
+end
+
+function KinFreightTask:GetFreightMaxAssist(pPlayer)
+  local nVipAdd = Vip:GetVipAddKinFreightAssistNum(pPlayer.GetVipLevel())
+  return nVipAdd + self.KinFreightTaskCfg.nAssistCount
+end
+
+function KinFreightTask:GetFreightMaxSeekHelp(pPlayer)
+  local nVipAdd = Vip:GetVipAddKinFreightSeekHelpNum(pPlayer.GetVipLevel())
+  return nVipAdd + self.KinFreightTaskCfg.nSeekHelpCount
+end
+
+function KinFreightTask:CanSeekHelp(pPlayer, nIndex)
+  local bRet, szErr = self:IsKFTOpen(pPlayer)
+  if not bRet then
+    return false, szErr
+  end
+  local tbData = self:GetKinFreightData(pPlayer)
+  if not tbData.tbFreightTask or not tbData.tbFreightTask[nIndex] then
+    return false, i18n.EasyGet("\229\143\130\230\149\176\233\148\153\232\175\175")
+  end
+  if tbData.tbFreightTask[nIndex] and 1 == tbData.tbFreightTask[nIndex].nFilling then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\232\180\167\231\137\169\229\183\178\230\143\144\228\186\164")
+  end
+  if tbData.tbFreightTask[nIndex].nSeekHelpId > 0 then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\232\180\167\231\137\169\229\183\178\230\177\130\229\138\169\239\188\129")
+  end
+  tbData.nSeekHelpCount = tbData.nSeekHelpCount or 0
+  if tbData.nSeekHelpCount >= self:GetFreightMaxSeekHelp(pPlayer) then
+    return false, i18n.EasyGet("\230\177\130\229\138\169\230\172\161\230\149\176\229\183\178\232\190\190\228\184\138\233\153\144\239\188\129")
+  end
+  return true
+end
+
+function KinFreightTask:CanFillingTask(pPlayer, nIndex, nTemplateId)
+  local bRet, szErr = self:IsKFTOpen(pPlayer)
+  if not bRet then
+    return false, szErr
+  end
+  local tbData = self:GetKinFreightData(pPlayer)
+  if not tbData.tbFreightTask or Lib:CountTB(tbData.tbFreightTask) <= 0 then
+    return false, i18n.EasyGet("\230\156\170\230\142\165\229\143\151\228\187\187\229\138\161")
+  end
+  local tbCfg = self.tbKinFreight[nTemplateId]
+  if not tbData.tbFreightTask[nIndex] or tbData.tbFreightTask[nIndex].nId ~= nTemplateId or not tbCfg then
+    return false, i18n.EasyGet("\229\143\130\230\149\176\233\148\153\232\175\175")
+  end
+  if tbData.tbFreightTask[nIndex].nFilling and 1 == tbData.tbFreightTask[nIndex].nFilling then
+    return false, i18n.EasyGet("\229\189\147\229\137\141\232\180\167\231\137\169\229\183\178\232\163\133\229\161\171")
+  end
+  local nHadNum = pPlayer.GetItemCountByTypeInBag(nTemplateId)
+  if nHadNum < tbCfg.nNum then
+    return false, i18n.EasyGet("\231\137\169\229\147\129\228\184\141\232\182\179")
+  end
+  return true
+end

@@ -1,0 +1,298 @@
+Require("CommonScript/Npc/Npc.lua")
+PlayerPortrait.Def = {SAVE_GROUP = 39}
+local tbMetaReturnTrue = {
+  __index = function()
+    return true
+  end
+}
+
+function PlayerPortrait:StringFactionToTable(szFactions)
+  local tbRet = {}
+  local tbFactions = Lib:SplitStr(szFactions, "|")
+  for _, v in pairs(tbFactions) do
+    local nFaction = tonumber(v)
+    if nFaction then
+      tbRet[nFaction] = 1
+    end
+  end
+  if next(tbRet) == nil then
+    setmetatable(tbRet, tbMetaReturnTrue)
+  end
+  return tbRet
+end
+
+function PlayerPortrait:StringBodySexToTable(szBodySex)
+  local tbRet = {}
+  local tbFactions = Lib:SplitStr(szBodySex, "|")
+  for _, v in pairs(tbFactions) do
+    local nSex = tonumber(v)
+    if nSex then
+      tbRet[nSex] = true
+    end
+  end
+  if next(tbRet) == nil then
+    setmetatable(tbRet, tbMetaReturnTrue)
+  end
+  return tbRet
+end
+
+function PlayerPortrait:LoadSetting()
+  local tbSaveIdx = {}
+  local tbSetting = Lib:LoadTabFileEx("Setting/Player/Portrait.tab", "dddsssssssdds", "Id", {
+    "Id",
+    "FaceID",
+    "BigFaceID",
+    "Faction",
+    "BodySex",
+    "Desc",
+    "Limit",
+    "OpenUi",
+    "Icon",
+    "IconAtlas",
+    "Basic",
+    "SaveIdx",
+    "Source"
+  })
+  assert(tbSetting, "[PlayerPortrait LoadSetting Fail]")
+  self.tbPortraitSetting = {}
+  for _, v in pairs(tbSetting) do
+    assert(not self.tbPortraitSetting[v.Id], "[PlayerPortrait LoadSetting] Error, Key Repeat")
+    local tbFaciton = self:StringFactionToTable(v.Faction)
+    local tbBodySex = self:StringBodySexToTable(v.BodySex)
+    self.tbPortraitSetting[v.Id] = {
+      nId = v.Id,
+      nFaceId = v.FaceID,
+      nBigFaceId = v.BigFaceID,
+      tbFaciton = tbFaciton,
+      tbBodySex = tbBodySex,
+      szDesc = v.Desc,
+      szLimit = v.Limit,
+      szOpenUi = v.OpenUi,
+      szIcon = v.Icon,
+      szIconAtlas = v.IconAtlas,
+      bBasic = 1 == v.Basic,
+      nSaveIdx = v.SaveIdx,
+      szSource = v.Source
+    }
+    if 1 == v.Basic then
+      tbSaveIdx[v.Id] = true
+    end
+    self:GetPortraitSetting(v.Id)
+  end
+  self.tbPortraitSetting = SetReadOnly(self.tbPortraitSetting)
+  local tbSexPortrait = Lib:EasyLoadTabFile("Setting/Player/PortraitSex.tab")
+  assert(tbSexPortrait, "[PlayerPortrait PortraitSex.tab LoadSetting Fail]")
+  self.tbSexPortraitSetting = {}
+  for _, tbInfo in pairs(tbSexPortrait) do
+    local tbTemp = {
+      [Npc.SexDef.MALE] = tbInfo.nMaleId,
+      [Npc.SexDef.FEMALE] = tbInfo.nFemaleId
+    }
+    self.tbSexPortraitSetting[tbInfo.nMaleId] = tbTemp
+    self.tbSexPortraitSetting[tbInfo.nFemaleId] = tbTemp
+  end
+  self.tbSexPortraitSetting = SetReadOnly(self.tbSexPortraitSetting)
+end
+
+function PlayerPortrait:GetPortraitSetting(nPortrait)
+  local tbSetting = self.tbPortraitSetting[nPortrait]
+  if tbSetting and not tbSetting.szBigIcon and not tbSetting.szBigIconAtlas then
+    local IconSmallAtlas, IconSmall = Npc:GetFace(tbSetting.nFaceId)
+    local BigIconAtlas, BigIcon = Npc:GetFace(tbSetting.nBigFaceId)
+    tbSetting.szBigIcon = BigIcon or tbSetting.szIcon
+    tbSetting.szBigIconAtlas = BigIconAtlas or tbSetting.szIconAtlas
+    tbSetting.szIconSmall = IconSmall or tbSetting.szIcon
+    tbSetting.szIconSmallAtlas = IconSmallAtlas or tbSetting.szIconAtlas
+  end
+  return tbSetting or {}
+end
+
+PlayerPortrait:LoadSetting()
+
+function PlayerPortrait:IsNeedSex(nPortrait, nSex)
+  local tbSetting = self.tbPortraitSetting[nPortrait]
+  if tbSetting.tbBodySex[nSex] then
+    return true
+  end
+  return false
+end
+
+function PlayerPortrait:IsNeedFaction(nPortrait, nFaction)
+  local tbSetting = self.tbPortraitSetting[nPortrait]
+  if tbSetting.tbFaciton[nFaction] then
+    return true
+  end
+  return false
+end
+
+function PlayerPortrait:GetSprite(nPortrait)
+  local tbSetting = self:GetPortraitSetting(nPortrait)
+  return tbSetting.szIcon, tbSetting.szIconAtlas
+end
+
+function PlayerPortrait:GetSmallIcon(nPortrait)
+  local tbSetting = self.tbPortraitSetting[nPortrait]
+  if tbSetting then
+    local IconSmallAtlas, IconSmall = Npc:GetFace(tbSetting.nFaceId)
+    return IconSmall, IconSmallAtlas
+  end
+  if EDITOR then
+    Lib.ShowStack("GetSmallIcon Error! Portrait is " .. tostring(nPortrait))
+  end
+  return "head_huaimi", "UIAtlas/XJHead_Role.prefab"
+end
+
+function PlayerPortrait:GetPortraitBigIcon(nPortrait)
+  local tbSetting = self:GetPortraitSetting(nPortrait)
+  return tbSetting.szBigIcon, tbSetting.szBigIconAtlas
+end
+
+function PlayerPortrait:IsBasicPortrait(nPortrait)
+  local tbSetting = self.tbPortraitSetting[nPortrait]
+  if not tbSetting then
+    return
+  end
+  return tbSetting.bBasic
+end
+
+function PlayerPortrait:GetFactionPortraits(nFaction, nBodySex)
+  local tbRet = {}
+  for _, tbSetting in pairs(self.tbPortraitSetting) do
+    if 1 == tbSetting.tbFaciton[nFaction] and tbSetting.tbBodySex[nBodySex] then
+      table.insert(tbRet, tbSetting)
+    end
+  end
+  return tbRet
+end
+
+function PlayerPortrait:GetFactionPortraitBigIcon(nFaction, nBodySex)
+  local tbRet
+  for _, tbSetting in pairs(self.tbPortraitSetting) do
+    if tbSetting.nBigFaceId > 0 and tbSetting.tbFaciton[nFaction] and tbSetting.tbBodySex[nBodySex] then
+      tbRet = self:GetPortraitSetting(tbSetting.nId)
+      break
+    end
+  end
+  if tbRet then
+    return tbRet.szBigIcon, tbRet.szBigIconAtlas
+  end
+end
+
+function PlayerPortrait:GetFactionPortraitSmallIcon(nFaction, nBodySex)
+  local tbRet
+  for _, tbSetting in pairs(self.tbPortraitSetting) do
+    if tbSetting.nBigFaceId > 0 and tbSetting.tbFaciton[nFaction] and tbSetting.tbBodySex[nBodySex] then
+      tbRet = self:GetPortraitSetting(tbSetting.nId)
+      break
+    end
+  end
+  if tbRet then
+    return tbRet.szIconSmall, tbRet.szIconSmallAtlas
+  end
+end
+
+function PlayerPortrait:IsAvaliablePortraits(nPortrait)
+  local tbSetting = self.tbPortraitSetting[nPortrait]
+  if not tbSetting then
+    return false
+  end
+  return true
+end
+
+function PlayerPortrait:GetCurSexPortraits(nPortrait, nSex)
+  local tbSetting = self.tbPortraitSetting[nPortrait]
+  if not tbSetting then
+    return
+  end
+  local tbSexPortrait = self.tbSexPortraitSetting[nPortrait]
+  if not tbSexPortrait then
+    return
+  end
+  return tbSexPortrait[nSex]
+end
+
+function PlayerPortrait:GetSaveIdx(nPortraitID)
+  if not nPortraitID then
+    return
+  end
+  local tbInfo = self.tbPortraitSetting[nPortraitID]
+  if not tbInfo then
+    return
+  end
+  return tbInfo.nSaveIdx
+end
+
+function PlayerPortrait:GetSaveInfo(nSaveIdx)
+  if 0 == nSaveIdx then
+    return
+  end
+  nSaveIdx = nSaveIdx - 0.1
+  local nSaveKey = math.ceil(nSaveIdx / 32)
+  local nBit = math.ceil(nSaveIdx % 32)
+  return nSaveKey, nBit
+end
+
+function PlayerPortrait:GetIcon(nPortraitID)
+  local tbInfo = self.tbPortraitSetting[nPortraitID]
+  if not tbInfo then
+    return
+  end
+  return tbInfo.szIcon
+end
+
+function PlayerPortrait:CheckCanAdd(pPlayer, nPortraitID)
+  if not pPlayer then
+    return false, "Add Portrait Error!"
+  end
+  local tbPlayerData = self:GetPlayerData(pPlayer)
+  local nSaveIdx = self:GetSaveIdx(nPortraitID)
+  if PlayerPortrait:IsDefaultProtrait(nPortraitID) then
+    return false, "Add Portrait Error!Default Portrait!"
+  end
+  if not tbPlayerData[nSaveIdx] then
+    return true
+  end
+  if PlayerPortrait:IsPermanentPortrait(pPlayer, nPortraitID) then
+    return false, i18n.EasyGet("\229\183\178\229\173\152\229\156\168\230\173\164\230\176\184\228\185\133\229\164\180\229\131\143")
+  end
+  return true
+end
+
+function PlayerPortrait:IsDefaultProtrait(nPortraitID)
+  local nSaveIdx = self:GetSaveIdx(nPortraitID)
+  if not nSaveIdx or 0 == nSaveIdx then
+    return true
+  end
+end
+
+function PlayerPortrait:IsPermanentPortrait(pPlayer, nPortraitID, tbPlayerData)
+  if MODULE_GAMESERVER then
+    tbPlayerData = self:GetPlayerData(pPlayer)
+  end
+  local nSaveIdx = self:GetSaveIdx(nPortraitID) or 0
+  if tbPlayerData[nSaveIdx] and tbPlayerData[nSaveIdx].nGetTime == tbPlayerData[nSaveIdx].nLimitTime then
+    return true
+  end
+end
+
+function PlayerPortrait:CheckIsInValidTime(pPlayer, nPortraitID, tbPlayerData)
+  if PlayerPortrait:IsDefaultProtrait(nPortraitID) then
+    return true
+  end
+  if PlayerPortrait:IsPermanentPortrait(pPlayer, nPortraitID, tbPlayerData) then
+    return true
+  end
+  if MODULE_GAMESERVER then
+    tbPlayerData = self:GetPlayerData(pPlayer)
+  end
+  local nSaveIdx = self:GetSaveIdx(nPortraitID)
+  if not tbPlayerData[nSaveIdx] then
+    return false
+  end
+  local nTime = GetTime()
+  if nTime < tbPlayerData[nSaveIdx].nLimitTime then
+    return true
+  elseif nTime > tbPlayerData[nSaveIdx].nLimitTime then
+    return false
+  end
+end

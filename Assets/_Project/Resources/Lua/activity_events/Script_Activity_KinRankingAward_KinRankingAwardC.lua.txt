@@ -1,0 +1,89 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+ActivityMgr.szKinRankingAwardsClassName = "KinRankingAwards"
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.szKinRankingAwardsClassName)
+
+function tbActivity:GetTimesInfo()
+  local nOpenServerTime = GetServerCreateTime()
+  local nCurTime = GetTime()
+  local nCurDay = Lib:GetLocalDay(nCurTime)
+  local nAwardTime = Lib:CalcTimeFrameOpenTime(self.tbConfig.szAwardDay, nOpenServerTime)
+  local szAwardDay = Lib:GetTimeStr(nAwardTime)
+  local nSituationTime = nAwardTime - 172800 - 1
+  local szSituationDay = Lib:GetTimeStr3(nSituationTime)
+  local nRemainDay = Lib:GetLocalDay(nAwardTime) - Lib:GetLocalDay(nCurTime)
+  if nCurDay == Lib:GetLocalDay(nAwardTime) then
+    local nRemainHour = (nAwardTime - nCurTime) / 3600
+    if nRemainHour < 0 then
+      nRemainHour = 0
+    else
+      nRemainHour = tonumber(string.format("%.1f", nRemainHour)) or 0
+    end
+    return szAwardDay, i18n.EasyGet("{0}\229\176\143\230\151\182\229\144\142", nRemainHour), szSituationDay
+  end
+  return szAwardDay, i18n.EasyGet("{0}\229\164\169\229\144\142", nRemainDay), szSituationDay
+end
+
+function tbActivity:IsLockRank()
+  return self:IsAwardTime()
+end
+
+tbActivity.Protocol = {
+  GetTop10RankInfo = 1,
+  GetMyRankInfo = 2,
+  OnGetTop10RankInfo = 3,
+  OnGetMyRankInfo = 4,
+  OnAddRedPoint = 5
+}
+local Protocol = {
+  [tbActivity.Protocol.OnGetTop10RankInfo] = "OnGetTop10RankInfo",
+  [tbActivity.Protocol.OnGetMyRankInfo] = "OnGetMyRankInfo"
+}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    me.CenterMsg(i18n.EasyGet("\230\156\141\229\138\161\231\171\175\232\190\147\229\133\165\233\148\153\232\175\175"))
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:UpdateTop10RankView()
+  ActivityMgr:CallServerScriptV2(self.nId, tbActivity.Protocol.GetTop10RankInfo)
+end
+
+function tbActivity:UpdateMyRankInfo()
+  ActivityMgr:CallServerScriptV2(self.nId, tbActivity.Protocol.GetMyRankInfo)
+end
+
+function tbActivity:OnGetTop10RankInfo(tbInfos)
+  Event:OnEvent(Event.emEVENT_KINRANKINGAWARD_UPDATE_RANK, tbInfos)
+end
+
+function tbActivity:OnGetMyRankInfo(szRankInfo)
+  Event:OnEvent(Event.emEVENT_KINRANKINGAWARD_UPDATE_MYRANK, szRankInfo)
+end
+
+function tbActivity:CheckRedPoint()
+  local nLastTime = LocalData:GetRoleNumber("KinRankingAwards_Last_Login_TimeFrame", 0)
+  local nNowTime = GetTime()
+  if Lib:IsDiffDay(14400, nLastTime, nNowTime) and not RedPointMgr:CheckEvent(RedPointMgr.EVENT.KinRankingAward) then
+    RedPointMgr:LightRedPoint(RedPointMgr.EVENT.KinRankingAward)
+  end
+end
+
+function tbActivity:OnLightRedPoint()
+  local tbActivity = ActivityMgr:GetKinRankingActivityInstance()
+  if tbActivity and tbActivity:IsOpen() and not tbActivity:IsAwardTime() then
+    self:CheckRedPoint()
+    LocalData:SetRoleNumber("KinRankingAwards_Last_Login_TimeFrame", GetTime())
+  else
+    LocalData:SetRoleNumber("KinRankingAwards_Last_Login_TimeFrame", 0)
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, tbActivity)
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, tbActivity)
+  end
+end
+
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, tbActivity)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, tbActivity.OnLightRedPoint, tbActivity)
+EventNotify:UnRegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, tbActivity)
+EventNotify:RegistNotify(EventNotify.emNOTIFY_CROSS_DAYS, tbActivity.OnLightRedPoint, tbActivity)

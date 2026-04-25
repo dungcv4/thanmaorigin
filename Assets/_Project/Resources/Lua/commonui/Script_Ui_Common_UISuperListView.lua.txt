@@ -1,0 +1,289 @@
+local tbWnd = {}
+Ui:SetClass("UISuperListView", tbWnd)
+
+function Ui:NewSuperListView(tbOwner, ...)
+  local tbClass = Ui:NewClass(Ui:GetClass("UISuperListView"))
+  tbClass.tbOwner = tbOwner
+  tbClass:OnCreate(...)
+  return tbClass
+end
+
+function tbWnd:OnCreate(szTemplateKey, funcSetItem, tbDataList, funcOnItemButton, bNoHighlight, funcOnSnapChange)
+  self.szItemPath, self.szItemName = self:_SplitLast(szTemplateKey, "/")
+  if not self.szItemPath or not self.szItemName then
+    LogErr(string.format("[UISuperListView] NodesPath error: %s", szTemplateKey))
+  end
+  local scrollRect, szScrollRectKey = self:_GetScrollViewRect(szTemplateKey)
+  if not scrollRect or not szScrollRectKey then
+    LogErr(string.format("[UISuperListView] scrollview not found: %s", szTemplateKey))
+    return
+  end
+  self.pView = self.tbOwner.pPanel:GetObject(szScrollRectKey):GetComponent(Ui.LoopListView2)
+  if not self.pView then
+    LogErr(string.format("[UISuperListView] LoopListView2 not found: %s", szScrollRectKey))
+    return
+  end
+  self.funcSetItem = funcSetItem
+  self.ptbElementData = tbDataList or {}
+  self.tbElemKeySet = {}
+  self.tbItemCS = {}
+  self.funcOnItemButton = funcOnItemButton
+  self.bNoHighlight = bNoHighlight
+  self.funcOnSnapChange = funcOnSnapChange
+  self.szScrollRectKey = szScrollRectKey
+  self.tbOwner.pPanel:SuperScrollView_InitListView(szScrollRectKey, #self.ptbElementData, self, self._OnItemUpdate)
+  if self.funcOnSnapChange then
+    self.tbOwner.pPanel:SuperScrollView_BindSnapChangeEvent(szScrollRectKey, self, self._OnSnapChange)
+  end
+  self.tbOwner.pPanel:SetActive(szTemplateKey, false)
+  if not self.tbOwner._tbScrollViewList then
+    self.tbOwner._tbScrollViewList = {}
+  end
+  self.tbOwner._tbScrollViewList[self] = 1
+end
+
+function tbWnd:_GetItemKey(nIndex)
+  return string.format("%s/%s%d", self.szItemPath, self.szItemName, nIndex)
+end
+
+function tbWnd:_OnItemUpdate(listView, index)
+  local nIndex = index + 1
+  if nIndex <= 0 or nIndex > #self.ptbElementData then
+    return nil
+  end
+  local item = listView:NewListViewItem(self.szItemName)
+  if not item then
+    return nil
+  end
+  self.tbItemCS[item:GetInstanceID()] = item
+  local szKey = self:_GetItemKey(nIndex)
+  local pNewPanel = item.gameObject:GetComponent(Ui.UIPanel)
+  pNewPanel = pNewPanel or item.gameObject:AddComponent(Ui.UIPanel)
+  pNewPanel.UIPath = string.format("%s/%s", self.tbOwner.pPanel.UIPath, szKey)
+  item.UserIntData1 = nIndex
+  if item.UserObjectData then
+    item.UserObjectData.szKey = szKey
+  else
+    item.UserObjectData = {szKey = szKey, pPanel = pNewPanel}
+  end
+  self.tbOwner.pPanel:RemoveObjectInDict(szKey)
+  self.tbOwner.pPanel:AddObjectInDict(szKey, item.gameObject)
+  self.tbElemKeySet[szKey] = 1
+  self:DoItemHightLight(nIndex, nIndex == self.nLastClickIndex)
+  if self.funcSetItem then
+    self.funcSetItem(self.tbOwner, item.UserObjectData, self.ptbElementData[nIndex], nIndex)
+  end
+  if self.funcOnItemButton then
+    Ui:Button_BindEvent(pNewPanel, "Main", self._OnClickElement, self, nIndex)
+  end
+  return item
+end
+
+function tbWnd:PlayAnimation()
+  for szKey in pairs(self.tbElemKeySet) do
+    local objItem = self.tbOwner.pPanel:GetObject(szKey)
+    if objItem or objItem.activeSelf then
+      local parent = objItem.transform.parent
+      local animator = parent:GetComponent(Ui.ScrollAnimator)
+      if animator then
+        animator:OnSetElement(objItem)
+      end
+    end
+  end
+end
+
+function tbWnd:_GetScrollViewRect(szTemplateKey)
+  szTemplateKey = self:_SplitLast(szTemplateKey, "/")
+  if not szTemplateKey then
+    return nil, nil
+  end
+  local gameObj = self.tbOwner.pPanel:GetObject(szTemplateKey)
+  if not gameObj then
+    return nil, nil
+  end
+  local scrollView = gameObj:GetComponent(Ui.ScrollRect)
+  if scrollView then
+    return scrollView, szTemplateKey
+  else
+    return self:_GetScrollViewRect(szTemplateKey)
+  end
+end
+
+function tbWnd:_SplitLast(szPath, sep)
+  local szReverse = string.reverse(szPath)
+  local i = string.find(szReverse, sep)
+  if not i then
+    return nil, nil
+  end
+  local l = string.len(szReverse)
+  local m = l - i
+  return string.sub(szPath, 1, m), string.sub(szPath, m + 2, l)
+end
+
+function tbWnd:MovePanelToItemIndex(nIndex, offset)
+  offset = offset or 0
+  self.pView:MovePanelToItemIndex(nIndex - 1, offset)
+end
+
+function tbWnd:SetSnapTargetItemIndex(nIndex)
+  self.pView:SetSnapTargetItemIndex(nIndex - 1)
+end
+
+function tbWnd:GetCurSnapTargetIndex()
+  return self.pView.CurSnapNearestItemIndex + 1
+end
+
+function tbWnd:RefreshAllItem(resetPos)
+  local bChanged = false
+  local nTotalItemCount = #self.ptbElementData
+  if self.nLastTotalItemCount ~= nTotalItemCount then
+    self.nLastTotalItemCount = nTotalItemCount
+    for key in pairs(self.tbElemKeySet) do
+      self.tbOwner.pPanel:RemoveObjectInDict(key)
+    end
+    self.tbElemKeySet = {}
+    self.pView:SetListItemCount(#self.ptbElementData, resetPos and true or false)
+    bChanged = true
+  end
+  self.pView:RefreshAllShownItem()
+  return bChanged
+end
+
+function tbWnd:RefreshAllShownItem()
+  self.pView:RefreshAllShownItem()
+end
+
+function tbWnd:SetAllElement(tbElementData, funcSetItem, resetPos)
+  if type(tbElementData) ~= "table" then
+    LogErr("[UISuperListView] SetAllElement tbElementData not table")
+    return false
+  end
+  self.nLastTotalItemCount = -1
+  self.ptbElementData = tbElementData
+  if funcSetItem then
+    self.funcSetItem = funcSetItem
+  end
+  return self:RefreshAllItem(resetPos)
+end
+
+function tbWnd:SetFuncSetItem(funcSetItem)
+  self.funcSetItem = funcSetItem
+  self:RefreshAllShownItem()
+end
+
+function tbWnd:MovePanelToFirstItem()
+  self.pView:MovePanelToItemIndex(0, 0)
+end
+
+function tbWnd:MovePanelToLastItem()
+  self.pView:MovePanelToItemIndex(#self.ptbElementData - 1, 0)
+end
+
+function tbWnd:IsScrollAtBottomRight()
+  if self.pView.IsVertList then
+    return Lib:EqualNumber(self.pView.ScrollRect.verticalNormalizedPosition, 0, 1.0E-4)
+  else
+    return Lib:EqualNumber(self.pView.ScrollRect.horizontalNormalizedPosition, 1, 1.0E-4)
+  end
+end
+
+function tbWnd:IsScrollAtTopLeft()
+  if self.pView.IsVertList then
+    return Lib:EqualNumber(self.pView.ScrollRect.verticalNormalizedPosition, 1, 1.0E-4)
+  else
+    return Lib:EqualNumber(self.pView.ScrollRect.horizontalNormalizedPosition, 0, 1.0E-4)
+  end
+end
+
+function tbWnd:DoItemHightLight(nIndex, bHightLight)
+  if self.bNoHighlight then
+    return
+  end
+  local objItem = self:GetObject(nIndex)
+  if not objItem then
+    return
+  end
+  local item = objItem:GetComponent(Ui.LoopListViewItem2)
+  if not item or item.UserIntData1 ~= nIndex or not item.UserObjectData then
+    return
+  end
+  local trans = objItem:GetComponent(Ui.BGroupTrans)
+  if trans then
+    if bHightLight then
+      trans:OnSelected()
+    else
+      trans:OnUnSelected()
+    end
+  end
+end
+
+function tbWnd:_OnClickElement(nIndex)
+  if self.nLastClickIndex then
+    self:DoItemHightLight(self.nLastClickIndex, false)
+  end
+  self:DoItemHightLight(nIndex, true)
+  local tbElement = self:GetElement(nIndex)
+  self.funcOnItemButton(self.tbOwner, tbElement, self.ptbElementData[nIndex], nIndex)
+  self.nLastClickIndex = nIndex
+end
+
+function tbWnd:ClearSelected()
+  if self.nLastClickIndex then
+    self:DoItemHightLight(self.nLastClickIndex, false)
+    self.nLastClickIndex = nil
+  end
+end
+
+function tbWnd:GetLastClickIndex()
+  return self.nLastClickIndex
+end
+
+function tbWnd:GetObject(nIndex)
+  local szKey = self:_GetItemKey(nIndex)
+  if not self.tbElemKeySet[szKey] then
+    return nil
+  end
+  return self.tbOwner.pPanel:GetObject(szKey)
+end
+
+function tbWnd:GetElement(nIndex)
+  local objItem = self:GetObject(nIndex)
+  if not objItem then
+    return
+  end
+  local item = objItem:GetComponent(Ui.LoopListViewItem2)
+  if not item or item.UserIntData1 ~= nIndex then
+    return
+  end
+  return item.UserObjectData, self.ptbElementData[nIndex]
+end
+
+function tbWnd:GetElementData()
+  return self.ptbElementData
+end
+
+function tbWnd:_OnSnapChange(nOldIndex, nNewIndex)
+  if self.funcOnSnapChange then
+    self.funcOnSnapChange(self.tbOwner, nOldIndex + 1, nNewIndex + 1)
+  end
+end
+
+function tbWnd:Clear()
+  self.tbOwner.pPanel:SuperScrollView_ClearSnapChangeEvent(self.szScrollRectKey)
+  for nGID, objItem in pairs(self.tbItemCS) do
+    if objItem.UserObjectData then
+      Ui.ClearUIPanel(objItem.UserObjectData)
+    end
+    objItem.UserObjectData = nil
+  end
+  self.tbItemCS = {}
+  for szKey, _ in pairs(self.tbElemKeySet) do
+    self.tbOwner.pPanel:DeleteObject(szKey)
+  end
+  self.tbElemKeySet = {}
+end
+
+function tbWnd:OnDestroy()
+  self:Clear()
+  self.tbOwner._tbScrollViewList[self] = nil
+end

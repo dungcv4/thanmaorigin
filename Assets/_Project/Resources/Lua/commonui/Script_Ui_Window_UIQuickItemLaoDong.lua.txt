@@ -1,0 +1,111 @@
+local tbWnd = Ui:CreateWindow("UIQuickItemLaoDong")
+tbWnd.MaxSumissionNumOnce = 999
+local tbControls = {
+  btnClose = "btnClose",
+  txtTitle = "txtTitle",
+  UIItemGrid = "CommitItem/UIItemGrid",
+  btnMain = "btnMain",
+  UIAddAndSubGroup = "UIAddAndSubGroup"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd.NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_ITEM,
+      tbWnd.OnItemUpdate
+    },
+    {
+      EventNotify.emNOTIFY_DEL_ITEM,
+      tbWnd.OnItemDelete
+    }
+  }
+end
+
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnMain = function(self)
+    self:Submit()
+  end
+}
+
+function tbWnd:OnCreate()
+  self.itemGrid = Ui:NewExistItemGrid(self, tbControls.UIItemGrid)
+  self.AddAndSubGroup = Ui:NewExistAddAndSubGroup(self, tbControls.UIAddAndSubGroup)
+  self.AddAndSubGroup:SetNumRange(1, 20, i18n.EasyGet("\230\143\144\228\186\164\230\149\176\229\183\178\232\190\190\228\184\138\233\153\144"))
+  self.AddAndSubGroup:BindEvent(function(nValue)
+    local nResult = self:UpdateNumberInput(nValue)
+    return nResult
+  end, nil, nil, nil, nil)
+end
+
+function tbWnd:OnOpen(nTemplateId, szBtnName, nMaxValue, szTitle, nActivityId, nFormulaID, bHasExtraAward)
+  self.nTemplateId = nTemplateId
+  self.szBtnName = szBtnName or i18n.EasyGet("\230\143\144\228\186\164")
+  self.szTitle = szTitle or i18n.EasyGet("\229\138\179\229\138\168\229\141\161\230\143\144\228\186\164")
+  self.nMaxValue = nMaxValue or 20
+  self.nActivityId = nActivityId
+  self.nFormulaID = nFormulaID
+  self.bHasExtraAward = bHasExtraAward
+  self:Update()
+  self.pPanel:Label_SetText(tbControls.txtTitle, self.szTitle)
+end
+
+function tbWnd:Update()
+  local tbItem = me.FindItem(self.nTemplateId or 0)
+  self.tbItemIdList = {}
+  for _, pItem in ipairs(tbItem or {}) do
+    self.tbItemIdList[pItem.dwId] = true
+  end
+  if not next(self.tbItemIdList) then
+    Timer:Register(1, Ui.CloseWindow, Ui, "UIQuickItemLaoDong")
+    return
+  end
+  local nItemCount = me.GetItemCountByTypeInBag(self.nTemplateId)
+  local nMax = math.min(math.min(nItemCount, self.nMaxValue), self.MaxSumissionNumOnce)
+  self.AddAndSubGroup:SetNumRange(1, nMax)
+  self.itemGrid:SetItemByTemplate(self.nTemplateId, nItemCount, nil, nil, {bShowTip = true})
+  self.itemGrid:SetClickEnable(true)
+  self.AddAndSubGroup:SetInputValue(nMax)
+  self.nSubmitNum = self.AddAndSubGroup.nValue
+end
+
+function tbWnd:OnClose()
+  self.nTemplateId = 0
+  self.nActivityId = nil
+  self.szBtnName = i18n.EasyGet("\230\143\144\228\186\164")
+end
+
+function tbWnd:OnItemUpdate(nItemId)
+  if self.tbItemIdList[nItemId] then
+    self:Update()
+  end
+end
+
+function tbWnd:OnItemDelete(nItemId)
+  if self.tbItemIdList[nItemId] then
+    self:Update()
+  end
+end
+
+function tbWnd:Submit()
+  if self.nActivityId then
+    local pInstance = ActivityMgr:GetInstanceById(self.nActivityId)
+    pInstance:HandIn_ToServer(self.nFormulaID, self.nSubmitNum)
+    local pNpc = ActivityMgr:GetNearestNpc(pInstance.tbConfig.nNPCID, me.nMapTemplateId)
+    if pNpc then
+      Operation:SimpleTap(pNpc.nId, false)
+    end
+  else
+    EventNotify.OnNotify(EventNotify.emNOTIFY_QUICKITEMHANDIN_SUBMIT, self.nTemplateId, self.nSubmitNum)
+  end
+end
+
+function tbWnd:UpdateNumberInput(nNum)
+  local nItemCount = me.GetItemCountByTypeInBag(self.nTemplateId)
+  nNum = nNum > nItemCount and nItemCount or nNum
+  self.nSubmitNum = nNum
+  return self.nSubmitNum
+end

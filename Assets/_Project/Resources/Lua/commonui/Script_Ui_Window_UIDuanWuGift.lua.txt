@@ -1,0 +1,285 @@
+local tbWnd = Ui:CreateWindow("UIDuanWuGift")
+local tbControls = {
+  btnClose = "node/imgBg/btnClose",
+  txtTitle = "node/imgBg/Open/Title/txtTitle",
+  btnHelp = "node/imgBg/Open/Title/btnHelp",
+  txtLevelTips = "node/imgBg/Open/Title/txtLiQuanTips",
+  btnNext = "node/imgBg/Open/R/btnNext",
+  txtCondition = "node/imgBg/Open/Title/condition/conditionContent/txtCondition2",
+  ToggleAutoOpen = "node/imgBg/Open/R/ToggleAuto",
+  txtLevel = "node/imgBg/Open/Title/txtLevel",
+  txtOpenNumber = "node/imgBg/Open/txtOpenNumber",
+  txtLiQuanTips = "node/imgBg/Open/LiQuan/txtLiQuanTips",
+  imgLiQuan = "node/imgBg/Open/LiQuan/imgLiQuan",
+  txtLiQuanNum = "node/imgBg/Open/LiQuan/txtNum",
+  imgKey = "node/imgBg/Open/Key/imgKey",
+  txtKeyNum = "node/imgBg/Open/Key/txtKeyNum",
+  btnKeyAdd = "node/imgBg/Open/Key/btnAdd",
+  Coaer_All = "node/imgBg/Coaer_All",
+  GiftTemplate = "node/imgBg/Open/GiftList/itemTemplate"
+}
+tbWnd.tbControls = tbControls
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_DRAGONBOATGIFT_ON_PICK_RESP,
+      self.OnPickResultResp,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_DRAGONBOATGIFT_REFRESH_UI,
+      self.OnRefreshUI,
+      self
+    },
+    {
+      EventNotify.emNOTIFY_SHOP_BUY_RESULT,
+      self.OnRefreshInfo,
+      self
+    }
+  }
+end
+
+tbWnd.tbOnClick = {
+  btnHelp = function(self)
+    Ui:OnHelpClicked(self.pInstance.tbConfig.szHelpKey)
+  end,
+  btnKeyAdd = function(self)
+    self.pInstance:OpenKeyShop()
+  end,
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnNext = function(self)
+    self:OnClickBtnNext()
+  end
+}
+
+function tbWnd:OnClickBtnNext()
+  self.pPanel:SetActive(tbControls.btnNext, false)
+  local pAnimator = self.pPanel:GetAnimator(tbControls.Coaer_All)
+  pAnimator:Play("Close", 0, 0)
+  self.pInstance:ReqNextLevel()
+end
+
+tbWnd.tbOnToggleClick = {
+  ToggleAutoOpen = function(self, isOn)
+    if isOn then
+      self:StartAutoOpen()
+    else
+      self:StopAutoOpen()
+    end
+  end
+}
+
+function tbWnd:StartAutoOpen()
+  self.bAutoOpen = true
+  self.bAutoOpenLock = true
+  local tbCache = self.pInstance:GetCache() or {}
+  if self.bDelay then
+    self.nDelayOpenTimer = Timer:Register(Env.GAME_FPS * 1.5, function()
+      self:RandomOpen()
+    end)
+  elseif tbCache.tbPlayerOpenInfoCache and (tbCache.tbPlayerOpenInfoCache.bOpenSpecialAward or tbCache.nOpenNumCache > self.pInstance.tbConfig.nMaxOpenIndex) then
+    self:OnClickBtnNext()
+  else
+    self:RandomOpen()
+  end
+  self.bDelay = false
+end
+
+function tbWnd:StopAutoOpen()
+  self.bAutoOpen = false
+  self.bAutoOpenLock = false
+  if self.nOpenTimer then
+    Timer:Close(self.nOpenTimer)
+    self.nOpenTimer = nil
+  end
+  if self.nNextTimer then
+    Timer:Close(self.nNextTimer)
+    self.nNextTimer = nil
+  end
+  if self.nDelayOpenTimer then
+    Timer:Close(self.nDelayOpenTimer)
+    self.nDelayOpenTimer = nil
+  end
+  self.bDelay = false
+end
+
+function tbWnd:RandomOpen()
+  local tbOpenedList = {}
+  for nIndex = 1, self.pInstance.tbConfig.nMaxOpenIndex do
+    if not self.tbCache.tbPlayerOpenInfoCache[nIndex] then
+      table.insert(tbOpenedList, nIndex)
+    end
+  end
+  local nOpenIndex = tbOpenedList[math.random(#tbOpenedList)]
+  local bRet = self.pInstance:ReqPickResult(nOpenIndex)
+  if not bRet then
+    self.pPanel:Toggle_SetChecked(self.ToggleAutoOpen, false)
+  end
+  return bRet
+end
+
+function tbWnd:OnCreate()
+  self.pPanel:Sprite_SetSprite(self.imgLiQuan, Currency:GetIcon(Currency.TYPE.DWLiQuan))
+end
+
+function tbWnd:OnOpen()
+  self.pInstance = ActivityMgr:GetInstanceByClassName(ActivityMgr.Def.ClassNameList.DragonBoatGift)
+  self.pPanel:Label_SetText(self.txtTitle, i18n.Parse(self.pInstance:GetName()))
+  local pAnimator = self.pPanel:GetAnimator(tbControls.Coaer_All)
+  pAnimator:Play("Open", 0, 0)
+  self.pPanel:Label_SetText(self.txtLiQuanNum, me.GetMoney(Currency.TYPE.DWLiQuan))
+  self.pPanel:Label_SetText(self.txtLiQuanTips, i18n.EasyGet("\229\183\178\230\156\137\231\164\188\229\136\184:"))
+  self.pPanel:Label_SetText(self.txtKeyNum, string.format("%d/1", me.GetItemCountInBags(self.pInstance.tbConfig.nDragonBoatKeyTemplateId)))
+  local tbCache = self.pInstance:GetCache() or {}
+  self.pPanel:Label_SetText(self.txtOpenNumber, string.format("%s:%d/%d", i18n.EasyGet("\230\156\172\229\177\130\229\183\178\229\188\128\229\144\175"), tbCache.nOpenNumCache - 1, self.pInstance.tbConfig.nMaxOpenIndex))
+  self:InitBoxSetting(tbCache)
+  self:SetSpecialLevel()
+  self.pPanel:Toggle_SetChecked(self.ToggleAutoOpen, false)
+end
+
+function tbWnd:SetSpecialLevel()
+  local tbCache = self.pInstance:GetCache()
+  if tbCache.nCurLevelCache <= self.pInstance.tbConfig.nMaxLevelNum and 0 == tbCache.nCurLevelCache % 5 then
+    self.pPanel:Toggle_SetChecked(self.ToggleAutoOpen, false)
+    self.pPanel:SetActive(self.ToggleAutoOpen, false)
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\229\133\179\229\141\161\233\156\128\232\166\129\230\137\139\229\138\168\229\188\128\229\144\175"))
+  else
+    if self.bAutoOpen then
+      self.pPanel:Toggle_SetChecked(self.ToggleAutoOpen, false)
+      self.bDelay = true
+      self.pPanel:Toggle_SetChecked(self.ToggleAutoOpen, true)
+    end
+    self.pPanel:SetActive(self.ToggleAutoOpen, true)
+  end
+end
+
+function tbWnd:InitBoxSetting(tbCache)
+  self.tbCache = tbCache
+  self.GiftListView = self.GiftListView or Ui:NewItemGridView(self, self.GiftTemplate)
+  self.GiftListView:Clear()
+  
+  local function fnClick(self, nOpenIndex, tbGrid)
+    local bRet = self:OpenBox(nOpenIndex)
+    if tbGrid then
+      tbGrid.pPanel:Button_SetEnable("../", not bRet)
+    end
+  end
+  
+  for nIndex = 1, self.pInstance.tbConfig.nMaxOpenIndex do
+    local bOpened = tbCache and tbCache.tbPlayerOpenInfoCache and tbCache.tbPlayerOpenInfoCache[nIndex]
+    if bOpened then
+      local tbGrid = self.GiftListView:SetItem(nIndex, tbCache.tbPlayerOpenInfoCache[nIndex][1], true)
+      tbGrid.pPanel:Animator_SetEnable("../", true)
+      local Animator = tbGrid.pPanel:GetAnimator("../")
+      Animator:Play("itemTemplate_Open", 0, 0)
+      tbGrid.pPanel:SetActive("../01_Effect", false)
+      if tbCache.tbPlayerOpenInfoCache.nMultiple and tbCache.tbPlayerOpenInfoCache.nMultiple > 1 then
+        tbGrid.pPanel:Label_SetText("../txtIncrease/01", "x" .. tostring(tbCache.tbPlayerOpenInfoCache.nMultiple))
+        tbGrid.pPanel:SetActive("../txtIncrease", true)
+      else
+        tbGrid.pPanel:SetActive("../txtIncrease", false)
+      end
+      if tbCache.tbPlayerOpenInfoCache[nIndex][1][2] == Currency:GetItemId(Currency.TYPE.DWLiQuan) then
+        tbGrid.pPanel:SetActive("../01_Effect", true)
+      end
+    else
+      local tbGrid = self.GiftListView:SetEmpty(nIndex)
+      tbGrid.pPanel:Animator_SetEnable("../", false)
+      Ui:Button_BindEvent(tbGrid.pPanel, "../", fnClick, self, nIndex, tbGrid)
+      tbGrid.pPanel:SetActive("../imgCover", true)
+      tbGrid.pPanel:SetActive("../01_Effect", false)
+      tbGrid.pPanel:SetActive("../txtIncrease", false)
+    end
+    if tbCache.tbPlayerOpenInfoCache and (tbCache.tbPlayerOpenInfoCache.bOpenSpecialAward or tbCache.nOpenNumCache > self.pInstance.tbConfig.nMaxOpenIndex) then
+      self.pPanel:SetActive(tbControls.btnNext, true)
+    else
+      self.pPanel:SetActive(tbControls.btnNext, false)
+    end
+    self.pPanel:Label_SetText(tbControls.txtLevel, i18n.EasyGet("\231\172\172{0}\229\133\179", tbCache.nCurLevelCache or 1))
+    local szTips = i18n.EasyGet("\230\173\164\229\133\179\229\141\161\230\151\160\231\164\188\229\136\184")
+    local szCondition = i18n.EasyGet("\229\188\128\229\144\175\231\164\188\231\155\146\239\188\140\230\139\134\229\174\140\230\137\128\230\156\137\231\164\188\231\155\146\239\188\140\229\141\179\229\143\175\233\128\154\229\133\179")
+    if tbCache.nCurLevelCache <= self.pInstance.tbConfig.nMaxLevelNum then
+      szTips = i18n.EasyGet("\230\173\164\229\133\179\229\141\161\230\156\137\231\164\188\229\136\184")
+      szCondition = i18n.EasyGet("\229\188\128\229\144\175\231\164\188\231\155\146\239\188\140\229\188\128\229\144\175\231\137\185\230\174\138\231\164\188\231\155\146\239\188\140\229\141\179\229\143\175\233\128\154\229\133\179")
+    end
+    self.pPanel:Label_SetText(tbControls.txtLevelTips, szTips)
+    self.pPanel:Label_SetText(tbControls.txtCondition, szCondition)
+    self.pPanel:Label_SetText(self.txtKeyNum, string.format("%d/1", me.GetItemCountInBags(self.pInstance.tbConfig.nDragonBoatKeyTemplateId)))
+  end
+end
+
+function tbWnd:OpenBox(nOpenIndex)
+  if self.bAutoOpenLock then
+    me.CenterMsg(i18n.EasyGet("\229\189\147\229\137\141\229\156\168\232\135\170\229\138\168\229\188\128\229\144\175\228\184\173"))
+    return false
+  end
+  local bResult = self.pInstance:ReqPickResult(nOpenIndex)
+  if not bResult then
+    self.pPanel:Toggle_SetChecked(self.ToggleAutoOpen, false)
+    return false
+  end
+  return true
+end
+
+function tbWnd:OnPickResultResp(nOpenIndex, nAwardType, tbAward, nMultiple, nOpenNum)
+  local tbGrid = self.GiftListView:SetItem(nOpenIndex, tbAward[1], true)
+  tbGrid.pPanel:Animator_SetEnable("../", true)
+  local Animator = tbGrid.pPanel:GetAnimator("../")
+  Animator:Play("itemTemplate_Open", 0, 0)
+  if nMultiple > 1 then
+    tbGrid.pPanel:Label_SetText("../txtIncrease/01", "x" .. nMultiple)
+    tbGrid.pPanel:SetActive("../txtIncrease", true)
+  else
+    tbGrid.pPanel:SetActive("../txtIncrease", false)
+  end
+  self.pPanel:Label_SetText(tbControls.txtKeyNum, string.format("%d/1", me.GetItemCountInBags(self.pInstance.tbConfig.nDragonBoatKeyTemplateId)))
+  self.pPanel:Label_SetText(self.txtOpenNumber, string.format("%s:%d/%d", i18n.EasyGet("\230\156\172\229\177\130\229\183\178\229\188\128\229\144\175"), nOpenNum - 1, self.pInstance.tbConfig.nMaxOpenIndex))
+  if nAwardType == self.pInstance.AwardType.SpecialAward then
+    me.CenterMsg(i18n.EasyGet("\230\129\173\229\150\156\229\164\167\228\190\160\230\138\189\228\184\173\231\137\185\230\174\138\231\164\188\231\155\146"))
+    self.pPanel:Label_SetText(self.txtLiQuanNum, me.GetMoney(Currency.TYPE.DWLiQuan))
+    tbGrid.pPanel:SetActive("../01_Effect", true)
+    self.pPanel:SetActive(tbControls.btnNext, true)
+    if self.bAutoOpen then
+      Timer:Close(self.nOpenTimer)
+      self.nOpenTimer = nil
+      self.nNextTimer = Timer:Register(Env.GAME_FPS, function()
+        self:OnClickBtnNext()
+      end)
+    end
+  elseif nOpenNum > self.pInstance.tbConfig.nMaxOpenIndex and self.tbCache and self.tbCache.nCurLevelCache > self.pInstance.tbConfig.nMaxLevelNum then
+    self.pPanel:SetActive(tbControls.btnNext, true)
+    if self.bAutoOpen then
+      Timer:Close(self.nOpenTimer)
+      self.nOpenTimer = nil
+      self.nNextTimer = Timer:Register(Env.GAME_FPS, function()
+        self:OnClickBtnNext()
+      end)
+    end
+  elseif self.bAutoOpen then
+    self.nOpenTimer = Timer:Register(Env.GAME_FPS, function()
+      self:RandomOpen()
+    end)
+  end
+end
+
+function tbWnd:OnRefreshUI()
+  local tbCache = self.pInstance:GetCache() or {}
+  self:InitBoxSetting(tbCache)
+  self.pPanel:Label_SetText(self.txtOpenNumber, string.format("%s:%d/%d", i18n.EasyGet("\230\156\172\229\177\130\229\183\178\229\188\128\229\144\175"), (tbCache.nOpenNumCache or 1) - 1, self.pInstance.tbConfig.nMaxOpenIndex))
+  self:SetSpecialLevel()
+end
+
+function tbWnd:OnRefreshInfo()
+  self.pPanel:Label_SetText(self.txtKeyNum, string.format("%d/1", me.GetItemCountInBags(self.pInstance.tbConfig.nDragonBoatKeyTemplateId)))
+end
+
+function tbWnd:OnClose()
+  self.pPanel:Toggle_SetChecked(self.ToggleAutoOpen, false)
+end
+
+function tbWnd:OnDestroy()
+  self.GiftListView = nil
+end

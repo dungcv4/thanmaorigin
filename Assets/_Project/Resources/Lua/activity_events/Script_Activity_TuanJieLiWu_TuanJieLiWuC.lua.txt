@@ -1,0 +1,78 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.TuanJieLiWu)
+local Protocol = {
+  [tbActivity.Protocol.OnGetBuyInfo] = "OnGetBuyInfo",
+  [tbActivity.Protocol.OnGetDiscountInfo] = "OnGetDiscountInfo"
+}
+
+function tbActivity:ServerRequest(nProtocol, ...)
+  if not nProtocol or not Protocol[nProtocol] then
+    me.CenterMsg(i18n.EasyGet("\230\156\141\229\138\161\231\171\175\232\190\147\229\133\165\233\148\153\232\175\175"))
+    return
+  end
+  self[Protocol[nProtocol]](self, ...)
+end
+
+function tbActivity:GetTimeAndDetailInfo()
+  local nStartTime = Lib:GetTimeStr(self.tbScheduleCfg.nStartTime)
+  local nBuyEndTime = Lib:GetTimeStr(self.tbConfig.nBuyEndTime)
+  local szActivityDetail = self.tbConfig.szActivityDetail or ""
+  if nStartTime and nBuyEndTime then
+    return string.format("%s-%s", nStartTime, nBuyEndTime), i18n.EasyGet(szActivityDetail)
+  else
+    LogErr("TuanJieLiWuC: GetTimeAndDetailInfo falied, ScheduleConfig Error")
+    me.CenterMsg(i18n.EasyGet("\232\142\183\229\143\150\230\180\187\229\138\168\230\151\182\233\151\180\229\143\138\232\175\166\230\131\133\228\191\161\230\129\175\229\164\177\232\180\165"))
+  end
+end
+
+function tbActivity:GetDiscountInfo(nPlayerId)
+  if not nPlayerId then
+    Log("TuanJieLiWuC: GetDiscountInfo failed, nPlayerId is nil")
+    return
+  end
+  ActivityMgr:CallServerScript(self.nId, tbActivity.Protocol.GetDiscountInfo, nPlayerId)
+end
+
+function tbActivity:CalcGiftListInfo(tbDiscountInfo)
+  local tbGiftListInfo = {}
+  local tbPlayerLimitInfo = Shop:GetLimitInfo(me, Shop.LimitType.Permanent)
+  if self.tbConfig and self.tbConfig.tbDiscountInfo then
+    for nGoodId, tbInfo in pairs(tbDiscountInfo) do
+      if not self.tbConfig.tbDiscountInfo[nGoodId] then
+        Log("TuanJieLiWuC: CalcGiftListInfo failed, Discount Config Error, nGoodId=%d", nGoodId)
+      end
+      local tbWare = Shop:GetAWare(nGoodId) or {}
+      local tbItemDisConfig = self.tbConfig.tbDiscountInfo[nGoodId]
+      tbGiftListInfo[nGoodId] = {
+        nOrgPrice = tbItemDisConfig.nPricePerGroup,
+        nReward = tbInfo.nReward,
+        nAllDisCount = {},
+        nMaxBuyCount = tbWare.nPermanentLimit or 0,
+        nPlayerBuyCount = tbPlayerLimitInfo[nGoodId] or 0,
+        nAllBuyCount = tbInfo.nAllBuyCount
+      }
+      for i = 1, self.tbConfig.nDiscountStage do
+        if not tbItemDisConfig["nDiscountRate" .. i] then
+          LogErr("TuanJieLiWuC: CalcGiftListInfo falied, nDiscountStage Error")
+        end
+        table.insert(tbGiftListInfo[nGoodId].nAllDisCount, tbItemDisConfig["nDiscountRate" .. i])
+      end
+    end
+  else
+    Log("UnityC: CalcGiftListInfo failed, config not exist")
+  end
+  return tbGiftListInfo
+end
+
+function tbActivity:OnGetDiscountInfo(tbDiscountInfo)
+  if 0 == Lib:GetTableLength(tbDiscountInfo) then
+    me.CenterMsg(i18n.EasyGet("\232\142\183\229\143\150\231\164\188\231\137\169\230\138\152\230\137\163\232\175\166\230\131\133\228\191\161\230\129\175\229\164\177\232\180\165"))
+    return {}
+  else
+    local tbGiftListInfo = self:CalcGiftListInfo(tbDiscountInfo)
+    EventNotify.OnNotify(EventNotify.emNOTIFY_TuanJieLiWu_DATA_SYNC, tbGiftListInfo)
+  end
+end
+
+function tbActivity:GetRedPointEventId()
+end

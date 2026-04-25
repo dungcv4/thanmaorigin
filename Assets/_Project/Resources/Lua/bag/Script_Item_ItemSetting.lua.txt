@@ -1,0 +1,324 @@
+Require("Script/Item/DigitalItemQualityCfg.lua")
+Item.DigitalItemQuality.BasicExp = Item.DigitalItemQuality.Exp
+
+function Item:GetDigitalItemQuality(szType, nValue)
+  local nQuality = 1
+  local tbGrade = Item.DigitalItemQuality[szType]
+  if not tbGrade then
+    return nQuality
+  end
+  local nMaxGrade = #tbGrade
+  for i = 1, nMaxGrade do
+    local v = tbGrade[i]
+    local p = tbGrade[i - 1]
+    if not p or v > p then
+      nQuality = i
+      if nValue <= v then
+        break
+      end
+    end
+  end
+  return nQuality
+end
+
+function Item:LoadSkillItemSetting()
+  self.tbSkillItem = {}
+  local tbSkillItem = Lib:LoadTabFileEx("Setting/Item/Other/SkillItem.tab", "dddssss", nil, {
+    "SkillId",
+    "SkillLevel",
+    "Quality",
+    "Icon",
+    "IconAtlas",
+    "Desc",
+    "Name"
+  })
+  for k, v in pairs(tbSkillItem) do
+    self.tbSkillItem[v.SkillId] = self.tbSkillItem[v.SkillId] or {}
+    self.tbSkillItem[v.SkillId][v.SkillLevel] = {
+      v.Name,
+      v.Icon,
+      v.IconAtlas,
+      v.Desc,
+      v.Quality
+    }
+  end
+  self.tbSkillItem = SetReadOnly(self.tbSkillItem)
+end
+
+Item:LoadSkillItemSetting()
+
+function Item:GetSkillItemSetting(nSkillId, nSkillLevel)
+  if self.tbSkillItem[nSkillId] and self.tbSkillItem[nSkillId][nSkillLevel] then
+    return self.tbSkillItem[nSkillId][nSkillLevel]
+  end
+end
+
+function Item:GetItemTargetType(nTemplateId)
+  local tbBaseInfo = Item:GetItemBaseProp(nTemplateId)
+  if tbBaseInfo.szClass == "Unidentify" then
+    nTemplateId = KItem.GetItemExtParam(nTemplateId, 1)
+    tbBaseInfo = Item:GetItemBaseProp(nTemplateId)
+  end
+  return tbBaseInfo.nItemType
+end
+
+local tbItemFunc = {
+  NeedChooseItem = function(nItemTemplateId, nItemId, tbInfo)
+    Ui:OpenWindow("UINeedChooseItem", nItemTemplateId, nItemId)
+  end,
+  SkillBook = function(nItemTemplateId, nItemId, tbInfo)
+    Ui:OpenWindow("SkillCheatsPanel", nItemId, nItemTemplateId)
+  end,
+  Stone = function(nItemTemplateId, nItemId, tbInfo)
+    Ui:OpenWindow("UIStoneTipsCompare", nItemId, nItemTemplateId, tbInfo)
+  end,
+  waiyi = function(nItemTemplateId, nItemId, tbInfo)
+    Ui:OpenWindow("UIItemTips", "Item", nItemId, nItemTemplateId, nil, nil, nil, tbInfo.szItemOpt, tbInfo.tbItemExtParams)
+  end,
+  hat = function(nItemTemplateId, nItemId, tbInfo)
+    Ui:OpenWindow("UIItemTips", "Item", nItemId, nItemTemplateId, nil, nil, nil, tbInfo.szItemOpt, tbInfo.tbItemExtParams)
+  end,
+  face = function(nItemTemplateId, nItemId, tbInfo)
+    Ui:OpenWindow("UIItemTips", "Item", nItemId, nItemTemplateId, nil, nil, nil, tbInfo.szItemOpt, tbInfo.tbItemExtParams)
+  end,
+  MedicineItem = function(nItemTemplateId, nItemId, tbInfo)
+    Ui:OpenWindow("UIItemTips", "Item", nItemId, nItemTemplateId, nil, nil, nil, tbInfo.szItemOpt, tbInfo.tbItemExtParams)
+  end,
+  StoneMaterialItem = function(nItemTemplateId, nItemId, tbInfo)
+    local nOptType = KItem.GetItemExtParam(nItemTemplateId, 1)
+    if 3 == nOptType then
+      Ui:OpenWindow("UIStoneTipsYuanShi", nItemId, nItemTemplateId, tbInfo)
+    else
+      Ui:OpenWindow("UIItemTips", "Item", nItemId or 0, nItemTemplateId, tbInfo.nFaction, tbInfo.nFactionSect, tbInfo.tbLinkInfo and tbInfo.tbLinkInfo.nSex or nil, tbInfo.szItemOpt, tbInfo.tbItemExtParams, tbInfo.tbLinkInfo)
+    end
+  end,
+  ShenBingPuSeed = function(nItemTemplateId, nItemId, tbInfo)
+    local tbEquipTipsInfo = {
+      nItemId = nItemId,
+      nTemplateId = nItemTemplateId,
+      nFaction = tbInfo.nFaction,
+      nFactionSect = tbInfo.nFactionSect,
+      nSex = tbInfo.nBodySex,
+      szOpt = tbInfo.szItemOpt,
+      pAsyncData = tbInfo.pAsyncData,
+      pos = Ui.Vector3.zero,
+      tbItemExtParams = tbInfo.tbItemExtParams,
+      tbLinkInfo = tbInfo.tbLinkInfo
+    }
+    Ui:OpenWindow("UIDivineWeaponEquipTips", tbEquipTipsInfo)
+  end,
+  WuXueItem = function(nItemTemplateId, nItemId, tbInfo)
+    Ui:OpenWindowAsync("UIItemTips_MartialArts01", "Item", nItemId, nItemTemplateId, nil)
+  end
+}
+local EquipTipsPos1 = Ui.Vector3(226, 0, 0)
+local EquipTipsPos2 = Ui.Vector3(-236, 0, 0)
+local TradeEquipTipsPos1 = Ui.Vector3(-400, 0, 0)
+local TradeEquipTipsPos2 = Ui.Vector3(60, 0, 0)
+
+function Item:ShowItemDetail(tbInfo, bOther)
+  local nItemId = tbInfo.nItemId or tbInfo.dwItemId
+  if nItemId and nItemId > 0 then
+    local pItem = KItem.GetItemObj(nItemId)
+    if not pItem then
+      return
+    end
+    if tbItemFunc[pItem.szClass] then
+      tbItemFunc[pItem.szClass](pItem.dwTemplateId, nItemId, tbInfo)
+    elseif 1 == pItem.IsEquip() then
+      local pEquip
+      if pItem.nEquipPos ~= Item.EQUIPPOS_EXTEND then
+        pEquip = me.GetEquipByPos(pItem.nEquipPos)
+      else
+        pEquip = Item.ExtEquip:GetEquipObj(me, Item.ExtEquip:GetSlot(pItem))
+      end
+      if pEquip and pEquip.dwId ~= nItemId and me.nIsP2PTrading <= 0 and tbInfo.szItemOpt ~= "CommerceTaskSubmit" then
+        local pos1 = bOther and EquipTipsPos1 or EquipTipsPos2
+        local pos2 = bOther and EquipTipsPos2 or EquipTipsPos1
+        local nPlayerId = GetItemOwner(nItemId)
+        local meId = me.dwID
+        if tbInfo.tbItemExtParams and tbInfo.tbItemExtParams.tbTradeInfo then
+          pos1 = TradeEquipTipsPos1
+          pos2 = TradeEquipTipsPos2
+        end
+        local tbEquipTipsInfo = {
+          nItemId = nItemId,
+          nTemplateId = 0,
+          nFaction = tbInfo.nFaction,
+          nFactionSect = tbInfo.nFactionSect,
+          nSex = tbInfo.nBodySex,
+          szOpt = tbInfo.szItemOpt,
+          pAsyncData = tbInfo.pAsyncData,
+          pos = pos2,
+          tbItemExtParams = tbInfo.tbItemExtParams
+        }
+        if tbEquipTipsInfo.tbItemExtParams and tbEquipTipsInfo.tbItemExtParams.tbTradeInfo then
+          tbEquipTipsInfo.tbItemExtParams.tbTradeInfo.bTrade = true
+        end
+        if Item.ZhenYuan:IsZhenYuanEquip(pItem) then
+          Ui:OpenWindow("UIZhenyuanTips", tbEquipTipsInfo)
+        elseif Item.PartnerEquip:CheckIsPartnerEquip(pItem) then
+          Ui:OpenWindow("UIPartnerEquipTips", tbEquipTipsInfo)
+        elseif Item.ShenBingPu:CheckIsShenBingPu(pItem) then
+          Ui:OpenWindow("UIDivineWeaponEquipTips", tbEquipTipsInfo)
+        else
+          Ui:OpenWindow("UIEquipTips", tbEquipTipsInfo)
+        end
+        local tbCompareTipsInfo = {
+          nItemId = pEquip.dwId,
+          nTemplateId = 0,
+          nFaction = me.nFaction,
+          nFactionSect = me.nFactionSect,
+          nSex = me.GetNpc().GetBodySex(),
+          pos = pos1,
+          szItemOpt = tbInfo.szItemOpt,
+          tbItemExtParams = tbInfo.tbItemExtParams
+        }
+        if tbCompareTipsInfo.tbItemExtParams and tbCompareTipsInfo.tbItemExtParams.tbTradeInfo then
+          tbCompareTipsInfo.tbItemExtParams.tbTradeInfo.bTrade = false
+        end
+        if Item.ZhenYuan.tbZhenYuanItemCfg[tbInfo.nTemplate] or Item.ZhenYuan:IsZhenYuanEquip(pEquip) then
+          Ui:OpenWindow("UICompareTipsZhenyuan", tbCompareTipsInfo)
+        elseif Item.PartnerEquip:CheckIsPartnerEquip(pItem) then
+          Ui:OpenWindow("UICompareTipsPartnerEquip", tbCompareTipsInfo)
+        elseif Item.ShenBingPu:CheckIsShenBingPu(pItem) then
+          Ui:OpenWindow("UICompareTipsDivineWeaponEquip", tbCompareTipsInfo)
+        else
+          Ui:OpenWindow("UICompareTips", tbCompareTipsInfo)
+        end
+      else
+        local tbEquipTipsInfo = {
+          nItemId = nItemId,
+          nFaction = tbInfo.nFaction,
+          nFactionSect = tbInfo.nFactionSect,
+          nSex = tbInfo.nBodySex,
+          szOpt = tbInfo.szItemOpt,
+          pAsyncData = tbInfo.pAsyncData,
+          pos = Ui.Vector3.zero,
+          tbItemExtParams = tbInfo.tbItemExtParams
+        }
+        if tbEquipTipsInfo.tbItemExtParams and tbEquipTipsInfo.tbItemExtParams.tbTradeInfo then
+          tbEquipTipsInfo.tbItemExtParams.tbTradeInfo.bTrade = true
+        end
+        if Item.ZhenYuan.tbZhenYuanItemCfg[tbInfo.nTemplate] or Item.ZhenYuan:IsZhenYuanEquip(pItem) then
+          Ui:OpenWindow("UIZhenyuanTips", tbEquipTipsInfo)
+        elseif Item.PartnerEquip:CheckIsPartnerEquip(pItem) then
+          Ui:OpenWindow("UIPartnerEquipTips", tbEquipTipsInfo)
+        elseif Item.ShenBingPu:CheckIsShenBingPu(pItem) then
+          Ui:OpenWindow("UIDivineWeaponEquipTips", tbEquipTipsInfo)
+        else
+          Ui:OpenWindow("UIEquipTips", tbEquipTipsInfo)
+        end
+      end
+    else
+      Ui:OpenWindow("UIItemTips", "Item", nItemId, pItem.dwTemplateId, nil, nil, nil, tbInfo.szItemOpt, tbInfo.tbItemExtParams)
+    end
+  elseif tbInfo.nTemplate then
+    local tbBaseInfo = Item:GetItemBaseProp(tbInfo.nTemplate)
+    local nEquipPos = KItem.GetEquipPos(tbInfo.nTemplate)
+    if tbItemFunc[tbBaseInfo.szClass] then
+      tbItemFunc[tbBaseInfo.szClass](tbInfo.nTemplate, nil, tbInfo)
+    elseif nEquipPos then
+      local tbEquips = me.GetEquips()
+      local nEquipPosItemId = tbEquips[nEquipPos]
+      if nEquipPos == Item.EQUIPPOS_EXTEND then
+        local nShort = Item.ExtEquip:GetSlotByTemplateId(tbInfo.nTemplate)
+        local pEquip = Item.ExtEquip:GetEquipObj(me, nShort)
+        if pEquip then
+          nEquipPosItemId = pEquip.dwId
+        end
+      end
+      if nEquipPosItemId then
+        local pos1 = EquipTipsPos1
+        local pos2 = EquipTipsPos2
+        if tbInfo.tbItemExtParams and tbInfo.tbItemExtParams.tbTradeInfo then
+          pos1 = TradeEquipTipsPos1
+          pos2 = TradeEquipTipsPos2
+        end
+        local tbEquipTipsInfo = {
+          nTemplateId = tbInfo.nTemplate,
+          nFaction = tbInfo.nFaction,
+          nFactionSect = tbInfo.nFactionSect,
+          nSex = tbInfo.nBodySex,
+          szOpt = tbInfo.szItemOpt,
+          pAsyncData = tbInfo.pAsyncData,
+          pos = pos1,
+          tbItemExtParams = tbInfo.tbItemExtParams,
+          tbLinkInfo = tbInfo.tbLinkInfo,
+          nSeries = tbInfo.nSeries
+        }
+        if tbEquipTipsInfo.tbItemExtParams and tbEquipTipsInfo.tbItemExtParams.tbTradeInfo then
+          tbEquipTipsInfo.tbItemExtParams.tbTradeInfo.bTrade = true
+          tbEquipTipsInfo.pos = pos2
+        end
+        if Item.ZhenYuan.tbZhenYuanItemCfg[tbInfo.nTemplate] then
+          Ui:OpenWindow("UIZhenyuanTips", tbEquipTipsInfo)
+        elseif tbBaseInfo.szClass and tbBaseInfo.szClass == "PartnerEquipItem" then
+          Ui:OpenWindow("UIPartnerEquipTips", tbEquipTipsInfo)
+        elseif tbBaseInfo.szClass and tbBaseInfo.szClass == "ShenBingPuItem" then
+          Ui:OpenWindow("UIDivineWeaponEquipTips", tbEquipTipsInfo)
+        else
+          Ui:OpenWindow("UIEquipTips", tbEquipTipsInfo)
+        end
+        local tbCompareTipsInfo = {
+          nItemId = nEquipPosItemId,
+          nTemplateId = 0,
+          nFaction = me.nFaction,
+          nFactionSect = me.nFactionSect,
+          nSex = me.GetNpc().GetBodySex(),
+          pAsyncData = nil,
+          pos = pos2,
+          szItemOpt = tbInfo.szItemOpt,
+          tbItemExtParams = tbInfo.tbItemExtParams,
+          nSeries = tbInfo.nSeries
+        }
+        local bShowEquipDetail = true
+        if tbEquipTipsInfo.tbItemExtParams and tbEquipTipsInfo.tbItemExtParams.tbTradeInfo then
+          bShowEquipDetail = false
+        end
+        if bShowEquipDetail then
+          if Item.ZhenYuan.tbZhenYuanItemCfg[tbInfo.nTemplate] then
+            Ui:OpenWindow("UICompareTipsZhenyuan", tbCompareTipsInfo)
+          elseif tbBaseInfo.szClass and tbBaseInfo.szClass == "PartnerEquipItem" then
+            Ui:OpenWindow("UICompareTipsPartnerEquip", tbCompareTipsInfo)
+          elseif tbBaseInfo.szClass and tbBaseInfo.szClass == "ShenBingPuItem" then
+            Ui:OpenWindow("UICompareTipsDivineWeaponEquip", tbCompareTipsInfo)
+          else
+            Ui:OpenWindow("UICompareTips", tbCompareTipsInfo)
+          end
+        end
+      else
+        local tbEquipTipsInfo = {
+          nTemplateId = tbInfo.nTemplate,
+          nFaction = tbInfo.nFaction,
+          nFactionSect = tbInfo.nFactionSect,
+          nSex = tbInfo.nBodySex,
+          szOpt = tbInfo.szItemOpt,
+          pAsyncData = tbInfo.pAsyncData,
+          pos = Ui.Vector3.zero,
+          tbItemExtParams = tbInfo.tbItemExtParams,
+          tbLinkInfo = tbInfo.tbLinkInfo,
+          nSeries = tbInfo.nSeries
+        }
+        if tbEquipTipsInfo.tbItemExtParams and tbEquipTipsInfo.tbItemExtParams.tbTradeInfo then
+          tbEquipTipsInfo.tbItemExtParams.tbTradeInfo.bTrade = true
+        end
+        if Item.ZhenYuan.tbZhenYuanItemCfg[tbInfo.nTemplate] then
+          Ui:OpenWindow("UIZhenyuanTips", tbEquipTipsInfo)
+        elseif Item.PartnerEquip.tbEquipItemCfg[tbInfo.nTemplate] then
+          Ui:OpenWindow("UIPartnerEquipTips", tbEquipTipsInfo)
+        elseif Item.ShenBingPu.tbItemCfg[tbInfo.nTemplate] then
+          Ui:OpenWindow("UIDivineWeaponEquipTips", tbEquipTipsInfo)
+        else
+          Ui:OpenWindow("UIEquipTips", tbEquipTipsInfo)
+        end
+      end
+    else
+      Ui:OpenWindow("UIItemTips", "Item", nil, tbInfo.nTemplate, tbInfo.nFaction, tbInfo.nFactionSect, tbInfo.tbLinkInfo and tbInfo.tbLinkInfo.nSex or nil, nil, tbInfo.tbItemExtParams, tbInfo.tbLinkInfo)
+    end
+  elseif tbInfo.szDigitalType then
+    Ui:OpenWindow("UIItemTips", "Digit", tbInfo.szDigitalType, tbInfo.nCount)
+  elseif tbInfo.nSkillId then
+    Ui:OpenWindow("UIItemTips", "Skill", tbInfo.nSkillId, tbInfo.nSkillLevel)
+  end
+end

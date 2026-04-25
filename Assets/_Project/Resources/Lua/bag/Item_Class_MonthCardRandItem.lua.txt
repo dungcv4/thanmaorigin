@@ -1,0 +1,71 @@
+Require("CommonScript/Item/ItemDefine.lua")
+Require("CommonScript/Item/Class/RandItem.lua")
+local tbMonthCardRandItem = Item:NewClass("MonthCardRandItem", "RandItem")
+local tbCheckJingHuoItems = {
+  [414] = 500,
+  [400] = 500,
+  [2000] = 888,
+  [1999] = 100,
+  [1996] = 10,
+  [1997] = 666,
+  [1998] = 1000,
+  [1995] = 10000
+}
+local tbCheckYuanQiItems = {
+  [671604] = 1000
+}
+
+function tbMonthCardRandItem:OnUseMany(it, nCount)
+  local nAwardId = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_AWARDID)
+  local nAwardKey = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_AWARDKEY)
+  local tbAwardStudio = StudioRandomItem:GetStudioAward(me, it.dwTemplateId)
+  local nExpendItemId = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_EXPENDITEMID)
+  local nExpendItemNum = KItem.GetItemExtParam(it.dwTemplateId, self.PARAM_EXPENDITEMNUM)
+  if tbAwardStudio then
+    nAwardId = tbAwardStudio.nAwardId
+    nAwardKey = tbAwardStudio.nAwardKey
+  end
+  if not nAwardKey or nAwardKey <= 0 then
+    nAwardKey = Award:GetLevelAwardKey(me.nLevel)
+  end
+  if not self:CheckJingHuoMaxValue(me, it.dwTemplateId, nCount) then
+    return 0
+  end
+  if not self:CheckYuanQiMaxValue(me, it.dwTemplateId, nCount) then
+    return 0
+  end
+  local nLeftBag = me.GetFreeBagCount()
+  if nLeftBag <= 0 then
+    me.CenterMsg(i18n.EasyGet("\232\131\140\229\140\133\231\169\186\233\151\180\228\184\141\232\182\179\239\188\140\230\151\160\230\179\149\228\189\191\231\148\168\239\188\129"))
+    return 0
+  end
+  local szMsg = it.szName
+  local nConsumeItemTemplateId = it.dwTemplateId
+  if nExpendItemId and nExpendItemNum and nExpendItemId > 0 and nExpendItemNum > 0 then
+    local pItem = me.GetOneItemByTypeInBag(nExpendItemId)
+    local nExpendItemSumNum = nExpendItemNum * nCount
+    if not pItem or not (nExpendItemSumNum <= me.ConsumeItemInBag(nExpendItemId, nExpendItemSumNum, Env.LogWay_UseItem)) then
+      me.CallClientScript("Item:CanNotUseCallBack", "RandItem", nExpendItemId, it.dwId)
+      return 0
+    end
+    Event:OnEvent(Event.emEVENT_RANDITEM_COSTITEM_COST, me.dwID, nExpendItemId, nExpendItemSumNum)
+  end
+  local tbAwardListForTrack = {}
+  local bHasMonthCard = WeekMonthCard:CheckMonthCardState(me)
+  for _ = 1, nCount do
+    local nEachRet = Award:CommonSendAward(me, nAwardId, nAwardKey, it.dwTemplateId, szMsg, {
+      nAwardTime = Lib:GetServerOpenDay()
+    }, not bHasMonthCard)
+    if 1 == nEachRet then
+      local tbLastAwards = Award:FetchLastAwards()
+      Lib:MergeTable(tbAwardListForTrack, tbLastAwards)
+    end
+  end
+  local tbMoneyForTrack, tbItemForTrack = Award:GetAwardListForMBILog(Award:MergetSameTypeAward(tbAwardListForTrack), true, {
+    "Gold",
+    "YuanBao",
+    "Coin"
+  })
+  Lib:TrackEvent(me.dwID, Env.track_openbox_open, nConsumeItemTemplateId, nCount, nExpendItemId, nExpendItemNum * nCount, tbMoneyForTrack.Gold or 0, tbMoneyForTrack.YuanBao or 0, tbMoneyForTrack.Coin or 0, Lib:EncodeJson(tbItemForTrack) or "")
+  return nCount
+end

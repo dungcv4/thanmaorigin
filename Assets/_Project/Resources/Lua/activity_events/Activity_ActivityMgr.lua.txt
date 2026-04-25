@@ -1,0 +1,319 @@
+ActivityMgr.tbClass = ActivityMgr.tbClass or {}
+ActivityMgr.tbSetting = ActivityMgr.tbSetting or {}
+ActivityMgr.Protocol = ActivityMgr.Protocol or {
+  GetActivityConfig = 1,
+  GetActivityData = 2,
+  DoActivityOperation = 3,
+  DoActivityOperationV2 = 4
+}
+ActivityMgr.REFRESH_OFFSET = 14400
+ActivityMgr.NoSaveKey = "__not_save_key__"
+ActivityMgr.NoLogWay = "__not_log_way__"
+ActivityMgr.NoScriptData = "__not_scriptdata__"
+ActivityMgr.ActionStatus = {Publish = 1, Cancel = 2}
+
+function ActivityMgr:CreateClass(szClass, szBaseClass)
+  if szBaseClass and self.tbClass[szBaseClass] then
+    self.tbClass[szClass] = Lib:NewClass(self.tbClass[szBaseClass])
+    return self.tbClass[szClass]
+  end
+  self.tbClass[szClass] = self.tbClass[szClass] or {}
+  return self.tbClass[szClass]
+end
+
+function ActivityMgr:GetClass(szClassName, szBaseClassName)
+  local tbClass = self.tbClass[szClassName]
+  if tbClass then
+    return tbClass
+  end
+  if szBaseClassName and self.tbClass[szBaseClassName] then
+    tbClass = Lib:NewClass(self.tbClass[szBaseClassName])
+    tbClass.szClassName = szClassName
+    self.tbClass[szClassName] = tbClass
+    return tbClass
+  end
+  tbClass = Lib:NewClass(self:GetClass("ActivityBase"))
+  tbClass.szClassName = szClassName
+  self.tbClass[szClassName] = tbClass
+  return tbClass
+end
+
+local tbClassBase = ActivityMgr:CreateClass("ActivityBase")
+
+function tbClassBase:DumpActivityInfo()
+  Log(string.format("nId=%d, szClassName=%s, nStartTime=%s, nEndTime=%s, szBeginTimeFrame=%s, szCloseTimeFrame=%s", self.nId, self.szClassName, Lib:GetTimeStr4(self.nStartTime), Lib:GetTimeStr4(self.nEndTime and self.nEndTime > 0 and self.nEndTime or 0), self.tbConfig and self.tbConfig.szBeginTimeFrame or "", self.tbConfig and self.tbConfig.szCloseTimeFrame or ""))
+end
+
+function tbClassBase:IsOpen()
+  return ActivityMgr:CheckOpening(self.tbScheduleCfg) and self:IsOpenActionStatus()
+end
+
+function tbClassBase:IsA(szClassName)
+  return self.szClassName == szClassName
+end
+
+function tbClassBase:GetId()
+  return self.nId
+end
+
+function tbClassBase:GetConfig()
+  return self.tbConfig
+end
+
+function tbClassBase:GetStartTime()
+  return self.nStartTime
+end
+
+function tbClassBase:GetEndTime()
+  return self.nEndTime
+end
+
+function tbClassBase:IsServerOnly()
+  return false
+end
+
+function tbClassBase:LoadConfig()
+  self.ACTIVITY_CONFIG = {}
+end
+
+function tbClassBase:LoadConfigWithGroup(tbConfig)
+  self.ACTIVITY_CONFIG = {}
+  self.tbConfig = {}
+end
+
+function tbClassBase:CheckConfig(nConfigId)
+  self:LoadConfig()
+  if not self.ACTIVITY_CONFIG[nConfigId] then
+    LogErr(string.format("[%s] CheckConfig fail. nConfigId =%d not found", self.szClassName, nConfigId))
+    return false
+  end
+  return true
+end
+
+function tbClassBase:IsLaunchedByGroup(tbConfig)
+  return not Lib:IsEmptyStr(tbConfig.szGroupName) and not Lib:IsEmptyStr(tbConfig.szGroupSubType)
+end
+
+function tbClassBase:CheckConfigWithGroup(tbConfig)
+  self:LoadConfigWithGroup(tbConfig)
+  if not self.tbConfig then
+    LogErr(string.format("[%s] CheckConfigWithGroup fail, szGroupName=%s,szGroupSubType=%s not found", tbConfig.szGroupName, tbConfig.szGroupSubType))
+    return false
+  end
+  if not self:CheckConfigValid(tbConfig) then
+    LogErr(string.format("[%s] CheckConfigValid fail, szGroupName=%s,szGroupSubType=%s", self.szClassName, tbConfig.szGroupName, tbConfig.szGroupSubType))
+    return false
+  end
+  return true
+end
+
+function tbClassBase:CheckConfigValid(tbConfig)
+  Log(string.format("[Warn] not check config, szGroupName=%s, szGroupSubType=%s", tbConfig.szGroupName, tbConfig.szGroupSubType))
+  return false
+end
+
+function tbClassBase:CheckCommonConfigValid()
+  local tbStrField = {
+    "szName",
+    "szLogWay",
+    "szDesc",
+    "szBeginTime",
+    "szEndTime"
+  }
+  local bResult = true
+  local tbType = ActivityMgr.Def.tbCheckFieldTyep
+  local tbCheckFunc = ActivityMgr.Def.tbCheckFieldFunc
+  for _, szField in ipairs(tbStrField) do
+    if not tbCheckFunc[tbType.string](self.tbConfig, szField) then
+      bResult = false
+    end
+  end
+  return bResult
+end
+
+function tbClassBase:OnInitWithGroup(tbConfig)
+  if not self:CheckConfigWithGroup(tbConfig) then
+    return false
+  end
+  self:OnModifyWithGroup(tbConfig)
+  return true
+end
+
+function tbClassBase:OnModifyWithGroup(tbConfig)
+  self:InitMetaData(tbConfig)
+  if self.InitExtraData then
+    self:InitExtraData(tbConfig)
+  end
+end
+
+function tbClassBase:OnInit(tbConfig)
+  if self:IsLaunchedByGroup(tbConfig) then
+    return self:OnInitWithGroup(tbConfig)
+  end
+  if not tbConfig.bIsDynamic and not self:CheckConfig(tbConfig.nConfigId) then
+    return false
+  end
+  self:OnModify(tbConfig)
+  return true
+end
+
+function tbClassBase:InitMetaData(tbConfig)
+  self.tbScheduleCfg = tbConfig
+  self.bIsDynamic = tbConfig.bIsDynamic
+  self.nStatus = tbConfig.nStatus
+  if not self:IsLaunchedByGroup(tbConfig) then
+    self.tbConfig = self.bIsDynamic and tbConfig.tbConfig or self.ACTIVITY_CONFIG[tbConfig.nConfigId]
+  elseif not self.tbConfig then
+    LogErr(string.format("[ActivityMgr] InitMetaData fail, not self.tbConfig %d %s %s", tbConfig.nId, tbConfig.szGroupName, tbConfig.szGroupSubType))
+  end
+  self.nId = tbConfig.nId
+  self.nStartTime = tbConfig.nStartTime
+  self.nEndTime = tbConfig.nEndTime
+  self.nConfigId = tbConfig.nConfigId or 0
+end
+
+function tbClassBase:OnModify(tbConfig)
+  self.bLoadConfig = false
+  if not tbConfig.bIsDynamic and not self:CheckConfig(tbConfig.nConfigId) then
+    return
+  end
+  self:InitMetaData(tbConfig)
+  if self.InitExtraData then
+    self:InitExtraData(tbConfig)
+  end
+end
+
+function tbClassBase:OnOpen()
+end
+
+function tbClassBase:OnClose()
+end
+
+function tbClassBase:GetScheduleCfg()
+  return self.tbScheduleCfg
+end
+
+function tbClassBase:IsDynamic()
+  return self.bIsDynamic
+end
+
+function tbClassBase:UpdateActionStatus(nStatus)
+  self.nStatus = nStatus
+  self.tbScheduleCfg.nStatus = nStatus
+end
+
+function tbClassBase:GetActionStatus()
+  return self.tbScheduleCfg.nStatus
+end
+
+function tbClassBase:IsOpenActionStatus()
+  return not self:IsDynamic() or ActivityMgr:IsOpenStatus(self:GetActionStatus())
+end
+
+function tbClassBase:GetSaveKeyFieldName()
+  return "szSaveKey"
+end
+
+function tbClassBase:GetLogWayFieldName()
+  return "szLogWay"
+end
+
+function tbClassBase:GetScriptDataFieldName()
+  return ActivityMgr.NoScriptData
+end
+
+function ActivityMgr:GenClassName(tbScheduleCfg)
+  local szClassName
+  if not self:IsActivityGroup(tbScheduleCfg) then
+    return tbScheduleCfg.szClassName
+  end
+  if not ActivityGroup[tbScheduleCfg.szGroupName] or not ActivityGroup[tbScheduleCfg.szGroupName][tbScheduleCfg.szGroupSubType] then
+    LogErr(string.format("[ActivityMgr] OpenActivity szGroupName=%s szSubType=%s not found", tbScheduleCfg.szGroupName, tbScheduleCfg.szGroupSubType))
+    return
+  end
+  return ActivityGroup[tbScheduleCfg.szGroupName][tbScheduleCfg.szGroupSubType].szClassName
+end
+
+function ActivityMgr:Create(szClassName)
+  local tbClass = self.tbClass[szClassName]
+  if not tbClass then
+    return nil
+  end
+  local tb = {}
+  setmetatable(tb, {__index = tbClass})
+  return tb
+end
+
+function ActivityMgr:CheckOpening(tbScheduleConfig)
+  local nNow = GetTime()
+  if tbScheduleConfig.nStartTime and nNow < tbScheduleConfig.nStartTime then
+    return false
+  end
+  if tbScheduleConfig.nEndTime and nNow >= tbScheduleConfig.nEndTime then
+    return false
+  end
+  if not Lib:IsEmptyStr(tbScheduleConfig.szBeginTimeFrame) and 0 == GetTimeFrameState(tbScheduleConfig.szBeginTimeFrame) then
+    return false
+  end
+  if not Lib:IsEmptyStr(tbScheduleConfig.szCloseTimeFrame) and 1 == GetTimeFrameState(tbScheduleConfig.szCloseTimeFrame) then
+    return false
+  end
+  local nCreateTime = GetServerCreateTime()
+  local nOpenServerTime = 0
+  if not Lib:IsEmptyStr(tbScheduleConfig.szOpenServerTime) then
+    nOpenServerTime = Lib:ParseDateTime(tbScheduleConfig.szOpenServerTime) or 0
+  end
+  if nCreateTime < nOpenServerTime then
+    return false
+  end
+  return true
+end
+
+function ActivityMgr:IsOpenStatus(nStatus)
+  return nStatus == self.ActionStatus.Publish
+end
+
+function ActivityMgr:CheckExpired(nLastStartTime, nStartTime)
+  return nStartTime > (nLastStartTime or 0)
+end
+
+function ActivityMgr:GetInstanceById(nId)
+  return self.tbInstance[nId]
+end
+
+function ActivityMgr:GetInstanceByClassName(szClassName)
+  local pInstance
+  for nId in pairs(self.tbClassName2Id[szClassName] or {}) do
+    pInstance = self:GetInstanceById(nId)
+    if pInstance then
+      return pInstance
+    end
+  end
+  return nil
+end
+
+function ActivityMgr:GetConfigurationChecker(szClassName)
+  return self.tbClass[szClassName] and self.tbClass[szClassName].CheckAndGenDynamicConfig
+end
+
+function ActivityMgr:IsActivityGroup(tbScheduleCfg)
+  if not Lib:IsEmptyStr(tbScheduleCfg.szGroupName) and not Lib:IsEmptyStr(tbScheduleCfg.szGroupSubType) then
+    return true
+  end
+  return false
+end
+
+function ActivityMgr:GetActivityCfgWithGroup(szGroupName, szGroupSubType)
+  if not ActivityGroup[szGroupName] or not ActivityGroup[szGroupName][szGroupSubType] then
+    return nil
+  end
+  return Lib:CopyTB(ActivityGroup[szGroupName][szGroupSubType])
+end
+
+function ActivityMgr:CheckIsServerJinShanChannel()
+  local nChannelId = string.sub(tostring(SERVER_ID), 1, 2)
+  if "10" == nChannelId then
+    return true
+  end
+  return false
+end

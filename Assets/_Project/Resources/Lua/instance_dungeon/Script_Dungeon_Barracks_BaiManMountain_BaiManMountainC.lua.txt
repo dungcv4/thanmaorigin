@@ -1,0 +1,169 @@
+Require("CommonScript/BeachFight/BeachFightCfg.lua")
+BaiManMountain.BaiManMountainC = BaiManMountain.BaiManMountainC or {}
+local BaiManMountainC = BaiManMountain.BaiManMountainC
+BaiManMountainC.MainMap = BaiManMountainC.MainMap or {}
+local MainMap = BaiManMountainC.MainMap
+MainMap.bIsCanExit = true
+BaiManMountainC.Protocol = {
+  [BaiManMountain.Def.Protocol.SetTargetPos] = "OnSetTargetPosResp",
+  [BaiManMountain.Def.Protocol.ChangeNewTarget] = "OnChangeNewTargetResp",
+  [BaiManMountain.Def.Protocol.UpdateTargetProgress] = "OnUpdateTargetProgress",
+  [BaiManMountain.Def.Protocol.NotifyPrepare] = "OnNotifyPrepareResp",
+  [BaiManMountain.Def.Protocol.NotifySettlement] = "OnNotifySettlementResp",
+  [BaiManMountain.Def.Protocol.ClearTargetPos] = "OnClearTargetPosResp",
+  [BaiManMountain.Def.Protocol.FinishTarget] = "OnFinishTargetResp"
+}
+
+function BaiManMountainC:ServerCmd(nProtocol, ...)
+  if self.Protocol[nProtocol] then
+    self[self.Protocol[nProtocol]](self, ...)
+  else
+    Lib:LogErrFormat("BaiManMountainC: ServerCmd failed, invalid Protocol %s", nProtocol)
+  end
+end
+
+function BaiManMountainC:OnSetTargetPosResp(nPosX, nPosY)
+  Dungeon:SetTargetPos(nPosX, nPosY)
+end
+
+function BaiManMountainC:OnClearTargetPosResp()
+  Dungeon:ClearTargetPos()
+end
+
+function BaiManMountainC:OnChangeNewTargetResp(szTargetType)
+  if BaiManMountain.Cfg.TargetCfg[szTargetType] then
+    local szMsg = BaiManMountain.Cfg.TargetCfg[szTargetType].szBeforeMsg
+    if not Lib:IsEmptyStr(szMsg) then
+      me.CenterMsg(i18n.Get(szMsg))
+    end
+  end
+end
+
+function BaiManMountainC:OnFinishTargetResp(szTargetType)
+  if BaiManMountain.Cfg.TargetCfg[szTargetType] then
+    local szMsg = BaiManMountain.Cfg.TargetCfg[szTargetType].szFinishMsg
+    if not Lib:IsEmptyStr(szMsg) then
+      me.CenterMsg(i18n.Get(szMsg))
+    end
+  end
+end
+
+function BaiManMountainC:OnNotifyPrepareResp(nRestTime)
+  MainMap.bIsCanExit = false
+  local tbTimeInfo
+  if Lib:IsInteger(nRestTime) then
+    tbTimeInfo = {
+      nRestTime + 3,
+      i18n.EasyGet("\229\135\134\229\164\135\230\151\182\233\151\180\239\188\154%s")
+    }
+    Ui:OpenWindow("UIReadyGo", nRestTime)
+  else
+    tbTimeInfo = {}
+  end
+  FubenUIController:ShowDefaultInfo({tbTimeInfo}, {
+    i18n.EasyGet("\231\173\137\229\190\133\229\137\175\230\156\172\229\188\128\229\167\139")
+  })
+end
+
+function BaiManMountainC:OnNotifySettlementResp(nRestTime)
+  local tbTimeInfo
+  if nil ~= nRestTime then
+    tbTimeInfo = {
+      nRestTime,
+      i18n.EasyGet("\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154%s")
+    }
+  else
+    tbTimeInfo = {}
+  end
+  FubenUIController:ShowDefaultInfo({tbTimeInfo}, {
+    i18n.EasyGet("\229\137\175\230\156\172\229\183\178\231\187\147\230\157\159")
+  })
+  self.bIsCanExit = true
+  EventNotify.OnNotify(EventNotify.emNOTIFY_CHANGE_LEAVE_BUTTON)
+end
+
+function BaiManMountainC:OnUpdateTargetProgress(szTargetType, nLeftTime, nProgress)
+  Lib:Tree({
+    szTargetType,
+    nLeftTime,
+    nProgress
+  })
+  local tbTargetCfg = BaiManMountain.Cfg.TargetCfg[szTargetType]
+  if tbTargetCfg then
+    local tbTexts = {}
+    if not Lib:IsEmptyStr(tbTargetCfg.szTargetDesc) then
+      tbTexts[1] = i18n.EasyGet("\229\189\147\229\137\141\231\155\174\230\160\135\239\188\154") .. i18n.Get(tbTargetCfg.szTargetDesc)
+    end
+    if not Lib:IsEmptyStr(tbTargetCfg.szProcessDesc) then
+      tbTexts[2] = i18n.Get(tbTargetCfg.szProcessDesc, nProgress)
+    end
+    local tbTimerParam = {}
+    if nil ~= nLeftTime then
+      tbTimerParam = {
+        {
+          nLeftTime,
+          i18n.EasyGet("\229\137\175\230\156\172\229\137\169\228\189\153\230\151\182\233\151\180\239\188\154%s")
+        }
+      }
+    else
+      tbTimerParam = {}
+    end
+    FubenUIController:ShowDefaultInfo(tbTimerParam, tbTexts)
+  end
+end
+
+function BaiManMountainC:RegisterRaceMapUIChecker()
+  FubenUIController:RegisterChecker({
+    BaiManMountain.Cfg.nMainMapTemplateId
+  }, self.MainMap)
+end
+
+function MainMap:OnFubenMapLoaded()
+  FubenUIController:OpenDefaultFuBenUI()
+  self.bIsCanExit = false
+end
+
+function MainMap:OnLeave()
+  FubenUIController:CloseFubenUI()
+  AFK:Stop()
+  self.bIsCanExit = false
+end
+
+function MainMap:IsNeedExitFubenButton()
+  return self.bIsCanExit
+end
+
+BaiManMountainC:RegisterRaceMapUIChecker()
+
+function BaiManMountainC:CallServerScript(nProtocol, ...)
+  RemoteServer.RequestBaiManMountain(nProtocol, ...)
+end
+
+function BaiManMountain:OnJoin()
+  local function fnOpenTeamWindowShowBarrack()
+    Ui:OpenWindowWithCallback("UITeam", function(_, tbWnd)
+      if not tbWnd:SelectBigAndSmallButton("Barracks", "BaiManMountain") then
+        LogErr("Barracks big button or BaiManMountain small button is not exsit in UITeam left")
+      end
+    end)
+  end
+  
+  if not TeamMgr:HasTeam() then
+    Ui:CloseWindow("UIActivity")
+    fnOpenTeamWindowShowBarrack()
+  elseif not TeamMgr:IsCaptain() then
+    me.CenterMsg(TeamMgr.OnlyCaptainCanJoinHintMsg())
+  elseif not TeamMgr:TeamFull() then
+    Ui:CloseWindow("UIActivity")
+    Ui:OpenWindowWithCallback("UITeam", function(_, tbWnd)
+      TeamMgr:SetTeamActivity(TeamMgr:GetActivityId("Barracks", "BaiManMountain"))
+      tbWnd:SelectBigButton("myTeam")
+    end)
+  else
+    Ui:CloseWindow("UIActivity")
+    local nActivityId = TeamMgr:GetActivityId("Barracks", "BaiManMountain")
+    if nil ~= nActivityId then
+      TeamMgr:AutoSetAndEnterActivity(nActivityId)
+    end
+  end
+end

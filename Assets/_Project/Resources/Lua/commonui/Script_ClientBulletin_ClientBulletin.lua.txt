@@ -1,0 +1,293 @@
+Require("Script/Ui/Common/RedPointMgr.lua")
+ClientBulletin.BULLETIN_TYPE_LOGIN = 1
+ClientBulletin.BULLETIN_TYPE_SERVER = 2
+ClientBulletin.BULLETIN_TYPE_END = 3
+ClientBulletin.MAX_REDPOINT = 10
+ClientBulletin.tbRedPoint = {}
+ClientBulletin.nServerBulletinOpenLevel = 10
+ClientBulletin.tbRequesting = {}
+ClientBulletin.nRequestInterval = 1
+ClientBulletin.tbGetUrlFunc = {
+  [ClientBulletin.BULLETIN_TYPE_LOGIN] = function()
+    local szTime = os.date("%Y%m%d%H%M", GetTime())
+    return string.format("%sgetLoginBulletin?time=%d&bundleId=%s", Client.BulletinUrl, szTime, ClientBulletin:GetBundleId())
+  end,
+  [ClientBulletin.BULLETIN_TYPE_SERVER] = function()
+    local szTime = os.date("%Y%m%d%H%M", GetTime())
+    return string.format("%sgetGsBulletin?time=%d&serverId=%d", Client.BulletinUrl, szTime, me.nServerId)
+  end
+}
+local tbBtnShowCfg = Lib:EasyLoadTabFile("Setting/UI/UIHudRightTopBtn.tab", {"szBtnName"})
+if tbBtnShowCfg and tbBtnShowCfg.btnNewInfo then
+  ClientBulletin.nServerBulletinOpenLevel = tbBtnShowCfg.btnNewInfo.nLevel or 1
+end
+local tbSortMap = {
+  everytime = 3,
+  daily = 2,
+  once = 1,
+  default = 1
+}
+ClientBulletin.tbCallBackFunc = {
+  [ClientBulletin.BULLETIN_TYPE_LOGIN] = function(bRet, szJson, bActive)
+    if not bRet then
+      if bActive then
+        Ui:OpenWindow("UIMessageBoxBig", i18n.EasyGet("\232\142\183\229\143\150\229\133\172\229\145\138\232\182\133\230\151\182"), {
+          function()
+          end
+        }, {
+          i18n.szOk
+        })
+      end
+      return
+    end
+    local tbBulletinInfo = Lib:DecodeJson(szJson)
+    if #tbBulletinInfo.data <= 0 then
+      if bActive then
+        Ui:OpenWindow("UIMessageBoxBig", i18n.EasyGet("\230\178\161\230\156\137\230\150\176\229\133\172\229\145\138"), {
+          function()
+          end
+        }, {
+          i18n.szOk
+        })
+      end
+      return
+    end
+    table.sort(tbBulletinInfo.data, function(a, b)
+      local nSortA = tbSortMap[a.show_frequency or "default"] or tbSortMap.default
+      local nSortB = tbSortMap[b.show_frequency or "default"] or tbSortMap.default
+      if nSortA == nSortB then
+        return a.weight > b.weight
+      else
+        return nSortA > nSortB
+      end
+    end)
+    local tbBulletinRecord = LocalData:GetGlobalTable("ClientBulletin", {})
+    local bNeedShow = bActive
+    local nNow = GetTime()
+    if not bActive then
+      for _, tbInfo in ipairs(tbBulletinInfo.data) do
+        local nLastViewTime = tbBulletinRecord[tbInfo.id]
+        if nLastViewTime then
+          if tbInfo.show_frequency then
+            if tbInfo.show_frequency == "everytime" then
+              bNeedShow = true
+              break
+            elseif tbInfo.show_frequency == "daily" and Lib:IsDiffDay(14400, nNow, nLastViewTime) then
+              bNeedShow = true
+              break
+            end
+          end
+        else
+          bNeedShow = true
+          break
+        end
+      end
+    end
+    if bNeedShow then
+      for k, _ in pairs(tbBulletinRecord) do
+        tbBulletinRecord[k] = nil
+      end
+      for _, tbInfo in ipairs(tbBulletinInfo.data) do
+        tbBulletinRecord[tbInfo.id] = nNow
+      end
+      LocalData:SetGlobalTable("ClientBulletin", tbBulletinRecord)
+      Ui:OpenWindow("UIAnnouncement", tbBulletinInfo.data)
+    end
+  end,
+  [ClientBulletin.BULLETIN_TYPE_SERVER] = function(bRet, szJson, bActive)
+    if not bRet then
+      if bActive then
+        Ui:OpenWindow("UINewInformation", ClientBulletin.tbBulletinInfo and ClientBulletin.tbBulletinInfo.data)
+      end
+      return
+    end
+    local tbBulletinInfo = Lib:DecodeJson(szJson)
+    if #tbBulletinInfo.data <= 0 then
+      if bActive then
+        Ui:OpenWindow("UINewInformation")
+      end
+      return
+    end
+    ClientBulletin.tbBulletinInfo = tbBulletinInfo
+    table.sort(tbBulletinInfo.data, function(a, b)
+      local nSortA = tbSortMap[a.show_frequency or "default"] or tbSortMap.default
+      local nSortB = tbSortMap[b.show_frequency or "default"] or tbSortMap.default
+      if nSortA == nSortB then
+        return a.weight > b.weight
+      else
+        return nSortA > nSortB
+      end
+    end)
+    local tbBulletinRecord = LocalData:GetRoleTable("ServerBulletin", {})
+    local bNeedShow = bActive
+    local nNow = GetTime()
+    for nIndex, tbInfo in ipairs(tbBulletinInfo.data) do
+      local bNeedRedPoint = false
+      local nLastViewTime = tbBulletinRecord[tbInfo.id]
+      if nLastViewTime then
+        if tbInfo.show_frequency then
+          if tbInfo.show_frequency == "everytime" then
+            bNeedShow = true
+          elseif tbInfo.show_frequency == "daily" and Lib:IsDiffDay(14400, nNow, nLastViewTime) then
+            bNeedShow = true
+          end
+        end
+      else
+        bNeedShow = true
+        bNeedRedPoint = true
+      end
+      if bNeedRedPoint then
+        RedPointMgr:LightRedPoint(ClientBulletin.tbRedPoint[nIndex])
+      end
+    end
+    if bNeedShow then
+      for k, _ in pairs(tbBulletinRecord) do
+        tbBulletinRecord[k] = nil
+      end
+      for _, tbInfo in ipairs(tbBulletinInfo.data) do
+        tbBulletinRecord[tbInfo.id] = nNow
+      end
+      LocalData:SetRoleTable("ServerBulletin", tbBulletinRecord)
+      Ui:OpenWindow("UINewInformation", tbBulletinInfo.data)
+    end
+  end
+}
+ClientBulletin.nActiveInterval = 30
+
+function ClientBulletin:GetBulletin(nType, bActive)
+  if nType >= ClientBulletin.BULLETIN_TYPE_END or nType < 1 then
+    return
+  end
+  if Ui.InSavePowerMode and not Ui.GameEnv.InPlatform_PC then
+    return
+  end
+  if Client.BulletinUrl ~= "" then
+    local szUrl = self.tbGetUrlFunc[nType]()
+    
+    local function funcCallback(bRet, szJson)
+      self.tbRequesting[nType] = false
+      self.tbCallBackFunc[nType](bRet, szJson, bActive)
+    end
+    
+    if szUrl and "" ~= szUrl and not self.tbRequesting[nType] then
+      self.tbRequesting[nType] = true
+      Client.HttpModule.Get(szUrl, funcCallback)
+      return
+    end
+  end
+  if nType == ClientBulletin.BULLETIN_TYPE_SERVER and bActive then
+    local tbData
+    if ClientBulletin.tbBulletinInfo then
+      tbData = ClientBulletin.tbBulletinInfo.data
+    end
+    Ui:OpenWindow("UINewInformation", tbData)
+  end
+end
+
+function ClientBulletin:GetBundleId()
+  return CS.UnityEngine.Application.identifier
+end
+
+function ClientBulletin:GetLangStr()
+  if not Ui.GameEnv.LimitLangCode or Ui.GameEnv.LimitLangCode == "" then
+    return i18n.CurrentLanguageCode()
+  else
+    return Ui.GameEnv.LimitLangCode
+  end
+end
+
+function ClientBulletin:OnBulletinChange(szLang, nId, bDelete)
+  if szLang ~= self:GetLangStr() then
+    return
+  end
+  if bDelete then
+    self.tbBulletin[nId] = nil
+  else
+    self:RequestBulletinById(nId)
+  end
+end
+
+function ClientBulletin:RequestAllBulletin()
+  local szLang = self:GetLangStr()
+  RemoteServer.RequestAllBulletin(szLang)
+end
+
+function ClientBulletin:OnSyncAllBulletin(szLang, tbAllBulletin)
+  local szCurrentLang = self:GetLangStr()
+  if szLang ~= szCurrentLang then
+    return
+  end
+  self.tbBulletin = tbAllBulletin
+end
+
+function ClientBulletin:RequestBulletinById(nId)
+  local szLang = self:GetLangStr()
+  RemoteServer.RequestSingleBulletin(szLang, nId)
+end
+
+function ClientBulletin:OnSyncSingleBulletin(tbBulletin)
+  local szCurrentLang = self:GetLangStr()
+  if tbBulletin.szLang ~= szCurrentLang then
+    return
+  end
+  self.tbBulletin[tbBulletin.nId] = tbBulletin
+end
+
+function ClientBulletin:SendSystemChannelMsg(szMsg, nSenderId, bIsRollMsg)
+  Ui:OnWorldNotify(szMsg, nSenderId, bIsRollMsg)
+end
+
+function ClientBulletin:OnPlayerLogin()
+  if me.nLevel >= self.nServerBulletinOpenLevel then
+    self:GetBulletin(self.BULLETIN_TYPE_SERVER)
+  end
+  self:RequestAllBulletin()
+end
+
+function ClientBulletin:OnLanguageChange()
+  self:RequestAllBulletin()
+end
+
+function ClientBulletin:Active()
+  local nTime = GetTime()
+  local nTimeStamp = nTime * 1000
+  for nId, tbInfo in pairs(self.tbBulletin) do
+    if nTimeStamp >= tbInfo.nStartTime and nTimeStamp <= tbInfo.nEndTime and (not self.tbLastShowTime[nId] or nTime - self.tbLastShowTime[nId] > tbInfo.nFrequency * 60) then
+      if 1 == tbInfo.nType then
+        self:SendSystemChannelMsg(tbInfo.szContent, ChatMgr.SystemMsgType.System, 1)
+      elseif 2 == tbInfo.nType then
+        ChatMgr:OnChannelMessage(ChatMgr.ChannelType.System, 0, ChatMgr.SystemMsgType.System, "", 0, 0, 0, tbInfo.szContent)
+      end
+      self.tbLastShowTime[nId] = nTime
+    end
+  end
+  return true
+end
+
+function ClientBulletin:ReturnToLogin()
+  self.tbBulletin = {}
+end
+
+function ClientBulletin:CheckIsOpen()
+  if self.tbBulletinInfo and self.tbBulletinInfo.data and #self.tbBulletinInfo.data > 0 then
+    return true
+  end
+  return false
+end
+
+function ClientBulletin:Init()
+  self.tbBulletin = self.tbBulletin or {}
+  self.tbLastShowTime = self.tbLastShowTime or {}
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_PLAYER_LOGIN, self.OnPlayerLogin, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_LOCALIZE_CHANGE, self.OnLanguageChange, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_RETURN_TO_LOGIN, self.ReturnToLogin, self)
+  if self.nTimer then
+    Timer:Close(self.nTimer)
+  end
+  self.nTimer = Timer:Register(self.nActiveInterval * Env.GAME_FPS, self.Active, self)
+  for i = RedPointMgr.EVENT.ClientBulletinBegin, RedPointMgr.EVENT.ClientBulletinEnd do
+    table.insert(self.tbRedPoint, i)
+  end
+end
+
+ClientBulletin:Init()

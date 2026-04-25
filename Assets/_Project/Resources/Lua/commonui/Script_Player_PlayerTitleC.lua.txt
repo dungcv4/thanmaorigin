@@ -1,0 +1,135 @@
+function PlayerTitle:OnSyncAllData(tbAllData)
+  me.tbPlayerTitleData = tbAllData
+  
+  local pNpc = me.GetNpc()
+  if tbAllData.nActivateTitle > 0 then
+    pNpc.SetTitleInfo(tbAllData.nActivateTitle, tbAllData.szActivateTitle)
+  end
+  self:CheckAttr()
+end
+
+function PlayerTitle:CheckAttr()
+  if FightSkill:IsAttriKeyValue(FightSkill.nTitleAttrKey) then
+    return
+  end
+  local tbTitleIds = {}
+  for nTitleId, _ in pairs(me.tbPlayerTitleData.tbAllTitle or {}) do
+    if self:IsTitleHasAttr(nTitleId) then
+      table.insert(tbTitleIds, nTitleId)
+    end
+  end
+  if #tbTitleIds > 0 then
+    me.AddAttrTitles(tbTitleIds)
+    me.AddTitlesAttr(tbTitleIds)
+  end
+  FightSkill:AddAttriKey(FightSkill.nTitleAttrKey)
+end
+
+function PlayerTitle:GetPlayerTitleData()
+  local tbData = me.tbPlayerTitleData
+  if not tbData then
+    me.tbPlayerTitleData = {}
+    tbData = me.tbPlayerTitleData
+  end
+  tbData.nActivateTitle = tbData.nActivateTitle or 0
+  tbData.tbAllTitle = tbData.tbAllTitle or {}
+  return tbData
+end
+
+function PlayerTitle:AddTitle(nTitleID, nEndTime, szTitle)
+  local tbData = self:GetPlayerTitleData()
+  local tbTitleData = {}
+  tbTitleData.nTitleID = nTitleID
+  tbTitleData.nEndTime = nEndTime
+  tbTitleData.szTitle = szTitle
+  tbData.tbAllTitle[nTitleID] = tbTitleData
+  if self:IsTitleHasAttr(nTitleID) then
+    me.AddAttrTitle(nTitleID)
+    me.AddTitleAttr(nTitleID)
+  end
+  local tbTitleTemp = PlayerTitle:GetTitleTemplate(nTitleID)
+  if tbTitleTemp and 1 == tbTitleTemp.bAutoUse then
+    RemoteServer.ActiveTitle(nTitleID)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UPDATE_TITLE)
+  RedPointMgr:LightRedPoint(RedPointMgr.EVENT.TitleUpdate)
+end
+
+function PlayerTitle:OpenTitleWithTitleID(nTitleID)
+  local tbInfo = self:GetTitleTemplate(nTitleID)
+  if tbInfo then
+    Ui:OpenWindow("UITitle", nTitleID)
+  end
+end
+
+function PlayerTitle:SetTitleStr(nTitleID, szTitle)
+  local tbData = self:GetPlayerTitleData()
+  if 0 ~= nTitleID and not tbData.tbAllTitle[nTitleID] then
+    return
+  end
+  tbData.tbAllTitle[nTitleID].szTitle = szTitle
+  if tbData.nActivateTitle == nTitleID then
+    self:ActiveTitle(nTitleID, szTitle)
+  end
+end
+
+function PlayerTitle:ActiveTitle(nTitleID, szTitle)
+  local tbData = self:GetPlayerTitleData()
+  tbData.nActivateTitle = nTitleID
+  tbData.szActiveTitle = szTitle
+  local pNpc = me.GetNpc()
+  if pNpc then
+    pNpc.SetTitleInfo(nTitleID, szTitle)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UPDATE_TITLE)
+end
+
+function PlayerTitle:DeleteTitle(nTitleID)
+  local tbData = self:GetPlayerTitleData()
+  tbData.tbAllTitle[nTitleID] = nil
+  if self:IsTitleHasAttr(nTitleID) then
+    me.DelTitle(nTitleID)
+  end
+  EventNotify.OnNotify(EventNotify.emNOTIFY_UPDATE_TITLE)
+end
+
+function PlayerTitle:GetTitle(nTitleID)
+  local tbData = self:GetPlayerTitleData()
+  return tbData.tbAllTitle[nTitleID]
+end
+
+function PlayerTitle:SetTitleLabel(tbWnd, szLabel, nTitleID, szTitle)
+  local pNpc = me.GetNpc()
+  nTitleID = nTitleID or pNpc.nTitleID
+  if nTitleID <= 0 then
+    tbWnd.pPanel:Label_SetText(szLabel, "")
+    return
+  end
+  local tbTitleTemp = PlayerTitle:GetTitleTemplate(nTitleID)
+  if nil == tbTitleTemp then
+    Log("No Title!!", nTitleID)
+    return
+  end
+  local szTitleColor = Ui.tbQualityColor[tbTitleTemp.Quality] or "ebebeb"
+  tbWnd.pPanel:Label_SetText(szLabel, string.format("<color=#%s>%s</color>", szTitleColor, szTitle or tbTitleTemp.Name))
+end
+
+function PlayerTitle:GetShowCurTitleCount()
+  local nCount = 0
+  local tbData = self:GetPlayerTitleData()
+  for nTitleId, _ in pairs(tbData.tbAllTitle or {}) do
+    if self:IsCanShow(nTitleId) then
+      nCount = nCount + 1
+    end
+  end
+  return nCount
+end
+
+function PlayerTitle:GetTitlesFightPower()
+  local tbTitleIds = me.GetAttrTitles()
+  local nFightPower = 0
+  for _, nTitleId in pairs(tbTitleIds or {}) do
+    nFightPower = nFightPower + PlayerTitle:GetTitleFightPower(nTitleId)
+  end
+  return nFightPower
+end

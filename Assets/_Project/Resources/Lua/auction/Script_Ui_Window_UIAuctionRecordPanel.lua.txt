@@ -1,0 +1,123 @@
+local tbWnd = Ui:CreateWindow("UIAuctionRecord")
+tbWnd.tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  txtTitle = "node/imgBG/txtTitle",
+  goRecord = "node/imgBG/Content/RecordList/Template",
+  txtNoAuction = "node/imgBG/Content/txtNoAuction",
+  btnLeft = "node/imgBG/Content/BtnList/btnLeft",
+  btnRight = "node/imgBG/Content/BtnList/btnRight",
+  txtPages = "node/imgBG/Content/BtnList/txtPages"
+}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnLeft = function(self)
+    self:OnClickLeftPage()
+  end,
+  btnRight = function(self)
+    self:OnClickRightPage()
+  end
+}
+tbWnd.nCountPerPage = 7
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_AUCTION_DATA,
+      self.OnSyncAuctionData
+    }
+  }
+end
+
+function tbWnd:OnOpen(szAuctionType, bIsMyAuction)
+  self.szAuctionType = szAuctionType
+  self.bIsMyAuction = bIsMyAuction
+  self.tbShowList = {}
+  self.nCurPage = 0
+  self.nMaxPage = 0
+  Auction:AskAuctionDealListInfo(szAuctionType)
+end
+
+function tbWnd:OnSyncAuctionData(szType, szAuctionType)
+  if "AuctionDealList" == szType and szAuctionType == self.szAuctionType then
+    self:InitData()
+  end
+end
+
+function tbWnd:InitData()
+  self.tbShowList = Auction:GetAuctionDealList(self.szAuctionType)
+  self.nCurPage = 0
+  self.nMaxPage = math.ceil(#self.tbShowList / self.nCountPerPage)
+  local szTitle
+  if self.bIsMyAuction then
+    szTitle = i18n.EasyGet("\230\136\145\231\154\132\230\139\141\229\141\150\232\174\176\229\189\149")
+  elseif Auction:IsGlobal(self.szAuctionType) then
+    szTitle = i18n.EasyGet("\229\133\168\230\156\141\230\139\141\229\141\150\232\174\176\229\189\149")
+  elseif Auction:IsShoper(self.szAuctionType) then
+    szTitle = i18n.EasyGet("\231\165\158\231\167\152\229\149\134\228\186\186\230\139\141\229\141\150\232\174\176\229\189\149")
+  elseif Tong:HasTong() then
+    szTitle = i18n.EasyGet("\229\184\174\228\188\154\230\139\141\229\141\150\232\174\176\229\189\149")
+  else
+    szTitle = i18n.EasyGet("\229\174\182\230\151\143\230\139\141\229\141\150\232\174\176\229\189\149")
+  end
+  self.pPanel:Label_SetText(self.txtTitle, szTitle)
+  for nId = 1, self.nCountPerPage do
+    self.pPanel:SetActive(self.goRecord .. nId, false)
+  end
+  self.pPanel:SetActive(self.txtNoAuction, 0 == self.nMaxPage)
+  self.pPanel:Button_SetEnable(self.btnLeft, false)
+  self.pPanel:Button_SetEnable(self.btnRight, false)
+  self.pPanel:Label_SetText(self.txtPages, "0/0")
+  self:OnClickRightPage()
+end
+
+function tbWnd:UpdateData()
+  local nBeginId = (self.nCurPage - 1) * self.nCountPerPage
+  for nId = 1, self.nCountPerPage do
+    local tbRecord = self.tbShowList[nBeginId + nId]
+    local szKey = self.goRecord .. nId
+    if not self.bIsMyAuction and tbRecord or self.bIsMyAuction and tbRecord and tbRecord.nBidderId == me.dwID then
+      self.pPanel:Label_SetText(szKey .. "/txtActivity", i18n.Get(Auction.Def.tbTypeToName[tbRecord.szType]))
+      self.pPanel:Label_SetText(szKey .. "/txtTime", Lib:OSDate(i18n.EasyGet("%m\230\156\136%d\230\151\165%H:%M"), tbRecord.nTime))
+      self.pPanel:Label_SetText(szKey .. "/txtItem", i18n.Parse(Item:GetItemBaseProp(tbRecord.nItemId).szName))
+      local szMoneyType
+      if Auction:IsShoper(self.szAuctionType) then
+        szMoneyType = Auction:GetShoperAuctionItemMoneyType(tbRecord.nOrgId)
+      else
+        szMoneyType = Auction:GetAuctionItemMoneyType(tbRecord.nItemId)
+      end
+      local szPrice
+      if tbRecord.szName then
+        if tbRecord.bBidOver then
+          szPrice = i18n.EasyGet("{0}{1}\228\184\128\229\143\163\228\187\183\230\136\144\228\186\164", tbRecord.nPrice, Currency:GetName(szMoneyType))
+        else
+          szPrice = i18n.EasyGet("{0}{1}\231\171\158\230\139\141\228\187\183\230\136\144\228\186\164", tbRecord.nPrice, Currency:GetName(szMoneyType))
+        end
+      else
+        szPrice = i18n.EasyGet("\230\181\129\230\139\141\232\135\179\228\184\150\231\149\140\231\171\158\230\139\141")
+      end
+      self.pPanel:Label_SetText(szKey .. "/txtPrice", szPrice)
+      self.pPanel:SetActive(szKey, true)
+    else
+      self.pPanel:SetActive(szKey, false)
+    end
+  end
+  self.pPanel:Button_SetEnable(self.btnLeft, self.nCurPage > 1)
+  self.pPanel:Button_SetEnable(self.btnRight, self.nCurPage < self.nMaxPage)
+  self.pPanel:Label_SetText(self.txtPages, string.format("%d/%d", self.nCurPage, self.nMaxPage))
+end
+
+function tbWnd:OnClickLeftPage()
+  if self.nCurPage > 1 then
+    self.nCurPage = self.nCurPage - 1
+    self:UpdateData()
+  end
+end
+
+function tbWnd:OnClickRightPage()
+  if self.nCurPage < self.nMaxPage then
+    self.nCurPage = self.nCurPage + 1
+    self:UpdateData()
+  end
+end

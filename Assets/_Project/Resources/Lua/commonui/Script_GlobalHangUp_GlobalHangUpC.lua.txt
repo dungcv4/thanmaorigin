@@ -1,0 +1,106 @@
+Require("CommonScript/GlobalHangUp/GlobalHangUp.lua")
+
+function GlobalHangUp:OnFubenMapLoaded()
+  FubenUIController:OpenFuBenUI()
+  self:RefreshUIShowInfo()
+  if self.nRefreshTimer then
+    Timer:Close(self.nRefreshTimer)
+    self.nRefreshTimer = nil
+  end
+  self.nRefreshTimer = Timer:Register(Env.GAME_FPS * 2, function(this)
+    this:RefreshUIShowInfo()
+    return true
+  end, self)
+end
+
+function GlobalHangUp:RefreshUIShowInfo()
+  if not self.Cfg.MapList[me.nMapTemplateId] then
+    return
+  end
+  local nExp = me.GetUserValue(self.SAVE_KEY, self.SAVE_ID_LIST.ExpNum)
+  local nEquipBoxNum = me.GetUserValue(self.SAVE_KEY, self.SAVE_ID_LIST.EquipBoxNum)
+  nEquipBoxNum = nEquipBoxNum + me.GetUserValue(self.SAVE_KEY, self.SAVE_ID_LIST.OrangeEquipBoxNum)
+  nEquipBoxNum = nEquipBoxNum + me.GetUserValue(self.SAVE_KEY, self.SAVE_ID_LIST.PurpleEquipBoxNum)
+  local nGoldShellNum = 0
+  for _, tbInfo in ipairs(self.SAVE_ID_LIST.GoldShellList) do
+    nGoldShellNum = nGoldShellNum + me.GetUserValue(self.SAVE_KEY, tbInfo.Num)
+  end
+  local nGoldFuDaiNum = me.GetUserValue(self.SAVE_KEY, self.SAVE_ID_LIST.GoldFuDai)
+  local szDartingMsg = Darting:GetDartingIntro()
+  local szIntro = i18n.Get(self.Cfg.szFubenUIShowIntro, Map:GetMapName(me.nMapTemplateId), nExp, nEquipBoxNum, nGoldShellNum, nGoldFuDaiNum, szDartingMsg)
+  FubenUIController:ShowInfo(nil, nil, nil, szIntro)
+end
+
+function GlobalHangUp:FlyExp(nExp)
+  if me.GetNpc() then
+    me.GetNpc().DoFlyChar(12, nExp)
+  end
+end
+
+function GlobalHangUp:OnLeave()
+  Log("GlobalHangUp:OnLeave", me.nMapTemplateId)
+  if self.nRefreshTimer then
+    Timer:Close(self.nRefreshTimer)
+    self.nRefreshTimer = nil
+  end
+  FubenUIController:CloseFubenUI()
+end
+
+function GlobalHangUp:IsInFuben()
+  return true, i18n.Parse(Map:GetMapName(me.nMapTemplateId))
+end
+
+function GlobalHangUp:RegisterFubenUIChecker()
+  local tbMapIdList = {}
+  for nTemplateId in pairs(self.Cfg.MapList) do
+    table.insert(tbMapIdList, nTemplateId)
+  end
+  FubenUIController:RegisterChecker(tbMapIdList, self)
+end
+
+function GlobalHangUp:CheckKongQueHeCanShow()
+  return me.nTotalLevel >= self.Cfg.MapList[self.KongQueHeMapTemplateID].Level
+end
+
+function GlobalHangUp:CheckLeaveKongQueHeShow()
+  return false
+end
+
+function GlobalHangUp:GoToMap(nMapId)
+  Darting:GotoMap(nMapId)
+end
+
+function GlobalHangUp:OnSwitchMap(nCurTemplateId, nMapId)
+  if not self.Cfg.MapList[nMapId] then
+    return true
+  end
+  if not TeamMgr:HasTeam() then
+    return self:CanSwitchMap(nCurTemplateId, nMapId)
+  elseif not TeamMgr:IsCaptain() then
+    return false, i18n.EasyGet("\228\187\133\233\152\159\233\149\191\229\143\175\229\143\145\232\181\183\232\191\155\229\133\165{0}", Map:GetMapName(nMapId))
+  end
+  local nActivityId = TeamMgr:GetActivityId("KongQueHeYunBiao", "KongQueHeYunBiao")
+  TeamMgr:AutoSetAndEnterActivity(nActivityId)
+end
+
+function GlobalHangUp:OnClickLeaveZone()
+  if not TeamMgr:HasTeam() then
+    RemoteServer.LeaveZonePublicMap()
+    return
+  end
+  if not TeamMgr:IsCaptain() then
+    me.CenterMsg(i18n.EasyGet("\228\187\133\233\152\159\233\149\191\229\143\175\229\143\145\232\181\183\231\166\187\229\188\128{0}", Map:GetMapName(me.nMapTemplateId)))
+    return
+  end
+  local nActivityId = TeamMgr:GetActivityId("LeaveKongQueHe", "LeaveKongQueHe")
+  TeamMgr:AutoSetAndEnterActivity(nActivityId)
+end
+
+function GlobalHangUp:InitClient()
+  if not self.bInit then
+    self:RegisterFubenUIChecker()
+    self.bInit = true
+  end
+end
+
+GlobalHangUp:InitClient()

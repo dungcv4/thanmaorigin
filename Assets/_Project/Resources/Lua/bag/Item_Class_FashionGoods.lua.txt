@@ -1,0 +1,99 @@
+local tbItemClass = Item:GetClass("FashionGoods")
+
+function tbItemClass:OnAutoUse(pPlayer, nItemTemplateId, nCount, szMsg, tbItemExtParams, nLogReason, nLogReason2)
+  local tbAward = {}
+  local nFashionID = KItem.GetItemExtParam(nItemTemplateId, Shop.FASHION_PARAM.FASHIONID)
+  local nExpiredTime = KItem.GetItemExtParam(nItemTemplateId, Shop.FASHION_PARAM.TIMEOUT)
+  local bCanAutoUse = KItem.GetItemCanAutoUse(nItemTemplateId)
+  local bHasThisFashion = Fashion:GetFashion(pPlayer, nFashionID)
+  local tbSetting, _ = Fashion:GetFashionSetting(pPlayer, nFashionID)
+  if bCanAutoUse and not bHasThisFashion then
+    local nCurTime = GetTime()
+    if nExpiredTime > 0 then
+      nExpiredTime = nCurTime + nExpiredTime
+    end
+    Fashion:AddFashion(pPlayer, nFashionID, nExpiredTime)
+    pPlayer.Msg(i18n.EasyGet("\232\142\183\229\190\151\229\164\150\232\163\133\239\188\154{0}", tbSetting.szName))
+    if 0 == nExpiredTime then
+      pPlayer.CenterMsg(i18n.EasyGet("\233\173\133\229\138\155\229\128\188+{0}\239\188\136\232\142\183\229\190\151\229\164\150\232\167\130\239\188\154{1}\239\188\137", tbSetting.nPrettyValue, tbSetting.szName), true)
+    end
+  else
+    pPlayer.AddItemEx_Unsafe(nItemTemplateId, 1, {}, nLogReason, nLogReason2)
+    local tbLinkInfo = {
+      nLinkType = ChatMgr.LinkType.Item,
+      nFaction = pPlayer.nFaction,
+      nTemplateId = nItemTemplateId,
+      nBodySex = pPlayer.nSex
+    }
+    local szSysMsg = i18n.EasyGet("\230\130\168\232\142\183\229\190\151\228\186\134<{0}>\239\188\136{1}\239\188\137", Item:GetName(nItemTemplateId, pPlayer), i18n.Get(Env.tbLogWayGameDesc[nLogReason]))
+    pPlayer.CallClientScript("Ui:ShowHint", szSysMsg, tbLinkInfo)
+  end
+  return true, tbAward
+end
+
+function tbItemClass:OnUse(pItem)
+  local nFashionID = KItem.GetItemExtParam(pItem.dwTemplateId, Shop.FASHION_PARAM.FASHIONID)
+  local nExpiredTime = KItem.GetItemExtParam(pItem.dwTemplateId, Shop.FASHION_PARAM.TIMEOUT)
+  local bHasThisFashion = Fashion:GetFashion(me, nFashionID)
+  local tbSetting, _ = Fashion:GetFashionSetting(me, nFashionID)
+  if bHasThisFashion then
+    me.CenterMsg(i18n.EasyGet("\230\130\168\229\183\178\230\148\182\232\151\143\228\186\134\229\144\140\230\172\190\229\164\150\232\163\133"))
+    return
+  end
+  local nHaveCount = me.GetItemCountByTypeInBag(pItem.dwTemplateId)
+  if nHaveCount <= 0 then
+    return
+  end
+  if 1 ~= me.ConsumeItemInBag(pItem.dwTemplateId, 1, Env.LogWay_FashionShopBuy) then
+    LogErr("Use FashionGoods failed, ID: ", pItem.dwTemplateId)
+    return
+  end
+  if nHaveCount - 1 ~= me.GetItemCountByTypeInBag(pItem.dwTemplateId) then
+    LogErr("FashionGoods OnUse delete error", me.dwID, pItem.dwTemplateId)
+    return
+  end
+  local nCurTime = GetTime()
+  if nExpiredTime > 0 then
+    nExpiredTime = nCurTime + nExpiredTime
+  end
+  local bRet = Fashion:AddFashion(me, nFashionID, nExpiredTime)
+  if bRet and tbSetting then
+    me.CenterMsg(i18n.EasyGet("\232\142\183\229\190\151\229\164\150\232\163\133\239\188\154{0}", tbSetting.szName), true)
+    if 0 == nExpiredTime then
+      me.CenterMsg(i18n.EasyGet("\233\173\133\229\138\155\229\128\188+{0}\239\188\136\232\142\183\229\190\151\229\164\150\232\167\130\239\188\154{1}\239\188\137", tbSetting.nPrettyValue, tbSetting.szName), true)
+    end
+    local nPartIndex = Fashion:GetPartConfigByPartId(tbSetting.nPart, tbSetting.nLayer)
+    me.CallClientScript("Ui:OpenWindow", "UIBag", 5, nPartIndex, nFashionID)
+  end
+end
+
+function tbItemClass:IsAutoUse(nItemTemplateId)
+  local nAutoUse = KItem.GetItemCanAutoUse(nItemTemplateId)
+  return 1 == nAutoUse and true or false
+end
+
+function tbItemClass:GetUseSetting(nItemTemplateId, nItemId)
+  if not nItemId or not KItem.GetItemObj(nItemId) then
+    return
+  end
+  local nGiveFlag = KItem.GetItemExtParam(nItemTemplateId, Shop.FASHION_PARAM.GIVEFLAG)
+  if nGiveFlag and nGiveFlag > 0 then
+    local function fnGive()
+      Ui:CloseWindow("UIItemTips")
+      
+      me.CallClientScript("Ui:OpenWindow", "UIExperienceBook", nItemTemplateId, nItemId, "Fashion")
+    end
+    
+    return {
+      szFirstName = i18n.EasyGet("\228\189\191\231\148\168"),
+      fnFirst = "UseItem",
+      szSecondName = i18n.EasyGet("\232\181\160\233\128\129"),
+      fnSecond = fnGive
+    }
+  else
+    return {
+      szFirstName = i18n.EasyGet("\228\189\191\231\148\168"),
+      fnFirst = "UseItem"
+    }
+  end
+end

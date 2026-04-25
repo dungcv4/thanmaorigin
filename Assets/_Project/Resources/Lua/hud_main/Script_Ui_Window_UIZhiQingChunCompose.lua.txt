@@ -1,0 +1,250 @@
+local tbWnd = Ui:CreateWindow("UIZhiQingChunCompose")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_QINGCHUNQUAN_DATA_SYNC,
+      self.UpdateAllShow
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  XingFuTemplate = "node/imgBG/Content/Happiness/Materials/Template",
+  btnXingFuMake = "node/imgBG/Content/Happiness/btnMake",
+  txtXingFuRemainingValue = "node/imgBG/Content/Happiness/Remaining/txtRemainingValue",
+  btnXingFuExtraAward = "node/imgBG/Content/Happiness/btnExtraAward",
+  imgAward_XingFu = "node/imgBG/Content/Happiness/btnExtraAward/imgAward",
+  imgAward_XingFuRecieve = "node/imgBG/Content/Happiness/btnExtraAward/imgAward_Recieve",
+  imgAward_XingFuOpen = "node/imgBG/Content/Happiness/btnExtraAward/imgAwardOpen",
+  HuanLeTemplate = "node/imgBG/Content/Joy/Materials/Template",
+  btnHuanLeMake = "node/imgBG/Content/Joy/btnMake",
+  txtHuanLeRemainingValue = "node/imgBG/Content/Joy/Remaining/txtRemainingValue",
+  btnHuanLeExtraAward = "node/imgBG/Content/Joy/btnExtraAward",
+  imgAward_HuanLe = "node/imgBG/Content/Joy/btnExtraAward/imgAward",
+  imgAward_HuanLeRecieve = "node/imgBG/Content/Joy/btnExtraAward/imgAward_Recieve",
+  imgAward_HuanLeOpen = "node/imgBG/Content/Joy/btnExtraAward/imgAwardOpen",
+  wndExtraAwardDetail = "wndExtraAwardDetail",
+  extraAwardItemTemplate = "wndExtraAwardDetail/imgBg/GetAwards/AwardList/Viewport/Content/ItemTemplate"
+}
+tbWnd.tbControls = tbControls
+tbWnd.QuanType = {XingFuQuan = 1, HuanLeQuan = 2}
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnXingFuMake = function(self)
+    if not self.pInstance then
+      LogErr("UIZhiQingChunCompose pInstance nil")
+      return
+    end
+    local nMaxNum = self.pInstance:GetPlayerCanMakeQuanNum(me, tbWnd.QuanType.XingFuQuan)
+    if 1 == nMaxNum then
+      self.pInstance:MakeXingFuQuan(nMaxNum)
+    else
+      Ui:OpenWindow("UIZhiQingChunComposeSetting", self.nId, tbWnd.QuanType.XingFuQuan, nMaxNum, 1)
+    end
+  end,
+  btnHuanLeMake = function(self)
+    if not self.pInstance then
+      LogErr("UIZhiQingChunCompose pInstance nil")
+      return
+    end
+    local nMaxNum = self.pInstance:GetPlayerCanMakeQuanNum(me, tbWnd.QuanType.HuanLeQuan)
+    if 1 == nMaxNum then
+      self.pInstance:MakeHuanLeQuan(nMaxNum)
+    else
+      Ui:OpenWindow("UIZhiQingChunComposeSetting", self.nId, tbWnd.QuanType.HuanLeQuan, nMaxNum, 1)
+    end
+  end,
+  btnXingFuExtraAward = function(self)
+    self:ShowExtraAward(self.QuanType.XingFuQuan)
+    self.pPanel:SetActive(tbControls.wndExtraAwardDetail, true)
+  end,
+  btnHuanLeExtraAward = function(self)
+    self:ShowExtraAward(self.QuanType.HuanLeQuan)
+    self.pPanel:SetActive(tbControls.wndExtraAwardDetail, true)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbXingFuItemScrollView = Ui:NewScrollView(self, tbControls.XingFuTemplate)
+  self.tbHuanLeItemScrollView = Ui:NewScrollView(self, tbControls.HuanLeTemplate)
+  self.tbExtraAwardScrollView = Ui:NewScrollView(self, tbControls.extraAwardItemTemplate)
+  self:SetClickEmptyCallback(tbControls.wndExtraAwardDetail)
+end
+
+function tbWnd:OnOpen(nId)
+  self.nId = nId
+  self.pInstance = ActivityMgr:GetInstanceById(self.nId)
+  if not self.pInstance then
+    me.CenterMsg(i18n.EasyGet("\228\184\141\229\156\168\230\180\187\229\138\168\230\156\159"))
+    self:Close()
+    return
+  end
+  self:RegRedPoint()
+  self:UpdateAllShow()
+end
+
+function tbWnd:OnClose()
+  self:UnRegRedPoint()
+end
+
+function tbWnd:RegRedPoint()
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnXingFuMake, {
+    RedPointMgr.EVENT.QingChunQuanXingFuQuanMake
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnHuanLeMake, {
+    RedPointMgr.EVENT.QingChunQuanHuanLeQuanMake
+  })
+end
+
+function tbWnd:UnRegRedPoint()
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnXingFuMake)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnHuanLeMake)
+end
+
+function tbWnd:UpdateAllShow()
+  self:InitXingFuRewardShow()
+  self:InitHuanLeRewardShow()
+  self:ShowExtraAward(self.nQuanType or 1)
+end
+
+function tbWnd:InitXingFuRewardShow()
+  self.tbXingFuItemScrollView:Clear()
+  local tbCfg = ActivityMgr.ChildrenActivity:GetActivityCfg("QingChunQuan")
+  if not tbCfg then
+    LogErr("InitXingFuRewardShow tbCfg nil ")
+    return
+  end
+  local XingFuQuanFormula = tbCfg.XingFuQuanFormula
+  if not XingFuQuanFormula then
+    LogErr("InitShangdengRewardShow ShangdengZongziFormala nil ")
+    return
+  end
+  for i, tbFormula in ipairs(XingFuQuanFormula) do
+    self.tbXingFuItemScrollView:SetElement(i, function(tbElement)
+      local tbItemGrid = tbElement.tbItemGrid
+      if not tbItemGrid then
+        tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbItemGrid:SetClickEnable(true)
+      end
+      tbItemGrid:SetItemByTemplate(tbFormula.nTemplateID, 1)
+      local nNeedNum = tbFormula.nCount
+      local nHaveNum = me.GetItemCountByTypeInBag(tbFormula.nTemplateID)
+      local szShowText = string.format("%d/%d", nHaveNum, nNeedNum)
+      tbItemGrid:LabelSuffix_SetText(szShowText)
+      if nNeedNum <= nHaveNum then
+        tbItemGrid:LabelSuffix_SetColor("Green")
+      else
+        tbItemGrid:LabelSuffix_SetColor("Red")
+      end
+    end)
+  end
+  local nLeftXingFuQuanMakeCount, nLeftHuanLeQuanMakeCount = self.pInstance:GetLeftQuanMakeCount()
+  self.pPanel:Label_SetText(tbControls.txtXingFuRemainingValue, nLeftXingFuQuanMakeCount)
+  self.pPanel:SetActive(tbControls.imgAward_XingFu, false)
+  self.pPanel:SetActive(tbControls.imgAward_XingFuRecieve, false)
+  self.pPanel:SetActive(tbControls.imgAward_XingFuOpen, false)
+  local bCanGetExtraAward = self.pInstance:QuanCanGetExtraAward(self.QuanType.XingFuQuan)
+  local bHasGetExtraAward = self.pInstance:QuanAllExtraAwardHasGet(self.QuanType.XingFuQuan)
+  if bCanGetExtraAward then
+    self.pPanel:SetActive(tbControls.imgAward_XingFuRecieve, true)
+  elseif bHasGetExtraAward then
+    self.pPanel:SetActive(tbControls.imgAward_XingFuOpen, true)
+  else
+    self.pPanel:SetActive(tbControls.imgAward_XingFu, true)
+  end
+  local bCanMakeQuan = self.pInstance:HaveQuanMakeTime(me, self.QuanType.XingFuQuan, 1)
+  self.pPanel:Button_SetEnable(tbControls.btnXingFuMake, bCanMakeQuan)
+end
+
+function tbWnd:InitHuanLeRewardShow()
+  self.tbHuanLeItemScrollView:Clear()
+  local tbCfg = ActivityMgr.ChildrenActivity:GetActivityCfg("QingChunQuan")
+  if not tbCfg then
+    LogErr("InitHuanLeRewardShow tbCfg nil ")
+    return
+  end
+  local HuanLeFormula = tbCfg.HuanLeQuanFormula
+  if not HuanLeFormula then
+    LogErr("InitHuanLeRewardShow HuanLeFormula nil ")
+    return
+  end
+  for i, tbFormula in ipairs(HuanLeFormula) do
+    self.tbHuanLeItemScrollView:SetElement(i, function(tbElement)
+      local tbItemGrid = tbElement.tbItemGrid
+      if not tbItemGrid then
+        tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbItemGrid:SetClickEnable(true)
+      end
+      tbItemGrid:SetItemByTemplate(tbFormula.nTemplateID, 1)
+      local nNeedNum = tbFormula.nCount
+      local nHaveNum = me.GetItemCountByTypeInBag(tbFormula.nTemplateID)
+      local szShowText = string.format("%d/%d", nHaveNum, nNeedNum)
+      tbItemGrid:LabelSuffix_SetText(szShowText)
+      if nNeedNum <= nHaveNum then
+        tbItemGrid:LabelSuffix_SetColor("Green")
+      else
+        tbItemGrid:LabelSuffix_SetColor("Red")
+      end
+    end)
+  end
+  local nLeftXingFuQuanMakeCount, nLeftHuanLeQuanMakeCount = self.pInstance:GetLeftQuanMakeCount()
+  self.pPanel:Label_SetText(tbControls.txtHuanLeRemainingValue, nLeftHuanLeQuanMakeCount)
+  self.pPanel:SetActive(tbControls.imgAward_HuanLe, false)
+  self.pPanel:SetActive(tbControls.imgAward_HuanLeRecieve, false)
+  self.pPanel:SetActive(tbControls.imgAward_HuanLeOpen, false)
+  local bCanGetExtraAward = self.pInstance:QuanCanGetExtraAward(self.QuanType.HuanLeQuan)
+  local bHasGetExtraAward = self.pInstance:QuanAllExtraAwardHasGet(self.QuanType.HuanLeQuan)
+  if bCanGetExtraAward then
+    self.pPanel:SetActive(tbControls.imgAward_HuanLeRecieve, true)
+  elseif bHasGetExtraAward then
+    self.pPanel:SetActive(tbControls.imgAward_HuanLeOpen, true)
+  else
+    self.pPanel:SetActive(tbControls.imgAward_HuanLe, true)
+  end
+  local bCanMakeQuan = self.pInstance:HaveQuanMakeTime(me, self.QuanType.HuanLeQuan, 1)
+  self.pPanel:Button_SetEnable(tbControls.btnHuanLeMake, bCanMakeQuan)
+end
+
+function tbWnd:ShowExtraAward(nQuanType)
+  self.nQuanType = nQuanType
+  local tbAllExtraAward = self.pInstance:GetExtraAwardList(nQuanType)
+  if not tbAllExtraAward then
+    LogErr("ShowExtraAward tbExtraAward error ")
+    return
+  end
+  self.tbExtraAwardScrollView:Clear()
+  for nIndex, tbInfo in ipairs(tbAllExtraAward) do
+    self.tbExtraAwardScrollView:SetElement(nIndex, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("AwardTips/txtAwardTip1", tbInfo.szInfo)
+      pPanel:SetActive("AwardTips/txtAwardTip2", false)
+      local tbItemGrid = tbElement.tbItemGrid
+      if not tbItemGrid then
+        tbItemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+        tbItemGrid:SetClickEnable(true)
+        tbElement.tbItemGrid = tbItemGrid
+      end
+      tbItemGrid:SetGenericItem(tbInfo.tbAward[1])
+      pPanel:SetActive("btnGet", not tbInfo.bSuccess)
+      pPanel:SetActive("MarkRecieved", tbInfo.bSuccess)
+      Ui:Button_BindEvent(pPanel, "btnGet", self.OnGetExtraAward, self, nQuanType, nIndex)
+      pPanel:Button_SetEnable("btnGet", not tbInfo.bSuccess and tbInfo.nNeedNum <= tbInfo.nCurNum)
+    end)
+  end
+end
+
+function tbWnd:OnGetExtraAward(nQuanType, nIndex)
+  if not self.pInstance then
+    LogErr("UIZhiQingChunCompose pInstance nil")
+    return
+  end
+  self.pInstance:GetExtraAward(nQuanType, nIndex)
+end
+
+function tbWnd:OnClickEmptyClose()
+  self.pPanel:SetActive(tbControls.wndExtraAwardDetail, false)
+end

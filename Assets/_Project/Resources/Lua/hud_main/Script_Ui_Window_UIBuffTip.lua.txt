@@ -1,0 +1,130 @@
+local tbWnd = Ui:CreateWindow("UIBuffTip")
+
+function tbWnd:NotifyEvents()
+  return {}
+end
+
+tbWnd.tbControls = {
+  Template = "imgBG/imgList/List/Template"
+}
+tbWnd.tbOnClick = {}
+
+function tbWnd:OnCreate()
+  self:SetClickEmptyToClose()
+  self.tbScrollView = Ui:NewScrollView(self, self.Template, nil, false, false)
+end
+
+function tbWnd:OnOpen(tbBuffSkill)
+  local tbBuffSkill = tbBuffSkill or {}
+  local pNpc = me.GetNpc()
+  self.tbBuffSkillInfo = {}
+  for i, tbBuffInfo in ipairs(tbBuffSkill) do
+    local nBuffSkillId = tbBuffInfo.nSkillId
+    local tbState = pNpc.GetSkillState(nBuffSkillId)
+    if tbState and (tbState.nEndFrame > 0 or -1 == tbState.nEndFrame) then
+      self.tbBuffSkillInfo[i] = {
+        nBuffSkillId = tbState.nSkillId,
+        nSkillLevel = tbState.nSkillLevel,
+        tbMagic = tbState.tbAttrib
+      }
+    end
+  end
+  self:UpdateBuffList()
+end
+
+function tbWnd:UpdateBuffList()
+  self.tbScrollView:Reset()
+  for i = 1, #self.tbBuffSkillInfo do
+    local tbSkillInfo = self.tbBuffSkillInfo[i]
+    if tbSkillInfo then
+      self.tbScrollView:SetElement(i, function(tbElement)
+        local pPanel = tbElement.pPanel
+        local nBuffSkillId = tbSkillInfo.nBuffSkillId
+        local nSkillLevel = tbSkillInfo.nSkillLevel
+        local tbMagic = tbSkillInfo.tbMagic
+        local szMsg = FightSkill:GetSkillStateMagicDesc(nBuffSkillId, nSkillLevel, tbMagic) or ""
+        local tbStateEffect = FightSkill:GetStateEffectBySkill(nBuffSkillId, nSkillLevel)
+        pPanel:Sprite_SetSprite("imgIcon", tbStateEffect.Icon)
+        pPanel:Label_SetText("txtName", i18n.Parse(tbStateEffect.StateName))
+        pPanel:Label_SetText("txtMagicDescScrollView/txtMagicDesc", szMsg)
+        self:UpdateRemainTime(nBuffSkillId, tbElement)
+      end)
+    end
+  end
+  self:CloseTimer()
+  self.nTimeTimer = Timer:Register(Env.GAME_FPS, self.UpdateTime, self)
+end
+
+function tbWnd:UpdateTime()
+  if not self.tbBuffSkillInfo or not next(self.tbBuffSkillInfo) then
+    return
+  end
+  for i = 1, #self.tbBuffSkillInfo do
+    local tbSkillInfo = self.tbBuffSkillInfo[i]
+    if tbSkillInfo and next(tbSkillInfo) then
+      local nBuffSkillId = tbSkillInfo.nBuffSkillId
+      local tbElement = self.tbScrollView:GetElement(i)
+      self:UpdateRemainTime(nBuffSkillId, tbElement)
+    end
+  end
+  return true
+end
+
+function tbWnd:UpdateRemainTime(nBuffSkillId, tbElement)
+  local tbState = me.GetNpc().GetSkillState(nBuffSkillId)
+  local tbSkillInfo = FightSkill:GetSkillSetting(nBuffSkillId, 1)
+  local fTime = 0
+  local szTime = i18n.EasyGet("<color=#ebebeb>\230\176\184\228\185\133</color>")
+  local pPanel = tbElement.pPanel
+  if tbState and tbState.nEndFrame > 0 then
+    fTime = math.floor((tbState.nEndFrame - GetFrame()) / Env.GAME_FPS)
+    if fTime < 0 then
+      fTime = 0
+    end
+    if not tbSkillInfo.IsAura then
+      szTime = string.format("<color=#ebebeb>%s</color>", Lib:TimeDesc(fTime))
+    end
+    pPanel:Label_SetText("txtTime", szTime)
+    return
+  end
+  if tbState and -1 == tbState.nEndFrame then
+    pPanel:Label_SetText("txtTime", szTime)
+    return
+  end
+  self:OnBuffEffectEnd()
+end
+
+function tbWnd:CloseTimer()
+  if self.nTimeTimer then
+    Timer:Close(self.nTimeTimer)
+    self.nTimeTimer = nil
+  end
+end
+
+function tbWnd:OnClose()
+  self:CloseTimer()
+end
+
+function tbWnd:OnBuffEffectEnd()
+  self:CloseTimer()
+  local tbTempBuffSkillInfo = self.tbBuffSkillInfo or {}
+  local pNpc = me.GetNpc()
+  local idx = 1
+  self.tbBuffSkillInfo = {}
+  for index, tbInfo in ipairs(tbTempBuffSkillInfo) do
+    local tbState = pNpc.GetSkillState(tbInfo.nBuffSkillId)
+    if tbState and (tbState.nEndFrame > 0 or -1 == tbState.nEndFrame) then
+      self.tbBuffSkillInfo[idx] = {
+        nBuffSkillId = tbState.nSkillId,
+        nSkillLevel = tbState.nSkillLevel,
+        tbMagic = tbState.tbAttrib
+      }
+      idx = idx + 1
+    end
+  end
+  if not self.tbBuffSkillInfo or not next(self.tbBuffSkillInfo) then
+    self:Close()
+    return
+  end
+  self:UpdateBuffList()
+end

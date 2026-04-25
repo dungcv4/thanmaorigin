@@ -1,0 +1,329 @@
+Require("CommonScript/Activity/ActivityMgr.lua")
+Require("CommonScript/Activity/ActivityMgrDef.lua")
+local tbActivity = ActivityMgr:GetClass(ActivityMgr.Def.ClassNameList.JingWangJiuXiActivity)
+tbActivity.nSaveGroupId = GetGroupKey("JingWangJiuXi")
+tbActivity.nSaveShangDengZongziID = 1
+tbActivity.nSaveLvZongziID = 2
+tbActivity.nSaveHandInShangDengZongziID = 3
+tbActivity.nSaveHandInLvZongziID = 4
+tbActivity.nSaveGainAwardID = 5
+tbActivity.ZongZiSaveID = {
+  [1] = 6,
+  [2] = 7,
+  [3] = 8,
+  [4] = 9
+}
+tbActivity.nSaveAlertMailID = 10
+tbActivity.nSaveLastStartTime = 11
+tbActivity.ZongziID = {
+  ShangdengZongziID = 1108,
+  LvZongziID = 1107,
+  ZongyeID = 1100
+}
+tbActivity.AwardType = {
+  SHANGDENGZONGZI = "SHANGDENGZONGZI",
+  LVZONGZI = "LVZONGZI"
+}
+tbActivity.MaxZongziMakeNum = {MakeShangdengZongzi = 50, MakeLvZongzi = 150}
+tbActivity.Protocol = {
+  MakeShangdengZongzi = 1,
+  MakeLvZongzi = 2,
+  GetExtraAward = 3
+}
+tbActivity.HandInAwardID = 1091
+tbActivity.ZongziAwardKey = {LvZongzi = 1, ShangdengZongzi = 2}
+tbActivity.ZONGZITYPE = {SHANGDENGZONGZI = 1, LVZONGZI = 2}
+
+function tbActivity:LoadConfig()
+  if self.bLoadConfig then
+    return
+  end
+  local szFilepath = "Setting/Activity/XiongWangActivity/JingWangJiuXi/JingWangJiuXi.tab"
+  local tbField = {
+    "nConfigId",
+    "szSaveKey",
+    "szMailTitle",
+    "szMailFrom",
+    "szLogWay",
+    "szDesc",
+    "szName",
+    "nLevel",
+    "nShowAwardId",
+    "nShowAwardKey",
+    "szShowTime",
+    "nMaxBatchNum",
+    "nMaxExistSecond",
+    "nIntervalSecond",
+    "nMaxNpcNum",
+    "szDialogText",
+    "nMaxKillNum",
+    "nKillAwardId",
+    "nKillAwardKey",
+    "szTimeOut",
+    "szAlertTime",
+    "szAlertMFrom",
+    "szAlertMTitle",
+    "szAlertMText"
+  }
+  local tbActivityConfig = Lib:LoadTabFileEx(szFilepath, "dssssssdddsddddsdddsssss", "nConfigId", tbField)
+  self.ACTIVITY_CONFIG = {}
+  for nConfigId, tbConfig in pairs(tbActivityConfig or {}) do
+    tbConfig.nTimeOut = not Lib:IsEmptyStr(tbConfig.szTimeOut) and Lib:ParseDateTime(tbConfig.szTimeOut) or 0
+    tbConfig.nAlertTime = Lib:ParseDateTime(tbConfig.szAlertTime)
+    self.ACTIVITY_CONFIG[nConfigId] = tbConfig
+  end
+  szFilepath = "Setting/Activity/XiongWangActivity/JingWangJiuXi/TributeRobber.tab"
+  tbField = {
+    "nConfigId",
+    "nMapTemplateId",
+    "nNpcTemplateId",
+    "nAttackNpcTemplateId",
+    "nAttackNpcTemplateId",
+    "nPosX",
+    "nPosY"
+  }
+  local tbRobber = Lib:LoadTabFileEx(szFilepath, "ddddddd", nil, tbField)
+  for _, tbInfo in ipairs(tbRobber or {}) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("JingWangJiuXiActivity:LoadConfig TributeRobber nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbRobber = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbRobber or {}
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbRobber[tbInfo.nMapTemplateId] = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbRobber[tbInfo.nMapTemplateId] or {}
+    table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbRobber[tbInfo.nMapTemplateId], tbInfo)
+  end
+  szFilepath = "Setting/Activity/XiongWangActivity/JingWangJiuXi/ActivePointAward.tab"
+  tbField = {
+    "nConfigId",
+    "nActivePoint",
+    "nAwardId",
+    "nAwardKey",
+    "szMailText"
+  }
+  local tbActivePointAward = Lib:LoadTabFileEx(szFilepath, "dddds", nil, tbField)
+  for _, tbInfo in ipairs(tbActivePointAward or {}) do
+    assert(self.ACTIVITY_CONFIG[tbInfo.nConfigId], string.format("JingWangJiuXiActivity:LoadConfig ActivePointAward nConfigId=%d not exist", tbInfo.nConfigId))
+    self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbActivePointAward = self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbActivePointAward or {}
+    table.insert(self.ACTIVITY_CONFIG[tbInfo.nConfigId].tbActivePointAward, tbInfo)
+  end
+  for _, tbInfo in pairs(self.ACTIVITY_CONFIG) do
+    table.sort(tbInfo.tbActivePointAward, function(tbFirst, tbSecond)
+      return tbFirst.nActivePoint < tbSecond.nActivePoint
+    end)
+  end
+  local szFilepath = "Setting/Activity/XiongWangActivity/JingWangJiuXi/ZongziFormala.tab"
+  local tbField = {
+    "nConfigId",
+    "szFormalaType",
+    "nTemplateID",
+    "szName",
+    "nCount"
+  }
+  local tbZongziFormulaConfig = Lib:LoadTabFileEx(szFilepath, "dsdsd", nil, tbField)
+  for _, tbConfig in pairs(tbZongziFormulaConfig or {}) do
+    local nConfigId = tbConfig.nConfigId
+    assert(self.ACTIVITY_CONFIG[nConfigId], string.format("load JingWangJiuXi not exist", nConfigId))
+    self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiShangdengFormula = self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiShangdengFormula or {}
+    self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiShangdengZongzi = self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiShangdengZongzi or {}
+    self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiLvZongziFormula = self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiLvZongziFormula or {}
+    self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiLvZongzi = self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiLvZongzi or {}
+    if tbConfig.szFormalaType == "SHANGDENGFORMALA" then
+      table.insert(self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiShangdengFormula, tbConfig)
+    elseif tbConfig.szFormalaType == "SHANGDENGZONGZI" then
+      table.insert(self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiShangdengZongzi, tbConfig)
+    elseif tbConfig.szFormalaType == "LVZONGZIFORMALA" then
+      table.insert(self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiLvZongziFormula, tbConfig)
+    elseif tbConfig.szFormalaType == "LVZONGZI" then
+      table.insert(self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiLvZongzi, tbConfig)
+    end
+  end
+  local szFilepath = "Setting/Activity/XiongWangActivity/JingWangJiuXi/ExtraAward.tab"
+  local tbField = {
+    "nConfigId",
+    "nIndex",
+    "szAwardType",
+    "nNeedZongziNum",
+    "nAwardID",
+    "nAwardKey",
+    "szInfo"
+  }
+  local tbExtraAwardConfig = Lib:LoadTabFileEx(szFilepath, "ddsddds", nil, tbField)
+  for _, tbConfig in pairs(tbExtraAwardConfig or {}) do
+    local nConfigId = tbConfig.nConfigId
+    assert(self.ACTIVITY_CONFIG[nConfigId], string.format("load JingWangJiuXi not exist", nConfigId))
+    self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiShangdengExtraAward = self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiShangdengExtraAward or {}
+    self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiLvZongziExtraAward = self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiLvZongziExtraAward or {}
+    if "SHANGDENGZONGZI" == tbConfig.szAwardType then
+      table.insert(self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiShangdengExtraAward, tbConfig)
+    elseif "LVZONGZI" == tbConfig.szAwardType then
+      table.insert(self.ACTIVITY_CONFIG[nConfigId].JingWangJiuXiLvZongziExtraAward, tbConfig)
+    end
+  end
+  self.ACTIVITY_CONFIG = SetReadOnly(self.ACTIVITY_CONFIG)
+  self.bLoadConfig = true
+end
+
+function tbActivity:CanJoin(nLevel)
+  return nLevel >= self.tbConfig.nLevel
+end
+
+function tbActivity:GetExtraAwardSaveID(nIndex)
+  return self.ZongZiSaveID[nIndex]
+end
+
+function tbActivity:CanGetExtraAward(pPlayer, nZongziType, nIndex)
+  if not pPlayer then
+    return false
+  end
+  local tbExtraAwardCfg = self:GetExtraAwardCfg(nZongziType)
+  if not tbExtraAwardCfg then
+    LogErr("GetExtraAward tbExtraAwardCfg nil")
+    return false
+  end
+  local tbExtraAwardItem = tbExtraAwardCfg[nIndex]
+  if not tbExtraAwardItem then
+    LogErr("GetExtraAward tbExtraAwardItem nil")
+    return false
+  end
+  local bHandInEnough = self:HandInZongziIsEnough(pPlayer, tbExtraAwardItem)
+  if not bHandInEnough then
+    return false, i18n.EasyGet("\228\184\138\232\180\161\231\178\189\229\173\144\230\149\176\233\135\143\228\184\141\232\182\179\239\188\129")
+  end
+  local bHasGetExtraAward = self:HasGetExtraAward(pPlayer, tbExtraAwardItem.nIndex)
+  if bHasGetExtraAward then
+    return false, i18n.EasyGet("\230\130\168\229\183\178\233\162\134\229\143\150\232\191\135\232\175\165\229\165\150\229\138\177\239\188\129")
+  end
+  return true
+end
+
+function tbActivity:GetExtraAwardCfg(nZongziType)
+  local tbExtraAwardCfg
+  if nZongziType == self.ZONGZITYPE.SHANGDENGZONGZI then
+    tbExtraAwardCfg = self.tbConfig.JingWangJiuXiShangdengExtraAward
+  elseif nZongziType == self.ZONGZITYPE.LVZONGZI then
+    tbExtraAwardCfg = self.tbConfig.JingWangJiuXiLvZongziExtraAward
+  end
+  return tbExtraAwardCfg
+end
+
+function tbActivity:HandInZongziIsEnough(pPlayer, tbExtraAwardItem)
+  local nZongziHandInSaveID
+  if tbExtraAwardItem.szAwardType == "SHANGDENGZONGZI" then
+    nZongziHandInSaveID = self.nSaveHandInShangDengZongziID
+  elseif tbExtraAwardItem.szAwardType == "LVZONGZI" then
+    nZongziHandInSaveID = self.nSaveHandInLvZongziID
+  end
+  if not nZongziHandInSaveID then
+    LogErr("HandInZongziIsEnough error")
+    return false
+  end
+  local nNeedCount = tbExtraAwardItem.nNeedZongziNum
+  local nHandInCount = pPlayer.GetUserValue(self.nSaveGroupId, nZongziHandInSaveID)
+  return nNeedCount <= nHandInCount
+end
+
+function tbActivity:GetCurSubmissionNum(pPlayer, szAwardType)
+  if szAwardType == self.AwardType.SHANGDENGZONGZI then
+    return pPlayer.GetUserValue(self.SaveKey, self.nSaveHandInShangDengZongziID)
+  end
+  if szAwardType == self.AwardType.LVZONGZI then
+    return pPlayer.GetUserValue(self.SaveKey, self.nSaveHandInLvZongziID)
+  end
+  return 0
+end
+
+function tbActivity:HasGetExtraAward(pPlayer, nIndex)
+  local nSaveID = self:GetExtraAwardSaveID(nIndex)
+  return pPlayer.GetUserValue(self.nSaveGroupId, nSaveID) > 0
+end
+
+function tbActivity:GetZongziFormula(nZongziType)
+  local thFormula
+  if nZongziType == self.ZONGZITYPE.SHANGDENGZONGZI then
+    thFormula = self.ACTIVITY_CONFIG[self.nConfigId].JingWangJiuXiShangdengFormula
+  elseif nZongziType == self.ZONGZITYPE.LVZONGZI then
+    thFormula = self.ACTIVITY_CONFIG[self.nConfigId].JingWangJiuXiLvZongziFormula
+  end
+  if not thFormula then
+    LogErr("GetZongziFormula error ", nZongziType)
+  end
+  return thFormula
+end
+
+function tbActivity:GetMaxZongziMakeCount(nZongziType)
+  local nCount = Env.INT_MAX
+  if nZongziType == self.ZONGZITYPE.SHANGDENGZONGZI then
+    nCount = self.MaxZongziMakeNum.MakeShangdengZongzi
+  elseif nZongziType == self.ZONGZITYPE.LVZONGZI then
+    nCount = self.MaxZongziMakeNum.MakeLvZongzi
+  end
+  return nCount
+end
+
+function tbActivity:GetZongziMakeCount(pPlayer, nZongziType)
+  local nCount = self:GetMaxZongziMakeCount(nZongziType)
+  if nZongziType == self.ZONGZITYPE.SHANGDENGZONGZI then
+    nCount = pPlayer.GetUserValue(self.nSaveGroupId, self.nSaveShangDengZongziID)
+  elseif nZongziType == self.ZONGZITYPE.LVZONGZI then
+    nCount = pPlayer.GetUserValue(self.nSaveGroupId, self.nSaveLvZongziID)
+  end
+  return nCount
+end
+
+function tbActivity:HaveZongziMakeTime(pPlayer, nZongziType, nZongziNum)
+  local nHaveZongziMakeTime = self:GetZongziMakeCount(pPlayer, nZongziType)
+  local nMaxZongziMakeTime = self:GetMaxZongziMakeCount(nZongziType)
+  return nMaxZongziMakeTime >= nHaveZongziMakeTime + nZongziNum
+end
+
+function tbActivity:CheckPlayerCanMakeZongzi(pPlayer, nZongziType, nZongziNum)
+  nZongziNum = nZongziNum or 1
+  local thFormula = self:GetZongziFormula(nZongziType)
+  if not thFormula then
+    LogErr("CheckPlayerCanMakeZongzi formula nil ")
+    return false
+  end
+  local bHaveMakeTimes = self:HaveZongziMakeTime(pPlayer, nZongziType, nZongziNum)
+  if not bHaveMakeTimes then
+    return false, i18n.EasyGet("\229\136\182\228\189\156\230\172\161\230\149\176\228\184\141\232\182\179!")
+  end
+  for _, tbItem in pairs(thFormula) do
+    local nTemplateID = tbItem.nTemplateID
+    local nNeedCount = tbItem.nCount * nZongziNum
+    local nHaveCount = pPlayer.GetItemCountByTypeInBag(nTemplateID)
+    if nNeedCount > nHaveCount then
+      return false, i18n.EasyGet("\230\137\128\233\156\128\231\137\169\229\147\129\228\184\141\232\182\179!")
+    end
+  end
+  return true
+end
+
+function tbActivity:GetLeftZongziMakeCount()
+  local nLeftShangdengZongziMakeCount = self.MaxZongziMakeNum.MakeShangdengZongzi - me.GetUserValue(self.nSaveGroupId, self.nSaveShangDengZongziID)
+  local nLeftLvZongziMakeCount = self.MaxZongziMakeNum.MakeLvZongzi - me.GetUserValue(self.nSaveGroupId, self.nSaveLvZongziID)
+  return nLeftShangdengZongziMakeCount, nLeftLvZongziMakeCount
+end
+
+function tbActivity:GetPlayerCanMakeZongziNum(pPlayer, nZongziType)
+  local thFormula = self:GetZongziFormula(nZongziType)
+  if not thFormula then
+    LogErr("CheckPlayerCanMakeZongzi formula nil ")
+    return false
+  end
+  local nMaxNum = 200
+  for _, tbItem in pairs(thFormula) do
+    local nTemplateID = tbItem.nTemplateID
+    local nNeedCount = tbItem.nCount
+    local nHaveCount = pPlayer.GetItemCountByTypeInBag(nTemplateID)
+    local nCurCanMake = math.floor(nHaveCount / nNeedCount)
+    if nMaxNum > nCurCanMake then
+      nMaxNum = nCurCanMake
+    end
+  end
+  local nLeftShangdeng, nLeftLvZong = self:GetLeftZongziMakeCount()
+  local nLeftTime = 200
+  if nZongziType == self.ZONGZITYPE.SHANGDENGZONGZI then
+    nLeftTime = nLeftShangdeng
+  elseif nZongziType == self.ZONGZITYPE.LVZONGZI then
+    nLeftTime = nLeftLvZong
+  end
+  nMaxNum = math.min(nMaxNum, nLeftTime)
+  return nMaxNum
+end

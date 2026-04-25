@@ -1,0 +1,355 @@
+local tbWnd = Ui:CreateClass("UIEquipJingZhu", "UIPanel")
+local tbControls = {
+  btnJingZhu = "panelConsume/btnJingZhu",
+  btnAutoJingZhu = "panelConsume/btnAutoJingZhu",
+  JingZhuTemplate = "panelEquipList/imgList/List/Template",
+  txtEquipName = "panelJingZhu/EquipInfo/txtEquipName",
+  EquipGrid = "panelJingZhu/EquipInfo/UIItemGrid",
+  Possibility = "panelJingZhu/Possibility",
+  txtPossibilityValue = "panelJingZhu/Possibility/txtPossibilityValue",
+  txtPossibilityUp = "panelJingZhu/Possibility/txtPossibilityUp",
+  txtLevel = "panelJingZhu/JingZhuPreview/Level/txtLevel",
+  txtNewLevel = "panelJingZhu/JingZhuPreview/Level/txtNewLevel",
+  goAttribute = "panelJingZhu/JingZhuPreview/Attribute",
+  txtJingZhuFeeValue = "panelConsume/Cost/txtJingZhuFee/txtJingZhuFeeValue",
+  txtMaxLvTip = "panelJingZhu/txtMaxLvTip",
+  txtTitleJingZhu = "panelConsume/txtTitleJingZhu",
+  txtTitleBreakthrough = "panelConsume/Cost/txtTitleBreakthrough",
+  txtJingZhuTip = "panelConsume/txtJingZhuTip",
+  txtBreakthroughTip = "panelConsume/Cost/txtBreakthroughTip",
+  ConsumeGrid = "panelConsume/Cost/UIItemGrid",
+  txtItemNum = "panelConsume/Cost/txtItemNum",
+  btnAdd = "panelConsume/Cost/btnAdd",
+  txtCount = "panelConsume/Cost/txtCount",
+  txtJingZhuFee = "panelConsume/Cost/txtJingZhuFee",
+  txtBreakthroughFee = "panelConsume/Cost/txtBreakthroughFee",
+  txtComposeFee = "panelConsume/Cost/txtComposeFee",
+  txtComposeValue = "panelConsume/Cost/txtComposeFee/txtComposeValue",
+  btnBreakthrough = "panelJingZhu/btnBreakthrough",
+  txtAutoJingZhuText = "panelConsume/btnAutoJingZhu/Text",
+  goCost = "panelConsume/Cost",
+  Fail = "Fail",
+  Success_Effect = "Success_Effect"
+}
+tbWnd.tbControls = tbControls
+local EquipJingZhu = Item.EquipJingZhu
+
+function tbWnd:DoJingZhuReq()
+  local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+  local bRet, szErr = EquipJingZhu:CanJingZhuWithReminderWindow(me, nEquipPos)
+  if not bRet then
+    me.CenterMsg(szErr)
+    return
+  end
+  EquipJingZhu:JingZhuReq(nEquipPos)
+end
+
+tbWnd.tbOnClick = {
+  btnAdd = function(self)
+    if self.nConsumeTemplateId > 0 then
+      Shop:OpenShopBuyWid(self.nConsumeTemplateId, true, "YuanBao")
+    end
+  end,
+  btnJingZhu = function(self)
+    self:DoJingZhuReq()
+  end,
+  btnAutoJingZhu = function(self)
+    local nDefaultPos = self.tbSVData[self.nEquipIndex][1]
+    me.MsgBox(i18n.EasyGet("\228\184\128\233\148\174\231\178\190\233\147\184\230\151\182\239\188\140\228\188\152\229\133\136\228\187\142\231\178\190\233\147\184\231\173\137\231\186\167\230\156\128\228\189\142\231\154\132\233\131\168\228\189\141\232\191\155\232\161\140\231\178\190\233\147\184\239\188\140\230\152\175\229\144\166\231\187\167\231\187\173\239\188\159"), {
+      {
+        i18n.szOk,
+        Item.AutoJingZhu.OpenWindowAndStart,
+        Item.AutoJingZhu,
+        nDefaultPos
+      },
+      {
+        i18n.szCancel
+      }
+    })
+  end,
+  btnBreakthrough = function(self)
+    local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+    Item.EquipJingZhu:JingZhuBreakReq(nEquipPos)
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbEquipScrollView = Ui:NewScrollView(self, tbControls.JingZhuTemplate, self.OnEquipClick, false, true)
+  self.tbEquipGrid = Ui:NewExistItemGrid(self, tbControls.EquipGrid)
+  self.tbEquipGrid:SetClickEnable(true)
+  self.tbConsumeGrid = Ui:NewExistItemGrid(self, tbControls.ConsumeGrid)
+  self.tbConsumeGrid:SetClickEnable(true)
+  self.pPanel:SetActive(tbControls.Fail, false)
+  self.pPanel:SetActive(tbControls.Success_Effect, false)
+end
+
+function tbWnd:OnOpen(nEquipPos)
+  self.pPanel:SetActive(tbControls.txtComposeFee, false)
+  self.nConsumeTemplateId = 0
+  self.tbSVData = {}
+  local tbEquip = me.GetEquips()
+  for k, v in pairs(tbEquip) do
+    if k <= Item.EQUIPPOS_AMULET then
+      local pEquip = KItem.GetItemObj(v)
+      table.insert(self.tbSVData, {
+        k,
+        v,
+        Item.tbEquipSort[pEquip.nEquipPos]
+      })
+    end
+  end
+  
+  local function fnDamageCmp(a, b)
+    return a[3] < b[3]
+  end
+  
+  table.sort(self.tbSVData, fnDamageCmp)
+  self.nEquipIndex = 1
+  if nEquipPos then
+    for k, v in ipairs(self.tbSVData) do
+      if v[1] == nEquipPos then
+        self.nEquipIndex = k
+        break
+      end
+    end
+  end
+  self:UpdateJingZhuEquipSV()
+  self:UpdateEquipDetailInfo()
+  self.tbEquipScrollView:ScrollToIndex(self.nEquipIndex)
+end
+
+function tbWnd:OnClose()
+  if self.nSuccessEffectTimer then
+    Timer:Close(self.nSuccessEffectTimer)
+  end
+  if self.nFailEffectTimer then
+    Timer:Close(self.nFailEffectTimer)
+  end
+  self.nSuccessEffectTimer = nil
+  self.nFailEffectTimer = nil
+  self.pPanel:SetActive(tbControls.Fail, false)
+  self.pPanel:SetActive(tbControls.Success_Effect, false)
+end
+
+function tbWnd:NotifyJingZhu(szParam, nPos)
+  local nIndex
+  for i, tbSVDataElement in ipairs(self.tbSVData) do
+    if tbSVDataElement[1] == nPos then
+      nIndex = i
+      break
+    end
+  end
+  local tbElement = self.tbEquipScrollView:GetElement(nIndex)
+  local nJingZhuLevel = EquipJingZhu:GetJingZhuLevel(me, nPos)
+  tbElement.pPanel:Label_SetText("txtJingZhuLevel/txtJingZhuLevelValue", tostring(nJingZhuLevel))
+  self:UpdateEquipDetailInfo()
+  if szParam and "success" == szParam then
+    self:ShowSuccessEffect()
+  elseif szParam and "fail" == szParam then
+    self:ShowFailEffect()
+  end
+end
+
+function tbWnd:ShowSuccessEffect()
+  if self.nSuccessEffectTimer then
+    Timer:Close(self.nSuccessEffectTimer)
+    self.pPanel:SetActive(tbControls.Success_Effect, false)
+  end
+  self.pPanel:SetActive(tbControls.Success_Effect, true)
+  Sound:PlaySound("CastingWin", _)
+  self.nSuccessEffectTimer = Timer:Register(Env.GAME_FPS, function()
+    self.pPanel:SetActive(tbControls.Success_Effect, false)
+    self.nSuccessEffectTimer = nil
+  end)
+end
+
+function tbWnd:ShowFailEffect()
+  if self.nFailEffectTimer then
+    Timer:Close(self.nFailEffectTimer)
+    self.pPanel:SetActive(tbControls.Fail, false)
+  end
+  self.pPanel:SetActive(tbControls.Fail, true)
+  Sound:PlaySound("CastingFail", _)
+  self.nFailEffectTimer = Timer:Register(Env.GAME_FPS, function()
+    self.pPanel:SetActive(tbControls.Fail, false)
+    self.nFailEffectTimer = nil
+  end)
+end
+
+function tbWnd:OnEquipClick(nIndex)
+  if self.nEquipIndex == nIndex then
+    return
+  end
+  local tbOldElement = self.tbEquipScrollView:GetElement(self.nEquipIndex)
+  if tbOldElement then
+    tbOldElement.pPanel:SetActive("imgSelected", false)
+  end
+  self.nEquipIndex = nIndex
+  local tbCurElement = self.tbEquipScrollView:GetElement(self.nEquipIndex)
+  tbCurElement.pPanel:SetActive("imgSelected", true)
+  self:UpdateEquipDetailInfo()
+end
+
+function tbWnd:fnSetItem(i, tbElement)
+  local nEquipPos, nEquipId = self.tbSVData[i][1], self.tbSVData[i][2]
+  local pEquip = KItem.GetItemObj(nEquipId)
+  local pPanel = tbElement.pPanel
+  local itemGrid = Ui:NewExistItemGrid(tbElement, "UIItemGrid")
+  itemGrid:SetItem(nEquipId, pEquip.dwTemplateId)
+  itemGrid:SetClickEnable(true, function()
+    self:OnEquipClick(i)
+  end)
+  tbElement.pPanel:SetActive("imgSelected", i == self.nEquipIndex)
+  pPanel:Label_SetText("txtEquipName", Item:GetName(pEquip.dwTemplateId, me))
+  local nJingZhuLevel = EquipJingZhu:GetJingZhuLevel(me, nEquipPos)
+  pPanel:Label_SetText("txtJingZhuLevel/txtJingZhuLevelValue", tostring(nJingZhuLevel))
+  RedPointMgr:DynamicRegisteRedPoint(pPanel, "Main", {
+    EquipJingZhu.tbEquipPos2RedPoint[nEquipPos]
+  })
+end
+
+function tbWnd:UpdateJingZhuEquipSV()
+  self.tbEquipScrollView:Reset()
+  for i, v in pairs(self.tbSVData) do
+    self.tbEquipScrollView:SetElement(i, function(tbElement)
+      self:fnSetItem(i, tbElement)
+    end)
+  end
+end
+
+function tbWnd:UpdateEquipDetailInfo()
+  local nEquipPos = self.tbSVData[self.nEquipIndex][1]
+  local pEquip = me.GetEquipByPos(nEquipPos)
+  if not pEquip then
+    return
+  end
+  self.tbEquipGrid:SetItem(pEquip.dwId, pEquip.dwTemplateId)
+  self.pPanel:Label_SetText(tbControls.txtEquipName, Item:GetName(pEquip.dwTemplateId, me))
+  local nMaxLevel = EquipJingZhu:GetJingZhuMaxLevel(pEquip.nLevel)
+  local nCurJingZhuLevel = EquipJingZhu:GetJingZhuLevel(me, nEquipPos)
+  if nMaxLevel <= nCurJingZhuLevel then
+    self.pPanel:Label_SetText(tbControls.txtPossibilityValue, string.format("%d%%", 0))
+    self.pPanel:Label_SetText(tbControls.txtPossibilityUp, "")
+    self:UpdateAttrInfo(pEquip, nCurJingZhuLevel, nCurJingZhuLevel)
+    self:UpdateConsumeInfo(0)
+    self.pPanel:SetActive(tbControls.txtMaxLvTip, true)
+    self.pPanel:Label_SetText(tbControls.txtMaxLvTip, i18n.EasyGet("\229\183\178\231\178\190\233\147\184\232\135\179\230\156\128\233\171\152\231\173\137\231\186\167\239\188\140\230\155\180\230\141\162\230\155\180\233\171\152\233\152\182\232\163\133\229\164\135\229\143\175\228\187\165\231\187\167\231\187\173\231\178\190\233\147\184\239\188\129"))
+    self.pPanel:SetActive(tbControls.goCost, false)
+    self.pPanel:SetActive(tbControls.btnJingZhu, false)
+    self.pPanel:SetActive(tbControls.btnAutoJingZhu, false)
+    self.pPanel:SetActive(tbControls.btnBreakthrough, false)
+    self.pPanel:SetActive(tbControls.txtCount, false)
+  else
+    self.pPanel:SetActive(tbControls.goCost, true)
+    self.pPanel:SetActive(tbControls.txtMaxLvTip, false)
+    local nIsBreak = false
+    local nBreakId, nBreakItemNum = EquipJingZhu:GetJingZhuBreakConfig(nCurJingZhuLevel, nEquipPos)
+    if nBreakId > 0 then
+      local nBreakLevel = EquipJingZhu:GetJingZhuBreakLevel(me, nEquipPos)
+      if nCurJingZhuLevel > nBreakLevel then
+        nIsBreak = true
+      end
+    end
+    if nIsBreak then
+      self.pPanel:SetActive(tbControls.txtCount, false)
+      self.pPanel:SetActive(tbControls.Possibility, false)
+      self:UpdateBreakInfo(true)
+      self:UpdateAttrInfo(pEquip, nCurJingZhuLevel, nCurJingZhuLevel)
+      self:UpdateConsumeInfo(nBreakId, true, nBreakItemNum, 0)
+    else
+      self.pPanel:SetActive(tbControls.txtCount, true)
+      self.pPanel:Label_SetText(tbControls.txtCount, i18n.EasyGet("\228\187\138\230\151\165\230\172\161\230\149\176\239\188\154{0}/{1}", DegreeCtrl:GetDegree(me, EquipJingZhu.POS_2_DEGREE[nEquipPos]), EquipJingZhu.DAILY_JING_ZHU_TIME_LIMIT))
+      self.pPanel:SetActive(tbControls.Possibility, true)
+      self:UpdateBreakInfo(false)
+      local nNextJingZhuLevel = nCurJingZhuLevel + 1
+      local nBaseRate, nAddRate = EquipJingZhu:GetJingZhuSuccessRateCfg(nNextJingZhuLevel)
+      self.pPanel:Label_SetText(tbControls.txtPossibilityValue, string.format("%d%%", nBaseRate))
+      local nFailCount = EquipJingZhu:GetJingZhuFailCount(me, nEquipPos)
+      if nFailCount > 0 then
+        self.pPanel:Label_SetText(tbControls.txtPossibilityUp, string.format("+%d%%", nFailCount * nAddRate))
+      else
+        self.pPanel:Label_SetText(tbControls.txtPossibilityUp, "")
+      end
+      self:UpdateAttrInfo(pEquip, nCurJingZhuLevel, nNextJingZhuLevel)
+      local nItemTemplateId, nItemNum, nCoin = EquipJingZhu:GetJingZhuConsumeInfo(nNextJingZhuLevel, nEquipPos)
+      self:UpdateConsumeInfo(nItemTemplateId, false, nItemNum, nCoin)
+    end
+  end
+end
+
+function tbWnd:UpdateAttrInfo(pEquip, nCurLevel, nNextLevel)
+  self.pPanel:Label_SetText(tbControls.txtLevel, nCurLevel)
+  self.pPanel:Label_SetText(tbControls.txtNewLevel, nNextLevel)
+  local tbBaseAttrib = pEquip.GetBaseAttrib()
+  for i = 1, EquipJingZhu.ATTR_NUM_LIMIT do
+    local tbCurAttrNum = EquipJingZhu:GetJingZhuAddAttrNum(nCurLevel, tbBaseAttrib[i].szName)
+    local tbNextAttrNum = EquipJingZhu:GetJingZhuAddAttrNum(nNextLevel, tbBaseAttrib[i].szName)
+    local szDesc, szValueCur = self:GetMagicAttribDesc(tbBaseAttrib[i].szName, tbCurAttrNum)
+    local _, szValueNext = self:GetMagicAttribDesc(tbBaseAttrib[i].szName, tbNextAttrNum)
+    self.pPanel:Label_SetText(string.format("%s%d%s", tbControls.goAttribute, i, "/txtAttribute"), szDesc)
+    local szSubValue = FightSkill:StringValueSubResult(szValueCur, szValueNext)
+    self.pPanel:Label_SetText(string.format("%s%d%s", tbControls.goAttribute, i, "/txtValue"), szValueCur)
+    self.pPanel:Label_SetText(string.format("%s%d%s", tbControls.goAttribute, i, "/txtNewValue"), szValueNext)
+    if "" == szSubValue then
+      self.pPanel:Label_SetText(string.format("%s%d%s", tbControls.goAttribute, i, "/txtAddValue"), "")
+    else
+      self.pPanel:Label_SetText(string.format("%s%d%s", tbControls.goAttribute, i, "/txtAddValue"), szSubValue)
+    end
+  end
+end
+
+function tbWnd:GetMagicAttribDesc(szName, tbMagic)
+  if "" == szName then
+    return "", ""
+  end
+  local szAttribMsg, szValue = FightSkill:GetMagicDescSplit(szName, tbMagic)
+  return szAttribMsg, szValue
+end
+
+function tbWnd:UpdateBreakInfo(bIsBreak)
+  self.pPanel:SetActive(tbControls.txtTitleBreakthrough, bIsBreak)
+  self.pPanel:SetActive(tbControls.txtBreakthroughTip, bIsBreak)
+  self.pPanel:SetActive(tbControls.txtBreakthroughFee, false)
+  self.pPanel:SetActive(tbControls.btnBreakthrough, bIsBreak)
+  self.pPanel:SetActive(tbControls.txtTitleJingZhu, not bIsBreak)
+  self.pPanel:SetActive(tbControls.txtJingZhuTip, not bIsBreak)
+  self.pPanel:SetActive(tbControls.txtJingZhuFee, not bIsBreak)
+  self.pPanel:SetActive(tbControls.btnJingZhu, not bIsBreak)
+  self.pPanel:SetActive(tbControls.btnAutoJingZhu, not bIsBreak)
+end
+
+function tbWnd:UpdateConsumeInfo(nItemTemplateId, bIsBreak, nNeedNum, nCoinNum)
+  self.nConsumeTemplateId = nItemTemplateId
+  if nItemTemplateId > 0 then
+    self.tbConsumeGrid:SetItemByTemplate(nItemTemplateId)
+    self.tbConsumeGrid:SetClickEnable(true)
+    local nCurNum = me.GetItemCountByTypeInBag(nItemTemplateId)
+    local nCanSynthesisNum = EquipJingZhu:GetCanSynthesisNum(me, nItemTemplateId)
+    self.pPanel:Label_SetText(tbControls.txtJingZhuFeeValue, nCoinNum)
+    local nAllNum = nCurNum + nCanSynthesisNum
+    if nNeedNum <= nAllNum then
+      self.pPanel:Label_SetColorByName(tbControls.txtItemNum, "Enough")
+    else
+      self.pPanel:Label_SetColorByName(tbControls.txtItemNum, "NotEnough")
+    end
+    self.pPanel:Label_SetText(tbControls.txtItemNum, nAllNum .. "/" .. nNeedNum)
+    local bNeedAndCanSynthesis = nNeedNum > nCurNum and nCanSynthesisNum > 0
+    self.pPanel:SetActive(tbControls.txtComposeFee, bNeedAndCanSynthesis)
+    if bNeedAndCanSynthesis then
+      local nNeedSynthesisNum = math.min(nCanSynthesisNum, nNeedNum - nCurNum)
+      local nSysthesisCoin
+      _, nSysthesisCoin = EquipJingZhu:CanSynthesisSpecificNum(me, nItemTemplateId, nNeedSynthesisNum, me.GetMoney("Coin"))
+      self.pPanel:Label_SetText(tbControls.txtComposeValue, nSysthesisCoin)
+    end
+  else
+    self.tbConsumeGrid:Clear()
+    self.pPanel:Label_SetColorByName(tbControls.txtItemNum, "NotEnough")
+    self.pPanel:Label_SetText(tbControls.txtItemNum, "0/0")
+    self.pPanel:Label_SetText(tbControls.txtJingZhuFeeValue, 0)
+    self.pPanel:SetActive(tbControls.txtComposeFee, false)
+  end
+end
+
+function tbWnd:OnResponseBuy()
+  self:UpdateEquipDetailInfo()
+end

@@ -1,0 +1,213 @@
+Require("CommonScript/Task/WuXingZhiShu/YanWuChangCfg.lua")
+Require("Script/Fuben/FubenUIController.lua")
+YanWuChang.bInDungeon = false
+YanWuChang.tbEachStepEnum = {
+  DialogBeforeFight = 1,
+  DefeatBeRestrainSeries = 2,
+  MiddleDialog = 3,
+  DefeatRestrainSeries = 4,
+  DialogBeforeLeave = 5
+}
+YanWuChang.emStartStep = YanWuChang.tbEachStepEnum.DialogBeforeFight
+YanWuChang.emEndStep = YanWuChang.tbEachStepEnum.DialogBeforeLeave
+
+function YanWuChang.fnMeNpc()
+  return me.GetNpc()
+end
+
+function YanWuChang.fnIntroducerNpc()
+  return YanWuChang.pIntroducer
+end
+
+FubenUIController:RegisterChecker({
+  YanWuChang.nMainMapTemplateId
+}, YanWuChang)
+
+function YanWuChang:OnS2CBeforeStart()
+  if not YanWuChang.bInDungeon then
+    self.bInDungeon = true
+    self:BeforeStartRegister()
+    RemoteServer.YanWuChangRequest(self.tbC2SProtocol.Enter)
+  end
+end
+
+function YanWuChang:OnLogin()
+  self.bInDungeon = false
+  self.emStep = nil
+end
+
+function YanWuChang:BeforeStartRegister()
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LOADED, self.OnEnter, self)
+  EventNotify:RegistNotify(EventNotify.emNOTIFY_MAP_LEAVE, self.OnLeave, self)
+end
+
+function YanWuChang:OnEnter(nMapTemplateId)
+  if self.bInDungeon and nMapTemplateId == self.Cfg.nMapTemplateId then
+    local tbIntroducer = self.tbNpcInfo.Introducer
+    self.pIntroducer = KNpc.Add(self:GetIntroducerTemplateId(me), 1, -1, me.nMapId, tbIntroducer.PosX, tbIntroducer.PosY, 0, 0, 0)
+    FubenUIController:OpenDefaultFuBenUI()
+    self:ChangeStep(self.emStartStep)
+    self.nDeathRegId = PlayerEvent:Register(me, "OnDeath", self.OnPlayerDeath, self)
+  end
+end
+
+function YanWuChang:OnLeave(nTemplateId, nMapID)
+  if self.bInDungeon and nTemplateId == self.Cfg.nMapTemplateId then
+    self.pIntroducer.Delete()
+    self.bInDungeon = false
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_LOADED, self)
+    EventNotify:UnRegistNotify(EventNotify.emNOTIFY_MAP_LEAVE, self)
+    FubenUIController:CloseFubenUI()
+    PlayerEvent:UnRegister(me, "OnDeath", self.nDeathRegId)
+  end
+end
+
+function YanWuChang:StepStart(emStep)
+  if emStep == self.tbEachStepEnum.DialogBeforeFight then
+    self:ShowTargetText(i18n.Get(self.tbText.szTargetDialogWithIntroduer, i18n.Parse(self.pIntroducer.szName)))
+    self:DialogToIntroduerStepStartAction()
+  elseif emStep == self.tbEachStepEnum.DefeatBeRestrainSeries then
+    self:RefreshNpcStepStart(false)
+  elseif emStep == self.tbEachStepEnum.MiddleDialog then
+    self:ShowDialogs(self.tbDialog.AfterDefeatBeRestrain, self.StepLimitNextStep, self, self.tbEachStepEnum.MiddleDialog)
+  elseif emStep == self.tbEachStepEnum.DefeatRestrainSeries then
+    self:RefreshNpcStepStart(true)
+  elseif emStep == self.tbEachStepEnum.DialogBeforeLeave then
+    self:ShowTargetText(i18n.Get(self.tbText.szTargetDialogWithIntroduer, i18n.Parse(self.pIntroducer.szName)))
+    self:DialogToIntroduerStepStartAction()
+  end
+end
+
+function YanWuChang:StepEnd(emStep)
+  if emStep == self.tbEachStepEnum.DialogBeforeFight or emStep == self.tbEachStepEnum.DialogBeforeLeave then
+    FubenUIController:UnRegisterDefaultFubenPanelClickEvent()
+  elseif emStep == self.tbEachStepEnum.DefeatBeRestrainSeries or emStep == self.tbEachStepEnum.DefeatRestrainSeries then
+    AFK:Stop()
+  end
+end
+
+function YanWuChang:ChangeStep(nNewStep)
+  if self.emStep ~= nil then
+    self:StepEnd(self.emStep)
+  end
+  self.emStep = nNewStep
+  if self.emStep ~= nil then
+    self:StepStart(self.emStep)
+  end
+end
+
+function YanWuChang:NextStep()
+  local nNewStep
+  if self.emStep >= self.emEndStep then
+    nNewStep = nil
+  else
+    nNewStep = self.emStep + 1
+  end
+  self:ChangeStep(nNewStep)
+end
+
+function YanWuChang:ShowDialogs(tbDialogInfo, fnWholeDialogEndCallBack, ...)
+  self:NextDialog(tbDialogInfo, 1, fnWholeDialogEndCallBack, ...)
+end
+
+function YanWuChang:NextDialog(tbDialogInfo, nStep, fnWholeDialogEndCallBack, ...)
+  if nStep > #tbDialogInfo then
+    fnWholeDialogEndCallBack(...)
+  else
+    local tbAStepDialog = tbDialogInfo[nStep]
+    if nil ~= tbAStepDialog then
+      Dialog:Show({
+        Text = "<auto_next>" .. tbAStepDialog.fnText(),
+        OptList = {
+          {
+            Text = i18n.Get(tbAStepDialog.szOptionText),
+            Callback = self.NextDialog,
+            Param = {
+              self,
+              tbDialogInfo,
+              nStep + 1,
+              fnWholeDialogEndCallBack,
+              ...
+            }
+          }
+        }
+      }, me, tbAStepDialog.fnGetDialogNpc())
+    end
+  end
+end
+
+function YanWuChang:GetDefeatOtherFactionTargetText(szNpcName)
+  return i18n.Get(self.tbText.szTargetDefeatOtherFaction, szNpcName)
+end
+
+function YanWuChang:ShowTargetText(szText)
+  FubenUIController:ShowDefaultInfo(nil, {
+    i18n.Get(self.tbText.szTargetTitle),
+    szText
+  })
+end
+
+function YanWuChang:StepLimitNextStep(emLimitNowStep)
+  if self.bInDungeon and self.emStep == emLimitNowStep then
+    self:NextStep()
+  end
+end
+
+function YanWuChang:RefreshNpcStepStart(bIsRestrainOther)
+  self:RefreshNpc(bIsRestrainOther)
+  AFK:Start()
+  self:ShowTargetText(self:GetDefeatOtherFactionTargetText(i18n.Parse(self.pMonster.szName)))
+  local szCenterMsgText
+  if bIsRestrainOther then
+    szCenterMsgText = i18n.Get(self.tbText.szRefreshRestrainMonsterTips)
+  else
+    szCenterMsgText = i18n.Get(self.tbText.szRefreshBeRestrainMonsterTips)
+  end
+  me.CenterMsg(szCenterMsgText)
+end
+
+function YanWuChang:RefreshNpc(bIsRestrainOther)
+  local tbMyFactionInfo = Faction.tbFactionInfo[me.nFaction]
+  local nNpcSeries
+  if bIsRestrainOther then
+    nNpcSeries = Npc.tbRestrainSeries[tbMyFactionInfo.nSeries]
+  else
+    nNpcSeries = Npc.tbBeRestrainSeries[tbMyFactionInfo.nSeries]
+  end
+  local tbBelongSeriesFactions = {}
+  for nFaction, tbFaction in pairs(Faction.tbFactionInfo) do
+    if 0 ~= tbFaction.nOpenType and tbFaction.nSeries == nNpcSeries then
+      table.insert(tbBelongSeriesFactions, nFaction)
+    end
+  end
+  local nNpcFaction = tbBelongSeriesFactions[MathRandom(#tbBelongSeriesFactions)]
+  local tbMonster = self.tbNpcInfo.Monster
+  local nRefreshNpcTemplateId, emNowStep
+  if bIsRestrainOther then
+    nRefreshNpcTemplateId = self.tbFactionNpcInfo[nNpcFaction].nRefreshNpcTemplateIdWeak
+    emNowStep = self.tbEachStepEnum.DefeatRestrainSeries
+  else
+    nRefreshNpcTemplateId = self.tbFactionNpcInfo[nNpcFaction].nRefreshNpcTemplateIdStrong
+    emNowStep = self.tbEachStepEnum.DefeatBeRestrainSeries
+  end
+  self.pMonster = KNpc.Add(nRefreshNpcTemplateId, 1, nNpcSeries, me.nMapId, tbMonster.PosX, tbMonster.PosY, 0, 0, 0)
+  Npc:RegNpcOnDeath(self.pMonster, self.StepLimitNextStep, self, emNowStep)
+end
+
+function YanWuChang:OnPlayerDeath(pKiller)
+  if self.bInDungeon then
+    me.Revive(Player.KE_PLAYER_REVIVE_TYPE.emKREVIVE_TYPE_REMOTE)
+    me.GetNpc().RestoreHP()
+    local tbRevivePos = self.tbNpcInfo.PlayerBirth
+    me.SetPosition(tbRevivePos.PosX, tbRevivePos.PosY)
+  end
+end
+
+function YanWuChang:DialogToIntroduerStepStartAction()
+  self:AutoPathToIntroduer()
+  FubenUIController:RegisterDefaultFubenPanelClickEvent(self.AutoPathToIntroduer, self)
+end
+
+function YanWuChang:AutoPathToIntroduer()
+  Operation:OnDialogerClicked(self.pIntroducer.nId)
+end

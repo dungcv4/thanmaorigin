@@ -1,0 +1,257 @@
+local tbWnd = Ui:CreateWindow("UILegionMgrPanel")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_SYNC_LEGION_BASEINFO,
+      self.onLegionSyncData
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBG/btnClose",
+  Template = "node/SelectList/ListPanel/ScrollView/Viewport/Content/template",
+  btnConfirm = "node/imgBG/Content/btnConfirm",
+  SelectList = "node/SelectList",
+  btnMaster = "node/imgBG/Content/Master",
+  btnViceMaster1 = "node/imgBG/Content/ViceMaster1",
+  btnViceMaster2 = "node/imgBG/Content/ViceMaster2",
+  btnViceMaster3 = "node/imgBG/Content/ViceMaster3"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:Close()
+  end,
+  btnConfirm = function(self)
+    self:OnComfirm()
+  end,
+  btnMaster = function(self)
+    self:OnClickCareer(self.btnMaster, Legion.Def.Career_Master)
+  end,
+  btnViceMaster1 = function(self)
+    self:OnClickCareer(self.btnViceMaster1, Legion.Def.Career_ViceMaster, 1)
+  end,
+  btnViceMaster2 = function(self)
+    self:OnClickCareer(self.btnViceMaster2, Legion.Def.Career_ViceMaster, 2)
+  end,
+  btnViceMaster3 = function(self)
+    self:OnClickCareer(self.btnViceMaster3, Legion.Def.Career_ViceMaster, 3)
+  end
+}
+tbWnd.tbCareer2Txt = {
+  [Legion.Def.Career_Master] = {
+    [1] = "node/imgBG/Content/Master/txtName"
+  },
+  [Legion.Def.Career_ViceMaster] = {
+    [1] = "node/imgBG/Content/ViceMaster1/txtName",
+    [2] = "node/imgBG/Content/ViceMaster2/txtName",
+    [3] = "node/imgBG/Content/ViceMaster3/txtName"
+  }
+}
+tbWnd.tbCareer2EmptyTxt = {
+  [Legion.Def.Career_ViceMaster] = {
+    [1] = "node/imgBG/Content/ViceMaster1/txtEmpty",
+    [2] = "node/imgBG/Content/ViceMaster2/txtEmpty",
+    [3] = "node/imgBG/Content/ViceMaster3/txtEmpty"
+  }
+}
+tbWnd.tbCareer2Btn = {
+  [Legion.Def.Career_Master] = {
+    [1] = "node/imgBG/Content/Master"
+  },
+  [Legion.Def.Career_ViceMaster] = {
+    [1] = "node/imgBG/Content/ViceMaster1",
+    [2] = "node/imgBG/Content/ViceMaster2",
+    [3] = "node/imgBG/Content/ViceMaster3"
+  }
+}
+
+function tbWnd:OnCreate()
+  self.tbSelectList = Ui:NewScrollView(self, tbControls.Template, function(self, nIndex, tbElement)
+    self:OnSelect(nIndex)
+  end)
+  self:SetClickEmptyToClose(tbControls.SelectList)
+end
+
+function tbWnd:OnOpen()
+  self:Init()
+end
+
+function tbWnd:Init()
+  for nCareer, tbPath in pairs(self.tbCareer2Txt) do
+    for _, szPath in ipairs(tbPath) do
+      self.pPanel:Label_SetText(szPath, "")
+      if self.tbCareer2EmptyTxt[nCareer] then
+        for _, szEmptyPath in ipairs(self.tbCareer2EmptyTxt[nCareer]) do
+          self.pPanel:SetActive(szEmptyPath, true)
+        end
+      end
+    end
+  end
+  self.pPanel:SetActive(tbControls.SelectList, false)
+  local tbMemberList = Legion:GetMemberList() or {}
+  self.tbOldCareerInfo = {}
+  local tbIndex = {}
+  for i = 1, #tbMemberList do
+    local nCareer = tbMemberList[i].nCareer
+    if self.tbCareer2Txt[nCareer] then
+      self.tbOldCareerInfo[nCareer] = self.tbOldCareerInfo[nCareer] or {}
+      table.insert(self.tbOldCareerInfo[nCareer], {
+        szName = tbMemberList[i].szName,
+        nCareer = nCareer,
+        nMemberId = tbMemberList[i].nMemberId
+      })
+      if tbIndex[nCareer] and 2 == tbIndex[nCareer] then
+        self.pPanel:Label_SetText(self.tbCareer2Txt[nCareer][3], tbMemberList[i].szName)
+        tbIndex[nCareer] = 3
+      elseif tbIndex[nCareer] and 1 == tbIndex[nCareer] then
+        self.pPanel:Label_SetText(self.tbCareer2Txt[nCareer][2], tbMemberList[i].szName)
+        tbIndex[nCareer] = 2
+      else
+        self.pPanel:Label_SetText(self.tbCareer2Txt[nCareer][1], tbMemberList[i].szName)
+        tbIndex[nCareer] = 1
+      end
+      if self.tbCareer2EmptyTxt[nCareer] and self.tbCareer2EmptyTxt[nCareer][tbIndex[nCareer]] then
+        self.pPanel:SetActive(self.tbCareer2EmptyTxt[nCareer][tbIndex[nCareer]], false)
+      end
+    end
+  end
+  self.tbNewCareerInfo = Lib:CopyTB(self.tbOldCareerInfo)
+  self.nSelectCareer = nil
+  local nMyCareer = Legion:GetMyCareer()
+  for nCareer, tbPath in pairs(self.tbCareer2Btn) do
+    if Legion.Def.Career_Authority[nMyCareer][Legion.Def.Career2Authority[nCareer]] then
+      for _, szPath in ipairs(tbPath) do
+        self.pPanel:Button_SetEnable(szPath, true)
+      end
+    else
+      for _, szPath in ipairs(tbPath) do
+        self.pPanel:Button_SetEnable(szPath, false)
+      end
+    end
+  end
+end
+
+function tbWnd:OnClickCareer(szPath, nCareer, nIndex)
+  nIndex = nIndex or 1
+  local tbPosition = self.pPanel:Object_GetPosition(szPath)
+  self.pPanel:Object_SetPosition(tbControls.SelectList, Ui.Vector3(tbPosition.x, tbPosition.y, tbPosition.z))
+  self.nSelectCareer = nCareer
+  self.nSelectIndex = nIndex
+  local tbCurrentSelectInfo = self.tbNewCareerInfo[nCareer] and self.tbNewCareerInfo[nCareer][nIndex] or nil
+  self:OnUpdateSelectList(tbCurrentSelectInfo)
+  self.pPanel:SetActive(tbControls.SelectList, true)
+end
+
+function tbWnd:OnUpdateSelectList(tbCurrentSelectInfo)
+  local tbMemberList = Legion:GetMemberList() or {}
+  self.tbSelectList:Clear()
+  self.tbList = {}
+  local CurrentChoosePlayerId = tbCurrentSelectInfo and tbCurrentSelectInfo.nMemberId or 0
+  local nCounter = 1
+  if self.nSelectCareer ~= Legion.Def.Career_Master then
+    self.tbSelectList:SetElement(nCounter, function(tbElement)
+      local pPanel = tbElement.pPanel
+      pPanel:Label_SetText("txtName", i18n.Get(Legion.Cfg.Msg.CancelAppoint))
+    end)
+    nCounter = nCounter + 1
+    table.insert(self.tbList, {})
+  end
+  for i = 1, #tbMemberList do
+    if tbMemberList[i].nCareer ~= Legion.Def.Career_Master and tbMemberList[i].nMemberId ~= CurrentChoosePlayerId and tbMemberList[i].nCareer ~= self.nSelectCareer then
+      self.tbSelectList:SetElement(nCounter, function(tbElement)
+        local pPanel = tbElement.pPanel
+        pPanel:Label_SetText("txtName", tbMemberList[i].szName)
+      end)
+      nCounter = nCounter + 1
+      table.insert(self.tbList, {
+        szName = tbMemberList[i].szName,
+        nCareer = tbMemberList[i].nCareer,
+        nMemberId = tbMemberList[i].nMemberId,
+        nJoinTime = tbMemberList[i].nJoinTime
+      })
+    end
+  end
+end
+
+function tbWnd:OnSelect(nIndex)
+  if self.tbList[nIndex].nMemberId then
+    for nCareer, tbData in pairs(self.tbNewCareerInfo) do
+      for nIdx, tbInfo in ipairs(tbData) do
+        if self.tbList[nIndex].nMemberId == tbInfo.nMemberId then
+          tbData[nIdx] = nil
+          self.pPanel:Label_SetText(self.tbCareer2Txt[nCareer][nIdx], "")
+          if self.tbCareer2EmptyTxt[nCareer] and self.tbCareer2EmptyTxt[nCareer][nIdx] then
+            self.pPanel:SetActive(self.tbCareer2EmptyTxt[nCareer][nIdx], true)
+          end
+          break
+        end
+      end
+    end
+    self.tbNewCareerInfo[self.nSelectCareer] = self.tbNewCareerInfo[self.nSelectCareer] or {}
+    self.tbNewCareerInfo[self.nSelectCareer][self.nSelectIndex] = {
+      szName = self.tbList[nIndex].szName,
+      nCareer = self.tbList[nIndex].nCareer,
+      nMemberId = self.tbList[nIndex].nMemberId,
+      nJoinTime = self.tbList[nIndex].nJoinTime
+    }
+    self.pPanel:Label_SetText(self.tbCareer2Txt[self.nSelectCareer][self.nSelectIndex], self.tbList[nIndex].szName)
+    if self.tbCareer2EmptyTxt[self.nSelectCareer] and self.tbCareer2EmptyTxt[self.nSelectCareer][self.nSelectIndex] then
+      self.pPanel:SetActive(self.tbCareer2EmptyTxt[self.nSelectCareer][self.nSelectIndex], false)
+    end
+  else
+    if self.tbNewCareerInfo[self.nSelectCareer] then
+      self.tbNewCareerInfo[self.nSelectCareer][self.nSelectIndex] = nil
+    end
+    self.pPanel:Label_SetText(self.tbCareer2Txt[self.nSelectCareer][self.nSelectIndex], "")
+    if self.tbCareer2EmptyTxt[self.nSelectCareer][self.nSelectIndex] then
+      self.pPanel:SetActive(self.tbCareer2EmptyTxt[self.nSelectCareer][self.nSelectIndex], true)
+    end
+  end
+  self.pPanel:SetActive(tbControls.SelectList, false)
+end
+
+function tbWnd:onLegionSyncData(szDataType)
+  if "MemberList" == szDataType then
+    self:Init()
+  end
+end
+
+function tbWnd:OnComfirm()
+  if self.tbNewCareerInfo[Legion.Def.Career_Master] and self.tbNewCareerInfo[Legion.Def.Career_Master][1] and self.tbOldCareerInfo[Legion.Def.Career_Master] and self.tbOldCareerInfo[Legion.Def.Career_Master][1] and self.tbNewCareerInfo[Legion.Def.Career_Master][1].nMemberId ~= self.tbOldCareerInfo[Legion.Def.Career_Master][1].nMemberId then
+    Legion:RequestChangeMaster(self.tbNewCareerInfo[Legion.Def.Career_Master][1].nMemberId)
+    self:Close()
+    return
+  end
+  local tbCancalMember = {}
+  local tbSetCareerMember = {}
+  for nCareer, tbData in pairs(self.tbCareer2Txt) do
+    for nIdx, _ in ipairs(tbData) do
+      if self.tbNewCareerInfo[nCareer] and self.tbNewCareerInfo[nCareer][nIdx] and self.tbOldCareerInfo[nCareer] and self.tbOldCareerInfo[nCareer][nIdx] then
+        if self.tbNewCareerInfo[nCareer][nIdx].nMemberId ~= self.tbOldCareerInfo[nCareer][nIdx].nMemberId then
+          table.insert(tbCancalMember, self.tbOldCareerInfo[nCareer][nIdx].nMemberId)
+          table.insert(tbSetCareerMember, {
+            nMemberId = self.tbNewCareerInfo[nCareer][nIdx].nMemberId,
+            nCareer = nCareer
+          })
+        end
+      elseif self.tbNewCareerInfo[nCareer] and self.tbNewCareerInfo[nCareer][nIdx] and (not self.tbOldCareerInfo[nCareer] or not self.tbOldCareerInfo[nCareer][nIdx]) then
+        table.insert(tbSetCareerMember, {
+          nMemberId = self.tbNewCareerInfo[nCareer][nIdx].nMemberId,
+          nCareer = nCareer
+        })
+      elseif self.tbOldCareerInfo[nCareer] and self.tbOldCareerInfo[nCareer][nIdx] and (not self.tbNewCareerInfo[nCareer] or not self.tbNewCareerInfo[nCareer][nIdx]) then
+        table.insert(tbCancalMember, self.tbOldCareerInfo[nCareer][nIdx].nMemberId)
+      end
+    end
+  end
+  if #tbCancalMember > 0 or #tbSetCareerMember > 0 then
+    Legion:ChangeCareers(tbCancalMember, tbSetCareerMember)
+    self:Close()
+  else
+    me.CenterMsg(i18n.Get(Legion.Cfg.Msg.NoCareerChange))
+    return
+  end
+end

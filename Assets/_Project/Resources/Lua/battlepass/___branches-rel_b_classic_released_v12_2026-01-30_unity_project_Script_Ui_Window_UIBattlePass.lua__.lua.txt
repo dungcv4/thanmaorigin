@@ -1,0 +1,478 @@
+local tbWnd = Ui:CreateWindow("UIBattlePass")
+
+function tbWnd:NotifyEvents()
+  return {
+    {
+      EventNotify.emNOTIFY_MAP_SWITCH,
+      self.CloseByDefault,
+      self
+    }
+  }
+end
+
+local tbControls = {
+  btnClose = "node/imgBg/btnClose",
+  btnReward = "node/imgBg/btnList/btnReward",
+  btnMission = "node/imgBg/btnList/btnMission",
+  imgbar = "node/imgBg/imgLevelBg/imgBarBg/imgbar",
+  txtValue = "node/imgBg/imgLevelBg/txtExperienceTip/txtValue",
+  txtLevel = "node/imgBg/imgLevelBg/imgOrderBg/txtValue",
+  RewardList = "node/imgBg/Content/RewardList",
+  RankAwardsList = "node/imgBg/Content/RewardList/RankAwardsList",
+  RankAwardsTemplate = "node/imgBg/Content/RewardList/RankAwardsList/Viewport/RankContent/Template",
+  imgEliteLock = "node/imgBg/Content/RewardList/btnLevelList/btnElite/imgLock",
+  imgLegendLock = "node/imgBg/Content/RewardList/btnLevelList/btnLegend/imgLock",
+  txtRewardCountdown = "node/imgBg/Content/RewardList/Countdown/txtCountdownValue",
+  btnRewardBuy = "node/imgBg/Content/RewardList/btnBuy",
+  btnRewardGetAll = "node/imgBg/Content/RewardList/btnGetAll",
+  txtPreviewLevel = "node/imgBg/Content/RewardList/AwardsPreview/txtLevel",
+  PreviewItem1 = "node/imgBg/Content/RewardList/AwardsPreview/item01/UIItemGrid",
+  PreviewItem2 = "node/imgBg/Content/RewardList/AwardsPreview/item02/UIItemGrid",
+  PreviewItem3 = "node/imgBg/Content/RewardList/AwardsPreview/item03/UIItemGrid",
+  MissionList = "node/imgBg/Content/MissionList",
+  btnTagStrength = "node/imgBg/Content/MissionList/btnList/btnTagStrength",
+  btnTagSocialize = "node/imgBg/Content/MissionList/btnList/btnTagSocialize",
+  btnTagFuben = "node/imgBg/Content/MissionList/btnList/btnTagFuben",
+  btnTagPvP = "node/imgBg/Content/MissionList/btnList/btnTagPvP",
+  TagStrengthText = "node/imgBg/Content/MissionList/btnList/btnTagStrength/Text",
+  TextTagSocialize = "node/imgBg/Content/MissionList/btnList/btnTagSocialize/Text",
+  TextTagFuben = "node/imgBg/Content/MissionList/btnList/btnTagFuben/Text",
+  TextTagPvP = "node/imgBg/Content/MissionList/btnList/btnTagPvP/Text",
+  txtMissionCountdown = "node/imgBg/Content/MissionList/Countdown/txtCountdownValue",
+  btnMissionGetAll = "node/imgBg/Content/MissionList/btnGetAll",
+  txtFinishValue = "node/imgBg/Content/MissionList/FinishCount/txtFinishValue",
+  MissionTaskTemplate = "node/imgBg/Content/MissionList/TaskList/Mask/Content/Template",
+  btnHelp = "node/imgBg/txtTitle/btnHelp"
+}
+tbWnd.tbControls = tbControls
+tbWnd.tbOnClick = {
+  btnClose = function(self)
+    self:CloseByDefault()
+  end,
+  btnRewardBuy = function(self)
+    self:BuyBattlePass()
+  end,
+  btnRewardGetAll = function(self)
+    self:OnClickReceiveAllAwardBtn()
+  end,
+  btnMissionGetAll = function(self)
+    self:OnClickCompleteAllTaskBtn()
+  end,
+  btnHelp = function(self)
+    Ui:OnHelpClicked("BattlePassHelp")
+  end
+}
+
+function tbWnd:OnCreate()
+  self.tbItemGridN = Ui:NewExistItemGrid(self, self.PreviewItem1)
+  self.tbItemGridM = Ui:NewExistItemGrid(self, self.PreviewItem2)
+  self.tbItemGridH = Ui:NewExistItemGrid(self, self.PreviewItem3)
+  self.tbRewardBtnGroup = Ui:NewButtonGroup(self, {
+    tbControls.btnReward,
+    tbControls.btnMission
+  }, true, function(self, nIndex)
+    if 1 == nIndex then
+      if BattlePass:GetLvAwardReceiveTable() == nil then
+        BattlePass:ReqBattlePassAwardData()
+      else
+        self:ShowAwardPanel()
+      end
+    elseif 2 == nIndex then
+      if nil == BattlePass:GetBattlePassTaskTable() then
+        BattlePass:ReqBattlePassTaskData()
+      else
+        self:ShowTaskPanel()
+      end
+    end
+  end)
+  self.tbMissionBtnGroup = Ui:NewButtonGroup(self, {
+    tbControls.btnTagStrength,
+    tbControls.btnTagSocialize,
+    tbControls.btnTagFuben,
+    tbControls.btnTagPvP
+  }, true, function(self, nIndex)
+    self:ShowTaskListByTag(nIndex)
+  end)
+  self.tbRewardScrollRect = self.pPanel:GetScrollRect(tbControls.RankAwardsList)
+  self.tbRewardScrollRect.onValueChanged:AddListener(function(vec2)
+    local x = vec2.x
+    if x < 0 then
+      x = 0
+    end
+    local index = (100 * x + 7) * (1 - x * 0.1)
+    for i, battlePassLvCfgData in ipairs(BattlePass.tbPreviewbBattlePassAward) do
+      if index <= battlePassLvCfgData.nLevel then
+        self.nLastPreviewLv = self.nCurPreviewLv
+        self.nCurPreviewLv = battlePassLvCfgData.nLevel
+        self:UpdatePreviewAward(battlePassLvCfgData)
+        break
+      end
+    end
+  end)
+  self.tbRewardScrollView = Ui:NewSuperGridView(self, tbControls.RankAwardsTemplate, self.SetRewardElement, BattlePass.tbBattlePassLvCfg)
+  self.tbMissionScrollView = Ui:NewSuperListView(self, tbControls.MissionTaskTemplate, self.SetTaskElementInfo)
+end
+
+function tbWnd:OnOpen()
+  self.pPanel:SetActive(tbControls.MissionList, false)
+  self.pPanel:SetActive(tbControls.RewardList, false)
+  BattlePass.bIsNeedUpdateBattlePassTask = 1
+  self.nCurPreviewLv = 0
+  self.nLastPreviewLv = 0
+  self.tbMissionBtnGroupkey = nil
+  self:ShowLevelInfo()
+  self.tbRewardBtnGroup:Select(1)
+  self:ShowTime()
+  if self.nWaittingTimer then
+    Timer:Close(self.nWaittingTimer)
+    self.nWaittingTimer = nil
+  end
+  self.nWaittingTimer = Timer:Register(Env.GAME_FPS * 5, self.ShowTime, self)
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnReward, {
+    RedPointMgr.EVENT.BattlePassAward
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnRewardGetAll, {
+    RedPointMgr.EVENT.BattlePassAward
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnMission, {
+    RedPointMgr.EVENT.BattlePassStrengthTask,
+    RedPointMgr.EVENT.BattlePassSocializeTask,
+    RedPointMgr.EVENT.BattlePassFubenTask,
+    RedPointMgr.EVENT.BattlePassPvPTask
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnMissionGetAll, {
+    RedPointMgr.EVENT.BattlePassStrengthTask,
+    RedPointMgr.EVENT.BattlePassSocializeTask,
+    RedPointMgr.EVENT.BattlePassFubenTask,
+    RedPointMgr.EVENT.BattlePassPvPTask
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnTagStrength, {
+    RedPointMgr.EVENT.BattlePassStrengthTask
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnTagSocialize, {
+    RedPointMgr.EVENT.BattlePassSocializeTask
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnTagFuben, {
+    RedPointMgr.EVENT.BattlePassFubenTask
+  })
+  RedPointMgr:DynamicRegisteRedPoint(self.pPanel, tbControls.btnTagPvP, {
+    RedPointMgr.EVENT.BattlePassPvPTask
+  })
+end
+
+function tbWnd:ShowTime()
+  local szTime = BattlePass:GetRemainingTime()
+  if szTime then
+    self.pPanel:Label_SetText(tbControls.txtRewardCountdown, szTime)
+    self.pPanel:Label_SetText(tbControls.txtMissionCountdown, szTime)
+    return true
+  end
+  me.CenterMsg(i18n.EasyGet("\230\180\187\229\138\168\230\151\182\233\151\180\231\187\147\230\157\159"))
+  self.nWaittingTimer = nil
+  self:CloseByDefault()
+end
+
+function tbWnd:CloseByDefault()
+  self:Close()
+  self.tbMissionBtnGroup.key = nil
+end
+
+function tbWnd:OnClose()
+  self:CloseTimerId()
+  Ui:CloseWindow("UIbattlePassBuy")
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnReward)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnRewardGetAll)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnMission)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnMissionGetAll)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnTagStrength)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnTagSocialize)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnTagFuben)
+  RedPointMgr:DynamicUnRegist(self.pPanel, tbControls.btnTagPvP)
+end
+
+function tbWnd:CloseTimerId()
+  if self.nWaittingTimer then
+    Timer:Close(self.nWaittingTimer)
+    self.nWaittingTimer = nil
+  end
+end
+
+function tbWnd:ShowLevelInfo()
+  local nCurLv = BattlePass:GetBattlePassPlayerLv()
+  self.pPanel:Label_SetText(tbControls.txtLevel, nCurLv)
+  local nCurExp = BattlePass:GetBattlePassPlayerExp()
+  local nCurLvMaxExp = BattlePass:GetCurLvMaxExp(nCurLv)
+  if nCurExp > nCurLvMaxExp then
+    nCurExp = nCurLvMaxExp
+  end
+  self.pPanel:Label_SetText(tbControls.txtValue, i18n.EasyGet("{0}/{1}", nCurExp, nCurLvMaxExp))
+  self.pPanel:Sprite_SetFill(tbControls.imgbar, nCurExp / nCurLvMaxExp)
+  self.pPanel:Label_SetText(tbControls.txtFinishValue, BattlePass:GetBattlePassCanUseQuickCompleteCount())
+end
+
+function tbWnd:UpdateBattlePassPlayerTypeState()
+  local nBattlePassPlayerType = BattlePass:GetBattlePassPlayerType()
+  local bIsUnlockElite = nBattlePassPlayerType >= BattlePass.AwardTag.Elite
+  local bIsUnlockLegend = nBattlePassPlayerType >= BattlePass.AwardTag.Legend
+  self.pPanel:SetActive(tbControls.imgEliteLock, not bIsUnlockElite)
+  self.pPanel:SetActive(tbControls.imgLegendLock, not bIsUnlockLegend)
+  if nBattlePassPlayerType >= BattlePass.AwardTag.Legend then
+    self.pPanel:Button_SetEnable(tbControls.btnRewardBuy, false)
+  else
+    self.pPanel:Button_SetEnable(tbControls.btnRewardBuy, true)
+  end
+end
+
+function tbWnd:RefreshAwardView(nLv)
+  if nLv then
+    self.tbRewardScrollView:MovePanelToItemIndex(nLv)
+  end
+  self.tbRewardScrollView:RefreshAllShownItem()
+end
+
+function tbWnd:ShowAwardPanel()
+  self.pPanel:SetActive(tbControls.MissionList, false)
+  self.pPanel:SetActive(tbControls.RewardList, true)
+  self:UpdateBattlePassPlayerTypeState()
+  self:RefreshAwardView(BattlePass:GetHaveAwardMinLevel())
+end
+
+function tbWnd:SetRewardElement(tbElement, battlePassLvCfgData)
+  local nCurLv = BattlePass:GetBattlePassPlayerLv()
+  local nLv = battlePassLvCfgData.nLevel
+  local tbAwardReceive = BattlePass:GetLvAwardReceive(nLv)
+  local nBattlePassType = BattlePass:GetBattlePassPlayerType()
+  local pPanel = tbElement.pPanel
+  pPanel:Label_SetText("txtLevel", i18n.EasyGet("{0}\231\186\167", nLv))
+  local tbItemGridN = tbElement.tbItemGridN
+  tbItemGridN = tbItemGridN or Ui:NewExistItemGrid(tbElement, "item01/UIItemGrid")
+  local tbAwards = Award:GetAward(BattlePass.AwardListId, battlePassLvCfgData.nAwardKeyN, {})
+  tbItemGridN:SetGenericItem(tbAwards[1])
+  tbItemGridN:SetClickEnable(true)
+  if tbAwardReceive[BattlePass.AwardTag.Normal] == true then
+    pPanel:SetActive("item01/imgRecieved", true)
+    pPanel:SetActive("item01/imgCanGet", false)
+  else
+    pPanel:SetActive("item01/imgRecieved", false)
+    if nCurLv >= nLv and nBattlePassType >= BattlePass.AwardTag.Normal then
+      pPanel:SetActive("item01/imgCanGet", true)
+    else
+      pPanel:SetActive("item01/imgCanGet", false)
+    end
+  end
+  Ui:Button_BindEvent(pPanel, "item01/imgCanGet", function()
+    self:OnClickReceiveAwardBtn(nLv, BattlePass.AwardTag.Normal)
+  end)
+  local tbItemGridM = tbElement.tbItemGridM
+  tbItemGridM = tbItemGridM or Ui:NewExistItemGrid(tbElement, "item02/UIItemGrid")
+  local tbAwards = Award:GetAward(BattlePass.AwardListId, battlePassLvCfgData.nAwardKeyM, {})
+  tbItemGridM:SetGenericItem(tbAwards[1])
+  tbItemGridM:SetClickEnable(true)
+  if true == tbAwardReceive[BattlePass.AwardTag.Elite] then
+    pPanel:SetActive("item02/imgRecieved", true)
+    pPanel:SetActive("item02/imgCanGet", false)
+  else
+    pPanel:SetActive("item02/imgRecieved", false)
+    if nCurLv >= nLv and nBattlePassType >= BattlePass.AwardTag.Elite then
+      pPanel:SetActive("item02/imgCanGet", true)
+    else
+      pPanel:SetActive("item02/imgCanGet", false)
+    end
+  end
+  Ui:Button_BindEvent(pPanel, "item02/imgCanGet", function()
+    self:OnClickReceiveAwardBtn(nLv, BattlePass.AwardTag.Elite)
+  end)
+  local tbItemGridH = tbElement.tbItemGridH
+  tbItemGridH = tbItemGridH or Ui:NewExistItemGrid(tbElement, "item03/UIItemGrid")
+  local tbAwards = Award:GetAward(BattlePass.AwardListId, battlePassLvCfgData.nAwardKeyH, {})
+  tbItemGridH:SetGenericItem(tbAwards[1])
+  tbItemGridH:SetClickEnable(true)
+  if true == tbAwardReceive[BattlePass.AwardTag.Legend] then
+    pPanel:SetActive("item03/imgRecieved", true)
+    pPanel:SetActive("item03/imgCanGet", false)
+  else
+    pPanel:SetActive("item03/imgRecieved", false)
+    if nCurLv >= nLv and nBattlePassType >= BattlePass.AwardTag.Legend then
+      pPanel:SetActive("item03/imgCanGet", true)
+    else
+      pPanel:SetActive("item03/imgCanGet", false)
+    end
+  end
+  Ui:Button_BindEvent(pPanel, "item03/imgCanGet", function()
+    self:OnClickReceiveAwardBtn(nLv, BattlePass.AwardTag.Legend)
+  end)
+end
+
+function tbWnd:OnClickReceiveAwardBtn(nLv, nAwardTag)
+  BattlePass:ReqReceiveAward(nLv, nAwardTag)
+end
+
+function tbWnd:OnClickReceiveAllAwardBtn()
+  BattlePass:ReqReceiveAllAward()
+end
+
+function tbWnd:OnClickCompleteAllTaskBtn()
+  BattlePass:ReqCompleteAllTask()
+end
+
+function tbWnd:ShowTaskPanel()
+  self.pPanel:SetActive(tbControls.MissionList, true)
+  self.pPanel:SetActive(tbControls.RewardList, false)
+  self.pPanel:Label_SetText(tbControls.TagStrengthText, BattlePass.tbTagNameFun[BattlePass.emTagStrength]())
+  self.pPanel:Label_SetText(tbControls.TextTagSocialize, BattlePass.tbTagNameFun[BattlePass.emTagSocialize]())
+  self.pPanel:Label_SetText(tbControls.TextTagFuben, BattlePass.tbTagNameFun[BattlePass.emTagFuben]())
+  self.pPanel:Label_SetText(tbControls.TextTagPvP, BattlePass.tbTagNameFun[BattlePass.emTagPvP]())
+  if self.tbMissionBtnGroup.key == nil then
+    self.tbMissionBtnGroup:Select(1)
+  else
+    self.tbMissionBtnGroup:Select(self.tbMissionBtnGroup.key)
+  end
+end
+
+local function tbTaskSortFunc(battlePassTaskCfgDataA, battlePassTaskCfgDataB)
+  local nTaskIdA = battlePassTaskCfgDataA.nTaskId
+  local nTagA = battlePassTaskCfgDataA.nTag
+  local nTaskIdB = battlePassTaskCfgDataB.nTaskId
+  local nTagB = battlePassTaskCfgDataB.nTag
+  local battlePassTaskDataA = BattlePass:GetBattlePassTaskData(nTaskIdA, nTagA)
+  local battlePassTaskDataB = BattlePass:GetBattlePassTaskData(nTaskIdB, nTagB)
+  local nIsCompletedA = battlePassTaskDataA.bIsCompleted and 1 or 0
+  local nIsCompletedB = battlePassTaskDataB.bIsCompleted and 1 or 0
+  if nIsCompletedA ~= nIsCompletedB then
+    return nIsCompletedA < nIsCompletedB
+  end
+  if 0 == nIsCompletedA and 0 == nIsCompletedB then
+    local battlePassTaskCfgDataA = BattlePass:GetBattlePassTaskCfgData(nTaskIdA, nTagA)
+    local battlePassTaskCfgDataB = BattlePass:GetBattlePassTaskCfgData(nTaskIdB, nTagB)
+    local nIsCanCompletedA = battlePassTaskDataA.nCurCount >= battlePassTaskCfgDataA.nFinishCount and 1 or 0
+    local nIsCanCompletedB = battlePassTaskDataB.nCurCount >= battlePassTaskCfgDataB.nFinishCount and 1 or 0
+    if nIsCanCompletedA ~= nIsCanCompletedB then
+      return nIsCanCompletedA > nIsCanCompletedB
+    end
+  end
+  if nTaskIdA ~= nTaskIdB then
+    return nTaskIdA < nTaskIdB
+  end
+  if nTagA ~= nTagB then
+    return nTagA < nTagB
+  end
+end
+
+function tbWnd:ShowTaskListByTag(nTaskClass)
+  local taskClassList = BattlePass:GetBattlePassTaskClassList(nTaskClass)
+  table.sort(taskClassList, tbTaskSortFunc)
+  self.tbMissionScrollView:SetAllElement(taskClassList)
+  if self.tbMissionBtnGroupkey ~= nTaskClass then
+    self.tbMissionScrollView:MovePanelToFirstItem()
+    self.tbMissionBtnGroupkey = nTaskClass
+  end
+end
+
+function tbWnd:SetTaskElementInfo(tbElement, battlePassTaskCfgData)
+  local pPanel = tbElement.pPanel
+  local battlePassTypeCfgData = BattlePass:GetBattlePassTypeCfgData(battlePassTaskCfgData.szTaskType)
+  pPanel:Label_SetText("txtTaskName", i18n.Parse(battlePassTypeCfgData.szTaskName))
+  if battlePassTaskCfgData.nExtraParam == nil or 0 == battlePassTaskCfgData.nExtraParam then
+    pPanel:Label_SetText("TaskNum/txtNumTips", string.format(i18n.Parse(battlePassTypeCfgData.szTaskDesc), battlePassTaskCfgData.nFinishCount))
+  elseif battlePassTaskCfgData.nNotExtraConcat and tonumber(battlePassTaskCfgData.nNotExtraConcat) >= 1 then
+    pPanel:Label_SetText("TaskNum/txtNumTips", string.format(i18n.Parse(battlePassTypeCfgData.szTaskDesc), battlePassTaskCfgData.nFinishCount))
+  else
+    pPanel:Label_SetText("TaskNum/txtNumTips", string.format(i18n.Parse(battlePassTypeCfgData.szTaskDesc), battlePassTaskCfgData.nExtraParam, battlePassTaskCfgData.nFinishCount))
+  end
+  local tbItemGrid = tbElement.tbItemGrid
+  tbItemGrid = tbItemGrid or Ui:NewExistItemGrid(tbElement, "item/UIItemGrid")
+  tbItemGrid:SetDigitalItem("ZhanLingExp", battlePassTaskCfgData.nAddExp)
+  tbItemGrid:SetClickEnable(true)
+  local nTaskId = battlePassTaskCfgData.nTaskId
+  local nTag = battlePassTaskCfgData.nTag
+  local battlePassTaskData = BattlePass:GetBattlePassTaskData(nTaskId, nTag)
+  if battlePassTaskData.bIsCompleted == true then
+    pPanel:SetActive("NoFinish", false)
+    pPanel:SetActive("txtFinish", true)
+  else
+    pPanel:SetActive("NoFinish", true)
+    pPanel:SetActive("txtFinish", false)
+    if battlePassTaskData.nCurCount >= battlePassTaskCfgData.nFinishCount then
+      pPanel:SetActive("NoFinish/CanFinish", true)
+      pPanel:SetActive("NoFinish/CanNotFinish", false)
+    else
+      pPanel:SetActive("NoFinish/CanFinish", false)
+      pPanel:SetActive("NoFinish/CanNotFinish", true)
+      if nil == battlePassTaskCfgData.nCostGold or 0 == battlePassTaskCfgData.nCostGold then
+        pPanel:SetActive("NoFinish/CanNotFinish/btnFinish", false)
+      else
+        pPanel:SetActive("NoFinish/CanNotFinish/btnFinish", true)
+      end
+    end
+  end
+  local nCurCount = battlePassTaskData.nCurCount <= battlePassTaskCfgData.nFinishCount and battlePassTaskData.nCurCount or battlePassTaskCfgData.nFinishCount
+  pPanel:Label_SetText("TaskNum/txtNumValue", i18n.EasyGet("{0}/{1}", nCurCount, battlePassTaskCfgData.nFinishCount))
+  Ui:Button_BindEvent(pPanel, "NoFinish/CanFinish/btnGet", function()
+    self:OnClickCompleteTaskBtn(nTaskId, nTag)
+  end)
+  Ui:Button_BindEvent(pPanel, "NoFinish/CanNotFinish/btnFinish", function()
+    self:OnClickQuickCompleteTaskBtn(nTaskId, nTag)
+  end)
+  Ui:Button_BindEvent(pPanel, "NoFinish/CanNotFinish/btnGo", function()
+    self:OnClickGoTaskBtn(nTaskId, nTag)
+  end)
+end
+
+function tbWnd:OnClickCompleteTaskBtn(nTaskId, nTag)
+  BattlePass:ReqCompleteTask(nTaskId, nTag)
+end
+
+function tbWnd:OnClickQuickCompleteTaskBtn(nTaskId, nTag)
+  local battlePassTaskCfgData = BattlePass:GetBattlePassTaskCfgData(nTaskId, nTag)
+  local szMsg = i18n.EasyGet("\230\182\136\232\128\151{0}\233\135\145\229\184\129\229\191\171\233\128\159\229\174\140\230\136\144", battlePassTaskCfgData.nCostGold)
+  
+  local function fnClose()
+    Ui:CloseWindow("UIMessageBox")
+  end
+  
+  local function fnAgree()
+    BattlePass:ReqQuickCompleteTask(nTaskId, nTag)
+  end
+  
+  Ui:OpenWindow("UIMessageBox", szMsg, {
+    {fnAgree},
+    {fnClose}
+  }, {
+    i18n.szOk,
+    i18n.szCancel
+  }, nil, nCloseTime)
+end
+
+function tbWnd:OnClickGoTaskBtn(nTaskId, nTag)
+  BattlePass:OnGoTask(nTaskId, nTag)
+end
+
+function tbWnd:BuyBattlePass()
+  if not Ui:WindowVisible("UIbattlePassBuy") then
+    Ui:OpenWindow("UIbattlePassBuy")
+  end
+end
+
+function tbWnd:UpdatePreviewAward(battlePassLvCfgData)
+  self.pPanel:Label_SetText(self.txtPreviewLevel, i18n.EasyGet("{0}\231\186\167", battlePassLvCfgData.nLevel))
+  local tbAwards = Award:GetAward(BattlePass.AwardListId, battlePassLvCfgData.nAwardKeyN, {})
+  self.tbItemGridN:SetGenericItem(tbAwards[1])
+  self.tbItemGridN:SetClickEnable(true)
+  local tbAwards = Award:GetAward(BattlePass.AwardListId, battlePassLvCfgData.nAwardKeyM, {})
+  self.tbItemGridM:SetGenericItem(tbAwards[1])
+  self.tbItemGridM:SetClickEnable(true)
+  local tbAwards = Award:GetAward(BattlePass.AwardListId, battlePassLvCfgData.nAwardKeyH, {})
+  self.tbItemGridH:SetGenericItem(tbAwards[1])
+  self.tbItemGridH:SetClickEnable(true)
+end
+
+function tbWnd:RefreshTaskView()
+  self:ShowLevelInfo()
+  if 2 == self.tbRewardBtnGroup.key then
+    if self.tbMissionBtnGroup.key == nil then
+      self.tbMissionBtnGroup:Select(1)
+    else
+      self.tbMissionBtnGroup:Select(self.tbMissionBtnGroup.key)
+    end
+  end
+end
