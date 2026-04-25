@@ -16,8 +16,8 @@ using UnityEngine;
 public class BundleLoader : BaseLoader
 {
     // Fields (offsets từ dump.cs)
-    private Guid _RequestID;                                // 0x40
-    private BundleLoader.BundleInfo[] _DependentAbList;     // 0x50
+    private System.Guid _RequestID;                         // 0x40
+    private BundleInfo[] _DependentAbList;                  // 0x50
     private IEnumerator _InitEnumerator;                    // 0x58
     private int _DependentAbCount;                          // 0x60
     private int _DependentAbLoadedCount;                    // 0x64
@@ -112,5 +112,13 @@ public class BundleLoader : BaseLoader
     private void _OnBundleLoadFinish(AssetBundle bundle, object[] param)
     {
         _LoadingFinished = true;
+    }
+
+    // Nested type — Source: dump.cs (BundleLoader nested helper). Holds dependent bundle metadata.
+    public class BundleInfo
+    {
+        public string Url;          // 0x10
+        public AssetBundle Bundle;  // 0x18
+        public int Status;          // 0x20
     }
 }

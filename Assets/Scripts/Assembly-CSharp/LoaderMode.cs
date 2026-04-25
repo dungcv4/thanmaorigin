@@ -1,12 +1,11 @@
-// AUTO-GENERATED stub from KTO_FullExtract/script_map.json
-// Class: LoaderMode
-// GUID: 75b9014282e6e4157826eb5cb00cea0d
-// TODO: Phase 3+ port body 1-1 from KTO_DecompiledReference/
-//   File hint: /Users/vsf-user-l/Documents/Test/alo/KiemTheUI/Assets/Scripts/Resource/LoaderMode.cs.meta
+// Class:  LoaderMode (enum)
+// GUID:   75b9014282e6e4157826eb5cb00cea0d (preserved via .meta)
+// Source: KTO_Resources/il2cpp_full_dump/dump.cs (TypeDefIndex 136)
+//
+// FULL 1-1 PORT 2026-04-25.
 
-using UnityEngine;
-
-public class LoaderMode : MonoBehaviour
+public enum LoaderMode
 {
+    Async = 0,
+    Sync = 1,
 }
-

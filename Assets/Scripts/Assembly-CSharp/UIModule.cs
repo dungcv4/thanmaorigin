@@ -222,7 +222,7 @@ public class UIModule : MonoBehaviour
     // gốc body:
     //   hotfix at +0xb0.
     //   Else: if _StartUI != null: UIStartUp.SetUpdateState(_StartUI, state);
-    public static void OnStartUIUpdateStateChange(UpdaterState state)
+    public static void OnStartUIUpdateStateChange(KKUpdater.UpdaterState state)
     {
         Debug.Log($"[UIModule] UpdateState={state}");
         if (_StartUI != null) { /* _StartUI.SetUpdateState(state) — UIStartUp class stub */ }

@@ -25,6 +25,10 @@ using System.Text;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
+// Delegate — Source: dump.cs (TypeDefIndex 138).
+// gốc invocation: void Invoke(object obj, object param).
+public delegate void OnResourceFinishEventHandler(object obj, object param);
+
 public class ResourceModule : MonoBehaviour
 {
     // Fields (offsets từ dump.cs)

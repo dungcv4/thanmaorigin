@@ -24,6 +24,16 @@ using UnityEngine;
 
 public class AudioModule : MonoBehaviour
 {
+    // Nested enum — Source: dump.cs (TypeDefIndex 326)
+    public enum AudioModuleLimitNumberType
+    {
+        InGameObjectOfSound = 0,
+        InGlobalOfSound = 1,
+        InGameObjectOfMe = 2,
+        InGameObjectOfOtherPlayer = 3,
+        InGameObjectOfNPC = 4,
+    }
+
     // Fields (offsets từ dump.cs)
     public static AudioModule _Instance;                                                // 0x0
     public static AudioListener _MusicListener;                                         // 0x8
@@ -50,15 +60,10 @@ public class AudioModule : MonoBehaviour
         set => m_SoundCfg = value;
     }
 
-    // VMA: 0x01c70600 — Source: AudioModule.c:369 (get_SoundCfg)
-    // gốc body: `return *(undefined8 *)(_Instance + 0x28);`  — direct field read.
-    [CompilerGenerated]
-    public static Dictionary<string, int> get_SoundCfg() => m_SoundCfg;
-
-    // VMA: 0x01c70645 — Source: AudioModule.c:389 (set_SoundCfg)
-    // gốc body: `*(undefined8 *)(_Instance + 0x28) = param_1;`  — direct field write.
-    [CompilerGenerated]
-    private static void set_SoundCfg(Dictionary<string, int> value) { m_SoundCfg = value; }
+    // VMA: 0x01c70600 / 0x01c70645 — Source: AudioModule.c:369 / 389 (get/set_SoundCfg)
+    // gốc body: direct field read/write at offset 0x28 of _Instance.
+    // Auto-property `SoundCfg { get; set; }` declared above generates get_SoundCfg/set_SoundCfg
+    // at correct VMAs — explicit methods omitted (CS0082 collision).
 
     // VMA: 0x01c70696 — Source: AudioModule.c:410 (Init)
     // gốc body: alloc `<Init>d__12` iterator state machine. Real Init logic in MoveNext (separate).
