@@ -128,7 +128,11 @@ public class AudioModule : MonoBehaviour
 	// RVA: 0x1B72140 Offset: 0x1B6E140 VA: 0x1B72140
 	public static void LoadSoundConfig() { throw new System.NotImplementedException("TODO: port from Ghidra"); }
 
-	// RVA: 0x1B72349 Offset: 0x1B6E349 VA: 0x1B72349
-	public static int GetSoundID(string szKey) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+	// VMA: 0x01b72349 — Source: KTO_DecompiledReference/_root/AudioModule.c (GetSoundID)
+	// gốc: lookup szKey trong loaded Sound.tab → numeric ID (used as AudioClip index).
+	// MINIMAL PORT: szKey hash code → int. Full Sound.tab lookup deferred to Phase 3.6 full AudioModule.
+	public static int GetSoundID(string szKey) {
+		return string.IsNullOrEmpty(szKey) ? 0 : szKey.GetHashCode();
+	}
 
 }

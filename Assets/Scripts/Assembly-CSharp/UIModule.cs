@@ -132,11 +132,19 @@ public class UIModule : MonoBehaviour
 	// RVA: 0x1BC970C Offset: 0x1BC570C VA: 0x1BC970C
 	public static Vector2 ScreenPointToLocalPointInRectangle(RectTransform trans, Vector2 screenPoint) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
 
-	// RVA: 0x1BBECC1 Offset: 0x1BBACC1 VA: 0x1BBECC1
-	public static void PlaySound(int nSoundID) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+	// VMA: 0x01bbecc1 — Source: KTO_DecompiledReference/_root/UIModule.c (PlaySound section)
+	// gốc: hotfix check → AudioModule.PlaySound(soundEvent, gameObject, ...).
+	// MINIMAL PORT: empty no-op. Full audio routing deferred to Phase 3.6 full AudioModule + EventReference port.
+	public static void PlaySound(int nSoundID) {
+		// Audio playback deferred. UIView.Show calls UIViewAnimationScale.PlayShow → UIModule.PlaySound;
+		// no-op để runtime path không crash khi Show gọi anim.
+	}
 
-	// RVA: 0x1BC982B Offset: 0x1BC582B VA: 0x1BC982B
-	public static void StopSound(int nSoundID) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+	// VMA: 0x01bc982b — Source: KTO_DecompiledReference/_root/UIModule.c (StopSound section)
+	// MINIMAL PORT: empty no-op. Same pattern as PlaySound.
+	public static void StopSound(int nSoundID) {
+		// no-op (deferred Phase 3.6).
+	}
 
 	// VMA: 0x01cc9902 — Source: KTO_DecompiledReference/_root/UIModule.c (SetGroup section)
 	// gốc: forward gameObject + nGroup to UIModule sorting stack management.

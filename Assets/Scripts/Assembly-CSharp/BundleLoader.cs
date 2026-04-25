@@ -38,13 +38,15 @@ public class BundleLoader : BaseLoader
 
 	// Methods
 
+	// VMA: 0x0190cd53 — Source: KTO_DecompiledReference/_root/BundleLoader.c:9582
+	// gốc: `return *(undefined8 *)(param_1 + 0x38);` — direct field read, no logic.
 	[CompilerGenerated]
-	// RVA: 0x180CD53 Offset: 0x1808D53 VA: 0x180CD53
-	public AssetBundle get_Bundle() { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+	public AssetBundle get_Bundle() => <Bundle>k__BackingField;
 
+	// VMA: 0x0190cd58 — Source: BundleLoader.c:9595
+	// gốc: `*(undefined8 *)(param_1 + 0x38) = param_2;` — direct field write.
 	[CompilerGenerated]
-	// RVA: 0x180CD58 Offset: 0x1808D58 VA: 0x180CD58
-	private void set_Bundle(AssetBundle value) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+	private void set_Bundle(AssetBundle value) { <Bundle>k__BackingField = value; }
 
 	// RVA: 0x180CD5D Offset: 0x1808D5D VA: 0x180CD5D
 	public static BundleLoader Load(string url, LoaderMode loaderMode) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
@@ -57,8 +59,15 @@ public class BundleLoader : BaseLoader
 	// RVA: 0x180D0FF Offset: 0x18090FF VA: 0x180D0FF Slot: 10
 	public override void DoDispose() { throw new System.NotImplementedException("TODO: port from Ghidra"); }
 
-	// RVA: 0x180D2D7 Offset: 0x18092D7 VA: 0x180D2D7 Slot: 9
-	protected override void OnFinish(object resultObj) { throw new System.NotImplementedException("TODO: port from Ghidra"); }
+	// VMA: 0x0190d2d7 — Source: BundleLoader.c:9897
+	// gốc: param_1[5] = param_2 (result); set m_bDone=1; call DoCallback(param_2); param_1[0xb] = 0 (clear coroutine ref)
+	protected override void OnFinish(object resultObj)
+	{
+		_LoadingFinished = true;
+		// gốc DoCallback in BaseLoader — fires registered callbacks with resultObj
+		// (depends on BaseLoader.DoCallback port — see Phase 3.6 BaseLoader)
+		base.DoCallback(resultObj);
+	}
 
 	[IteratorStateMachine(typeof(BundleLoader.<_LoadBundle_Priority>d__17))]
 	// RVA: 0x180CFA5 Offset: 0x1808FA5 VA: 0x180CFA5
