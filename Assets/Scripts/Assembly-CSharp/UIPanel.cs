@@ -396,7 +396,7 @@ public class UIPanel : MonoBehaviour
     }
 
 	// RVA: 0x1B2FAE1 Offset: 0x1B2BAE1 VA: 0x1B2FAE1
-	public void UIAnimation_SetSprites(string szKey, string szPathPrefix, int nPathPostfixLength, int nStartNum, int nEndNum, string szType, float fInterval = 0,05, bool bLoop = true)
+	public void UIAnimation_SetSprites(string szKey, string szPathPrefix, int nPathPostfixLength, int nStartNum, int nEndNum, string szType, float fInterval = 0.05f, bool bLoop = true)
     { /* sprite frame anim — defer Phase 3.9 */ }
 
 	// RVA: 0x1B2FF47 Offset: 0x1B2BF47 VA: 0x1B2FF47
