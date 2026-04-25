@@ -43,7 +43,24 @@ namespace ThanMaOrigin.Lua
             ThanMaOrigin.Lua.KTOLuaNative.BindLua(Env);
             ThanMaOrigin.Network.CmdRegistry.BindLua(Env);
 
-            Debug.Log("[thanmaorigin.LuaEngine] Awake — XLua initialized + bridges wired");
+            // Phase 8 — Native Lua bindings (777 surface methods, 1-1 cite từ libclient_scene.so):
+            //   me      ← LuaPlayer (256 methods)
+            //   me_async← LuaPlayerAsync (24)
+            //   KNpc    ← LuaNpc (297)
+            //   KItem   ← LuaItem (68)
+            //   Global  ← LuaGlobalScriptNameSpace (132)
+            var me = new ThanMaOrigin.Lua.Native.MePlayer();
+            var meAsync = new ThanMaOrigin.Lua.Native.MePlayerAsync();
+            var kNpc = new ThanMaOrigin.Lua.Native.KNpcLua();
+            var kItem = new ThanMaOrigin.Lua.Native.KItemLua();
+            var kGlobal = new ThanMaOrigin.Lua.Native.KGlobalLua();
+            Env.Global.Set("me", me);
+            Env.Global.Set("me_async", meAsync);
+            Env.Global.Set("KNpc", kNpc);
+            Env.Global.Set("KItem", kItem);
+            Env.Global.Set("Global", kGlobal);
+
+            Debug.Log("[thanmaorigin.LuaEngine] Awake — XLua initialized + bridges wired (Phase 8: 777 native bindings)");
         }
 
         // Custom Lua loader: maps `require("login.UILogin")` → Resources/Lua/login/UILogin.lua.txt
