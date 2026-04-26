@@ -1,0 +1,96 @@
+Shader "UI/ImageEffect_MultiPass" {
+	Properties {
+		[Enum(TwoSide,0,Off,2)] _TwoSide ("2-Side", Float) = 2
+		[HideInInspector] _ZWrite ("__zw", Float) = 1
+		_Diffuse ("第一层贴图", 2D) = "white" {}
+		_AlphaCutout ("_AlphaCutout", Range(0, 1)) = 0
+		[Toggle] _DiffuseRo ("旋转", Float) = 0
+		_DiffuseAng ("旋转角度", Float) = 0
+		[HDR] _Color ("颜色", Vector) = (1,1,1,1)
+		_Brightness ("亮度(0-10)", Range(0, 10)) = 1
+		_Uspeed ("Uspeed", Float) = 0
+		_Vspeed ("Vspeed", Float) = 0
+		[Foldout] _DiffuseMaskShown ("", Float) = 1
+		[Toggle] _DiffuseMask ("第一层遮罩", Float) = 0
+		_DiffuseMaskTex ("遮罩贴图", 2D) = "white" {}
+		_MaskMaskTex ("遮罩的遮罩贴图", 2D) = "white" {}
+		[Toggle] _DiffuseMaskRo ("旋转", Float) = 0
+		_DiffuseMaskAng ("旋转角度", Float) = 0
+		_USpeed_diffusem ("USpeed", Float) = 0
+		_VSpeed_diffusem ("VSpeed", Float) = 0
+		[Foldout] _DissolveShown ("", Float) = 1
+		[Toggle] _DissolveBlock ("溶解", Float) = 0
+		_DissolveTex ("溶解贴图", 2D) = "white" {}
+		_DissolveProgress ("DissolveProgress", Float) = 1
+		_EdgeWidth ("Edge Width", Float) = 0
+		[HDR] _EdgeColor ("Edge Col", Vector) = (1,1,1,1)
+		_DissolveUSpeed ("USpeed_Dissolve", Float) = 0
+		_DissolveVSpeed ("VSpeed_Dissolve", Float) = 0
+		[Foldout] _DistortShown ("", Float) = 1
+		[Toggle] _DistortBlock ("扭曲", Float) = 0
+		_DistortTex ("扭曲贴图", 2D) = "white" {}
+		_ForceX ("强度 X(0 1)", Float) = 0.1
+		_ForceY ("强度 Y(0 1)", Float) = 0.1
+		_USpeed_distort ("USpeed", Float) = 0
+		_VSpeed_distort ("VSpeed", Float) = 0
+		[Foldout] _DistortMaskShown ("", Float) = 1
+		[Toggle] _DistortMask ("扭曲遮罩", Float) = 0
+		_DistortMaskTex ("遮罩贴图", 2D) = "white" {}
+		[Enum(UnityEngine.Rendering.CompareFunction)] _StencilComp ("Stencil模式", Float) = 0
+		_Stencil ("Stencil ID", Float) = 0
+		[Enum(UnityEngine.Rendering.StencilOp)] _StencilOp ("Stencil Operation", Float) = 0
+		_StencilWriteMask ("Stencil Write Mask", Float) = 255
+		_StencilReadMask ("Stencil Read Mask", Float) = 255
+		_ColorMask ("Color Mask", Float) = 15
+		[Toggle(_FORCE_CLIP_RECT)] _ForceClipRect ("_FORCE_CLIP_RECT", Float) = 0
+		[Toggle(_USE_ORTH_TO_PERSPECTIVE)] _UseOrthToPerspective ("_USE_ORTH_TO_PERSPECTIVE", Float) = 0
+		[HideInInspector] _BlendSet ("__mode", Float) = 1
+		[HideInInspector] _SrcRGBMode ("__src_rgb", Float) = 5
+		[HideInInspector] _SrcAlphaMode ("__src_alpha", Float) = 5
+		[HideInInspector] _DestRGBMode ("__dst_rgb", Float) = 10
+		[HideInInspector] _DestAlphaMode ("__dst_alpha", Float) = 10
+		[HideInInspector] _cpfv ("cpfv", Float) = 0
+	}
+	//DummyShaderTextExporter
+	SubShader{
+		Tags { "RenderType"="Opaque" }
+		LOD 200
+
+		Pass
+		{
+			HLSLPROGRAM
+			#pragma vertex vert
+			#pragma fragment frag
+
+			float4x4 unity_ObjectToWorld;
+			float4x4 unity_MatrixVP;
+
+			struct Vertex_Stage_Input
+			{
+				float4 pos : POSITION;
+			};
+
+			struct Vertex_Stage_Output
+			{
+				float4 pos : SV_POSITION;
+			};
+
+			Vertex_Stage_Output vert(Vertex_Stage_Input input)
+			{
+				Vertex_Stage_Output output;
+				output.pos = mul(unity_MatrixVP, mul(unity_ObjectToWorld, input.pos));
+				return output;
+			}
+
+			float4 _Color;
+
+			float4 frag(Vertex_Stage_Output input) : SV_TARGET
+			{
+				return _Color; // RGBA
+			}
+
+			ENDHLSL
+		}
+	}
+	//CustomEditor "ImageEffectShaderGUI"
+}

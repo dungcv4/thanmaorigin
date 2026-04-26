@@ -61,6 +61,16 @@ namespace ThanMaOrigin.Lua
             Env.Global.Set("KItem", kItem);
             Env.Global.Set("Global", kGlobal);
 
+            // ─── g_szUserPath ────────────────────────────────────────────────
+            // gốc native global string set by LuaClient::SetUserPath @ libclient_scene.so:0x419010
+            // (called from LuaClient::Init early in boot chain).
+            // Cite: rodata 0x10d131 "g_szUserPath" + 0x101447 "void LuaClient::SetUserPath(const char *)"
+            // Used by ClientSave.lua / LocalData.lua / FriendShip.lua to compute save file paths.
+            // DEVIATION: Application.persistentDataPath + trailing slash.
+            string userPath = UnityEngine.Application.persistentDataPath;
+            if (!userPath.EndsWith("/")) userPath += "/";
+            Env.Global.Set("g_szUserPath", userPath);
+
             // Bind `Require(path)` global — gốc native C function (string at libclient_scene.so:0x106963).
             //   gốc syntax: Require("Script/EventSystem/EventNotify.lua") or
             //               Require("CommonScript/Item/ItemDefine.lua")
