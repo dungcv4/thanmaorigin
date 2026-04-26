@@ -55,10 +55,21 @@ namespace ThanMaOrigin.Lua
 
         /// <summary>
         /// Bind these helpers as Lua globals. Call after LuaEngine init.
+        ///
+        /// Naming convention: Lua-side name (NO `Lua` prefix) per gốc rodata strings:
+        ///   "RegisterTimerPoint" @ libclient_scene.so rodata 0x0f64de
+        ///   "GetLuaTop"          @ rodata (inferred — convention mirror of LuaGetLuaTop@0x238520)
+        ///   "IsPayOpen"          @ rodata (inferred mirror of LuaIsPayOpen)
+        /// C++ class methods are named `LuaX` (registry helpers); Lua-callable globals drop the prefix.
         /// </summary>
         public static void BindLua(LuaEnv env)
         {
             if (env == null) return;
+            // Lua-callable global names (no "Lua" prefix) — match gốc rodata
+            env.Global.Set<string, System.Func<int, LuaFunction, int>>("RegisterTimerPoint", LuaRegisterTimerPoint);
+            env.Global.Set<string, System.Func<int>>("GetLuaTop", LuaGetLuaTop);
+            env.Global.Set<string, System.Func<bool>>("IsPayOpen", LuaIsPayOpen);
+            // Backwards-compat aliases (in case any code calls the C++-style names)
             env.Global.Set<string, System.Func<int, LuaFunction, int>>("LuaRegisterTimerPoint", LuaRegisterTimerPoint);
             env.Global.Set<string, System.Func<int>>("LuaGetLuaTop", LuaGetLuaTop);
             env.Global.Set<string, System.Func<bool>>("LuaIsPayOpen", LuaIsPayOpen);

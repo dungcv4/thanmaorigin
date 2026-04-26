@@ -53,12 +53,30 @@ namespace ThanMaOrigin.Bootstrap
             // 4. Hand off to gốc Lua boot.
             //    DoString triggers Script_Client.lua:Client:OnStartup() which drives
             //    everything else (UI init, login scene, event registration).
+            //
+            // DEVIATION (cited per "no creativity" rule):
+            //   gốc native libclient_scene.so binds `Client` table + `luanet.*` namespace
+            //   via luanet_gettag/luanet_tonetobject/etc. (vma 0x289c20-0x289f40 per
+            //   KTO_LibClientScene_Decompiled/INDEX.tsv). Higher-level
+            //   `luanet.import_type(name)` is the NLua API for resolving .NET types by name.
+            //   thanmaorigin uses XLua (NOT NLua), where the equivalent access is `CS[name]`.
+            //   Bridge below provides the exact 1-1 mapping — no namespace heuristics added.
+            //   All gốc C# types referenced by Script_Client.lua are top-level (no namespace),
+            //   so `CS[name]` is sufficient.
+            //   Approved: 2026-04-26 (no chế cháo audit).
             Debug.Log("[thanmaorigin] Loading gốc Lua boot (Script_Client) ...");
             try
             {
                 var env = LuaEngine.Instance.Env;
-                // gốc require path (capital R, dot-style flattened)
                 env.DoString(@"
+                    -- Bootstrap globals (gốc native sets these before Script_Client runs)
+                    Client = Client or {}
+                    luanet = luanet or {}
+                    if not luanet.import_type then
+                        -- 1-1 bridge to XLua's CS table
+                        luanet.import_type = function(typeName) return CS[typeName] end
+                    end
+
                     local ok, err = pcall(function()
                         require('commonui.Script_Client')
                         if Client and Client.OnStartup then
