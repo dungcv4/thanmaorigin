@@ -1,63 +1,47 @@
+// Class:  TimerModule
+// GUID:   eadda1f87195ca5393dd8d66563a968b (preserved via .meta)
+// Source: KTO_DecompiledReference/_root/TimerModule.c (2 methods, 76 LOC Ghidra)
+// Address range: 0x01ca429e — 0x01ca42fc
+
+// AUTO-GENERATED template — REVIEW + HAND-FIX before commit.
+// gốc Ghidra body lines preserved as // gốc: comments. Translate each line 1-1.
+//
+// TODO REVIEW CHECKLIST:
+//   1. Verify field offsets match dump.cs (re-check class block for exact types)
+//   2. Translate each `// gốc:` line to working C#
+//   3. Test compile + smoke test boot
+//   4. Remove TODO markers when done; commit per pattern Re-port <X> 1-1 from Ghidra
+
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 public class TimerModule : MonoBehaviour
 {
-	/*
-	Dummy class. This could have happened for several reasons:
+    // ─── PORT 1-1: TimerModule.Init ───
+    // VMA: 0x01ca429e — Source: decomp_01ca.c:3227
+    public long Init()
+    {
+        // gốc: long lVar1;
+        // gốc: lVar1 = thunk_FUN_01851e62(DAT_03568d20);
+        // gốc: System_Object___ctor(lVar1,0);
+        // → System_Object_.ctor(lVar1,0);
+        // gốc: *(undefined4 *)(lVar1 + 0x10) = 0;
+        // gốc: return lVar1;
+        throw new System.NotImplementedException("TODO: port body 1-1 from gốc");
+    }
 
-	1. No dll files were provided to AssetRipper.
+    // ─── PORT 1-1: TimerModule.Update ───
+    // VMA: 0x01ca42fc — Source: decomp_01ca.c:3264
+    public void Update()
+    {
+        // gốc: if (**(long **)(DAT_03565038 + 0xb8) != 0) {
+        // gốc: KTV_KTimerScheduler__Active(**(long **)(DAT_03565038 + 0xb8),0);
+        // → KTV_KTimerScheduler.Active(**(long **)(DAT_03565038 + 0xb8),0);
+        // gốc: return;
+        // gốc: }
+        // gốc: /* WARNING: Subroutine does not return */
+        // gốc: FUN_0185fa41();
+        // → throw new System.NullReferenceException();
+    }
 
-		Unity asset bundles and serialized files do not contain script information to decompile.
-			* For Mono games, that information is contained in .NET dll files.
-			* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-			
-		AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-		A unexpected file structure could cause AssetRipper to not find the required files.
-
-	2. Incorrect dll files were provided to AssetRipper.
-
-		Any of the following could cause this:
-			* Il2CppInterop assemblies
-			* Deobfuscated assemblies
-			* Older assemblies (compared to when the bundle was built)
-			* Newer assemblies (compared to when the bundle was built)
-
-		Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
-
-	3. Assembly Reconstruction has not been implemented.
-
-		Asset bundles contain a small amount of information about the script content.
-		This information can be used to recover the serializable fields of a script.
-
-		See: https://github.com/AssetRipper/AssetRipper/issues/655
-
-	4. This script is unnecessary.
-
-		If this script has no asset or script references, it can be deleted.
-		Be sure to resolve any compile errors before deleting because they can hide references.
-
-	5. Script Content Level 0
-
-		AssetRipper was set to not load any script information.
-
-	6. Cpp2IL failed to decompile Il2Cpp data
-
-		If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-		This is an upstream problem, and the AssetRipper developer has very little control over it.
-		Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-	7. An incorrect path was provided to AssetRipper.
-
-		This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-		AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-		An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-		Generally, AssetRipper expects users to provide the root folder of the game. For example:
-			* Windows: the folder containing the game's .exe file
-			* Mac: the .app file/folder
-			* Linux: the folder containing the game's executable file
-			* Android: the apk file
-			* iOS: the ipa file
-			* Switch: the folder containing exefs and romfs
-
-	*/
-}
