@@ -55,9 +55,13 @@ namespace ThanMaOrigin.Network
         public static string BuildToken(string userId, int randomPwd)
         {
             // 1. Build inner data: "U:{UserID}:{RandomPwd}:{NowTicks*10000}:T"
-            //    NowRealTime() = unix seconds; TimeUtil multiplies by 10000.
-            long nowSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            long nowTicks10000 = nowSec * 10000L;
+            //    Server: TimeUtil.NowRealTime() = DateTime.Now.Ticks / 10000 (ms since year 1).
+            //    Server multiplies result by 10000 = DateTime.Now.Ticks units (100-ns since year 1).
+            //    Client must match exactly — use DateTime.Now.Ticks directly.
+            //    Bug 9.15.1 (2026-04-27): previously used Unix epoch seconds * 10000, which
+            //    server compared against year-1 ticks → diff was always > maxTicks (24h) →
+            //    Token Time Expired (-4). Fix: use DateTime.Now.Ticks like server.
+            long nowTicks10000 = DateTime.Now.Ticks;
             string inner = $"U:{userId}:{randomPwd}:{nowTicks10000}:T";
             byte[] dataToken = Encoding.UTF8.GetBytes(inner);
 

@@ -153,6 +153,39 @@ namespace ThanMaOrigin.Network
                     // gốc Lua tbWnd:GatewayHandSuccess(nRetCode, nShowAgreement) consumes both ints.
                     ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName(
                         "emNOTIFY_GATEWAY_HANDED", retCode, nShowAgreement);
+
+                    // BACKUP path: directly run GatewayHandSuccess on UILoginChannelInner singleton.
+                    // The EventNotify subscriber chain is fragile (Repeat Regist warnings on UI
+                    // re-instantiation can leave subscriber list empty per probe at 21:00). Calling
+                    // the handler directly via Ui.tbClass lookup guarantees UILoginServer opens
+                    // even when subscriber wasn't registered at fire time.
+                    // gốc behavior: handler runs once. Calling twice = no-op since handler is
+                    // idempotent (CloseWindow + OpenWindow are guarded).
+                    if (retCode == 0)
+                    {
+                        var env = ThanMaOrigin.Lua.LuaEngine.Instance?.Env;
+                        if (env != null)
+                        {
+                            try
+                            {
+                                env.DoString($@"
+                                    local tbWnd = Ui.tbClass and Ui.tbClass.UILoginChannelInner
+                                    if tbWnd and tbWnd.GatewayHandSuccess then
+                                        local ok, err = xpcall(function()
+                                            tbWnd:GatewayHandSuccess({retCode}, {nShowAgreement})
+                                        end, debug.traceback)
+                                        if not ok then print('[GatewayHandshake direct call] FAIL: '..tostring(err)) end
+                                    else
+                                        print('[GatewayHandshake direct call] UILoginChannelInner singleton not found — skipping')
+                                    end
+                                ", "GatewayDirectHandSuccess");
+                            }
+                            catch (System.Exception e)
+                            {
+                                Debug.LogError($"[GatewayHandshake] direct GatewayHandSuccess call failed: {e.Message}");
+                            }
+                        }
+                    }
                     break;
                 }
                 case GatewayProtocol.RSP_GET_SERVER_LIST:
