@@ -4,18 +4,15 @@
 // Dump:   KTO_Resources/il2cpp_full_dump/dump.cs
 //
 // FULL 1-1 PORT 2026-04-26 — every method body verified against Ghidra C decompile.
+// 2026-04-27 (canonicalization Day 4): removed `Resources.Load` DEVIATION from
+// LoadResourceSync. LoadResourceSync now wires through ResourceCache + LoaderManager
+// + CommonLoader + BundleManager 1-1 with gốc; LateUpdate calls BundleManager.Update().
 //
-// CLASS DEVIATION (cited at top, applies to ~18/25 methods):
-// gốc relies on these classes (not yet ported in thanmaorigin):
-//   BundleManager (native bundle lifecycle)
-//   KCoroutine (custom coroutine pump)
-//   LoaderManager.Load (factory chain → BundleLoader)
-//   ResourceCache.GetCache/DoCache (in-memory cache)
-//   ResourceTask + ResourceTaskAsyncManager (async queue)
-//   CppApi.FilePackOpenInfo/ReadResFileText/GetResFileSize/ReadResFile (P/Invoke libclient_scene)
-//   ResourceDef.GetResourceFullPath (path resolver)
-//   ResourceAndroidPlugin.GetAssetBytes (Android JNI)
-// thanmaorigin DEVIATION: simplified Resources.Load + StreamingAssets file reads.
+// REMAINING DEVIATIONS (cited per method below):
+//   - Async LoadResourceAsync still collapses to sync (ResourceTaskAsyncManager unported).
+//   - KCoroutine pump unported — coroutine state machines elided.
+//   - CppApi.* P/Invoke into libclient_scene unported (pack0.dat already extracted).
+//   - ResourceAndroidPlugin.GetAssetBytes (Android JNI) unported (File.ReadAllBytes used).
 
 using System;
 using System.Collections;
@@ -95,6 +92,8 @@ public class ResourceModule : MonoBehaviour
     {
         _OnceLoadResCount = 5;  // Sane default (gốc starts at -1 then SetOnceLoadResCount called later)
         CacheRecycleLine = 100;
+        // Wire BundleManager init — gốc Init iterator eventually calls BundleManager.Init().
+        BundleManager.Init();
         yield break;
     }
 
@@ -103,8 +102,13 @@ public class ResourceModule : MonoBehaviour
     //   BundleManager.Update();
     //   KCoroutine.Update(0);
     //   ResourceTaskAsyncManager.Activate();
-    // DEVIATION: BundleManager + KCoroutine + ResourceTaskAsyncManager unavailable. No-op.
-    private void LateUpdate() { }
+    // PARTIAL — BundleManager.Update() now wired (drains s_loadingFinishBundle queue when
+    //   the async path lands in TIER 2). KCoroutine + ResourceTaskAsyncManager remain
+    //   unported — relevant only when the async LoadBundle path is enabled.
+    private void LateUpdate()
+    {
+        BundleManager.Update();
+    }
 
     // VMA: 0x01914daa — Source: ResourceModule.c:4091 (OpenPackFile)
     // gốc body:
@@ -146,7 +150,14 @@ public class ResourceModule : MonoBehaviour
     //   if asset == null: LogHelper.ERROR("Loaded path " + trimmed + " but asset null");
     //   ResourceCache.DoCache(trimmed, loader);
     //   return asset;
-    // DEVIATION: Use Resources.Load fallback (no LoaderManager/ResourceCache).
+    //
+    // FULL 1-1 PORT 2026-04-27 (canonicalization Day 4) — DEVIATION removed.
+    // Wires through ResourceCache.GetCache → LoaderManager.Load(Sync) → CommonLoader.Asset
+    //   → ResourceCache.DoCache. Underlying loader chain (CommonLoader → BundleManager.LoadBundle
+    //   → AssetBundle.LoadFromFile) is now sync-collapsed but still preserves the gốc call graph.
+    //
+    // Editor dev fallback (under #if UNITY_EDITOR): when no .ab built yet (Day 4.5 not run),
+    //   walk Assets/ for matching prefab. Matches CLAUDE.md "DEV FALLBACK only valid in editor".
     public static Object LoadResourceSync(string szPath)
     {
         if (string.IsNullOrEmpty(szPath))
@@ -155,49 +166,64 @@ public class ResourceModule : MonoBehaviour
             return null;
         }
         var trimmed = szPath.Trim();
-        // Strip "Assets/" prefix and extension if present (gốc convention).
+
+        // Step 1: cache (gốc lines 519-529)
+        var cached = ResourceCache.GetCache(trimmed);
+        if (cached != null) return cached;
+
+        // Step 2: LoaderManager.Load(trimmed, 1)  — gốc line 534
+        var loader = LoaderManager.Load(trimmed, LoaderMode.Sync, null);
+        if (loader == null)
+        {
+            Debug.LogError($"[ResourceModule.LoadResourceSync] LoaderManager.Load NULL for '{trimmed}'");
+            // Fall through to editor fallback below — production .ab path may not exist yet.
+        }
+        else
+        {
+            var asset = loader.Asset;  // gốc reads loader+0x38
+            if (asset == null)
+            {
+                Debug.LogError($"[ResourceModule.LoadResourceSync] Loaded path '{trimmed}' but asset NULL");
+            }
+            // Cache regardless of asset null (gốc line 557 unconditional ResourceCache.DoCache).
+            ResourceCache.DoCache(trimmed, loader);
+            if (asset != null) return asset;
+        }
+
+#if UNITY_EDITOR
+        // DEV FALLBACK — only valid in editor.
+        // When Day 4.5 build pipeline hasn't run, no .ab files exist on disk so the
+        // sync chain above returns null. Walk Assets/ for matching prefab + ImportAsset.
+        // Approved deviation per canonicalization Day 4 plan: "Editor PlayMode: ResourceModule
+        //   .LoadResourceSync(...) → prefab thật, không null"
         var p = trimmed;
         if (p.StartsWith("Assets/")) p = p.Substring(7);
         var ext = Path.GetExtension(p);
         if (!string.IsNullOrEmpty(ext)) p = p.Substring(0, p.Length - ext.Length);
 
-        Debug.Log($"[ResourceModule.LoadResourceSync] szPath={szPath} → p={p}");
-
-        // 1. Try Resources.Load (gốc primary path)
-        var asset = Resources.Load(p);
-        if (asset != null) { Debug.Log($"[ResourceModule] Resources.Load found {p}"); return asset; }
-        Debug.Log($"[ResourceModule] Resources.Load NULL for {p}, trying editor-fallback");
-
-#if UNITY_EDITOR
-        // 2. Editor fallback: filesystem search for prefab + force-import + LoadAssetAtPath.
-        // AssetDatabase.FindAssets returns 0 for prefabs in this project (Unity asset import incomplete).
-        // Bypass via filesystem walk: find <name>.prefab anywhere in Assets/, then ImportAsset → LoadAssetAtPath.
         var name = System.IO.Path.GetFileName(p);
-        var assetsRoot = Application.dataPath; // .../Assets
-        Debug.Log($"[ResourceModule] editor-fallback: searching '{name}.prefab' under {assetsRoot}");
+        var assetsRoot = Application.dataPath;
+        Debug.Log($"[ResourceModule] DEV FALLBACK searching '{name}.prefab' under {assetsRoot}");
         try
         {
             var matches = System.IO.Directory.GetFiles(assetsRoot, name + ".prefab", System.IO.SearchOption.AllDirectories);
-            Debug.Log($"[ResourceModule] editor-fallback: found {matches.Length} matches");
             foreach (var fullPath in matches)
             {
-                // Convert /Users/.../Assets/game/ui/views/X.prefab → Assets/game/ui/views/X.prefab
                 var rel = "Assets" + fullPath.Substring(assetsRoot.Length);
                 UnityEditor.AssetDatabase.ImportAsset(rel, UnityEditor.ImportAssetOptions.ForceUpdate);
-                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(rel);
-                if (asset != null)
+                var devAsset = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(rel);
+                if (devAsset != null)
                 {
-                    Debug.Log($"[ResourceModule] editor-fallback loaded: {p} → {rel}");
-                    return asset;
+                    Debug.Log($"[ResourceModule] DEV FALLBACK loaded: {trimmed} → {rel}");
+                    return devAsset;
                 }
-                Debug.LogWarning($"[ResourceModule] editor-fallback: ImportAsset+LoadAssetAtPath returned NULL for {rel}");
             }
         }
         catch (System.Exception e)
         {
-            Debug.LogError($"[ResourceModule] editor-fallback EXCEPTION: {e.Message}");
+            Debug.LogError($"[ResourceModule] DEV FALLBACK EXCEPTION: {e.Message}");
         }
-        Debug.LogWarning($"[ResourceModule] editor-fallback: no .prefab found for '{name}' under Assets/");
+        Debug.LogWarning($"[ResourceModule] DEV FALLBACK: no .prefab found for '{name}' under Assets/");
 #endif
         return null;
     }
@@ -226,8 +252,7 @@ public class ResourceModule : MonoBehaviour
     // gốc body: `ResourceCache.UnloadUnusedAssets(bGC);`
     public static void UnLoadResourceCache(bool bGC)
     {
-        Resources.UnloadUnusedAssets();
-        if (bGC) System.GC.Collect();
+        ResourceCache.UnloadUnusedAssets(bGC);
     }
 
     // VMA: 0x0191573e — Source: ResourceModule.c:4590 (SetOnceLoadResCount)
@@ -273,7 +298,7 @@ public class ResourceModule : MonoBehaviour
 
     // VMA: 0x019160a3 — Source: ResourceModule.c:4972 (GetResourceCacheCount)
     // gốc body: `return ResourceCache.GetCacheCount();`
-    public static int GetResourceCacheCount() => 0; // DEVIATION: ResourceCache deferred
+    public static int GetResourceCacheCount() => ResourceCache.GetCacheCount();
 
     // VMA: 0x019160de — Source: ResourceModule.c:4993 (GetResourceWaitCount)
     // gốc body:

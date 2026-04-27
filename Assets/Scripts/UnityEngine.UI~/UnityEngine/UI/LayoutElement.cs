@@ -1,66 +1,228 @@
-using UnityEngine;
+using UnityEngine.EventSystems;
 
 namespace UnityEngine.UI
 {
-	public class LayoutElement : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    [AddComponentMenu("Layout/Layout Element", 140)]
+    [RequireComponent(typeof(RectTransform))]
+    [ExecuteAlways]
+    /// <summary>
+    /// Add this component to a GameObject to make it into a layout element or override values on an existing layout element.
+    /// </summary>
+    public class LayoutElement : UIBehaviour, ILayoutElement, ILayoutIgnorer
+    {
+        [SerializeField] private bool m_IgnoreLayout = false;
+        [SerializeField] private float m_MinWidth = -1;
+        [SerializeField] private float m_MinHeight = -1;
+        [SerializeField] private float m_PreferredWidth = -1;
+        [SerializeField] private float m_PreferredHeight = -1;
+        [SerializeField] private float m_FlexibleWidth = -1;
+        [SerializeField] private float m_FlexibleHeight = -1;
+        [SerializeField] private int m_LayoutPriority = 1;
 
-		1. No dll files were provided to AssetRipper.
+        /// <summary>
+        /// Should this RectTransform be ignored by the layout system?
+        /// </summary>
+        /// <remarks>
+        /// Setting this property to true will make a parent layout group component not consider this RectTransform part of the group. The RectTransform can then be manually positioned despite being a child GameObject of a layout group.
+        /// </remarks>
+        public virtual bool ignoreLayout { get { return m_IgnoreLayout; } set { if (SetPropertyUtility.SetStruct(ref m_IgnoreLayout, value)) SetDirty(); } }
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+        public virtual void CalculateLayoutInputHorizontal() {}
+        public virtual void CalculateLayoutInputVertical() {}
 
-		2. Incorrect dll files were provided to AssetRipper.
+        /// <summary>
+        /// The minimum width this layout element may be allocated.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI; // Required when using UI elements.
+        ///
+        /// public class ExampleClass : MonoBehaviour
+        /// {
+        ///     public Transform MyContentPanel;
+        ///
+        ///     //Sets the flexible height on on all children in the content panel.
+        ///     public void Start()
+        ///     {
+        ///         //Assign all the children of the content panel to an array.
+        ///         LayoutElement[] myLayoutElements = MyContentPanel.GetComponentsInChildren<LayoutElement>();
+        ///
+        ///         //For each child in the array change its LayoutElement's minimum width size to 200.
+        ///         foreach (LayoutElement element in myLayoutElements)
+        ///         {
+        ///             element.minWidth = 200f;
+        ///         }
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public virtual float minWidth { get { return m_MinWidth; } set { if (SetPropertyUtility.SetStruct(ref m_MinWidth, value)) SetDirty(); } }
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+        /// <summary>
+        /// The minimum height this layout element may be allocated.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI; // Required when using UI elements.
+        ///
+        /// public class ExampleClass : MonoBehaviour
+        /// {
+        ///     public Transform MyContentPanel;
+        ///
+        ///     //Sets the flexible height on on all children in the content panel.
+        ///     public void Start()
+        ///     {
+        ///         //Assign all the children of the content panel to an array.
+        ///         LayoutElement[] myLayoutElements = MyContentPanel.GetComponentsInChildren<LayoutElement>();
+        ///
+        ///         //For each child in the array change its LayoutElement's minimum height size to 64.
+        ///         foreach (LayoutElement element in myLayoutElements)
+        ///         {
+        ///             element.minHeight = 64f;
+        ///         }
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public virtual float minHeight { get { return m_MinHeight; } set { if (SetPropertyUtility.SetStruct(ref m_MinHeight, value)) SetDirty(); } }
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+        /// <summary>
+        /// The preferred width this layout element should be allocated if there is sufficient space. The preferredWidth can be set to -1 to remove the size.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI; // Required when using UI elements.
+        ///
+        /// public class ExampleClass : MonoBehaviour
+        /// {
+        ///     public Transform MyContentPanel;
+        ///
+        ///     //Sets the flexible height on on all children in the content panel.
+        ///     public void Start()
+        ///     {
+        ///         //Assign all the children of the content panel to an array.
+        ///         LayoutElement[] myLayoutElements = MyContentPanel.GetComponentsInChildren<LayoutElement>();
+        ///
+        ///         //For each child in the array change its LayoutElement's preferred width size to 250.
+        ///         foreach (LayoutElement element in myLayoutElements)
+        ///         {
+        ///             element.preferredWidth = 250f;
+        ///         }
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public virtual float preferredWidth { get { return m_PreferredWidth; } set { if (SetPropertyUtility.SetStruct(ref m_PreferredWidth, value)) SetDirty(); } }
 
-		3. Assembly Reconstruction has not been implemented.
+        /// <summary>
+        /// The preferred height this layout element should be allocated if there is sufficient space.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI; // Required when using UI elements.
+        ///
+        /// public class ExampleClass : MonoBehaviour
+        /// {
+        ///     public Transform MyContentPanel;
+        ///
+        ///     //Sets the flexible height on on all children in the content panel.
+        ///     public void Start()
+        ///     {
+        ///         //Assign all the children of the content panel to an array.
+        ///         LayoutElement[] myLayoutElements = MyContentPanel.GetComponentsInChildren<LayoutElement>();
+        ///
+        ///         //For each child in the array change its LayoutElement's preferred height size to 100.
+        ///         foreach (LayoutElement element in myLayoutElements)
+        ///         {
+        ///             element.preferredHeight = 100f;
+        ///         }
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public virtual float preferredHeight { get { return m_PreferredHeight; } set { if (SetPropertyUtility.SetStruct(ref m_PreferredHeight, value)) SetDirty(); } }
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+        /// <summary>
+        /// The extra relative width this layout element should be allocated if there is additional available space.
+        /// </summary>
+        public virtual float flexibleWidth { get { return m_FlexibleWidth; } set { if (SetPropertyUtility.SetStruct(ref m_FlexibleWidth, value)) SetDirty(); } }
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+        /// <summary>
+        /// The extra relative height this layout element should be allocated if there is additional available space.
+        /// </summary>
+        public virtual float flexibleHeight { get { return m_FlexibleHeight; } set { if (SetPropertyUtility.SetStruct(ref m_FlexibleHeight, value)) SetDirty(); } }
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+        /// <summary>
+        /// The Priority of layout this element has.
+        /// </summary>
+        public virtual int layoutPriority { get { return m_LayoutPriority; } set { if (SetPropertyUtility.SetStruct(ref m_LayoutPriority, value)) SetDirty(); } }
 
-		5. Script Content Level 0
 
-			AssetRipper was set to not load any script information.
+        protected LayoutElement()
+        {}
 
-		6. Cpp2IL failed to decompile Il2Cpp data
+        protected override void OnEnable()
+        {
+            base.OnEnable();
+            SetDirty();
+        }
 
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
+        protected override void OnTransformParentChanged()
+        {
+            SetDirty();
+        }
 
-		7. An incorrect path was provided to AssetRipper.
+        protected override void OnDisable()
+        {
+            SetDirty();
+            base.OnDisable();
+        }
 
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
+        protected override void OnDidApplyAnimationProperties()
+        {
+            SetDirty();
+        }
 
-		*/
-	}
+        protected override void OnBeforeTransformParentChanged()
+        {
+            SetDirty();
+        }
+
+        /// <summary>
+        /// Mark the LayoutElement as dirty.
+        /// </summary>
+        /// <remarks>
+        /// This will make the auto layout system process this element on the next layout pass. This method should be called by the LayoutElement whenever a change is made that potentially affects the layout.
+        /// </remarks>
+        protected void SetDirty()
+        {
+            if (!IsActive())
+                return;
+            LayoutRebuilder.MarkLayoutForRebuild(transform as RectTransform);
+        }
+
+    #if UNITY_EDITOR
+        protected override void OnValidate()
+        {
+            SetDirty();
+        }
+
+    #endif
+    }
 }

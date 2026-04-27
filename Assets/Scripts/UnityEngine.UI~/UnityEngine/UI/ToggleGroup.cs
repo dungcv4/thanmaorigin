@@ -1,66 +1,185 @@
-using UnityEngine;
+using System;
+using System.Linq;
+using System.Collections.Generic;
+using UnityEngine.EventSystems;
 
 namespace UnityEngine.UI
 {
-	public class ToggleGroup : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    [AddComponentMenu("UI/Toggle Group", 31)]
+    [DisallowMultipleComponent]
+    /// <summary>
+    /// A component that represents a group of UI.Toggles.
+    /// </summary>
+    /// <remarks>
+    /// When using a group reference the group from a UI.Toggle. Only one member of a group can be active at a time.
+    /// </remarks>
+    public class ToggleGroup : UIBehaviour
+    {
+        [SerializeField] private bool m_AllowSwitchOff = false;
 
-		1. No dll files were provided to AssetRipper.
+        /// <summary>
+        /// Is it allowed that no toggle is switched on?
+        /// </summary>
+        /// <remarks>
+        /// If this setting is enabled, pressing the toggle that is currently switched on will switch it off, so that no toggle is switched on. If this setting is disabled, pressing the toggle that is currently switched on will not change its state.
+        /// Note that even if allowSwitchOff is false, the Toggle Group will not enforce its constraint right away if no toggles in the group are switched on when the scene is loaded or when the group is instantiated. It will only prevent the user from switching a toggle off.
+        /// </remarks>
+        public bool allowSwitchOff { get { return m_AllowSwitchOff; } set { m_AllowSwitchOff = value; } }
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+        protected List<Toggle> m_Toggles = new List<Toggle>();
 
-		2. Incorrect dll files were provided to AssetRipper.
+        protected ToggleGroup()
+        {}
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+        /// <summary>
+        /// Because all the Toggles have registered themselves in the OnEnabled, Start should check to
+        /// make sure at least one Toggle is active in groups that do not AllowSwitchOff
+        /// </summary>
+        protected override void Start()
+        {
+            EnsureValidState();
+            base.Start();
+        }
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+        protected override void OnEnable()
+        {
+            EnsureValidState();
+            base.OnEnable();
+        }
 
-		3. Assembly Reconstruction has not been implemented.
+        private void ValidateToggleIsInGroup(Toggle toggle)
+        {
+            if (toggle == null || !m_Toggles.Contains(toggle))
+                throw new ArgumentException(string.Format("Toggle {0} is not part of ToggleGroup {1}", new object[] {toggle, this}));
+        }
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+        /// <summary>
+        /// Notify the group that the given toggle is enabled.
+        /// </summary>
+        /// <param name="toggle">The toggle that got triggered on.</param>
+        /// <param name="sendCallback">If other toggles should send onValueChanged.</param>
+        public void NotifyToggleOn(Toggle toggle, bool sendCallback = true)
+        {
+            ValidateToggleIsInGroup(toggle);
+            // disable all toggles in the group
+            for (var i = 0; i < m_Toggles.Count; i++)
+            {
+                if (m_Toggles[i] == toggle)
+                    continue;
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+                if (sendCallback)
+                    m_Toggles[i].isOn = false;
+                else
+                    m_Toggles[i].SetIsOnWithoutNotify(false);
+            }
+        }
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+        /// <summary>
+        /// Unregister a toggle from the group.
+        /// </summary>
+        /// <param name="toggle">The toggle to remove.</param>
+        public void UnregisterToggle(Toggle toggle)
+        {
+            if (m_Toggles.Contains(toggle))
+                m_Toggles.Remove(toggle);
+        }
 
-		5. Script Content Level 0
+        /// <summary>
+        /// Register a toggle with the toggle group so it is watched for changes and notified if another toggle in the group changes.
+        /// </summary>
+        /// <param name="toggle">The toggle to register with the group.</param>
+        public void RegisterToggle(Toggle toggle)
+        {
+            if (!m_Toggles.Contains(toggle))
+                m_Toggles.Add(toggle);
+        }
 
-			AssetRipper was set to not load any script information.
+        /// <summary>
+        /// Ensure that the toggle group still has a valid state. This is only relevant when a ToggleGroup is Started
+        /// or a Toggle has been deleted from the group.
+        /// </summary>
+        public void EnsureValidState()
+        {
+            if (!allowSwitchOff && !AnyTogglesOn() && m_Toggles.Count != 0)
+            {
+                m_Toggles[0].isOn = true;
+                NotifyToggleOn(m_Toggles[0]);
+            }
 
-		6. Cpp2IL failed to decompile Il2Cpp data
+            IEnumerable<Toggle> activeToggles = ActiveToggles();
 
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
+            if (activeToggles.Count() > 1)
+            {
+                Toggle firstActive = GetFirstActiveToggle();
 
-		7. An incorrect path was provided to AssetRipper.
+                foreach (Toggle toggle in activeToggles)
+                {
+                    if (toggle == firstActive)
+                    {
+                        continue;
+                    }
+                    toggle.isOn = false;
+                }
+            }
+        }
 
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
+        /// <summary>
+        /// Are any of the toggles on?
+        /// </summary>
+        /// <returns>Are and of the toggles on?</returns>
+        public bool AnyTogglesOn()
+        {
+            return m_Toggles.Find(x => x.isOn) != null;
+        }
 
-		*/
-	}
+        /// <summary>
+        /// Returns the toggles in this group that are active.
+        /// </summary>
+        /// <returns>The active toggles in the group.</returns>
+        /// <remarks>
+        /// Toggles belonging to this group but are not active either because their GameObject is inactive or because the Toggle component is disabled, are not returned as part of the list.
+        /// </remarks>
+        public IEnumerable<Toggle> ActiveToggles()
+        {
+            return m_Toggles.Where(x => x.isOn);
+        }
+
+        /// <summary>
+        /// Returns the toggle that is the first in the list of active toggles.
+        /// </summary>
+        /// <returns>The first active toggle from m_Toggles</returns>
+        /// <remarks>
+        /// Get the active toggle for this group. As the group
+        /// </remarks>
+        public Toggle GetFirstActiveToggle()
+        {
+            IEnumerable<Toggle> activeToggles = ActiveToggles();
+            return activeToggles.Count() > 0 ? activeToggles.First() : null;
+        }
+
+        /// <summary>
+        /// Switch all toggles off.
+        /// </summary>
+        /// <remarks>
+        /// This method can be used to switch all toggles off, regardless of whether the allowSwitchOff property is enabled or not.
+        /// </remarks>
+        public void SetAllTogglesOff(bool sendCallback = true)
+        {
+            bool oldAllowSwitchOff = m_AllowSwitchOff;
+            m_AllowSwitchOff = true;
+
+            if (sendCallback)
+            {
+                for (var i = 0; i < m_Toggles.Count; i++)
+                    m_Toggles[i].isOn = false;
+            }
+            else
+            {
+                for (var i = 0; i < m_Toggles.Count; i++)
+                    m_Toggles[i].SetIsOnWithoutNotify(false);
+            }
+
+            m_AllowSwitchOff = oldAllowSwitchOff;
+        }
+    }
 }

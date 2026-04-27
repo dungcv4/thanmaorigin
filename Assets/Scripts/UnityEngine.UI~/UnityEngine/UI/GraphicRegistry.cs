@@ -1,66 +1,212 @@
-using UnityEngine;
+using System.Collections.Generic;
+using UnityEngine.UI.Collections;
 
 namespace UnityEngine.UI
 {
-	public class GraphicRegistry : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    /// <summary>
+    ///   Registry which maps a Graphic to the canvas it belongs to.
+    /// </summary>
+    public class GraphicRegistry
+    {
+        private static GraphicRegistry s_Instance;
 
-		1. No dll files were provided to AssetRipper.
+        private readonly Dictionary<Canvas, IndexedSet<Graphic>> m_Graphics = new Dictionary<Canvas, IndexedSet<Graphic>>();
+        private readonly Dictionary<Canvas, IndexedSet<Graphic>> m_RaycastableGraphics = new Dictionary<Canvas, IndexedSet<Graphic>>();
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+        protected GraphicRegistry()
+        {
+            // Avoid runtime generation of these types. Some platforms are AOT only and do not support
+            // JIT. What's more we actually create a instance of the required types instead of
+            // just declaring an unused variable which may be optimized away by some compilers (Mono vs MS).
 
-		2. Incorrect dll files were provided to AssetRipper.
+            // See: 877060
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+            System.GC.KeepAlive(new Dictionary<Graphic, int>());
+            System.GC.KeepAlive(new Dictionary<ICanvasElement, int>());
+            System.GC.KeepAlive(new Dictionary<IClipper, int>());
+        }
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+        /// <summary>
+        /// The singleton instance of the GraphicRegistry. Creates a new instance if it does not exist.
+        /// </summary>
+        public static GraphicRegistry instance
+        {
+            get
+            {
+                if (s_Instance == null)
+                    s_Instance = new GraphicRegistry();
+                return s_Instance;
+            }
+        }
 
-		3. Assembly Reconstruction has not been implemented.
+        /// <summary>
+        /// Associates a Graphic with a Canvas and stores this association in the registry.
+        /// </summary>
+        /// <param name="c">The canvas being associated with the Graphic.</param>
+        /// <param name="graphic">The Graphic being associated with the Canvas.</param>
+        public static void RegisterGraphicForCanvas(Canvas c, Graphic graphic)
+        {
+            if (c == null || graphic == null)
+                return;
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+            IndexedSet<Graphic> graphics;
+            instance.m_Graphics.TryGetValue(c, out graphics);
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+            if (graphics != null)
+            {
+                graphics.AddUnique(graphic);
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+                RegisterRaycastGraphicForCanvas(c, graphic);
 
-		5. Script Content Level 0
+                return;
+            }
 
-			AssetRipper was set to not load any script information.
+            // Dont need to AddUnique as we know its the only item in the list
+            graphics = new IndexedSet<Graphic>();
+            graphics.Add(graphic);
+            instance.m_Graphics.Add(c, graphics);
 
-		6. Cpp2IL failed to decompile Il2Cpp data
+            RegisterRaycastGraphicForCanvas(c, graphic);
+        }
 
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
+        /// <summary>
+        /// Associates a raycastable Graphic with a Canvas and stores this association in the registry.
+        /// </summary>
+        /// <param name="c">The canvas being associated with the Graphic.</param>
+        /// <param name="graphic">The Graphic being associated with the Canvas.</param>
+        public static void RegisterRaycastGraphicForCanvas(Canvas c, Graphic graphic)
+        {
+            if (c == null || graphic == null || !graphic.raycastTarget)
+                return;
 
-		7. An incorrect path was provided to AssetRipper.
+            IndexedSet<Graphic> graphics;
+            instance.m_RaycastableGraphics.TryGetValue(c, out graphics);
 
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
+            if (graphics != null)
+            {
+                graphics.AddUnique(graphic);
 
-		*/
-	}
+                return;
+            }
+
+            // Dont need to AddUnique as we know its the only item in the list
+            graphics = new IndexedSet<Graphic>();
+            graphics.Add(graphic);
+            instance.m_RaycastableGraphics.Add(c, graphics);
+        }
+
+        /// <summary>
+        /// Dissociates a Graphic from a Canvas, removing this association from the registry.
+        /// </summary>
+        /// <param name="c">The Canvas to dissociate from the Graphic.</param>
+        /// <param name="graphic">The Graphic to dissociate from the Canvas.</param>
+        public static void UnregisterGraphicForCanvas(Canvas c, Graphic graphic)
+        {
+            if (c == null || graphic == null)
+                return;
+
+            IndexedSet<Graphic> graphics;
+            if (instance.m_Graphics.TryGetValue(c, out graphics))
+            {
+                graphics.Remove(graphic);
+
+                if (graphics.Capacity == 0)
+                    instance.m_Graphics.Remove(c);
+
+                UnregisterRaycastGraphicForCanvas(c, graphic);
+            }
+        }
+
+        /// <summary>
+        /// Dissociates a Graphic from a Canvas, removing this association from the registry.
+        /// </summary>
+        /// <param name="c">The Canvas to dissociate from the Graphic.</param>
+        /// <param name="graphic">The Graphic to dissociate from the Canvas.</param>
+        public static void UnregisterRaycastGraphicForCanvas(Canvas c, Graphic graphic)
+        {
+            if (c == null || graphic == null)
+                return;
+
+            IndexedSet<Graphic> graphics;
+            if (instance.m_RaycastableGraphics.TryGetValue(c, out graphics))
+            {
+                graphics.Remove(graphic);
+
+                if (graphics.Count == 0)
+                    instance.m_RaycastableGraphics.Remove(c);
+            }
+        }
+
+        /// <summary>
+        /// Disables a Graphic from a Canvas, disabling this association from the registry.
+        /// </summary>
+        /// <param name="c">The Canvas to dissociate from the Graphic.</param>
+        /// <param name="graphic">The Graphic to dissociate from the Canvas.</param>
+        public static void DisableGraphicForCanvas(Canvas c, Graphic graphic)
+        {
+            if (c == null)
+                return;
+
+            IndexedSet<Graphic> graphics;
+            if (instance.m_Graphics.TryGetValue(c, out graphics))
+            {
+                graphics.DisableItem(graphic);
+
+                if (graphics.Capacity == 0)
+                    instance.m_Graphics.Remove(c);
+
+                DisableRaycastGraphicForCanvas(c, graphic);
+            }
+        }
+
+        /// <summary>
+        /// Disables the raycast for a Graphic from a Canvas, disabling this association from the registry.
+        /// </summary>
+        /// <param name="c">The Canvas to dissociate from the Graphic.</param>
+        /// <param name="graphic">The Graphic to dissociate from the Canvas.</param>
+        public static void DisableRaycastGraphicForCanvas(Canvas c, Graphic graphic)
+        {
+            if (c == null || !graphic.raycastTarget)
+                return;
+
+            IndexedSet<Graphic> graphics;
+            if (instance.m_RaycastableGraphics.TryGetValue(c, out graphics))
+            {
+                graphics.DisableItem(graphic);
+
+                if (graphics.Capacity == 0)
+                    instance.m_RaycastableGraphics.Remove(c);
+            }
+        }
+
+        private static readonly List<Graphic> s_EmptyList = new List<Graphic>();
+
+        /// <summary>
+        /// Retrieves the list of Graphics associated with a Canvas.
+        /// </summary>
+        /// <param name="canvas">The Canvas to search</param>
+        /// <returns>Returns a list of Graphics. Returns an empty list if no Graphics are associated with the specified Canvas.</returns>
+        public static IList<Graphic> GetGraphicsForCanvas(Canvas canvas)
+        {
+            IndexedSet<Graphic> graphics;
+            if (instance.m_Graphics.TryGetValue(canvas, out graphics))
+                return graphics;
+
+            return s_EmptyList;
+        }
+
+        /// <summary>
+        /// Retrieves the list of Graphics that are raycastable and associated with a Canvas.
+        /// </summary>
+        /// <param name="canvas">The Canvas to search</param>
+        /// <returns>Returns a list of Graphics. Returns an empty list if no Graphics are associated with the specified Canvas.</returns>
+        public static IList<Graphic> GetRaycastableGraphicsForCanvas(Canvas canvas)
+        {
+            IndexedSet<Graphic> graphics;
+            if (instance.m_RaycastableGraphics.TryGetValue(canvas, out graphics))
+                return graphics;
+
+            return s_EmptyList;
+        }
+    }
 }

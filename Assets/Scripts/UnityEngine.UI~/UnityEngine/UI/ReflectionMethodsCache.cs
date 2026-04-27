@@ -1,66 +1,76 @@
-using UnityEngine;
+using System;
+using System.Collections.Generic;
+using System.Reflection;
 
 namespace UnityEngine.UI
 {
-	public class ReflectionMethodsCache : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    internal class ReflectionMethodsCache
+    {
+#if PACKAGE_PHYSICS
+        public delegate bool Raycast3DCallback(Ray r, out RaycastHit hit, float f, int i);
+        public delegate RaycastHit[] RaycastAllCallback(Ray r, float f, int i);
+        public delegate int GetRaycastNonAllocCallback(Ray r, RaycastHit[] results, float f, int i);
 
-		1. No dll files were provided to AssetRipper.
+        public Raycast3DCallback raycast3D = null;
+        public RaycastAllCallback raycast3DAll = null;
+        public GetRaycastNonAllocCallback getRaycastNonAlloc = null;
+#endif
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+#if PACKAGE_PHYSICS2D
+        public delegate RaycastHit2D Raycast2DCallback(Vector2 p1, Vector2 p2, float f, int i);
+        public delegate RaycastHit2D[] GetRayIntersectionAllCallback(Ray r, float f, int i);
+        public delegate int GetRayIntersectionAllNonAllocCallback(Ray r, RaycastHit2D[] results, float f, int i);
 
-		2. Incorrect dll files were provided to AssetRipper.
+        public Raycast2DCallback raycast2D = null;
+        public GetRayIntersectionAllCallback getRayIntersectionAll = null;
+        public GetRayIntersectionAllNonAllocCallback getRayIntersectionAllNonAlloc = null;
+#endif
+        // We call Physics.Raycast and Physics2D.Raycast through reflection to avoid creating a hard dependency from
+        // this class to the Physics/Physics2D modules, which would otherwise make it impossible to make content with UI
+        // without force-including both modules.
+        //
+        // *NOTE* If other methods are required ensure to add [RequiredByNativeCode] to the bindings for that function. It prevents
+        //        the function from being stripped if required. See Dynamics.bindings.cs for examples (search for GraphicRaycaster.cs).
+        public ReflectionMethodsCache()
+        {
+#if PACKAGE_PHYSICS
+            var raycast3DMethodInfo = typeof(Physics).GetMethod("Raycast", new[] {typeof(Ray), typeof(RaycastHit).MakeByRefType(), typeof(float), typeof(int)});
+            if (raycast3DMethodInfo != null)
+                raycast3D = (Raycast3DCallback)Delegate.CreateDelegate(typeof(Raycast3DCallback), raycast3DMethodInfo);
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+            var raycastAllMethodInfo = typeof(Physics).GetMethod("RaycastAll", new[] {typeof(Ray), typeof(float), typeof(int)});
+            if (raycastAllMethodInfo != null)
+                raycast3DAll = (RaycastAllCallback)Delegate.CreateDelegate(typeof(RaycastAllCallback), raycastAllMethodInfo);
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+            var getRaycastAllNonAllocMethodInfo = typeof(Physics).GetMethod("RaycastNonAlloc", new[] { typeof(Ray), typeof(RaycastHit[]), typeof(float), typeof(int) });
+            if (getRaycastAllNonAllocMethodInfo != null)
+                getRaycastNonAlloc = (GetRaycastNonAllocCallback)Delegate.CreateDelegate(typeof(GetRaycastNonAllocCallback), getRaycastAllNonAllocMethodInfo);
+#endif
+#if PACKAGE_PHYSICS2D
+            var raycast2DMethodInfo = typeof(Physics2D).GetMethod("Raycast", new[] { typeof(Vector2), typeof(Vector2), typeof(float), typeof(int) });
+            if (raycast2DMethodInfo != null)
+                raycast2D = (Raycast2DCallback)Delegate.CreateDelegate(typeof(Raycast2DCallback), raycast2DMethodInfo);
 
-		3. Assembly Reconstruction has not been implemented.
+            var getRayIntersectionAllMethodInfo = typeof(Physics2D).GetMethod("GetRayIntersectionAll", new[] {typeof(Ray), typeof(float), typeof(int)});
+            if (getRayIntersectionAllMethodInfo != null)
+                getRayIntersectionAll = (GetRayIntersectionAllCallback)Delegate.CreateDelegate(typeof(GetRayIntersectionAllCallback), getRayIntersectionAllMethodInfo);
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+            var getRayIntersectionAllNonAllocMethodInfo = typeof(Physics2D).GetMethod("GetRayIntersectionNonAlloc", new[] { typeof(Ray), typeof(RaycastHit2D[]), typeof(float), typeof(int) });
+            if (getRayIntersectionAllNonAllocMethodInfo != null)
+                getRayIntersectionAllNonAlloc = (GetRayIntersectionAllNonAllocCallback)Delegate.CreateDelegate(typeof(GetRayIntersectionAllNonAllocCallback), getRayIntersectionAllNonAllocMethodInfo);
+#endif
+        }
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+        private static ReflectionMethodsCache s_ReflectionMethodsCache = null;
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
-
-		5. Script Content Level 0
-
-			AssetRipper was set to not load any script information.
-
-		6. Cpp2IL failed to decompile Il2Cpp data
-
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-		7. An incorrect path was provided to AssetRipper.
-
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
-
-		*/
-	}
+        public static ReflectionMethodsCache Singleton
+        {
+            get
+            {
+                if (s_ReflectionMethodsCache == null)
+                    s_ReflectionMethodsCache = new ReflectionMethodsCache();
+                return s_ReflectionMethodsCache;
+            }
+        }
+    }
 }

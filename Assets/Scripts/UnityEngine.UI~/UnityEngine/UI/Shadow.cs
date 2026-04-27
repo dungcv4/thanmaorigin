@@ -1,66 +1,144 @@
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Pool;
 
 namespace UnityEngine.UI
 {
-	public class Shadow : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    [AddComponentMenu("UI/Effects/Shadow", 80)]
+    /// <summary>
+    /// Adds an outline to a graphic using IVertexModifier.
+    /// </summary>
+    public class Shadow : BaseMeshEffect
+    {
+        [SerializeField]
+        private Color m_EffectColor = new Color(0f, 0f, 0f, 0.5f);
 
-		1. No dll files were provided to AssetRipper.
+        [SerializeField]
+        private Vector2 m_EffectDistance = new Vector2(1f, -1f);
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+        [SerializeField]
+        private bool m_UseGraphicAlpha = true;
 
-		2. Incorrect dll files were provided to AssetRipper.
+        private const float kMaxEffectDistance = 600f;
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+        protected Shadow()
+        {}
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+#if UNITY_EDITOR
+        protected override void OnValidate()
+        {
+            effectDistance = m_EffectDistance;
+            base.OnValidate();
+        }
 
-		3. Assembly Reconstruction has not been implemented.
+#endif
+        /// <summary>
+        /// Color for the effect
+        /// </summary>
+        public Color effectColor
+        {
+            get { return m_EffectColor; }
+            set
+            {
+                m_EffectColor = value;
+                if (graphic != null)
+                    graphic.SetVerticesDirty();
+            }
+        }
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+        /// <summary>
+        /// How far is the shadow from the graphic.
+        /// </summary>
+        public Vector2 effectDistance
+        {
+            get { return m_EffectDistance; }
+            set
+            {
+                if (value.x > kMaxEffectDistance)
+                    value.x = kMaxEffectDistance;
+                if (value.x < -kMaxEffectDistance)
+                    value.x = -kMaxEffectDistance;
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+                if (value.y > kMaxEffectDistance)
+                    value.y = kMaxEffectDistance;
+                if (value.y < -kMaxEffectDistance)
+                    value.y = -kMaxEffectDistance;
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+                if (m_EffectDistance == value)
+                    return;
 
-		5. Script Content Level 0
+                m_EffectDistance = value;
 
-			AssetRipper was set to not load any script information.
+                if (graphic != null)
+                    graphic.SetVerticesDirty();
+            }
+        }
 
-		6. Cpp2IL failed to decompile Il2Cpp data
+        /// <summary>
+        /// Should the shadow inherit the alpha from the graphic?
+        /// </summary>
+        public bool useGraphicAlpha
+        {
+            get { return m_UseGraphicAlpha; }
+            set
+            {
+                m_UseGraphicAlpha = value;
+                if (graphic != null)
+                    graphic.SetVerticesDirty();
+            }
+        }
 
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
+        protected void ApplyShadowZeroAlloc(List<UIVertex> verts, Color32 color, int start, int end, float x, float y)
+        {
+            UIVertex vt;
 
-		7. An incorrect path was provided to AssetRipper.
+            var neededCapacity = verts.Count + end - start;
+            if (verts.Capacity < neededCapacity)
+                verts.Capacity = neededCapacity;
 
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
+            for (int i = start; i < end; ++i)
+            {
+                vt = verts[i];
+                verts.Add(vt);
 
-		*/
-	}
+                Vector3 v = vt.position;
+                v.x += x;
+                v.y += y;
+                vt.position = v;
+                var newColor = color;
+                if (m_UseGraphicAlpha)
+                    newColor.a = (byte)((newColor.a * verts[i].color.a) / 255);
+                vt.color = newColor;
+                verts[i] = vt;
+            }
+        }
+
+        /// <summary>
+        /// Duplicate vertices from start to end and turn them into shadows with the given offset.
+        /// </summary>
+        /// <param name="verts">Vert list to copy</param>
+        /// <param name="color">Shadow color</param>
+        /// <param name="start">The start index in the verts list</param>
+        /// <param name="end">The end index in the vers list</param>
+        /// <param name="x">The shadows x offset</param>
+        /// <param name="y">The shadows y offset</param>
+        protected void ApplyShadow(List<UIVertex> verts, Color32 color, int start, int end, float x, float y)
+        {
+            ApplyShadowZeroAlloc(verts, color, start, end, x, y);
+        }
+
+        public override void ModifyMesh(VertexHelper vh)
+        {
+            if (!IsActive())
+                return;
+
+            var output = ListPool<UIVertex>.Get();
+            vh.GetUIVertexStream(output);
+
+            ApplyShadow(output, effectColor, 0, output.Count, effectDistance.x, effectDistance.y);
+            vh.Clear();
+            vh.AddUIVertexTriangleStream(output);
+            ListPool<UIVertex>.Release(output);
+        }
+    }
 }

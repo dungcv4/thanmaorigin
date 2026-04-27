@@ -1,66 +1,59 @@
-using UnityEngine;
+#if UNITY_EDITOR
+using System.Collections.Generic;
+using UnityEngine.UI.Collections;
 
 namespace UnityEngine.UI
 {
-	public class GraphicRebuildTracker : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    /// <summary>
+    /// EditorOnly class for tracking all Graphics.
+    /// Used when a source asset is reimported into the editor to ensure that Graphics are updated as intended.
+    /// </summary>
+    public static class GraphicRebuildTracker
+    {
+        static IndexedSet<Graphic> m_Tracked = new IndexedSet<Graphic>();
+        static bool s_Initialized;
 
-		1. No dll files were provided to AssetRipper.
+        /// <summary>
+        /// Add a Graphic to the list of tracked Graphics
+        /// </summary>
+        /// <param name="g">The graphic to track</param>
+        public static void TrackGraphic(Graphic g)
+        {
+            if (!s_Initialized)
+            {
+                CanvasRenderer.onRequestRebuild += OnRebuildRequested;
+                s_Initialized = true;
+            }
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+            m_Tracked.AddUnique(g);
+        }
 
-		2. Incorrect dll files were provided to AssetRipper.
+        /// <summary>
+        /// Remove a Graphic to the list of tracked Graphics
+        /// </summary>
+        /// <param name="g">The graphic to remove from tracking.</param>
+        public static void UnTrackGraphic(Graphic g)
+        {
+            m_Tracked.Remove(g);
+        }
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+        /// <summary>
+        /// Remove a Graphic to the list of tracked Graphics
+        /// </summary>
+        /// <param name="g">The graphic to remove from tracking.</param>
+        public static void DisableTrackGraphic(Graphic g)
+        {
+            m_Tracked.DisableItem(g);
+        }
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
-
-		3. Assembly Reconstruction has not been implemented.
-
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
-
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
-
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
-
-		5. Script Content Level 0
-
-			AssetRipper was set to not load any script information.
-
-		6. Cpp2IL failed to decompile Il2Cpp data
-
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-		7. An incorrect path was provided to AssetRipper.
-
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
-
-		*/
-	}
+        static void OnRebuildRequested()
+        {
+            StencilMaterial.ClearAll();
+            for (int i = 0; i < m_Tracked.Count; i++)
+            {
+                m_Tracked[i].OnRebuildRequested();
+            }
+        }
+    }
 }
+#endif // if UNITY_EDITOR

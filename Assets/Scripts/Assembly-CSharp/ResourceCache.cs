@@ -1,63 +1,104 @@
+// Class:  ResourceCache (static — in-memory asset cache for ResourceModule)
+// GUID:   (preserved via .meta — see ResourceCache.cs.meta)
+// Source: KiemTheOrigin_DeepExtract/_shared/DecompiledSource/ResourceCache.cs (Token 0x2000064)
+// IL2CPP: KTO_DecompiledReference/_root/ResourceCache.c (494 LOC, 5 methods)
+//
+// PARTIAL 1-1 PORT 2026-04-27 (canonicalization Day 4 — TIER 1 minimal).
+// gốc body uses gameObject ref-count pruning, async coroutine collect,
+// fnCollectFinish callback, and WeakReference temp cache.
+// thanmaorigin DEVIATION: simplified to plain Dictionary cache without LRU/coroutine.
+//
+// FIXME(canonicalization-day-4): full port deferred to TIER 2 backlog
+//   (CollectMemory iterator + WeakReference + lastUseTime LRU prune).
+
+using System.Collections.Generic;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
-public class ResourceCache : MonoBehaviour
+public static class ResourceCache
 {
-	/*
-	Dummy class. This could have happened for several reasons:
+    // Nested type — Source: dump.cs (Token 0x2000065)
+    // gốc fields: resPath (0x10), loader (0x18), lastUseTime (0x20)
+    public class ResourceCacheInfo : System.IComparable<ResourceCacheInfo>
+    {
+        public string resPath;       // 0x10
+        public CommonLoader loader;  // 0x18
+        public long lastUseTime;     // 0x20
 
-	1. No dll files were provided to AssetRipper.
+        // VMA: 0x1809F46 — Source: ResourceCache.c (ResourceCacheInfo.CompareTo)
+        // PARTIAL — IL2CPP body unclear (Ghidra stub returns default(int)).
+        public int CompareTo(ResourceCacheInfo other)
+        {
+            if (other == null) return -1;
+            return this.lastUseTime.CompareTo(other.lastUseTime);
+        }
 
-		Unity asset bundles and serialized files do not contain script information to decompile.
-			* For Mono games, that information is contained in .NET dll files.
-			* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-			
-		AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-		A unexpected file structure could cause AssetRipper to not find the required files.
+        // VMA: 0x1809641 — Source: ResourceCache.c (.ctor)
+        public ResourceCacheInfo() { }
+    }
 
-	2. Incorrect dll files were provided to AssetRipper.
+    // Delegate — Source: dump.cs (Token 0x2000066)
+    public delegate void OnCollectFinish();
 
-		Any of the following could cause this:
-			* Il2CppInterop assemblies
-			* Deobfuscated assemblies
-			* Older assemblies (compared to when the bundle was built)
-			* Newer assemblies (compared to when the bundle was built)
+    // Static fields (offsets from dump.cs)
+    public static OnCollectFinish fnCollectFinish;                                  // 0x0
+    private static bool m_isCollecting;                                              // 0x8
+    private static bool m_isNeedRecollecting;                                        // 0x9
+    public static Dictionary<string, ResourceCacheInfo> m_cacheResource              // 0x10
+        = new Dictionary<string, ResourceCacheInfo>();
+    private static Dictionary<string, System.WeakReference> m_tempCacheRes           // 0x18
+        = new Dictionary<string, System.WeakReference>();
 
-		Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+    // VMA: 0x18093E5 — Source: ResourceCache.c (DoCache)
+    // gốc body (lines 15-114): build ResourceCacheInfo with lastUseTime = DateTime.Now.Ticks,
+    //   m_cacheResource[szPath] = info; if exists, replace + RemoveRef on old loader.
+    // PARTIAL — keeping minimal upsert. Loader ref-count semantics deferred.
+    public static void DoCache(string szPath, CommonLoader loader)
+    {
+        if (string.IsNullOrEmpty(szPath) || loader == null) return;
+        var info = new ResourceCacheInfo
+        {
+            resPath = szPath,
+            loader = loader,
+            lastUseTime = System.DateTime.Now.Ticks,
+        };
+        m_cacheResource[szPath] = info;
+    }
 
-	3. Assembly Reconstruction has not been implemented.
+    // VMA: 0x1809648 — Source: ResourceCache.c (GetCache)
+    // gốc body (lines 115-370): TryGetValue m_cacheResource → bump lastUseTime →
+    //   return loader.Asset (CommonLoader+0x38). If miss, check m_tempCacheRes (WeakRef);
+    //   on hit, promote to m_cacheResource.
+    // PARTIAL — promote-from-temp + WeakRef revival deferred.
+    public static Object GetCache(string szPath)
+    {
+        if (string.IsNullOrEmpty(szPath)) return null;
+        if (m_cacheResource.TryGetValue(szPath, out var info) && info != null && info.loader != null)
+        {
+            info.lastUseTime = System.DateTime.Now.Ticks;
+            return info.loader.Asset;
+        }
+        return null;
+    }
 
-		Asset bundles contain a small amount of information about the script content.
-		This information can be used to recover the serializable fields of a script.
+    // VMA: 0x1809BE4 — Source: ResourceCache.c (IsCollect)
+    // gốc body: return m_isCollecting.
+    public static bool IsCollect() { return m_isCollecting; }
 
-		See: https://github.com/AssetRipper/AssetRipper/issues/655
+    // VMA: 0x1809CA7 — Source: ResourceCache.c (UnloadUnusedAssets)
+    // gốc body (lines 371-435): if (m_isCollecting) m_isNeedRecollecting=true; return;
+    //   start CollectMemory(bGC) coroutine; m_isCollecting=true.
+    // DEVIATION: synchronous Resources.UnloadUnusedAssets + optional GC.Collect.
+    public static void UnloadUnusedAssets(bool bGC)
+    {
+        Resources.UnloadUnusedAssets();
+        if (bGC) System.GC.Collect();
+    }
 
-	4. This script is unnecessary.
-
-		If this script has no asset or script references, it can be deleted.
-		Be sure to resolve any compile errors before deleting because they can hide references.
-
-	5. Script Content Level 0
-
-		AssetRipper was set to not load any script information.
-
-	6. Cpp2IL failed to decompile Il2Cpp data
-
-		If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-		This is an upstream problem, and the AssetRipper developer has very little control over it.
-		Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-	7. An incorrect path was provided to AssetRipper.
-
-		This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-		AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-		An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-		Generally, AssetRipper expects users to provide the root folder of the game. For example:
-			* Windows: the folder containing the game's .exe file
-			* Mac: the .app file/folder
-			* Linux: the folder containing the game's executable file
-			* Android: the apk file
-			* iOS: the ipa file
-			* Switch: the folder containing exefs and romfs
-
-	*/
+    // VMA: 0x1809E0A — Source: ResourceCache.c (GetCacheCount)
+    // gốc body (lines 436-468): return m_cacheResource.Count.
+    public static int GetCacheCount()
+    {
+        return m_cacheResource?.Count ?? 0;
+    }
 }

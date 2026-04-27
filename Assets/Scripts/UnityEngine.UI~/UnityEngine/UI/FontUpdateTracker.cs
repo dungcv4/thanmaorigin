@@ -1,66 +1,79 @@
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace UnityEngine.UI
 {
-	public class FontUpdateTracker : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    /// <summary>
+    /// Utility class that is used to help with Text update.
+    /// </summary>
+    /// <remarks>
+    /// When Unity rebuilds a font atlas a callback is sent to the font. Using this class you can register your text as needing to be rebuilt if the font atlas is updated.
+    /// </remarks>
+    public static class FontUpdateTracker
+    {
+        static Dictionary<Font, HashSet<Text>> m_Tracked = new Dictionary<Font, HashSet<Text>>();
 
-		1. No dll files were provided to AssetRipper.
+        /// <summary>
+        /// Register a Text element for receiving texture atlas rebuild calls.
+        /// </summary>
+        /// <param name="t">The Text object to track</param>
+        public static void TrackText(Text t)
+        {
+            if (t.font == null)
+                return;
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+            HashSet<Text> exists;
+            m_Tracked.TryGetValue(t.font, out exists);
+            if (exists == null)
+            {
+                // The textureRebuilt event is global for all fonts, so we add our delegate the first time we register *any* Text
+                if (m_Tracked.Count == 0)
+                    Font.textureRebuilt += RebuildForFont;
 
-		2. Incorrect dll files were provided to AssetRipper.
+                exists = new HashSet<Text>();
+                m_Tracked.Add(t.font, exists);
+            }
+            exists.Add(t);
+        }
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+        private static void RebuildForFont(Font f)
+        {
+            HashSet<Text> texts;
+            m_Tracked.TryGetValue(f, out texts);
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+            if (texts == null)
+                return;
 
-		3. Assembly Reconstruction has not been implemented.
+            foreach (var text in texts)
+                text.FontTextureChanged();
+        }
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+        /// <summary>
+        /// Deregister a Text element from receiving texture atlas rebuild calls.
+        /// </summary>
+        /// <param name="t">The Text object to no longer track</param>
+        public static void UntrackText(Text t)
+        {
+            if (t.font == null)
+                return;
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+            HashSet<Text> texts;
+            m_Tracked.TryGetValue(t.font, out texts);
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+            if (texts == null)
+                return;
 
-		5. Script Content Level 0
+            texts.Remove(t);
 
-			AssetRipper was set to not load any script information.
+            if (texts.Count == 0)
+            {
+                m_Tracked.Remove(t.font);
 
-		6. Cpp2IL failed to decompile Il2Cpp data
-
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-		7. An incorrect path was provided to AssetRipper.
-
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
-
-		*/
-	}
+                // There is a global textureRebuilt event for all fonts, so once the last Text reference goes away, remove our delegate
+                if (m_Tracked.Count == 0)
+                    Font.textureRebuilt -= RebuildForFont;
+            }
+        }
+    }
 }

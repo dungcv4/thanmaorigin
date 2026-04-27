@@ -96,4 +96,8 @@ public abstract class BaseLoader : MonoBehaviour
         // Default impl just stores the value via property setter.
         if (p >= 0f && p <= 1f) Progress = p;
     }
+
+    // VMA: 0x180CC36 — Source: dump.cs (Token 0x60001C4) — virtual NeedUnload (slot 11)
+    // gốc body: returns false by default; CommonLoader overrides with BundleType check.
+    public virtual bool NeedUnload() { return false; }
 }

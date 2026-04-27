@@ -1,66 +1,192 @@
+using System;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.Rendering;
+using UnityEngine.Serialization;
 
 namespace UnityEngine.UI
 {
-	public class Mask : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    [AddComponentMenu("UI/Mask", 13)]
+    [ExecuteAlways]
+    [RequireComponent(typeof(RectTransform))]
+    [DisallowMultipleComponent]
+    /// <summary>
+    /// A component for masking children elements.
+    /// </summary>
+    /// <remarks>
+    /// By using this element any children elements that have masking enabled will mask where a sibling Graphic would write 0 to the stencil buffer.
+    /// </remarks>
+    public class Mask : UIBehaviour, ICanvasRaycastFilter, IMaterialModifier
+    {
+        [NonSerialized]
+        private RectTransform m_RectTransform;
+        public RectTransform rectTransform
+        {
+            get { return m_RectTransform ?? (m_RectTransform = GetComponent<RectTransform>()); }
+        }
 
-		1. No dll files were provided to AssetRipper.
+        [SerializeField]
+        private bool m_ShowMaskGraphic = true;
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+        /// <summary>
+        /// Show the graphic that is associated with the Mask render area.
+        /// </summary>
+        public bool showMaskGraphic
+        {
+            get { return m_ShowMaskGraphic; }
+            set
+            {
+                if (m_ShowMaskGraphic == value)
+                    return;
 
-		2. Incorrect dll files were provided to AssetRipper.
+                m_ShowMaskGraphic = value;
+                if (graphic != null)
+                    graphic.SetMaterialDirty();
+            }
+        }
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+        [NonSerialized]
+        private Graphic m_Graphic;
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+        /// <summary>
+        /// The graphic associated with the Mask.
+        /// </summary>
+        public Graphic graphic
+        {
+            get { return m_Graphic ?? (m_Graphic = GetComponent<Graphic>()); }
+        }
 
-		3. Assembly Reconstruction has not been implemented.
+        [NonSerialized]
+        private Material m_MaskMaterial;
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+        [NonSerialized]
+        private Material m_UnmaskMaterial;
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+        protected Mask()
+        {}
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+        public virtual bool MaskEnabled() { return IsActive() && graphic != null; }
 
-		5. Script Content Level 0
+        [Obsolete("Not used anymore.")]
+        public virtual void OnSiblingGraphicEnabledDisabled() {}
 
-			AssetRipper was set to not load any script information.
+        protected override void OnEnable()
+        {
+            base.OnEnable();
+            if (graphic != null)
+            {
+                graphic.canvasRenderer.hasPopInstruction = true;
+                graphic.SetMaterialDirty();
 
-		6. Cpp2IL failed to decompile Il2Cpp data
+                // Default the graphic to being the maskable graphic if its found.
+                if (graphic is MaskableGraphic)
+                    (graphic as MaskableGraphic).isMaskingGraphic = true;
+            }
 
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
+            MaskUtilities.NotifyStencilStateChanged(this);
+        }
 
-		7. An incorrect path was provided to AssetRipper.
+        protected override void OnDisable()
+        {
+            // we call base OnDisable first here
+            // as we need to have the IsActive return the
+            // correct value when we notify the children
+            // that the mask state has changed.
+            base.OnDisable();
+            if (graphic != null)
+            {
+                graphic.SetMaterialDirty();
+                graphic.canvasRenderer.hasPopInstruction = false;
+                graphic.canvasRenderer.popMaterialCount = 0;
 
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
+                if (graphic is MaskableGraphic)
+                    (graphic as MaskableGraphic).isMaskingGraphic = false;
+            }
 
-		*/
-	}
+            StencilMaterial.Remove(m_MaskMaterial);
+            m_MaskMaterial = null;
+            StencilMaterial.Remove(m_UnmaskMaterial);
+            m_UnmaskMaterial = null;
+
+            MaskUtilities.NotifyStencilStateChanged(this);
+        }
+
+#if UNITY_EDITOR
+        protected override void OnValidate()
+        {
+            base.OnValidate();
+
+            if (!IsActive())
+                return;
+
+            if (graphic != null)
+            {
+                // Default the graphic to being the maskable graphic if its found.
+                if (graphic is MaskableGraphic)
+                    (graphic as MaskableGraphic).isMaskingGraphic = true;
+
+                graphic.SetMaterialDirty();
+            }
+
+            MaskUtilities.NotifyStencilStateChanged(this);
+        }
+
+#endif
+
+        public virtual bool IsRaycastLocationValid(Vector2 sp, Camera eventCamera)
+        {
+            if (!isActiveAndEnabled)
+                return true;
+
+            return RectTransformUtility.RectangleContainsScreenPoint(rectTransform, sp, eventCamera);
+        }
+
+        /// Stencil calculation time!
+        public virtual Material GetModifiedMaterial(Material baseMaterial)
+        {
+            if (!MaskEnabled())
+                return baseMaterial;
+
+            var rootSortCanvas = MaskUtilities.FindRootSortOverrideCanvas(transform);
+            var stencilDepth = MaskUtilities.GetStencilDepth(transform, rootSortCanvas);
+            if (stencilDepth >= 8)
+            {
+                Debug.LogWarning("Attempting to use a stencil mask with depth > 8", gameObject);
+                return baseMaterial;
+            }
+
+            int desiredStencilBit = 1 << stencilDepth;
+
+            // if we are at the first level...
+            // we want to destroy what is there
+            if (desiredStencilBit == 1)
+            {
+                var maskMaterial = StencilMaterial.Add(baseMaterial, 1, StencilOp.Replace, CompareFunction.Always, m_ShowMaskGraphic ? ColorWriteMask.All : 0);
+                StencilMaterial.Remove(m_MaskMaterial);
+                m_MaskMaterial = maskMaterial;
+
+                var unmaskMaterial = StencilMaterial.Add(baseMaterial, 1, StencilOp.Zero, CompareFunction.Always, 0);
+                StencilMaterial.Remove(m_UnmaskMaterial);
+                m_UnmaskMaterial = unmaskMaterial;
+                graphic.canvasRenderer.popMaterialCount = 1;
+                graphic.canvasRenderer.SetPopMaterial(m_UnmaskMaterial, 0);
+
+                return m_MaskMaterial;
+            }
+
+            //otherwise we need to be a bit smarter and set some read / write masks
+            var maskMaterial2 = StencilMaterial.Add(baseMaterial, desiredStencilBit | (desiredStencilBit - 1), StencilOp.Replace, CompareFunction.Equal, m_ShowMaskGraphic ? ColorWriteMask.All : 0, desiredStencilBit - 1, desiredStencilBit | (desiredStencilBit - 1));
+            StencilMaterial.Remove(m_MaskMaterial);
+            m_MaskMaterial = maskMaterial2;
+
+            graphic.canvasRenderer.hasPopInstruction = true;
+            var unmaskMaterial2 = StencilMaterial.Add(baseMaterial, desiredStencilBit - 1, StencilOp.Replace, CompareFunction.Equal, 0, desiredStencilBit - 1, desiredStencilBit | (desiredStencilBit - 1));
+            StencilMaterial.Remove(m_UnmaskMaterial);
+            m_UnmaskMaterial = unmaskMaterial2;
+            graphic.canvasRenderer.popMaterialCount = 1;
+            graphic.canvasRenderer.SetPopMaterial(m_UnmaskMaterial, 0);
+
+            return m_MaskMaterial;
+        }
+    }
 }

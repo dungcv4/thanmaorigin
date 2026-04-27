@@ -1,66 +1,165 @@
-using UnityEngine;
+using System;
+using System.Collections.Generic;
+using UnityEngine.Serialization;
 
 namespace UnityEngine.UI
 {
-	public class RawImage : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    /// <summary>
+    /// Displays a Texture2D for the UI System.
+    /// </summary>
+    /// <remarks>
+    /// If you don't have or don't wish to create an atlas, you can simply use this script to draw a texture.
+    /// Keep in mind though that this will create an extra draw call with each RawImage present, so it's
+    /// best to use it only for backgrounds or temporary visible graphics.
+    /// </remarks>
 
-		1. No dll files were provided to AssetRipper.
+    [RequireComponent(typeof(CanvasRenderer))]
+    [AddComponentMenu("UI/Raw Image", 12)]
+    public class RawImage : MaskableGraphic
+    {
+        [FormerlySerializedAs("m_Tex")]
+        [SerializeField] Texture m_Texture;
+        [SerializeField] Rect m_UVRect = new Rect(0f, 0f, 1f, 1f);
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+        protected RawImage()
+        {
+            useLegacyMeshGeneration = false;
+        }
 
-		2. Incorrect dll files were provided to AssetRipper.
+        /// <summary>
+        /// Returns the texture used to draw this Graphic.
+        /// </summary>
+        public override Texture mainTexture
+        {
+            get
+            {
+                if (m_Texture == null)
+                {
+                    if (material != null && material.mainTexture != null)
+                    {
+                        return material.mainTexture;
+                    }
+                    return s_WhiteTexture;
+                }
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+                return m_Texture;
+            }
+        }
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+        /// <summary>
+        /// The RawImage's texture to be used.
+        /// </summary>
+        /// <remarks>
+        /// Use this to alter or return the Texture the RawImage displays. The Raw Image can display any Texture whereas an Image component can only show a Sprite Texture.
+        /// Note : Keep in mind that using a RawImage creates an extra draw call with each RawImage present, so it's best to use it only for backgrounds or temporary visible graphics.Note: Keep in mind that using a RawImage creates an extra draw call with each RawImage present, so it's best to use it only for backgrounds or temporary visible graphics.
+        /// </remarks>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// //Create a new RawImage by going to Create>UI>Raw Image in the hierarchy.
+        /// //Attach this script to the RawImage GameObject.
+        ///
+        /// using UnityEngine;
+        /// using UnityEngine.UI;
+        ///
+        /// public class RawImageTexture : MonoBehaviour
+        /// {
+        ///     RawImage m_RawImage;
+        ///     //Select a Texture in the Inspector to change to
+        ///     public Texture m_Texture;
+        ///
+        ///     void Start()
+        ///     {
+        ///         //Fetch the RawImage component from the GameObject
+        ///         m_RawImage = GetComponent<RawImage>();
+        ///         //Change the Texture to be the one you define in the Inspector
+        ///         m_RawImage.texture = m_Texture;
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public Texture texture
+        {
+            get
+            {
+                return m_Texture;
+            }
+            set
+            {
+                if (m_Texture == value)
+                    return;
 
-		3. Assembly Reconstruction has not been implemented.
+                m_Texture = value;
+                SetVerticesDirty();
+                SetMaterialDirty();
+            }
+        }
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+        /// <summary>
+        /// UV rectangle used by the texture.
+        /// </summary>
+        public Rect uvRect
+        {
+            get
+            {
+                return m_UVRect;
+            }
+            set
+            {
+                if (m_UVRect == value)
+                    return;
+                m_UVRect = value;
+                SetVerticesDirty();
+            }
+        }
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+        /// <summary>
+        /// Adjust the scale of the Graphic to make it pixel-perfect.
+        /// </summary>
+        /// <remarks>
+        /// This means setting the RawImage's RectTransform.sizeDelta  to be equal to the Texture dimensions.
+        /// </remarks>
+        public override void SetNativeSize()
+        {
+            Texture tex = mainTexture;
+            if (tex != null)
+            {
+                int w = Mathf.RoundToInt(tex.width * uvRect.width);
+                int h = Mathf.RoundToInt(tex.height * uvRect.height);
+                rectTransform.anchorMax = rectTransform.anchorMin;
+                rectTransform.sizeDelta = new Vector2(w, h);
+            }
+        }
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+        protected override void OnPopulateMesh(VertexHelper vh)
+        {
+            Texture tex = mainTexture;
+            vh.Clear();
+            if (tex != null)
+            {
+                var r = GetPixelAdjustedRect();
+                var v = new Vector4(r.x, r.y, r.x + r.width, r.y + r.height);
+                var scaleX = tex.width * tex.texelSize.x;
+                var scaleY = tex.height * tex.texelSize.y;
+                {
+                    var color32 = color;
+                    vh.AddVert(new Vector3(v.x, v.y), color32, new Vector2(m_UVRect.xMin * scaleX, m_UVRect.yMin * scaleY));
+                    vh.AddVert(new Vector3(v.x, v.w), color32, new Vector2(m_UVRect.xMin * scaleX, m_UVRect.yMax * scaleY));
+                    vh.AddVert(new Vector3(v.z, v.w), color32, new Vector2(m_UVRect.xMax * scaleX, m_UVRect.yMax * scaleY));
+                    vh.AddVert(new Vector3(v.z, v.y), color32, new Vector2(m_UVRect.xMax * scaleX, m_UVRect.yMin * scaleY));
 
-		5. Script Content Level 0
+                    vh.AddTriangle(0, 1, 2);
+                    vh.AddTriangle(2, 3, 0);
+                }
+            }
+        }
 
-			AssetRipper was set to not load any script information.
-
-		6. Cpp2IL failed to decompile Il2Cpp data
-
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-		7. An incorrect path was provided to AssetRipper.
-
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
-
-		*/
-	}
+        protected override void OnDidApplyAnimationProperties()
+        {
+            SetMaterialDirty();
+            SetVerticesDirty();
+            SetRaycastDirty();
+        }
+    }
 }

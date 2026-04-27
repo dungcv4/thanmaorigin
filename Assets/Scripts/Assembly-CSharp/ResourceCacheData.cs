@@ -1,63 +1,45 @@
-using UnityEngine;
+// Class:  ResourceCacheData (asset cache entry with refcount)
+// GUID:   da212345e887548caa0a55e3057ff5a4 (preserved via .meta)
+// Source: KTO_DecompiledReference/_root/ResourceCacheData.c (5 methods, 100 LOC)
+//
+// FULL 1-1 PORT 2026-04-27 (canonicalization Day 4).
+// Field offsets inferred from IL2CPP body access patterns:
+//   +0x18: long timestamp (int64) — used by CompareTo
+//   +0x20: int refCount       — incremented by AddRef, decremented by RemoveRef
 
-public class ResourceCacheData : MonoBehaviour
+using System;
+
+public class ResourceCacheData : IComparable<ResourceCacheData>
 {
-	/*
-	Dummy class. This could have happened for several reasons:
+    // Fields — inferred from IL2CPP offsets (gốc has no public DecompiledSource for this)
+    public string resPath;       // 0x10 — convention (string handle slot)
+    public long lastUseTime;     // 0x18 — System_Int64 (used by CompareTo)
+    public int refCount;         // 0x20 — int (used by AddRef/RemoveRef/GetRefCount)
+    public object loader;        // 0x28 — CommonLoader / generic loader handle
 
-	1. No dll files were provided to AssetRipper.
+    // VMA: 0x019037ba — Source: ResourceCacheData.c (.ctor)
+    // gốc body: System_Object___ctor — empty.
+    public ResourceCacheData() { }
 
-		Unity asset bundles and serialized files do not contain script information to decompile.
-			* For Mono games, that information is contained in .NET dll files.
-			* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-			
-		AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-		A unexpected file structure could cause AssetRipper to not find the required files.
+    // VMA: 0x01900fb1 — Source: ResourceCacheData.c (CompareTo)
+    // gốc body:
+    //   if (other != null) return Int64.CompareTo(this+0x18, other+0x18);
+    //   return 0xffffffff (-1).
+    public int CompareTo(ResourceCacheData other)
+    {
+        if (other == null) return -1;
+        return this.lastUseTime.CompareTo(other.lastUseTime);
+    }
 
-	2. Incorrect dll files were provided to AssetRipper.
+    // VMA: 0x01913bf8 — Source: ResourceCacheData.c (AddRef)
+    // gốc body: *(int*)(this+0x20) = *(int*)(this+0x20) + 1;
+    public void AddRef() { refCount++; }
 
-		Any of the following could cause this:
-			* Il2CppInterop assemblies
-			* Deobfuscated assemblies
-			* Older assemblies (compared to when the bundle was built)
-			* Newer assemblies (compared to when the bundle was built)
+    // VMA: 0x01913bfc — Source: ResourceCacheData.c (RemoveRef)
+    // gốc body: *(int*)(this+0x20) = *(int*)(this+0x20) - 1;
+    public void RemoveRef() { refCount--; }
 
-		Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
-
-	3. Assembly Reconstruction has not been implemented.
-
-		Asset bundles contain a small amount of information about the script content.
-		This information can be used to recover the serializable fields of a script.
-
-		See: https://github.com/AssetRipper/AssetRipper/issues/655
-
-	4. This script is unnecessary.
-
-		If this script has no asset or script references, it can be deleted.
-		Be sure to resolve any compile errors before deleting because they can hide references.
-
-	5. Script Content Level 0
-
-		AssetRipper was set to not load any script information.
-
-	6. Cpp2IL failed to decompile Il2Cpp data
-
-		If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-		This is an upstream problem, and the AssetRipper developer has very little control over it.
-		Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-	7. An incorrect path was provided to AssetRipper.
-
-		This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-		AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-		An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-		Generally, AssetRipper expects users to provide the root folder of the game. For example:
-			* Windows: the folder containing the game's .exe file
-			* Mac: the .app file/folder
-			* Linux: the folder containing the game's executable file
-			* Android: the apk file
-			* iOS: the ipa file
-			* Switch: the folder containing exefs and romfs
-
-	*/
+    // VMA: 0x01913c00 — Source: ResourceCacheData.c (GetRefCount)
+    // gốc body: return *(int*)(this+0x20);
+    public int GetRefCount() { return refCount; }
 }

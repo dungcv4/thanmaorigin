@@ -1,66 +1,207 @@
-using UnityEngine;
+using System.Collections.Generic;
+using UnityEngine.UI;
 
 namespace UnityEngine.EventSystems
 {
-	public class PhysicsRaycaster : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    /// <summary>
+    /// Simple event system using physics raycasts.
+    /// </summary>
+    [AddComponentMenu("Event/Physics Raycaster")]
+    [RequireComponent(typeof(Camera))]
+    /// <summary>
+    /// Raycaster for casting against 3D Physics components.
+    /// </summary>
+    public class PhysicsRaycaster : BaseRaycaster
+    {
+        /// <summary>
+        /// Const to use for clarity when no event mask is set
+        /// </summary>
+        protected const int kNoEventMaskSet = -1;
 
-		1. No dll files were provided to AssetRipper.
+        protected Camera m_EventCamera;
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+        /// <summary>
+        /// Layer mask used to filter events. Always combined with the camera's culling mask if a camera is used.
+        /// </summary>
+        [SerializeField]
+        protected LayerMask m_EventMask = kNoEventMaskSet;
 
-		2. Incorrect dll files were provided to AssetRipper.
+        /// <summary>
+        /// The max number of intersections allowed. 0 = allocating version anything else is non alloc.
+        /// </summary>
+        [SerializeField]
+        protected int m_MaxRayIntersections = 0;
+        protected int m_LastMaxRayIntersections = 0;
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+#if PACKAGE_PHYSICS
+        RaycastHit[] m_Hits;
+#endif
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+        protected PhysicsRaycaster()
+        {}
 
-		3. Assembly Reconstruction has not been implemented.
+        public override Camera eventCamera
+        {
+            get
+            {
+                if (m_EventCamera == null)
+                    m_EventCamera = GetComponent<Camera>();
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+                if (m_EventCamera == null)
+                    return Camera.main;
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+                return m_EventCamera ;
+            }
+        }
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
 
-		5. Script Content Level 0
+        /// <summary>
+        /// Depth used to determine the order of event processing.
+        /// </summary>
+        public virtual int depth
+        {
+            get { return (eventCamera != null) ? (int)eventCamera.depth : 0xFFFFFF; }
+        }
 
-			AssetRipper was set to not load any script information.
+        /// <summary>
+        /// Event mask used to determine which objects will receive events.
+        /// </summary>
+        public int finalEventMask
+        {
+            get { return (eventCamera != null) ? eventCamera.cullingMask & m_EventMask : kNoEventMaskSet; }
+        }
 
-		6. Cpp2IL failed to decompile Il2Cpp data
+        /// <summary>
+        /// Layer mask used to filter events. Always combined with the camera's culling mask if a camera is used.
+        /// </summary>
+        public LayerMask eventMask
+        {
+            get { return m_EventMask; }
+            set { m_EventMask = value; }
+        }
 
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
+        /// <summary>
+        /// Max number of ray intersection allowed to be found.
+        /// </summary>
+        /// <remarks>
+        /// A value of zero will represent using the allocating version of the raycast function where as any other value will use the non allocating version.
+        /// </remarks>
+        public int maxRayIntersections
+        {
+            get { return m_MaxRayIntersections; }
+            set { m_MaxRayIntersections = value; }
+        }
 
-		7. An incorrect path was provided to AssetRipper.
+        /// <summary>
+        /// Returns a ray going from camera through the event position and the distance between the near and far clipping planes along that ray.
+        /// </summary>
+        /// <param name="eventData">The pointer event for which we will cast a ray.</param>
+        /// <param name="ray">The ray to use.</param>
+        /// <param name="eventDisplayIndex">The display index used.</param>
+        /// <param name="distanceToClipPlane">The distance between the near and far clipping planes along the ray.</param>
+        /// <returns>True if the operation was successful. false if it was not possible to compute, such as the eventPosition being outside of the view.</returns>
+        protected bool ComputeRayAndDistance(PointerEventData eventData, ref Ray ray, ref int eventDisplayIndex, ref float distanceToClipPlane)
+        {
+            if (eventCamera == null)
+                return false;
 
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
+            var eventPosition = MultipleDisplayUtilities.RelativeMouseAtScaled(eventData.position, eventData.displayIndex);
+            if (eventPosition != Vector3.zero)
+            {
+                // We support multiple display and display identification based on event position.
+                eventDisplayIndex = (int)eventPosition.z;
 
-		*/
-	}
+                // Discard events that are not part of this display so the user does not interact with multiple displays at once.
+                if (eventDisplayIndex != eventCamera.targetDisplay)
+                    return false;
+            }
+            else
+            {
+                // The multiple display system is not supported on all platforms, when it is not supported the returned position
+                // will be all zeros so when the returned index is 0 we will default to the event data to be safe.
+                eventPosition = eventData.position;
+            }
+
+            // Cull ray casts that are outside of the view rect. (case 636595)
+            if (!eventCamera.pixelRect.Contains(eventPosition))
+                return false;
+
+            ray = eventCamera.ScreenPointToRay(eventPosition);
+            // compensate far plane distance - see MouseEvents.cs
+            float projectionDirection = ray.direction.z;
+            distanceToClipPlane = Mathf.Approximately(0.0f, projectionDirection)
+                ? Mathf.Infinity
+                : Mathf.Abs((eventCamera.farClipPlane - eventCamera.nearClipPlane) / projectionDirection);
+            return true;
+        }
+
+        public override void Raycast(PointerEventData eventData, List<RaycastResult> resultAppendList)
+        {
+#if PACKAGE_PHYSICS
+            Ray ray = new Ray();
+            int displayIndex = 0;
+            float distanceToClipPlane = 0;
+            if (!ComputeRayAndDistance(eventData, ref ray, ref displayIndex, ref distanceToClipPlane))
+                return;
+
+            int hitCount = 0;
+
+            if (m_MaxRayIntersections == 0)
+            {
+                if (ReflectionMethodsCache.Singleton.raycast3DAll == null)
+                    return;
+
+                m_Hits = ReflectionMethodsCache.Singleton.raycast3DAll(ray, distanceToClipPlane, finalEventMask);
+                hitCount = m_Hits.Length;
+            }
+            else
+            {
+                if (ReflectionMethodsCache.Singleton.getRaycastNonAlloc == null)
+                    return;
+                if (m_LastMaxRayIntersections != m_MaxRayIntersections)
+                {
+                    m_Hits = new RaycastHit[m_MaxRayIntersections];
+                    m_LastMaxRayIntersections = m_MaxRayIntersections;
+                }
+
+                hitCount = ReflectionMethodsCache.Singleton.getRaycastNonAlloc(ray, m_Hits, distanceToClipPlane, finalEventMask);
+            }
+
+            if (hitCount != 0)
+            {
+                if (hitCount > 1)
+                    System.Array.Sort(m_Hits, 0, hitCount, RaycastHitComparer.instance);
+
+                for (int b = 0, bmax = hitCount; b < bmax; ++b)
+                {
+                    var result = new RaycastResult
+                    {
+                        gameObject = m_Hits[b].collider.gameObject,
+                        module = this,
+                        distance = m_Hits[b].distance,
+                        worldPosition = m_Hits[b].point,
+                        worldNormal = m_Hits[b].normal,
+                        screenPosition = eventData.position,
+                        displayIndex = displayIndex,
+                        index = resultAppendList.Count,
+                        sortingLayer = 0,
+                        sortingOrder = 0
+                    };
+                    resultAppendList.Add(result);
+                }
+            }
+#endif
+        }
+
+#if PACKAGE_PHYSICS
+        private class RaycastHitComparer : IComparer<RaycastHit>
+        {
+            public static RaycastHitComparer instance = new RaycastHitComparer();
+            public int Compare(RaycastHit x, RaycastHit y)
+            {
+                return x.distance.CompareTo(y.distance);
+            }
+        }
+#endif
+    }
 }

@@ -1,66 +1,130 @@
-using UnityEngine;
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 namespace UnityEngine.UIElements
 {
-	public class PanelRaycaster : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    // This code is disabled unless the UI Toolkit package or the com.unity.modules.uielements module are present.
+    // The UIElements module is always present in the Editor but it can be stripped from a project build if unused.
+#if PACKAGE_UITOOLKIT
+    /// <summary>
+    /// A derived BaseRaycaster to raycast against UI Toolkit panel instances at runtime.
+    /// </summary>
+    [AddComponentMenu("UI Toolkit/Panel Raycaster (UI Toolkit)")]
+    public class PanelRaycaster : BaseRaycaster, IRuntimePanelComponent
+    {
+        private BaseRuntimePanel m_Panel;
 
-		1. No dll files were provided to AssetRipper.
+        /// <summary>
+        /// The panel that this component relates to. If panel is null, this component will have no effect.
+        /// Will be set to null automatically if panel is Disposed from an external source.
+        /// </summary>
+        public IPanel panel
+        {
+            get => m_Panel;
+            set
+            {
+                var newPanel = (BaseRuntimePanel)value;
+                if (m_Panel != newPanel)
+                {
+                    UnregisterCallbacks();
+                    m_Panel = newPanel;
+                    RegisterCallbacks();
+                }
+            }
+        }
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+        void RegisterCallbacks()
+        {
+            if (m_Panel != null)
+            {
+                m_Panel.destroyed += OnPanelDestroyed;
+            }
+        }
 
-		2. Incorrect dll files were provided to AssetRipper.
+        void UnregisterCallbacks()
+        {
+            if (m_Panel != null)
+            {
+                m_Panel.destroyed -= OnPanelDestroyed;
+            }
+        }
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+        void OnPanelDestroyed()
+        {
+            panel = null;
+        }
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+        private GameObject selectableGameObject => m_Panel?.selectableGameObject;
 
-		3. Assembly Reconstruction has not been implemented.
+        public override int sortOrderPriority => Mathf.FloorToInt(m_Panel?.sortingPriority ?? 0f);
+        public override int renderOrderPriority => int.MaxValue - (UIElementsRuntimeUtility.s_ResolvedSortingIndexMax - (m_Panel?.resolvedSortingIndex ?? 0));
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+        public override void Raycast(PointerEventData eventData, List<RaycastResult> resultAppendList)
+        {
+            if (m_Panel == null)
+                return;
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+            var displayIndex = m_Panel.targetDisplay;
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+            Vector3 eventPosition = MultipleDisplayUtilities.GetRelativeMousePositionForRaycast(eventData);
 
-		5. Script Content Level 0
+            // Discard events that are not part of this display so the user does not interact with multiple displays at once.
+            if ((int) eventPosition.z != displayIndex)
+                return;
 
-			AssetRipper was set to not load any script information.
+            var position = eventPosition;
+            var delta = eventData.delta;
 
-		6. Cpp2IL failed to decompile Il2Cpp data
+            float h = Screen.height;
+            if (displayIndex > 0 && displayIndex < Display.displays.Length)
+            {
+#if UNITY_ANDROID
+                    // Changed for UITK to be coherent for Android which passes display relative rendering coordinates
+                    h = Display.displays[displayIndex].renderingHeight;
+#else
+                    h = Display.displays[displayIndex].systemHeight;
+#endif
+            }
 
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
+            position.y = h - position.y;
+            delta.y = -delta.y;
 
-		7. An incorrect path was provided to AssetRipper.
+            var eventSystem = UIElementsRuntimeUtility.activeEventSystem as EventSystem;
+            if (eventSystem == null || eventSystem.currentInputModule == null)
+                return;
+            var pointerId = eventSystem.currentInputModule.ConvertUIToolkitPointerId(eventData);
 
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
+            var capturingElement = m_Panel.GetCapturingElement(pointerId);
+            if (capturingElement is VisualElement ve && ve.panel != m_Panel)
+                return;
 
-		*/
-	}
+            var capturingPanel = PointerDeviceState.GetPlayerPanelWithSoftPointerCapture(pointerId);
+            if (capturingPanel != null && capturingPanel != m_Panel)
+                return;
+
+            if (capturingElement == null && capturingPanel == null)
+            {
+                if (!m_Panel.ScreenToPanel(position, delta, out var panelPosition, out _))
+                    return;
+
+                var pick = m_Panel.Pick(panelPosition);
+                if (pick == null)
+                    return;
+            }
+
+            resultAppendList.Add(new RaycastResult
+            {
+                gameObject = selectableGameObject,
+                module = this,
+                screenPosition = eventPosition,
+                displayIndex = m_Panel.targetDisplay,
+            });
+        }
+
+        public override Camera eventCamera => null;
+    }
+#endif
 }

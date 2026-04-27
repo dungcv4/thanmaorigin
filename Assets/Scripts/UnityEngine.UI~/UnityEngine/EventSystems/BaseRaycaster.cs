@@ -1,66 +1,101 @@
-using UnityEngine;
+using System;
+using System.Collections.Generic;
 
 namespace UnityEngine.EventSystems
 {
-	public class BaseRaycaster : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    /// <summary>
+    /// Base class for any RayCaster.
+    /// </summary>
+    /// <remarks>
+    /// A Raycaster is responsible for raycasting against scene elements to determine if the cursor is over them. Default Raycasters include PhysicsRaycaster, Physics2DRaycaster, GraphicRaycaster.
+    /// Custom raycasters can be added by extending this class.
+    /// </remarks>
+    public abstract class BaseRaycaster : UIBehaviour
+    {
+        private BaseRaycaster m_RootRaycaster;
 
-		1. No dll files were provided to AssetRipper.
+        /// <summary>
+        /// Raycast against the scene.
+        /// </summary>
+        /// <param name="eventData">Current event data.</param>
+        /// <param name="resultAppendList">List of hit Objects.</param>
+        public abstract void Raycast(PointerEventData eventData, List<RaycastResult> resultAppendList);
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+        /// <summary>
+        /// The camera that will generate rays for this raycaster.
+        /// </summary>
+        public abstract Camera eventCamera { get; }
 
-		2. Incorrect dll files were provided to AssetRipper.
+        [Obsolete("Please use sortOrderPriority and renderOrderPriority", false)]
+        public virtual int priority
+        {
+            get { return 0; }
+        }
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+        /// <summary>
+        /// Priority of the raycaster based upon sort order.
+        /// </summary>
+        public virtual int sortOrderPriority
+        {
+            get { return int.MinValue; }
+        }
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+        /// <summary>
+        /// Priority of the raycaster based upon render order.
+        /// </summary>
+        public virtual int renderOrderPriority
+        {
+            get { return int.MinValue; }
+        }
 
-		3. Assembly Reconstruction has not been implemented.
+        /// <summary>
+        /// Raycaster on root canvas
+        /// </summary>
+        public BaseRaycaster rootRaycaster
+        {
+            get
+            {
+                if (m_RootRaycaster == null)
+                {
+                    var baseRaycasters = GetComponentsInParent<BaseRaycaster>();
+                    if (baseRaycasters.Length != 0)
+                        m_RootRaycaster = baseRaycasters[baseRaycasters.Length - 1];
+                }
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+                return m_RootRaycaster;
+            }
+        }
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+        public override string ToString()
+        {
+            return "Name: " + gameObject + "\n" +
+                "eventCamera: " + eventCamera + "\n" +
+                "sortOrderPriority: " + sortOrderPriority + "\n" +
+                "renderOrderPriority: " + renderOrderPriority;
+        }
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+        protected override void OnEnable()
+        {
+            base.OnEnable();
+            RaycasterManager.AddRaycaster(this);
+        }
 
-		5. Script Content Level 0
+        protected override void OnDisable()
+        {
+            RaycasterManager.RemoveRaycasters(this);
+            base.OnDisable();
+        }
 
-			AssetRipper was set to not load any script information.
+        protected override void OnCanvasHierarchyChanged()
+        {
+            base.OnCanvasHierarchyChanged();
+            m_RootRaycaster = null;
+        }
 
-		6. Cpp2IL failed to decompile Il2Cpp data
-
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-		7. An incorrect path was provided to AssetRipper.
-
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
-
-		*/
-	}
+        protected override void OnTransformParentChanged()
+        {
+            base.OnTransformParentChanged();
+            m_RootRaycaster = null;
+        }
+    }
 }

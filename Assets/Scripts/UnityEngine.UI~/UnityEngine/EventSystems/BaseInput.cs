@@ -1,66 +1,129 @@
-using UnityEngine;
+using UnityEngine.UI;
 
 namespace UnityEngine.EventSystems
 {
-	public class BaseInput : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    /// <summary>
+    /// Interface to the Input system used by the BaseInputModule. With this it is possible to bypass the Input system with your own but still use the same InputModule. For example this can be used to feed fake input into the UI or interface with a different input system.
+    /// </summary>
+    public class BaseInput : UIBehaviour
+    {
+        /// <summary>
+        /// Interface to Input.compositionString. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        public virtual string compositionString
+        {
+            get { return Input.compositionString; }
+        }
 
-		1. No dll files were provided to AssetRipper.
+        /// <summary>
+        /// Interface to Input.imeCompositionMode. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        public virtual IMECompositionMode imeCompositionMode
+        {
+            get { return Input.imeCompositionMode; }
+            set { Input.imeCompositionMode = value; }
+        }
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+        /// <summary>
+        /// Interface to Input.compositionCursorPos. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        public virtual Vector2 compositionCursorPos
+        {
+            get { return Input.compositionCursorPos; }
+            set { Input.compositionCursorPos = value; }
+        }
 
-		2. Incorrect dll files were provided to AssetRipper.
+        /// <summary>
+        /// Interface to Input.mousePresent. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        public virtual bool mousePresent
+        {
+            get { return Input.mousePresent; }
+        }
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+        /// <summary>
+        /// Interface to Input.GetMouseButtonDown. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        /// <param name="button"></param>
+        /// <returns></returns>
+        public virtual bool GetMouseButtonDown(int button)
+        {
+            return Input.GetMouseButtonDown(button);
+        }
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+        /// <summary>
+        /// Interface to Input.GetMouseButtonUp. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        public virtual bool GetMouseButtonUp(int button)
+        {
+            return Input.GetMouseButtonUp(button);
+        }
 
-		3. Assembly Reconstruction has not been implemented.
+        /// <summary>
+        /// Interface to Input.GetMouseButton. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        public virtual bool GetMouseButton(int button)
+        {
+            return Input.GetMouseButton(button);
+        }
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+        /// <summary>
+        /// Interface to Input.mousePosition. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        public virtual Vector2 mousePosition
+        {
+            get { return Input.mousePosition; }
+        }
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+        /// <summary>
+        /// Interface to Input.mouseScrollDelta. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        public virtual Vector2 mouseScrollDelta
+        {
+            get { return Input.mouseScrollDelta; }
+        }
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+        /// <summary>
+        /// Interface to Input.touchSupported. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        public virtual bool touchSupported
+        {
+            get { return Input.touchSupported; }
+        }
 
-		5. Script Content Level 0
+        /// <summary>
+        /// Interface to Input.touchCount. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        public virtual int touchCount
+        {
+            get { return Input.touchCount; }
+        }
 
-			AssetRipper was set to not load any script information.
+        /// <summary>
+        /// Interface to Input.GetTouch. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        /// <param name="index">Touch index to get</param>
+        public virtual Touch GetTouch(int index)
+        {
+            return Input.GetTouch(index);
+        }
 
-		6. Cpp2IL failed to decompile Il2Cpp data
+        /// <summary>
+        /// Interface to Input.GetAxisRaw. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        /// <param name="axisName">Axis name to check</param>
+        public virtual float GetAxisRaw(string axisName)
+        {
+            return Input.GetAxisRaw(axisName);
+        }
 
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-		7. An incorrect path was provided to AssetRipper.
-
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
-
-		*/
-	}
+        /// <summary>
+        /// Interface to Input.GetButtonDown. Can be overridden to provide custom input instead of using the Input class.
+        /// </summary>
+        /// <param name="buttonName">Button name to get</param>
+        public virtual bool GetButtonDown(string buttonName)
+        {
+            return Input.GetButtonDown(buttonName);
+        }
+    }
 }

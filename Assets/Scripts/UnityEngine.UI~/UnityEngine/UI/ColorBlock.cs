@@ -1,66 +1,243 @@
-using UnityEngine;
+using System;
+using UnityEngine.Serialization;
 
 namespace UnityEngine.UI
 {
-	public class ColorBlock : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    [Serializable]
+    /// <summary>
+    /// Structure that stores the state of a color transition on a Selectable.
+    /// </summary>
+    public struct ColorBlock : IEquatable<ColorBlock>
+    {
+        [FormerlySerializedAs("normalColor")]
+        [SerializeField]
+        private Color m_NormalColor;
 
-		1. No dll files were provided to AssetRipper.
+        [FormerlySerializedAs("highlightedColor")]
+        [SerializeField]
+        private Color m_HighlightedColor;
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+        [FormerlySerializedAs("pressedColor")]
+        [SerializeField]
+        private Color m_PressedColor;
 
-		2. Incorrect dll files were provided to AssetRipper.
+        [FormerlySerializedAs("m_HighlightedColor")]
+        [SerializeField]
+        private Color m_SelectedColor;
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+        [FormerlySerializedAs("disabledColor")]
+        [SerializeField]
+        private Color m_DisabledColor;
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+        [Range(1, 5)]
+        [SerializeField]
+        private float m_ColorMultiplier;
 
-		3. Assembly Reconstruction has not been implemented.
+        [FormerlySerializedAs("fadeDuration")]
+        [SerializeField]
+        private float m_FadeDuration;
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+        /// <summary>
+        /// The normal color for this color block.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI; // Required when Using UI elements.
+        ///
+        /// public class ExampleClass : MonoBehaviour
+        /// {
+        ///     public Button button;
+        ///     public Color newColor;
+        ///
+        ///     void Start()
+        ///     {
+        ///         //Changes the button's Normal color to the new color.
+        ///         ColorBlock cb = button.colors;
+        ///         cb.normalColor = newColor;
+        ///         button.colors = cb;
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public Color normalColor       { get { return m_NormalColor; } set { m_NormalColor = value; } }
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+        /// <summary>
+        /// The highlight color for this color block.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI; // Required when Using UI elements.
+        ///
+        /// public class ExampleClass : MonoBehaviour
+        /// {
+        ///     public Button button;
+        ///     public Color newColor;
+        ///
+        ///     void Start()
+        ///     {
+        ///         //Changes the button's Highlighted color to the new color.
+        ///         ColorBlock cb = button.colors;
+        ///         cb.highlightedColor = newColor;
+        ///         button.colors = cb;
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public Color highlightedColor  { get { return m_HighlightedColor; } set { m_HighlightedColor = value; } }
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+        /// <summary>
+        /// The pressed color for this color block.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI; // Required when Using UI elements.
+        ///
+        /// public class ExampleClass : MonoBehaviour
+        /// {
+        ///     public Button button;
+        ///     public Color newColor;
+        ///
+        ///     void Start()
+        ///     {
+        ///         //Changes the button's Pressed color to the new color.
+        ///         ColorBlock cb = button.colors;
+        ///         cb.pressedColor = newColor;
+        ///         button.colors = cb;
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public Color pressedColor      { get { return m_PressedColor; } set { m_PressedColor = value; } }
 
-		5. Script Content Level 0
+        /// <summary>
+        /// The selected color for this color block.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI; // Required when Using UI elements.
+        ///
+        /// public class ExampleClass : MonoBehaviour
+        /// {
+        ///     public Button button;
+        ///     public Color newColor;
+        ///
+        ///     void Start()
+        ///     {
+        ///         //Changes the button's Selected color to the new color.
+        ///         ColorBlock cb = button.colors;
+        ///         cb.selectedColor = newColor;
+        ///         button.colors = cb;
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public Color selectedColor     { get { return m_SelectedColor; } set { m_SelectedColor = value; } }
 
-			AssetRipper was set to not load any script information.
+        /// <summary>
+        /// The disabled color for this color block.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI; // Required when Using UI elements.
+        ///
+        /// public class ExampleClass : MonoBehaviour
+        /// {
+        ///     public Button button;
+        ///     public Color newColor;
+        ///
+        ///     void Start()
+        ///     {
+        ///         //Changes the button's Disabled color to the new color.
+        ///         ColorBlock cb = button.colors;
+        ///         cb.disabledColor = newColor;
+        ///         button.colors = cb;
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public Color disabledColor     { get { return m_DisabledColor; } set { m_DisabledColor = value; } }
 
-		6. Cpp2IL failed to decompile Il2Cpp data
+        /// <summary>
+        /// Multiplier applied to colors (allows brightening greater then base color).
+        /// </summary>
+        public float colorMultiplier   { get { return m_ColorMultiplier; } set { m_ColorMultiplier = value; } }
 
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
+        /// <summary>
+        /// How long a color transition between states should take.
+        /// </summary>
+        public float fadeDuration      { get { return m_FadeDuration; } set { m_FadeDuration = value; } }
 
-		7. An incorrect path was provided to AssetRipper.
+        /// <summary>
+        /// Simple getter for a code generated default ColorBlock.
+        /// </summary>
+        public static ColorBlock defaultColorBlock;
 
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
+        static ColorBlock()
+        {
+            defaultColorBlock = new ColorBlock
+            {
+                m_NormalColor      = new Color32(255, 255, 255, 255),
+                m_HighlightedColor = new Color32(245, 245, 245, 255),
+                m_PressedColor     = new Color32(200, 200, 200, 255),
+                m_SelectedColor    = new Color32(245, 245, 245, 255),
+                m_DisabledColor    = new Color32(200, 200, 200, 128),
+                colorMultiplier    = 1.0f,
+                fadeDuration       = 0.1f
+            };
+        }
 
-		*/
-	}
+        public override bool Equals(object obj)
+        {
+            if (!(obj is ColorBlock))
+                return false;
+
+            return Equals((ColorBlock)obj);
+        }
+
+        public bool Equals(ColorBlock other)
+        {
+            return normalColor == other.normalColor &&
+                highlightedColor == other.highlightedColor &&
+                pressedColor == other.pressedColor &&
+                selectedColor == other.selectedColor &&
+                disabledColor == other.disabledColor &&
+                colorMultiplier == other.colorMultiplier &&
+                fadeDuration == other.fadeDuration;
+        }
+
+        public static bool operator==(ColorBlock point1, ColorBlock point2)
+        {
+            return point1.Equals(point2);
+        }
+
+        public static bool operator!=(ColorBlock point1, ColorBlock point2)
+        {
+            return !point1.Equals(point2);
+        }
+
+        public override int GetHashCode()
+        {
+            return base.GetHashCode();
+        }
+    }
 }

@@ -1,66 +1,123 @@
-using UnityEngine;
+using System;
+using System.Collections.Generic;
+using UnityEngine.EventSystems;
 
 namespace UnityEngine.UI
 {
-	public class BaseMeshEffect : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    [Obsolete("Use BaseMeshEffect instead", true)]
+    /// <summary>
+    /// Obsolete class use BaseMeshEffect instead.
+    /// </summary>
+    public abstract class BaseVertexEffect
+    {
+        [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+        [Obsolete("Use BaseMeshEffect.ModifyMeshes instead", true)] //We can't upgrade automatically since the signature changed.
+        public abstract void ModifyVertices(List<UIVertex> vertices);
+    }
 
-		1. No dll files were provided to AssetRipper.
+    /// <summary>
+    /// Base class for effects that modify the generated Mesh.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// <![CDATA[
+    ///using UnityEngine;
+    ///using UnityEngine.UI;
+    ///
+    ///public class PositionAsUV1 : BaseMeshEffect
+    ///{
+    ///    protected PositionAsUV1()
+    ///    {}
+    ///
+    ///    public override void ModifyMesh(Mesh mesh)
+    ///    {
+    ///        if (!IsActive())
+    ///            return;
+    ///
+    ///        var verts = mesh.vertices.ToList();
+    ///        var uvs = ListPool<Vector2>.Get();
+    ///
+    ///        for (int i = 0; i < verts.Count; i++)
+    ///        {
+    ///            var vert = verts[i];
+    ///            uvs.Add(new Vector2(verts[i].x, verts[i].y));
+    ///            verts[i] = vert;
+    ///        }
+    ///        mesh.SetUVs(1, uvs);
+    ///        ListPool<Vector2>.Release(uvs);
+    ///    }
+    ///}
+    /// ]]>
+    ///</code>
+    ///</example>
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+    [ExecuteAlways]
+    public abstract class BaseMeshEffect : UIBehaviour, IMeshModifier
+    {
+        [NonSerialized]
+        private Graphic m_Graphic;
 
-		2. Incorrect dll files were provided to AssetRipper.
+        /// <summary>
+        /// The graphic component that the Mesh Effect will aplly to.
+        /// </summary>
+        protected Graphic graphic
+        {
+            get
+            {
+                if (m_Graphic == null)
+                    m_Graphic = GetComponent<Graphic>();
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+                return m_Graphic;
+            }
+        }
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+        protected override void OnEnable()
+        {
+            base.OnEnable();
+            if (graphic != null)
+                graphic.SetVerticesDirty();
+        }
 
-		3. Assembly Reconstruction has not been implemented.
+        protected override void OnDisable()
+        {
+            if (graphic != null)
+                graphic.SetVerticesDirty();
+            base.OnDisable();
+        }
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+        /// <summary>
+        /// Called from the native side any time a animation property is changed.
+        /// </summary>
+        protected override void OnDidApplyAnimationProperties()
+        {
+            if (graphic != null)
+                graphic.SetVerticesDirty();
+            base.OnDidApplyAnimationProperties();
+        }
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+#if UNITY_EDITOR
+        protected override void OnValidate()
+        {
+            base.OnValidate();
+            if (graphic != null)
+                graphic.SetVerticesDirty();
+        }
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+#endif
 
-		5. Script Content Level 0
+        /// <summary>
+        /// Function that is called when the Graphic is populating the mesh.
+        /// </summary>
+        /// <param name="mesh">The generated mesh of the Graphic element that needs modification.</param>
+        public virtual void ModifyMesh(Mesh mesh)
+        {
+            using (var vh = new VertexHelper(mesh))
+            {
+                ModifyMesh(vh);
+                vh.FillMesh(mesh);
+            }
+        }
 
-			AssetRipper was set to not load any script information.
-
-		6. Cpp2IL failed to decompile Il2Cpp data
-
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-		7. An incorrect path was provided to AssetRipper.
-
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
-
-		*/
-	}
+        public abstract void ModifyMesh(VertexHelper vh);
+    }
 }

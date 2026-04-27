@@ -1,63 +1,39 @@
+// Class:  BundleInfo (data record — entry in BundleManager.s_bundlePool)
+// GUID:   345ff6ffb146a43e28effea75a18aa31 (preserved via .meta)
+// Source: KiemTheOrigin_DeepExtract/_shared/DecompiledSource/BundleInfo.cs (Token 0x200005D)
+// IL2CPP: KTO_DecompiledReference/_root/BundleInfo.c (47 LOC, CompareTo only)
+//
+// FULL 1-1 PORT 2026-04-27 (canonicalization Day 4).
+// Field order + offsets cited from dump.cs.
+
+using System;
 using UnityEngine;
 
-public class BundleInfo : MonoBehaviour
+public class BundleInfo : IComparable<BundleInfo>
 {
-	/*
-	Dummy class. This could have happened for several reasons:
+    // Fields (offsets from dump.cs — Token 0x400018D..0x4000192)
+    public string bundlePath;       // 0x10
+    public AssetBundle bundle;      // 0x18
+    public AbType type;             // 0x20
+    public int refCount;            // 0x24
+    public float lastUnUseTime;     // 0x28
+    public bool isRootBundle;       // 0x2C
 
-	1. No dll files were provided to AssetRipper.
+    // VMA: 0x18063BB — Source: KTO_DecompiledReference/_root/BundleInfo.c (CompareTo)
+    // gốc body: WARNING — Ghidra produced a default(int) stub. Implementing
+    //   conventional ordering on bundlePath since CompareTo<BundleInfo> in gốc
+    //   isn't actually called from any reachable site (was generated for
+    //   IComparable<T> interface satisfaction only).
+    // PARTIAL — IL2CPP body unclear (Ghidra stub). Implementing string-based
+    //   comparison so SortedSet/SortedDictionary callers behave deterministically.
+    public int CompareTo(BundleInfo other)
+    {
+        if (other == null) return 1;
+        if (object.ReferenceEquals(this, other)) return 0;
+        return string.Compare(this.bundlePath, other.bundlePath, StringComparison.Ordinal);
+    }
 
-		Unity asset bundles and serialized files do not contain script information to decompile.
-			* For Mono games, that information is contained in .NET dll files.
-			* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-			
-		AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-		A unexpected file structure could cause AssetRipper to not find the required files.
-
-	2. Incorrect dll files were provided to AssetRipper.
-
-		Any of the following could cause this:
-			* Il2CppInterop assemblies
-			* Deobfuscated assemblies
-			* Older assemblies (compared to when the bundle was built)
-			* Newer assemblies (compared to when the bundle was built)
-
-		Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
-
-	3. Assembly Reconstruction has not been implemented.
-
-		Asset bundles contain a small amount of information about the script content.
-		This information can be used to recover the serializable fields of a script.
-
-		See: https://github.com/AssetRipper/AssetRipper/issues/655
-
-	4. This script is unnecessary.
-
-		If this script has no asset or script references, it can be deleted.
-		Be sure to resolve any compile errors before deleting because they can hide references.
-
-	5. Script Content Level 0
-
-		AssetRipper was set to not load any script information.
-
-	6. Cpp2IL failed to decompile Il2Cpp data
-
-		If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-		This is an upstream problem, and the AssetRipper developer has very little control over it.
-		Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-	7. An incorrect path was provided to AssetRipper.
-
-		This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-		AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-		An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-		Generally, AssetRipper expects users to provide the root folder of the game. For example:
-			* Windows: the folder containing the game's .exe file
-			* Mac: the .app file/folder
-			* Linux: the folder containing the game's executable file
-			* Android: the apk file
-			* iOS: the ipa file
-			* Switch: the folder containing exefs and romfs
-
-	*/
+    // VMA: 0x18063D6 — Source: BundleInfo.c (.ctor)
+    // gốc body: System_Object___ctor — empty.
+    public BundleInfo() { }
 }

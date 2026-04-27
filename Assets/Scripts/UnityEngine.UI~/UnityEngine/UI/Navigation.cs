@@ -1,66 +1,308 @@
-using UnityEngine;
+using System;
+using UnityEngine.Serialization;
 
 namespace UnityEngine.UI
 {
-	public class Navigation : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    [Serializable]
+    /// <summary>
+    /// Structure storing details related to navigation.
+    /// </summary>
+    public struct Navigation : IEquatable<Navigation>
+    {
+        /*
+         * This looks like it's not flags, but it is flags,
+         * the reason is that Automatic is considered horizontal
+         * and verical mode combined
+         */
+        [Flags]
+        /// <summary>
+        /// Navigation mode enumeration.
+        /// </summary>
+        /// <remarks>
+        /// This looks like it's not flags, but it is flags, the reason is that Automatic is considered horizontal and vertical mode combined
+        /// </remarks>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI; // Required when Using UI elements.
+        ///
+        /// public class ExampleClass : MonoBehaviour
+        /// {
+        ///     public Button button;
+        ///
+        ///     void Start()
+        ///     {
+        ///         //Set the navigation to the mode "Vertical".
+        ///         if (button.navigation.mode == Navigation.Mode.Vertical)
+        ///         {
+        ///             Debug.Log("The button's navigation mode is Vertical");
+        ///         }
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public enum Mode
+        {
+            /// <summary>
+            /// No navigation is allowed from this object.
+            /// </summary>
+            None        = 0,
 
-		1. No dll files were provided to AssetRipper.
+            /// <summary>
+            /// Horizontal Navigation.
+            /// </summary>
+            /// <remarks>
+            /// Navigation should only be allowed when left / right move events happen.
+            /// </remarks>
+            Horizontal  = 1,
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+            /// <summary>
+            /// Vertical navigation.
+            /// </summary>
+            /// <remarks>
+            /// Navigation should only be allowed when up / down move events happen.
+            /// </remarks>
+            Vertical    = 2,
 
-		2. Incorrect dll files were provided to AssetRipper.
+            /// <summary>
+            /// Automatic navigation.
+            /// </summary>
+            /// <remarks>
+            /// Attempt to find the 'best' next object to select. This should be based on a sensible heuristic.
+            /// </remarks>
+            Automatic   = 3,
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+            /// <summary>
+            /// Explicit navigation.
+            /// </summary>
+            /// <remarks>
+            /// User should explicitly specify what is selected by each move event.
+            /// </remarks>
+            Explicit    = 4,
+        }
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+        // Which method of navigation will be used.
+        [SerializeField]
+        private Mode m_Mode;
 
-		3. Assembly Reconstruction has not been implemented.
+        [Tooltip("Enables navigation to wrap around from last to first or first to last element. Does not work for automatic grid navigation")]
+        [SerializeField]
+        private bool m_WrapAround;
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+        // Game object selected when the joystick moves up. Used when navigation is set to "Explicit".
+        [SerializeField]
+        private Selectable m_SelectOnUp;
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+        // Game object selected when the joystick moves down. Used when navigation is set to "Explicit".
+        [SerializeField]
+        private Selectable m_SelectOnDown;
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+        // Game object selected when the joystick moves left. Used when navigation is set to "Explicit".
+        [SerializeField]
+        private Selectable m_SelectOnLeft;
 
-		5. Script Content Level 0
+        // Game object selected when the joystick moves right. Used when navigation is set to "Explicit".
+        [SerializeField]
+        private Selectable m_SelectOnRight;
 
-			AssetRipper was set to not load any script information.
+        /// <summary>
+        /// Navigation mode.
+        /// </summary>
+        public Mode       mode           { get { return m_Mode; } set { m_Mode = value; } }
 
-		6. Cpp2IL failed to decompile Il2Cpp data
+        /// <summary>
+        /// Enables navigation to wrap around from last to first or first to last element.
+        /// Will find the furthest element from the current element in the opposite direction of movement.
+        /// </summary>
+        /// <example>
+        /// Note: If you have a grid of elements and you are on the last element in a row it will not wrap over to the next row it will pick the furthest element in the opposite direction.
+        /// </example>
+        public bool wrapAround { get { return m_WrapAround; } set { m_WrapAround = value; } }
 
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
+        /// <summary>
+        /// Specify a Selectable UI GameObject to highlight when the Up arrow key is pressed.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI;  // Required when Using UI elements.
+        ///
+        /// public class HighlightOnKey : MonoBehaviour
+        /// {
+        ///     public Button btnSave;
+        ///     public Button btnLoad;
+        ///
+        ///     public void Start()
+        ///     {
+        ///         // get the Navigation data
+        ///         Navigation navigation = btnLoad.navigation;
+        ///
+        ///         // switch mode to Explicit to allow for custom assigned behavior
+        ///         navigation.mode = Navigation.Mode.Explicit;
+        ///
+        ///         // highlight the Save button if the up arrow key is pressed
+        ///         navigation.selectOnUp = btnSave;
+        ///
+        ///         // reassign the struct data to the button
+        ///         btnLoad.navigation = navigation;
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public Selectable selectOnUp     { get { return m_SelectOnUp; } set { m_SelectOnUp = value; } }
 
-		7. An incorrect path was provided to AssetRipper.
+        /// <summary>
+        /// Specify a Selectable UI GameObject to highlight when the down arrow key is pressed.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI;  // Required when Using UI elements.
+        ///
+        /// public class HighlightOnKey : MonoBehaviour
+        /// {
+        ///     public Button btnSave;
+        ///     public Button btnLoad;
+        ///
+        ///     public void Start()
+        ///     {
+        ///         // get the Navigation data
+        ///         Navigation navigation = btnLoad.navigation;
+        ///
+        ///         // switch mode to Explicit to allow for custom assigned behavior
+        ///         navigation.mode = Navigation.Mode.Explicit;
+        ///
+        ///         // highlight the Save button if the down arrow key is pressed
+        ///         navigation.selectOnDown = btnSave;
+        ///
+        ///         // reassign the struct data to the button
+        ///         btnLoad.navigation = navigation;
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public Selectable selectOnDown   { get { return m_SelectOnDown; } set { m_SelectOnDown = value; } }
 
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
+        /// <summary>
+        /// Specify a Selectable UI GameObject to highlight when the left arrow key is pressed.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI;  // Required when Using UI elements.
+        ///
+        /// public class HighlightOnKey : MonoBehaviour
+        /// {
+        ///     public Button btnSave;
+        ///     public Button btnLoad;
+        ///
+        ///     public void Start()
+        ///     {
+        ///         // get the Navigation data
+        ///         Navigation navigation = btnLoad.navigation;
+        ///
+        ///         // switch mode to Explicit to allow for custom assigned behavior
+        ///         navigation.mode = Navigation.Mode.Explicit;
+        ///
+        ///         // highlight the Save button if the left arrow key is pressed
+        ///         navigation.selectOnLeft = btnSave;
+        ///
+        ///         // reassign the struct data to the button
+        ///         btnLoad.navigation = navigation;
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public Selectable selectOnLeft   { get { return m_SelectOnLeft; } set { m_SelectOnLeft = value; } }
 
-		*/
-	}
+        /// <summary>
+        /// Specify a Selectable UI GameObject to highlight when the right arrow key is pressed.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI;  // Required when Using UI elements.
+        ///
+        /// public class HighlightOnKey : MonoBehaviour
+        /// {
+        ///     public Button btnSave;
+        ///     public Button btnLoad;
+        ///
+        ///     public void Start()
+        ///     {
+        ///         // get the Navigation data
+        ///         Navigation navigation = btnLoad.navigation;
+        ///
+        ///         // switch mode to Explicit to allow for custom assigned behavior
+        ///         navigation.mode = Navigation.Mode.Explicit;
+        ///
+        ///         // highlight the Save button if the right arrow key is pressed
+        ///         navigation.selectOnRight = btnSave;
+        ///
+        ///         // reassign the struct data to the button
+        ///         btnLoad.navigation = navigation;
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        public Selectable selectOnRight  { get { return m_SelectOnRight; } set { m_SelectOnRight = value; } }
+
+        /// <summary>
+        /// Return a Navigation with sensible default values.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// <![CDATA[
+        /// using UnityEngine;
+        /// using System.Collections;
+        /// using UnityEngine.UI; // Required when Using UI elements.
+        ///
+        /// public class ExampleClass : MonoBehaviour
+        /// {
+        ///     public Button button;
+        ///
+        ///     void Start()
+        ///     {
+        ///         //Set the navigation to the default value. ("Automatic" is the default value).
+        ///         button.navigation = Navigation.defaultNavigation;
+        ///     }
+        /// }
+        /// ]]>
+        ///</code>
+        /// </example>
+        static public Navigation defaultNavigation
+        {
+            get
+            {
+                var defaultNav = new Navigation();
+                defaultNav.m_Mode = Mode.Automatic;
+                defaultNav.m_WrapAround = false;
+                return defaultNav;
+            }
+        }
+
+        public bool Equals(Navigation other)
+        {
+            return mode == other.mode &&
+                selectOnUp == other.selectOnUp &&
+                selectOnDown == other.selectOnDown &&
+                selectOnLeft == other.selectOnLeft &&
+                selectOnRight == other.selectOnRight;
+        }
+    }
 }

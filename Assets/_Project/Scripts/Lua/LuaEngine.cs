@@ -78,6 +78,42 @@ namespace ThanMaOrigin.Lua
                     net.ConnectGateway(ip, port, account, auth);
                 });
 
+            // ─── ConnectWorldServer global function ─────────────────────────
+            // VMA: 0x236b68 — Source: KTO_LibClientScene_Decompiled/functions/00236b68_LuaGlobalScriptNameSpace21LuaConnectWorldServerER10XLuaScript.asm
+            // ASM decoded (0x5c bytes, 23 insns):
+            //   x21 = XLuaScript::GetStr(s, 1)         // arg1 = world server addr (call 0x418360)
+            //   w0  = XLuaScript::GetInt(s, 2)         // arg2 = port              (call 0x418ad0)
+            //   Network::ConnectWorldServer(network_global, addr, port)            (call 0x4191d0)
+            //   network_global = *( *(adrp(0x431000) + 0x518) )                    (Network singleton)
+            //   return 0
+            // Called by Login.lua:413 ConnectWorldServer(szAddr, nPort) after gateway respond
+            // with world server endpoint.
+            // 1-1 PORT: route to NetworkManager.Connect with new addr+port.
+            Env.Global.Set<string, System.Action<string, int>>("ConnectWorldServer",
+                (addr, port) =>
+                {
+                    var net = ThanMaOrigin.Network.NetworkManager.Instance;
+                    if (net == null) { UnityEngine.Debug.LogError("[ConnectWorldServer] NetworkManager.Instance NULL"); return; }
+                    net.ConnectWorldServer(addr, port);
+                });
+
+            // ─── SetWorldServerConnectTimeout global function ───────────────
+            // VMA: 0x236bc4 — Source: KTO_LibClientScene_Decompiled/functions/00236bc4_LuaGlobalScriptNameSpace31LuaSetWorldServerConnectTimeoutER10XLuaScript.asm
+            // ASM decoded (0x3c bytes, 15 insns):
+            //   w1  = XLuaScript::GetInt(s, 1)         // arg1 = timeout seconds   (call 0x418ad0)
+            //   Network::SetWorldServerConnectTimeout(network_global, timeout)     (call 0x4191e0)
+            //   return 0
+            // Called by Login.lua:414 SetWorldServerConnectTimeout(100) right after
+            // ConnectWorldServer to set retry timeout.
+            // 1-1 PORT: store timeout on NetworkManager for future Connect calls.
+            Env.Global.Set<string, System.Action<int>>("SetWorldServerConnectTimeout",
+                (timeout) =>
+                {
+                    var net = ThanMaOrigin.Network.NetworkManager.Instance;
+                    if (net == null) { UnityEngine.Debug.LogError("[SetWorldServerConnectTimeout] NetworkManager.Instance NULL"); return; }
+                    net.SetWorldServerConnectTimeout(timeout);
+                });
+
             // ─── g_szUserPath ────────────────────────────────────────────────
             // gốc native global string set by LuaClient::SetUserPath @ libclient_scene.so:0x419010
             // (called from LuaClient::Init early in boot chain).

@@ -1,66 +1,138 @@
-using UnityEngine;
+using UnityEngine.EventSystems;
 
 namespace UnityEngine.UI
 {
-	public class ContentSizeFitter : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    [AddComponentMenu("Layout/Content Size Fitter", 141)]
+    [ExecuteAlways]
+    [RequireComponent(typeof(RectTransform))]
+    /// <summary>
+    /// Resizes a RectTransform to fit the size of its content.
+    /// </summary>
+    /// <remarks>
+    /// The ContentSizeFitter can be used on GameObjects that have one or more ILayoutElement components, such as Text, Image, HorizontalLayoutGroup, VerticalLayoutGroup, and GridLayoutGroup.
+    /// </remarks>
+    public class ContentSizeFitter : UIBehaviour, ILayoutSelfController
+    {
+        /// <summary>
+        /// The size fit modes avaliable to use.
+        /// </summary>
+        public enum FitMode
+        {
+            /// <summary>
+            /// Don't perform any resizing.
+            /// </summary>
+            Unconstrained,
+            /// <summary>
+            /// Resize to the minimum size of the content.
+            /// </summary>
+            MinSize,
+            /// <summary>
+            /// Resize to the preferred size of the content.
+            /// </summary>
+            PreferredSize
+        }
 
-		1. No dll files were provided to AssetRipper.
+        [SerializeField] protected FitMode m_HorizontalFit = FitMode.Unconstrained;
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+        /// <summary>
+        /// The fit mode to use to determine the width.
+        /// </summary>
+        public FitMode horizontalFit { get { return m_HorizontalFit; } set { if (SetPropertyUtility.SetStruct(ref m_HorizontalFit, value)) SetDirty(); } }
 
-		2. Incorrect dll files were provided to AssetRipper.
+        [SerializeField] protected FitMode m_VerticalFit = FitMode.Unconstrained;
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
+        /// <summary>
+        /// The fit mode to use to determine the height.
+        /// </summary>
+        public FitMode verticalFit { get { return m_VerticalFit; } set { if (SetPropertyUtility.SetStruct(ref m_VerticalFit, value)) SetDirty(); } }
 
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
+        [System.NonSerialized] private RectTransform m_Rect;
+        private RectTransform rectTransform
+        {
+            get
+            {
+                if (m_Rect == null)
+                    m_Rect = GetComponent<RectTransform>();
+                return m_Rect;
+            }
+        }
 
-		3. Assembly Reconstruction has not been implemented.
+        // field is never assigned warning
+        #pragma warning disable 649
+        private DrivenRectTransformTracker m_Tracker;
+        #pragma warning restore 649
 
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
+        protected ContentSizeFitter()
+        {}
 
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
+        protected override void OnEnable()
+        {
+            base.OnEnable();
+            SetDirty();
+        }
 
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
+        protected override void OnDisable()
+        {
+            m_Tracker.Clear();
+            LayoutRebuilder.MarkLayoutForRebuild(rectTransform);
+            base.OnDisable();
+        }
 
-		5. Script Content Level 0
+        protected override void OnRectTransformDimensionsChange()
+        {
+            SetDirty();
+        }
 
-			AssetRipper was set to not load any script information.
+        private void HandleSelfFittingAlongAxis(int axis)
+        {
+            FitMode fitting = (axis == 0 ? horizontalFit : verticalFit);
+            if (fitting == FitMode.Unconstrained)
+            {
+                // Keep a reference to the tracked transform, but don't control its properties:
+                m_Tracker.Add(this, rectTransform, DrivenTransformProperties.None);
+                return;
+            }
 
-		6. Cpp2IL failed to decompile Il2Cpp data
+            m_Tracker.Add(this, rectTransform, (axis == 0 ? DrivenTransformProperties.SizeDeltaX : DrivenTransformProperties.SizeDeltaY));
 
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
+            // Set size to min or preferred size
+            if (fitting == FitMode.MinSize)
+                rectTransform.SetSizeWithCurrentAnchors((RectTransform.Axis)axis, LayoutUtility.GetMinSize(m_Rect, axis));
+            else
+                rectTransform.SetSizeWithCurrentAnchors((RectTransform.Axis)axis, LayoutUtility.GetPreferredSize(m_Rect, axis));
+        }
 
-		7. An incorrect path was provided to AssetRipper.
+        /// <summary>
+        /// Calculate and apply the horizontal component of the size to the RectTransform
+        /// </summary>
+        public virtual void SetLayoutHorizontal()
+        {
+            m_Tracker.Clear();
+            HandleSelfFittingAlongAxis(0);
+        }
 
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
+        /// <summary>
+        /// Calculate and apply the vertical component of the size to the RectTransform
+        /// </summary>
+        public virtual void SetLayoutVertical()
+        {
+            HandleSelfFittingAlongAxis(1);
+        }
 
-		*/
-	}
+        protected void SetDirty()
+        {
+            if (!IsActive())
+                return;
+
+            LayoutRebuilder.MarkLayoutForRebuild(rectTransform);
+        }
+
+    #if UNITY_EDITOR
+        protected override void OnValidate()
+        {
+            SetDirty();
+        }
+
+    #endif
+    }
 }
