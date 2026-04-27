@@ -77,11 +77,20 @@ namespace ThanMaOrigin.Network
         // non-decreasing across packets (anti-cheat replay guard).
         private int _checkTicks = 1;
 
-        // Send packet: [4B Int32 LE dataSize][2B UInt16 LE cmdId][1B crc][4B Int32 LE ticks][payload]
-        //   dataSize = 1 + 4 + payload.Length  (includes anti-cheat prefix)
+        // Send packet (INBOUND wire to server has anti-cheat prefix):
+        //   [4B size_field LE][2B cmdId LE][1B crc][4B Int32 LE ticks][payload]
+        //   size_field = payload.Length + 1 + 4 + 2  (data + crc + ticks + cmdId)
         //   crc = (CRC32(bytes[1..end]) % 255) ^ (cmdId % 255)
-        //   ticks = monotonic counter
-        // Match gốc TCPInPacket.cs:60-62 + TCPManager.cs:409 CheckClientDataValid.
+        //   ticks = monotonic counter (replay guard)
+        //
+        // OUTBOUND wire from server has NO anti-cheat prefix (asymmetric per gốc):
+        //   [4B size_field LE][2B cmdId LE][raw payload]   ← see RecvLoop
+        //
+        // Cite: gốc TCPManager.CheckClientDataValid (server inbound) +
+        //       gốc TCPOutPacket.Final() (server outbound).
+        //
+        // Day 9.16 (2026-04-27): kept anti-cheat for security. Bug was elsewhere —
+        // recv was reading sizeField bytes instead of (sizeField - 2). Fixed in RecvLoop.
         public void Send(int opcode, byte[]? payload)
         {
             if (_stream == null || !_running) return;
@@ -90,21 +99,18 @@ namespace ThanMaOrigin.Network
             // Build the body: [crc placeholder][ticks][payload]
             int bodySize = 1 + 4 + payload.Length;
             var body = new byte[bodySize];
-            // Reserve byte[0] for crc (filled after computing).
             int ticks = System.Threading.Interlocked.Increment(ref _checkTicks);
             Buffer.BlockCopy(BitConverter.GetBytes(ticks), 0, body, 1, 4);
             if (payload.Length > 0)
                 Buffer.BlockCopy(payload, 0, body, 5, payload.Length);
 
-            // CRC over body[1..bodySize] (everything after the crc byte).
+            // CRC over body[1..bodySize] (everything after the crc byte itself).
             uint crc32 = Crc32.Compute(body, 1, bodySize - 1);
             uint cc = crc32 % 255u;
             uint cc2 = (uint)opcode % 255u;
             body[0] = (byte)(cc ^ cc2);
 
-            // Header: [4B sizeField LE][2B cmdId LE]
-            //   sizeField INCLUDES the 2-byte cmdId per gốc TCPInPacket.cs:416 (subtracts 2).
-            //   So sizeField = bodySize + 2 on the wire.
+            // Header: size_field includes the 2-byte cmdId per gốc TCPInPacket convention.
             int sizeField = bodySize + 2;
             var hdr = new byte[HEADER_SIZE];
             Buffer.BlockCopy(BitConverter.GetBytes(sizeField), 0, hdr, 0, 4);
@@ -122,7 +128,10 @@ namespace ThanMaOrigin.Network
             catch (Exception e) { Debug.LogError($"[TMSKSocket] Send failed: {e.Message}"); }
         }
 
-        // Recv loop: parse [4B Int32 LE dataSize][2B UInt16 LE cmdId][payload].
+        // Recv loop: parse [4B Int32 LE size_field][2B UInt16 LE cmdId][payload].
+        // Per gốc TCPOutPacket.Final() (server) line 153: `length = data_size + 2`.
+        // size_field on wire INCLUDES the 2-byte cmdId. So actual payload length =
+        // size_field - 2. (Same convention as inbound TCPInPacket._PacketDataSize -= 2.)
         private void RecvLoop()
         {
             var hdr = new byte[HEADER_SIZE];
@@ -131,15 +140,16 @@ namespace ThanMaOrigin.Network
                 while (_running && _stream != null)
                 {
                     if (!ReadExact(_stream, hdr, HEADER_SIZE)) break;
-                    int dataSize = BitConverter.ToInt32(hdr, 0);    // LE
-                    ushort cmdId = BitConverter.ToUInt16(hdr, 4);   // LE
-                    if (dataSize < 0 || dataSize > MAX_PACKET_DATA)
+                    int sizeField = BitConverter.ToInt32(hdr, 0);    // LE
+                    ushort cmdId = BitConverter.ToUInt16(hdr, 4);    // LE
+                    int payloadLen = sizeField - 2;  // strip the 2-byte cmdId already read in header
+                    if (payloadLen < 0 || payloadLen > MAX_PACKET_DATA)
                     {
-                        Debug.LogError($"[TMSKSocket] Invalid packet size {dataSize} for cmd {cmdId} — closing");
+                        Debug.LogError($"[TMSKSocket] Invalid packet size {sizeField} for cmd {cmdId} — closing");
                         break;
                     }
-                    var payload = dataSize > 0 ? new byte[dataSize] : Array.Empty<byte>();
-                    if (dataSize > 0 && !ReadExact(_stream, payload, dataSize)) break;
+                    var payload = payloadLen > 0 ? new byte[payloadLen] : Array.Empty<byte>();
+                    if (payloadLen > 0 && !ReadExact(_stream, payload, payloadLen)) break;
                     InboundQueue.Enqueue((cmdId, payload));
                 }
             }

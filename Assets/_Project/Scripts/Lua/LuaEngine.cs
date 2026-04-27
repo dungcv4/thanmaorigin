@@ -205,6 +205,50 @@ namespace ThanMaOrigin.Lua
             Env.Global.Set<string, System.Action<int>>("ConnectServer",
                 (serverId) => ThanMaOrigin.Network.GatewayHandshake.RequestLoginServer(serverId));
 
+            // ─── GetRoleList + GetServerRegion global stubs ──────────────────
+            // GetRoleList: Lua Login:OnSyncRoleListDone() at Login.lua:81 calls this to fetch
+            //   the cached role array. Returns {} when no roles → Lua opens UICreateRole.
+            // GetServerRegion: Lua UISelectServer:Refresh() line 162 calls this to group
+            //   servers by region for the "Đổi" (change server) panel. Returns {} when no
+            //   region data — single-server dev setup.
+            // FIXME: full role + region parsing when real data flows.
+            Env.DoString(@"
+                if not GetRoleList then
+                    function GetRoleList()
+                        return {}
+                    end
+                end
+                if not GetServerRegion then
+                    function GetServerRegion()
+                        return {}
+                    end
+                end
+                -- MathRandom: gốc native helper for seeded randomness. Stub uses math.random.
+                -- Cite: UICreateRole.lua:216 OnCreate calls MathRandom(min, max).
+                if not MathRandom then
+                    function MathRandom(a, b)
+                        -- Handle edge cases: math.random errors on empty/inverted interval.
+                        if a and b then
+                            if a == b then return a end
+                            if a > b then a, b = b, a end
+                            return math.random(a, b)
+                        end
+                        if a then
+                            if a < 1 then return 0 end
+                            return math.random(a)
+                        end
+                        return math.random()
+                    end
+                end
+                -- GetZoneTimeSecDiff: gốc native returns server-local timezone offset in sec.
+                -- Cite: Script_Client.lua:319. Stub returns 0 (UTC = local for dev).
+                if not GetZoneTimeSecDiff then
+                    function GetZoneTimeSecDiff()
+                        return 0
+                    end
+                end
+            ", "GetRoleListStub");
+
             // ─── CloseServerConnect / CloseGateWayConnect global stubs ──────
             // Lua may call these on logout / cancel. Map both to GatewayHandshake.Close.
             Env.Global.Set<string, System.Action>("CloseGateWayConnect",

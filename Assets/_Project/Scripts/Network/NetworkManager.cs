@@ -33,6 +33,116 @@ namespace ThanMaOrigin.Network
 
             // Wire CmdRegistry → outbound socket
             CmdRegistry.OnSendCmd += OnSendCmd;
+
+            // ─── Wire C# handlers for post-login CMD chain ──────────────────
+            // gốc protocol: client sends CMD_LOGIN_ON → server replies CMD_LOGIN_ON
+            // with "RandKey:WaitSecs". Then client sends CMD_ROLE_LIST → server
+            // returns role data. Client opens UISelectRoleExist or UICreateRole.
+            CmdRegistry.RegisterCSharpHandler(100, OnLoginOnReply);    // CMD_LOGIN_ON reply
+            CmdRegistry.RegisterCSharpHandler(20,  OnLoginOn2Reply);   // CMD_LOGIN_ON2 reply (SDK auth path)
+            CmdRegistry.RegisterCSharpHandler(101, OnRoleListReply);   // CMD_ROLE_LIST reply
+        }
+
+        // CMD_LOGIN_ON2 reply per ProcessUserLogin2Cmd KT_TCPHandler_Core.cs:1478:
+        //   SUCCESS: "userID:userName:userToken:isadult"   (4 fields)
+        //   FAILURE: "<errorCode>:..."                     (single error code)
+        //
+        // The userToken returned is a NEW server-generated RC4+SHA1 token. We must
+        // send it back via CMD_LOGIN_ON (id=100) — the REAL session-registration
+        // step. Only after CMD_LOGIN_ON does OnlineUserSession.AddSession run, so
+        // CMD_ROLE_LIST works.
+        //
+        // Flow: SDK login → CMD_LOGIN_ON2 (web auth) → CMD_LOGIN_ON (session) → CMD_ROLE_LIST
+        private void OnLoginOn2Reply(byte[] payload)
+        {
+            string s = payload != null ? System.Text.Encoding.UTF8.GetString(payload) : "";
+            UnityEngine.Debug.Log($"[NetworkManager] ← CMD_LOGIN_ON2 reply: '{s}'");
+            var fields = s.Split(':');
+            if (fields.Length < 4)
+            {
+                UnityEngine.Debug.LogError($"[NetworkManager] CMD_LOGIN_ON2 FAILED fields={fields.Length} payload='{s}'");
+                ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName(
+                    "emNOTIFY_LOGIN_HAND_SHAKE_END", 1);
+                return;
+            }
+            // fields[0]=userID (e.g. "3_testuser"), fields[1]=userName, fields[2]=NEW userToken, fields[3]=isadult
+            string userID = fields[0];
+            string userName = fields[1];
+            string userToken = fields[2];
+            string isadult = fields[3];
+            UnityEngine.Debug.Log($"[NetworkManager] CMD_LOGIN_ON2 SUCCESS userID='{userID}' userName='{userName}'");
+
+            // Send CMD_LOGIN_ON (id=100) per ProcessUserLoginCmd:1499 expected format:
+            //   "userID:userName:userToken:roleRandToken:verSign:userIsAdult"
+            // 6 fields = first-time login (no role yet). Server validates token via
+            // UserLoginToken.SetEncryptString → registers session via OnlineUserSession.AddSession.
+            // roleRandToken: we use 0 (unused on initial login per server line 1530).
+            _sdkPlatformUserId = userID;
+            string loginBody = $"{userID}:{userName}:{userToken}:0:{LoginTokenHelper.VerSign}:{isadult}";
+            _sock.Send(100, System.Text.Encoding.UTF8.GetBytes(loginBody));
+            UnityEngine.Debug.Log($"[NetworkManager] → CMD_LOGIN_ON sent body='{loginBody}'");
+        }
+
+        // SDK platform_user_id stash for CMD_ROLE_LIST userID field (set after SDK verify).
+        private string _sdkPlatformUserId;
+
+        // CMD_LOGIN_ON reply per ProcessUserLoginCmd KT_TCPHandler_Core.cs:1668:
+        //   SUCCESS: "RandKey:WaitSecs" — session registered via OnlineUserSession.AddSession.
+        //   FAILURE: single error code field.
+        // After SUCCESS we send CMD_ROLE_LIST since session is now active.
+        private void OnLoginOnReply(byte[] payload)
+        {
+            string s = payload != null ? System.Text.Encoding.UTF8.GetString(payload) : "";
+            UnityEngine.Debug.Log($"[NetworkManager] ← CMD_LOGIN_ON reply: '{s}'");
+            var fields = s.Split(':');
+            if (fields.Length < 2)
+            {
+                UnityEngine.Debug.LogError($"[NetworkManager] CMD_LOGIN_ON failed: code={fields[0]}");
+                ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName(
+                    "emNOTIFY_LOGIN_HAND_SHAKE_END", 1);
+                return;
+            }
+            UnityEngine.Debug.Log($"[NetworkManager] CMD_LOGIN_ON SUCCESS RandKey={fields[0]} WaitSecs={fields[1]}");
+
+            // Send CMD_ROLE_LIST. Format = "userID:zoneID". userID = SDK platform_user_id
+            // we used in CMD_LOGIN_ON2 + CMD_LOGIN_ON (e.g. "3_testuser").
+            string userId = _sdkPlatformUserId ?? _pendingAccount ?? "";
+            string body = $"{userId}:1";
+            _sock.Send(101, System.Text.Encoding.UTF8.GetBytes(body));
+            UnityEngine.Debug.Log($"[NetworkManager] → CMD_ROLE_LIST sent body='{body}'");
+        }
+
+        // Server replies CMD_ROLE_LIST with role-list payload (binary protobuf or
+        // delimited string — depends on TransferRequestToDBServer return format).
+        // Log payload + fire emNOTIFY event so Lua side can advance.
+        private void OnRoleListReply(byte[] payload)
+        {
+            UnityEngine.Debug.Log($"[NetworkManager] ← CMD_ROLE_LIST reply: {payload?.Length ?? 0} bytes " +
+                $"(first 64 hex: {(payload != null ? System.BitConverter.ToString(payload, 0, System.Math.Min(64, payload.Length)) : "null")})");
+            // gốc fires emNOTIFY_SYNC_ROLE_LIST (or similar) so Lua's UILoginServer
+            // OnSyncRoleListDone runs → opens UISelectRoleExist or UICreateRole.
+            // For now: fire generic event + let Lua handle it (or use direct call).
+            try
+            {
+                var env = ThanMaOrigin.Lua.LuaEngine.Instance?.Env;
+                if (env != null)
+                {
+                    // gốc: Login:OnSyncRoleListDone() reads role list via GetRoleList() global
+                    // and opens UISelectRoleExist or UICreateRole based on count.
+                    env.DoString(@"
+                        if Login and Login.OnSyncRoleListDone then
+                            local ok, err = xpcall(function() Login:OnSyncRoleListDone() end, debug.traceback)
+                            if not ok then print('[OnRoleListReply Login:OnSyncRoleListDone] FAIL: '..tostring(err)) end
+                        else
+                            print('[OnRoleListReply] Login.OnSyncRoleListDone NOT defined')
+                        end
+                    ", "OnRoleListReplyDirect");
+                }
+            }
+            catch (System.Exception e)
+            {
+                UnityEngine.Debug.LogError($"[NetworkManager.OnRoleListReply] direct call failed: {e.Message}");
+            }
         }
 
         public bool Connect()
@@ -102,35 +212,62 @@ namespace ThanMaOrigin.Network
             bool ok = _sock.Connect(ServerHost, ServerPort);
             if (ok)
             {
-                // Right after TCP connect, send CMD_LOGIN_ON. gốc native
-                // XWorldClient::DoHandshakeRequest @0x282e6c (XOR-encrypted, can't 1-1 port)
-                // does this automatically inside the socket-connect callback.
-                // We mirror that behavior in C# using LoginTokenHelper.
-                // CMD_LOGIN_ON = 100 (TCPGameServerCmds.CMD_LOGIN_ON in server enum).
-                try
-                {
-                    byte[] payload = LoginTokenHelper.BuildLoginOnPayload(_pendingAccount);
-                    _sock.Send(100, payload);
-                    UnityEngine.Debug.Log($"[NetworkManager.ConnectWorldServer] → CMD_LOGIN_ON sent ({payload.Length} bytes) for account='{_pendingAccount}'");
-
-                    // Fire emNOTIFY_LOGIN_HAND_SHAKE_END(0) so Lua's UILoginServer
-                    // OnHandShakeEnd handler closes UILoadingTips on success path.
-                    // gốc fires this from native XWorldClient::OnHandShakeRespond once
-                    // server replies. We fire optimistically; if server rejects login,
-                    // CMD_LOGIN_ON reply handler (CmdRegistry CMD 100) will fire
-                    // appropriate error event.
-                    ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName(
-                        "emNOTIFY_LOGIN_HAND_SHAKE_END", 0);
-                }
-                catch (System.Exception e)
-                {
-                    UnityEngine.Debug.LogError($"[NetworkManager.ConnectWorldServer] CMD_LOGIN_ON build/send FAIL: {e.Message}");
-                    // Fire HAND_SHAKE_END with non-zero so Lua opens UIMessageBoxBig.
-                    ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName(
-                        "emNOTIFY_LOGIN_HAND_SHAKE_END", 1);
-                }
+                // Right after TCP connect, run SDK auth + send CMD_LOGIN_ON2 (id=20).
+                // gốc flow (per KiemTheOrigin_DeepExtract/01_Login/Scripts/LoginSceneUI.cs):
+                //   1. Sdk:Login() → POST sdk_server :8887/loginsdk.aspx with (user, pass)
+                //   2. SDK returns access_token
+                //   3. POST /verifyaccount.aspx with token → returns platform_user_id, sign_token, l_time
+                //   4. Send CMD_LOGIN_ON2 to GameServer:3001:
+                //      "verSign:platform_user_id:account_name:l_time:isadult:sign_token"
+                //   5. GameServer recomputes sign_token = MD5(...+WEB_KEY) → if match, login OK
+                //
+                // Day 9.16 (2026-04-27): replace LoginTokenHelper RC4+SHA1 path with this.
+                //   The RC4+SHA1 path was for CMD_LOGIN_ON (id=100), which works but doesn't
+                //   actually authenticate against any user database — only validates a token
+                //   server itself signed. CMD_LOGIN_ON2 (id=20) is the real auth path used
+                //   by gốc Sdk channel.
+                //
+                // For DEV mode: hard-coded test credentials (testuser/12345678) since
+                // UILoginChannelInner only has account input field — no password input UI yet.
+                // TODO: add password input field to UILoginChannelInner prefab so user types
+                //       both. For now: account text overrides username if not blank, password
+                //       always "12345678" (dev test account from local_state.json).
+                StartCoroutine(DoSdkLoginCoroutine());
             }
             return ok;
+        }
+
+        private System.Collections.IEnumerator DoSdkLoginCoroutine()
+        {
+            string username = string.IsNullOrEmpty(_pendingAccount) ? "testuser" : _pendingAccount;
+            // DEV: hard-coded test password. local_state.json has testuser/12345678.
+            // TODO Phase 5: pipe password from UI input field.
+            string password = "12345678";
+            UnityEngine.Debug.Log($"[NetworkManager] SDK auth chain start user={username}");
+
+            var loginTask = SdkHttpClient.LoginAndVerifyAsync(username, password);
+            // Yield until task done (Unity coroutine pattern for Task<T>)
+            while (!loginTask.IsCompleted) yield return null;
+            var r = loginTask.Result;
+            if (!r.Success)
+            {
+                UnityEngine.Debug.LogError($"[NetworkManager] SDK auth FAIL: code={r.ErrorCode} msg='{r.ErrorMsg}'");
+                ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName(
+                    "emNOTIFY_LOGIN_HAND_SHAKE_END", 1);
+                yield break;
+            }
+
+            // CMD_LOGIN_ON2 (id=20) payload: "verSign:platform_user_id:account_name:l_time:isadult:sign_token"
+            // verSign = 20140624 (TCPCmdProtocolVer.VerSign).
+            // isadult = "1" (must match what we passed to verify; SDK server hardcodes "1" in formula).
+            _sdkPlatformUserId = r.PlatformUserId;  // stash for CMD_ROLE_LIST
+            string body = $"{LoginTokenHelper.VerSign}:{r.PlatformUserId}:{r.AccountName}:{r.LTime}:1:{r.SignToken}";
+            byte[] payload = System.Text.Encoding.UTF8.GetBytes(body);
+            _sock.Send(20, payload);
+            UnityEngine.Debug.Log($"[NetworkManager] → CMD_LOGIN_ON2 sent ({payload.Length} bytes) body='{body}'");
+
+            ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName(
+                "emNOTIFY_LOGIN_HAND_SHAKE_END", 0);
         }
 
         // Connect-retry timeout in seconds (default 100, set by Login.lua:414).
