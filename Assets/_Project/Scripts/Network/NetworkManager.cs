@@ -99,7 +99,38 @@ namespace ThanMaOrigin.Network
             {
                 _sock.Close();
             }
-            return _sock.Connect(ServerHost, ServerPort);
+            bool ok = _sock.Connect(ServerHost, ServerPort);
+            if (ok)
+            {
+                // Right after TCP connect, send CMD_LOGIN_ON. gốc native
+                // XWorldClient::DoHandshakeRequest @0x282e6c (XOR-encrypted, can't 1-1 port)
+                // does this automatically inside the socket-connect callback.
+                // We mirror that behavior in C# using LoginTokenHelper.
+                // CMD_LOGIN_ON = 100 (TCPGameServerCmds.CMD_LOGIN_ON in server enum).
+                try
+                {
+                    byte[] payload = LoginTokenHelper.BuildLoginOnPayload(_pendingAccount);
+                    _sock.Send(100, payload);
+                    UnityEngine.Debug.Log($"[NetworkManager.ConnectWorldServer] → CMD_LOGIN_ON sent ({payload.Length} bytes) for account='{_pendingAccount}'");
+
+                    // Fire emNOTIFY_LOGIN_HAND_SHAKE_END(0) so Lua's UILoginServer
+                    // OnHandShakeEnd handler closes UILoadingTips on success path.
+                    // gốc fires this from native XWorldClient::OnHandShakeRespond once
+                    // server replies. We fire optimistically; if server rejects login,
+                    // CMD_LOGIN_ON reply handler (CmdRegistry CMD 100) will fire
+                    // appropriate error event.
+                    ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName(
+                        "emNOTIFY_LOGIN_HAND_SHAKE_END", 0);
+                }
+                catch (System.Exception e)
+                {
+                    UnityEngine.Debug.LogError($"[NetworkManager.ConnectWorldServer] CMD_LOGIN_ON build/send FAIL: {e.Message}");
+                    // Fire HAND_SHAKE_END with non-zero so Lua opens UIMessageBoxBig.
+                    ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName(
+                        "emNOTIFY_LOGIN_HAND_SHAKE_END", 1);
+                }
+            }
+            return ok;
         }
 
         // Connect-retry timeout in seconds (default 100, set by Login.lua:414).

@@ -6,16 +6,18 @@
 //         that .so binary, must write managed C# wrapper.
 // Approved by user: 2026-04-26 (no-chế-cháo audit — explicit DEVIATION cite).
 //
-// Wire format — MATCH gốc server (Phase 10.1 fix 2026-04-26):
-//   [4B Int32 LE PacketDataSize][2B UInt16 LE PacketCmdID][payload]
+// Wire format — MATCH gốc server (Phase 10.1 fix 2026-04-26 + Day 9.15 anti-cheat fix):
+//   [4B Int32 LE PacketDataSize][2B UInt16 LE PacketCmdID][1B crc][4B Int32 LE checkTicks][payload]
 //
-// Cite: alo/GameServer_NET8/GameServer/Protocol/TCPInPacket.cs:60-62
-//   _PacketDataSize = BitConverter.ToInt32(CmdHeaderBuffer, 0);   // 4 bytes LE
-//   _PacketCmdID    = BitConverter.ToUInt16(CmdHeaderBuffer, 4);  // 2 bytes LE
+// Cite:
+//   - Header: alo/GameServer_NET8/GameServer/Protocol/TCPInPacket.cs:60-62
+//   - Anti-cheat byte+ticks: GameServer/Server/TCPManager.cs:409 CheckClientDataValid
+//     byte[0] = (crc32(bytes[1..end]) % 255) ^ (cmdId % 255)
+//     bytes[1..4] = clientCheckTicks (Int32 LE, monotonic — must be >= last received)
+//   - PacketDataSize includes the 1+4 anti-cheat prefix.
 //
-// PHASE 10.1 — wire format adapter:
-//   Previous: [2B BE totalLen][2B BE opcode][payload]   (DEVIATION, didn't match server)
-//   Current:  [4B LE dataSize][2B LE cmdID][payload]    (matches gốc server expectations)
+// Day 9.15 (2026-04-27): added anti-cheat header. Without it, server logs
+//   "Verify packet faild" and closes socket immediately on any CMD send.
 //
 // Naming "TMSKSocket" intentionally ad-hoc (not gốc class name). gốc has TcpServer.TCPClientHandle
 // (server-side handle) but no client-side TCP wrapper exists in IL2CPP.
@@ -71,25 +73,49 @@ namespace ThanMaOrigin.Network
             }
         }
 
-        // Send packet: [4B Int32 LE dataSize][2B UInt16 LE cmdId][payload]
-        // Match gốc TCPInPacket.cs:60-62 expected wire format.
+        // Monotonic check counter — server requires `clientCheckTicks` to be
+        // non-decreasing across packets (anti-cheat replay guard).
+        private int _checkTicks = 1;
+
+        // Send packet: [4B Int32 LE dataSize][2B UInt16 LE cmdId][1B crc][4B Int32 LE ticks][payload]
+        //   dataSize = 1 + 4 + payload.Length  (includes anti-cheat prefix)
+        //   crc = (CRC32(bytes[1..end]) % 255) ^ (cmdId % 255)
+        //   ticks = monotonic counter
+        // Match gốc TCPInPacket.cs:60-62 + TCPManager.cs:409 CheckClientDataValid.
         public void Send(int opcode, byte[]? payload)
         {
             if (_stream == null || !_running) return;
             payload ??= Array.Empty<byte>();
 
-            int dataSize = payload.Length;
-            // BitConverter on LE platforms (which Unity runs) defaults to little-endian — matches gốc.
+            // Build the body: [crc placeholder][ticks][payload]
+            int bodySize = 1 + 4 + payload.Length;
+            var body = new byte[bodySize];
+            // Reserve byte[0] for crc (filled after computing).
+            int ticks = System.Threading.Interlocked.Increment(ref _checkTicks);
+            Buffer.BlockCopy(BitConverter.GetBytes(ticks), 0, body, 1, 4);
+            if (payload.Length > 0)
+                Buffer.BlockCopy(payload, 0, body, 5, payload.Length);
+
+            // CRC over body[1..bodySize] (everything after the crc byte).
+            uint crc32 = Crc32.Compute(body, 1, bodySize - 1);
+            uint cc = crc32 % 255u;
+            uint cc2 = (uint)opcode % 255u;
+            body[0] = (byte)(cc ^ cc2);
+
+            // Header: [4B sizeField LE][2B cmdId LE]
+            //   sizeField INCLUDES the 2-byte cmdId per gốc TCPInPacket.cs:416 (subtracts 2).
+            //   So sizeField = bodySize + 2 on the wire.
+            int sizeField = bodySize + 2;
             var hdr = new byte[HEADER_SIZE];
-            Buffer.BlockCopy(BitConverter.GetBytes(dataSize), 0, hdr, 0, 4);            // Int32 LE
-            Buffer.BlockCopy(BitConverter.GetBytes((ushort)opcode), 0, hdr, 4, 2);       // UInt16 LE
+            Buffer.BlockCopy(BitConverter.GetBytes(sizeField), 0, hdr, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes((ushort)opcode), 0, hdr, 4, 2);
 
             try
             {
                 lock (_stream)
                 {
                     _stream.Write(hdr, 0, HEADER_SIZE);
-                    if (payload.Length > 0) _stream.Write(payload, 0, payload.Length);
+                    _stream.Write(body, 0, bodySize);
                     _stream.Flush();
                 }
             }
