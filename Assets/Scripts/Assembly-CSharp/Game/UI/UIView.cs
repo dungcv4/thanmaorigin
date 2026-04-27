@@ -16,6 +16,10 @@ using UnityEngine;
 using UnityEngine.UI;
 using XLua;
 
+// FIX 2026-04-27: gốc namespace `Game.UI` (per KTO_DecompiledReference/Game.UI.UIView/).
+// Lua reads via XLua reflection — class needs proper namespace.
+namespace Game.UI
+{
 public class UIView : MonoBehaviour
 {
     // Fields (offsets từ dump.cs)
@@ -47,18 +51,32 @@ public class UIView : MonoBehaviour
 
     // ========= Lifecycle =========
 
-    // VMA: 0x01c39846 — Source: UIView.c:7024
+    // VMA: 0x01c39846 — Source: UIView.c:7024 (Game_UI_UIView__Awake)
     // gốc: GetComponent<UIViewAnimationScale> + UIViewAnimationController, Init(luaClassName), call OnAwake.
+    // FIX 2026-04-27: gốc IL2CPP at LAB +0x250 builds args[2] table:
+    //   plVar4[4] = m_luaObj   (= self)
+    //   plVar4[5] = param_1    (= `this` UIView, becomes Lua param `view`)
+    //   XLua_LuaFunction__Call(m_funcOnAwake, args, 0);
+    // Lua signature: function UIWindow:OnAwake(view) → expects (self, view) — 2 args.
+    // Our previous InvokeLua only passed self → SetGroup(view.transform...) crashed because view nil.
+    // Source: 39_CommonUI/Lua/Script_Ui_Common_UIWindow.lua:3-9
     private void Awake()
     {
         m_ScaleAnim = GetComponent<UIViewAnimationScale>();
         m_animCtrl  = GetComponent<UIViewAnimationController>();
+
+        // REVERT 2026-04-27: removed FixupMissingTextComponents chế cháo. Per gốc 1-1
+        // architecture, Text/InputField/Toggle/Button MBs come from canonical prefab
+        // (KTO_FullExtract decoded full typetree). Stub-script GUIDs (Scripts/UnityEngine.UI~)
+        // are remapped to Tuanjie built-in com.unity.ugui@1.0.0 GUIDs at port time
+        // (/tmp/ui_guid_remap.json) so prefab YAML resolves natively. No runtime AddComponent.
+
         if (string.IsNullOrEmpty(m_luaClassName)) return;
         m_luaState = CppModule.GetLuaEnv();
         if (Init(m_luaClassName))
         {
-            // gốc: if Init succeeded + m_funcOnAwake exists, invoke it with self.
-            InvokeLua(m_funcOnAwake);
+            if (m_funcOnAwake != null && m_luaObj != null)
+                m_funcOnAwake.Call(m_luaObj, this);
         }
     }
 
@@ -165,16 +183,20 @@ public class UIView : MonoBehaviour
 
     // VMA: 0x01c3a59c — Source: UIView.c:7750
     // gốc: 3 branches based on which animation component exists:
-    //   (a) m_animCtrl exists → SetActive(true), animCtrl.PlayShow(callback to invoke funcCall(vecParams))
+    //   (a) m_animCtrl exists → SetActive(true), animCtrl.PlayShow(callback to invoke funcCall(caller))
     //   (b) m_ScaleAnim exists → if was Closing: ScaleAnim.FinishHideNow first; if not Opening: m_Opening=1, ScaleAnim.PlayShow
-    //   (c) Neither → SetActive(true) + invoke funcCall(vecParams)
-    public void Show(LuaFunction funcCall, object[] vecParams)
+    //   (c) Neither → SetActive(true) + invoke funcCall(caller)
+    // FIX 2026-04-27: previous signature `object[] vecParams` was wrong — gốc Lua call is
+    //   `Client.UIModule.PreloadUI(szUiName, function(self) ... end, self)` where 3rd arg is
+    //   a SINGLE caller table (Ui), not an array. XLua couldn't auto-convert a Lua table to
+    //   object[] so vecParams arrived empty/null → callback's `self` was nil.
+    //   Source: 39_CommonUI/Lua/Script_Ui_Ui.lua:309-323 (Ui:OpenWindow)
+    public void Show(LuaFunction funcCall, object caller)
     {
         Action onComplete = () =>
         {
             if (gameObject != null) gameObject.SetActive(true);
-            if (funcCall != null && vecParams != null) funcCall.Call(vecParams);
-            else if (funcCall != null) funcCall.Call();
+            if (funcCall != null) funcCall.Call(new object[] { caller });
         };
 
         if (m_animCtrl != null)
@@ -198,8 +220,7 @@ public class UIView : MonoBehaviour
         }
         // path (c): no animation, plain activate + callback
         if (gameObject != null) gameObject.SetActive(true);
-        if (funcCall != null && vecParams != null) funcCall.Call(vecParams);
-        else if (funcCall != null) funcCall.Call();
+        if (funcCall != null) funcCall.Call(new object[] { caller });
     }
 
     // VMA: 0x01c3a7eb — Source: UIView.c:7856
@@ -273,3 +294,4 @@ public class UIView : MonoBehaviour
         if (func != null && m_luaObj != null) func.Call(m_luaObj);
     }
 }
+} // namespace Game.UI

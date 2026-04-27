@@ -73,6 +73,35 @@ namespace ThanMaOrigin.Lua
             env.Global.Set<string, System.Func<int, LuaFunction, int>>("LuaRegisterTimerPoint", LuaRegisterTimerPoint);
             env.Global.Set<string, System.Func<int>>("LuaGetLuaTop", LuaGetLuaTop);
             env.Global.Set<string, System.Func<bool>>("LuaIsPayOpen", LuaIsPayOpen);
+
+            // Bind `Log` globals — gốc native libclient_scene.so binds these for Lua to print.
+            // Use Env.Global.Set (XLua direct write — bypasses Script_preload strict mode).
+            // FIX 2026-04-27: previous Action<object[]> signature was wrong — XLua doesn't
+            // auto-convert Lua varargs to object[] unless [LuaCallCSharp] wrap is generated.
+            // Lua call `Log("hi")` passed 1 arg → C# got empty array → "[LUA] " (blank).
+            // Use Action<object> for single arg (matches gốc usage `Log(s)` / `LogErr(s)`).
+            env.Global.Set<string, System.Action<object>>("Log",
+                arg => Debug.Log("[LUA] " + (arg == null ? "nil" : arg.ToString())));
+            env.Global.Set<string, System.Action<object>>("LogError",
+                arg => Debug.LogError("[LUA] " + (arg == null ? "nil" : arg.ToString())));
+            env.Global.Set<string, System.Action<object>>("LogErr",
+                arg => Debug.LogError("[LUA] " + (arg == null ? "nil" : arg.ToString())));
+            env.Global.Set<string, System.Action<object>>("LogWarning",
+                arg => Debug.LogWarning("[LUA] " + (arg == null ? "nil" : arg.ToString())));
+            env.Global.Set<string, System.Action<object>>("LogWarn",
+                arg => Debug.LogWarning("[LUA] " + (arg == null ? "nil" : arg.ToString())));
+        }
+
+        private static string JoinArgs(object[] args)
+        {
+            if (args == null || args.Length == 0) return "";
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (i > 0) sb.Append(' ');
+                sb.Append(args[i] != null ? args[i].ToString() : "nil");
+            }
+            return sb.ToString();
         }
     }
 }

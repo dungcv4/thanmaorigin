@@ -1,66 +1,63 @@
+// Class:  Game.RepresentLogic.SceneCameraController
+// Source: KTO_DecompiledReference/Game.RepresentLogic/SceneCameraController.c
+//
+// PARTIAL PORT 2026-04-27: Lua calls (Ui.SceneCameraController.X) require these statics.
+// Used by Script_Ui_Window_UILoginChannelInner.lua.txt:142-143:
+//   Ui.SceneCameraController.ClearTarget()
+//   Ui.SceneCameraController.SetGray(false)
+// Plus Ui.lua:1699 Ui.SceneCameraController.SetSize(nCameraSize)
+//
+// Methods ported 1-1 from IL2CPP (Ghidra ARM64 decompile):
+//   ClearTarget — sets _Instance.target_field to null (per VMA structure)
+//   SetGray(bool) — empty no-op (gốc body literally `return;`)
+//   SetSize(float) — adjusts camera orthographic size (Ghidra body has cmp + branches)
+//
+// DEVIATION: gốc holds singleton _Instance via DAT_035642c8 lazy-init pattern. thanmaorigin
+// uses standard FindObjectOfType / null-safe lookup. Behavior matches gốc when no Camera in
+// scene (no-op). Original side-effects (target tracking) deferred until camera-tracking
+// gameplay flows port.
+
 using UnityEngine;
 
 namespace Game.RepresentLogic
 {
-	public class SceneCameraController : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    public class SceneCameraController : MonoBehaviour
+    {
+        // gốc: SceneCameraController._Instance singleton via static DAT_035642c8.
+        // We use FindObjectOfType for now (DEVIATION: easier without static init wiring).
+        private static SceneCameraController _Instance;
+        private Transform _target;        // gốc field used by ClearTarget
+        private float _cameraSize = 5f;   // gốc field used by SetSize
 
-		1. No dll files were provided to AssetRipper.
+        private void Awake()
+        {
+            if (_Instance != null && _Instance != this) { Destroy(this); return; }
+            _Instance = this;
+        }
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
+        // VMA: Game_RepresentLogic_SceneCameraController__ClearTarget
+        // gốc body: _Instance.target = null;
+        public static void ClearTarget()
+        {
+            if (_Instance != null) _Instance._target = null;
+        }
 
-		2. Incorrect dll files were provided to AssetRipper.
+        // VMA: Game_RepresentLogic_SceneCameraController__SetGray
+        // gốc body: empty `return;` no-op.
+        public static void SetGray(bool bGray)
+        {
+            // gốc no-op. Visual-effect post-processing was likely conditionally compiled out.
+        }
 
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
-
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
-
-		3. Assembly Reconstruction has not been implemented.
-
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
-
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
-
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
-
-		5. Script Content Level 0
-
-			AssetRipper was set to not load any script information.
-
-		6. Cpp2IL failed to decompile Il2Cpp data
-
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-		7. An incorrect path was provided to AssetRipper.
-
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
-
-		*/
-	}
+        // VMA: Game_RepresentLogic_SceneCameraController__SetSize(float)
+        // gốc body: _Instance.cameraSize = param_1; if Camera ref present, apply.
+        // Used by Ui.lua:1699 to set camera distance.
+        public static void SetSize(float fSize)
+        {
+            if (_Instance == null) return;
+            _Instance._cameraSize = fSize;
+            var cam = _Instance.GetComponent<Camera>() ?? Camera.main;
+            if (cam != null && cam.orthographic) cam.orthographicSize = fSize;
+        }
+    }
 }

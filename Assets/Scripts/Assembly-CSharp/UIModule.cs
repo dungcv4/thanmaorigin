@@ -1,3 +1,4 @@
+using Game.UI;
 // Class:  UIModule
 // GUID:   1320eebfe218493bcae8457b6ad9fb3f (preserved via .meta)
 // Source: KTO_DecompiledReference/_root/UIModule.c (2891 LOC, 39 methods)
@@ -258,19 +259,19 @@ public class UIModule : MonoBehaviour
     //       go = existing.gameObject; SetUISortingOrder(go, uiName, false);
     //       UIView.Show(existing, funcCall, vecParams);
     //       if funcCall != 0: XLua.LuaBase.Dispose(funcCall);
-    public static void PreloadUIAsync(string uiName, LuaFunction funcCall, object[] vecParams)
+    public static void PreloadUIAsync(string uiName, LuaFunction funcCall, object caller)
     {
         if (string.IsNullOrEmpty(uiName)) return;
         UnRegisteAutoDestroy(uiName);
         var existing = GetUI(uiName);
         if (existing == null)
         {
-            LoadResourceAsync(uiName, funcCall, vecParams);
+            LoadResourceAsync(uiName, funcCall, caller);
         }
         else
         {
             SetUISortingOrder(existing.gameObject, uiName, false);
-            existing.Show(funcCall, vecParams);
+            existing.Show(funcCall, caller);
             funcCall?.Dispose();
         }
     }
@@ -284,7 +285,7 @@ public class UIModule : MonoBehaviour
     //     go = existing.gameObject; SetUISortingOrder(go, uiName, bFirstLoad);
     //     UIView.Show(existing, funcCall, vecParams);
     //     if funcCall != 0: XLua.LuaBase.Dispose(funcCall);
-    public static void PreloadUI(string uiName, LuaFunction funcCall, object[] vecParams)
+    public static void PreloadUI(string uiName, LuaFunction funcCall, object caller)
     {
         if (string.IsNullOrEmpty(uiName)) return;
         UnRegisteAutoDestroy(uiName);
@@ -292,12 +293,12 @@ public class UIModule : MonoBehaviour
         bool firstLoad = existing == null;
         if (firstLoad)
         {
-            LoadResource(uiName, funcCall, vecParams);
+            LoadResource(uiName, funcCall, caller);
             existing = GetUI(uiName);
         }
         if (existing == null) { Debug.LogWarning($"[UIModule.PreloadUI] {uiName} load failed"); return; }
         SetUISortingOrder(existing.gameObject, uiName, firstLoad);
-        existing.Show(funcCall, vecParams);
+        existing.Show(funcCall, caller);
         funcCall?.Dispose();
     }
 
@@ -339,7 +340,7 @@ public class UIModule : MonoBehaviour
     //     closure.path = prefabPath;
     //     callback = new OnResourceFinishEventHandler(closure.OnLoaded);
     //     ResourceModule.LoadResourceAsync(true, prefabPath, callback, 0);
-    private static void LoadResourceAsync(string uiName, LuaFunction funcCall, object[] vecParams)
+    private static void LoadResourceAsync(string uiName, LuaFunction funcCall, object caller)
     {
         var prefabPath = UI_VIEW_PATH + uiName;
         ResourceModule.LoadResourceAsync(true, prefabPath, (obj, _) =>
@@ -351,7 +352,7 @@ public class UIModule : MonoBehaviour
                 var view = inst.GetComponent<UIView>() ?? inst.AddComponent<UIView>();
                 _UIViewMap[uiName] = view;
                 SetUISortingOrder(inst, uiName, true);
-                view.Show(funcCall, vecParams);
+                view.Show(funcCall, caller);
                 funcCall?.Dispose();
             }
         }, null);
@@ -376,7 +377,7 @@ public class UIModule : MonoBehaviour
     //     if view == null: LogHelper.ERROR; Object.Destroy(instance); return false;
     //     _UIViewMap[uiName] = view;
     //     return true;
-    private static bool LoadResource(string uiName, LuaFunction funcCall, object[] vecParams)
+    private static bool LoadResource(string uiName, LuaFunction funcCall, object caller)
     {
         var prefabPath = UI_VIEW_PATH + uiName;
         var obj = ResourceModule.LoadResourceSync(prefabPath);
@@ -394,6 +395,10 @@ public class UIModule : MonoBehaviour
         _UIViewMap[uiName] = view;
         return true;
     }
+    // REVERT 2026-04-27: removed EnsureGraphicRaycasters + EnsureEventSystem chế cháo.
+    // EventSystem is added to BootScene at edit time (1-1: gốc has it via libclient_scene.so
+    // initializer; in thanmaorigin we serialize into scene). GraphicRaycaster on each canvas
+    // comes from canonical prefab (KTO_FullExtract).
 
     // VMA: 0x01cc85a9 — Source: UIModule.c:7197 (PushGOFront)
     // gốc body:

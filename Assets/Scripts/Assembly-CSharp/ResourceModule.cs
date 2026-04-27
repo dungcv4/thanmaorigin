@@ -160,7 +160,46 @@ public class ResourceModule : MonoBehaviour
         if (p.StartsWith("Assets/")) p = p.Substring(7);
         var ext = Path.GetExtension(p);
         if (!string.IsNullOrEmpty(ext)) p = p.Substring(0, p.Length - ext.Length);
-        return Resources.Load(p);
+
+        Debug.Log($"[ResourceModule.LoadResourceSync] szPath={szPath} → p={p}");
+
+        // 1. Try Resources.Load (gốc primary path)
+        var asset = Resources.Load(p);
+        if (asset != null) { Debug.Log($"[ResourceModule] Resources.Load found {p}"); return asset; }
+        Debug.Log($"[ResourceModule] Resources.Load NULL for {p}, trying editor-fallback");
+
+#if UNITY_EDITOR
+        // 2. Editor fallback: filesystem search for prefab + force-import + LoadAssetAtPath.
+        // AssetDatabase.FindAssets returns 0 for prefabs in this project (Unity asset import incomplete).
+        // Bypass via filesystem walk: find <name>.prefab anywhere in Assets/, then ImportAsset → LoadAssetAtPath.
+        var name = System.IO.Path.GetFileName(p);
+        var assetsRoot = Application.dataPath; // .../Assets
+        Debug.Log($"[ResourceModule] editor-fallback: searching '{name}.prefab' under {assetsRoot}");
+        try
+        {
+            var matches = System.IO.Directory.GetFiles(assetsRoot, name + ".prefab", System.IO.SearchOption.AllDirectories);
+            Debug.Log($"[ResourceModule] editor-fallback: found {matches.Length} matches");
+            foreach (var fullPath in matches)
+            {
+                // Convert /Users/.../Assets/game/ui/views/X.prefab → Assets/game/ui/views/X.prefab
+                var rel = "Assets" + fullPath.Substring(assetsRoot.Length);
+                UnityEditor.AssetDatabase.ImportAsset(rel, UnityEditor.ImportAssetOptions.ForceUpdate);
+                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(rel);
+                if (asset != null)
+                {
+                    Debug.Log($"[ResourceModule] editor-fallback loaded: {p} → {rel}");
+                    return asset;
+                }
+                Debug.LogWarning($"[ResourceModule] editor-fallback: ImportAsset+LoadAssetAtPath returned NULL for {rel}");
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[ResourceModule] editor-fallback EXCEPTION: {e.Message}");
+        }
+        Debug.LogWarning($"[ResourceModule] editor-fallback: no .prefab found for '{name}' under Assets/");
+#endif
+        return null;
     }
 
     // VMA: 0x0191549b — Source: ResourceModule.c:4452 (OnCollectFinish)

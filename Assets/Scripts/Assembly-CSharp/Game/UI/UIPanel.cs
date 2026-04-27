@@ -46,6 +46,12 @@ using UnityEngine;
 using UnityEngine.UI;
 using XLua;
 
+// FIX 2026-04-27: gốc namespace `Game.UI` (per KTO_DecompiledReference/Game.UI.UIPanel/).
+// Lua reads `Ui.UIPanel = typeof(CS.Game.UI.UIPanel)` (Script_Ui_Ui.lua:35) — class MUST
+// be in Game.UI namespace, otherwise CS.Game.UI.UIPanel resolves as a Lua dummy table
+// and gameObject:GetComponent(Ui.UIPanel) throws "invalid arguments".
+namespace Game.UI
+{
 public class UIPanel : MonoBehaviour
 {
 	// Fields (offsets từ dump.cs)
@@ -70,13 +76,21 @@ public class UIPanel : MonoBehaviour
 		set => m_UIPath = value;
 	}
 
-	// thanmaorigin helpers — gốc resolves child via Hash(szKey) lookup in m_ObjectList.
-	// DEVIATION: use transform.Find recursive (Phase 4 build proper hash cache).
+	// FIX 2026-04-27: gốc szKey is PATH like "imgBG/btnEnterGame" (UnityEngine.Transform.Find
+	// supports paths). Previous FindRecursive matched whole "imgBG/btnEnterGame" as a single
+	// child name, never finding it. Use Transform.Find which handles "/"-separated paths.
+	// gốc behavior: m_ObjectList is hash-cached lookup keyed by full path string.
 	private Transform FindChild(string szKey)
 	{
 		if (string.IsNullOrEmpty(szKey)) return null;
 		if (m_ObjectList.TryGetValue(szKey, out var cached) && cached != null) return cached;
-		var t = FindRecursive(transform, szKey);
+		// First try direct path lookup (handles "imgBG/btnEnterGame")
+		var t = transform.Find(szKey);
+		if (t == null)
+		{
+			// Fall back to recursive name-match (handles non-path single name in deep tree)
+			t = FindRecursive(transform, szKey);
+		}
 		if (t != null) m_ObjectList[szKey] = t;
 		return t;
 	}
@@ -991,3 +1005,4 @@ public class UIPanel : MonoBehaviour
     { /* iOS safe area adjust — defer */ }
 
 }
+} // namespace Game.UI

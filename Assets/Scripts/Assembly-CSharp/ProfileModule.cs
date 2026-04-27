@@ -18,8 +18,10 @@ using UnityEngine;
 
 public class ProfileModule : MonoBehaviour
 {
-    // ─── PORT 1-1: ProfileModule.BeginSample ───
+    // ─── PORT 1-1: ProfileModule.BeginSample (overload 1, no-arg) ───
     // VMA: 0x01bbd544 — Source: decomp_01bb.c:12109
+    // gốc has 2 BeginSample overloads — Wave A tool collapsed signatures.
+    // Hand-disambig pending: dump.cs TypeDefIndex needed for proper params.
     public long BeginSample()
     {
         // gốc: undefined8 in_RAX;
@@ -31,9 +33,11 @@ public class ProfileModule : MonoBehaviour
         throw new System.NotImplementedException("TODO: port body 1-1 from gốc");
     }
 
-    // ─── PORT 1-1: ProfileModule.BeginSample ───
+    // ─── PORT 1-1: ProfileModule.BeginSample (overload 2, name arg) ───
     // VMA: 0x01bbd57c — Source: decomp_01bb.c:12133
-    public long BeginSample()
+    // DEVIATION: Wave A tool generated identical sig to overload 1; using string param
+    // as placeholder until dump.cs read confirms gốc params (likely BeginSample(string name)).
+    public long BeginSample(string name)
     {
         // gốc: undefined8 in_RAX;
         // gốc: undefined8 uVar1;
@@ -224,3 +228,4 @@ public class ProfileModule : MonoBehaviour
         throw new System.NotImplementedException("TODO: port body 1-1 from gốc");
     }
 
+}

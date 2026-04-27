@@ -215,3 +215,4 @@ public class EffectManager : MonoBehaviour
         // → throw new System.NullReferenceException();
     }
 
+}

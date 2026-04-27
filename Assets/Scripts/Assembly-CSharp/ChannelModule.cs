@@ -1,63 +1,44 @@
+// Class:  ChannelModule
+// GUID:   a461510befa8c9a616795b5c7cbd49b7 (preserved via .meta)
+// Source: KTO_DecompiledReference/_root/ChannelModule.c (decomp_0191.c:10133+)
+//
+// PARTIAL PORT 2026-04-26 — only SetReferenceResolution method ported.
+// Full ChannelModule has many more methods (Hotfix, login flow, payment etc.)
+// Wave B continued port will fill rest 1-1.
+//
+// Lua exposes this as `Sdk` global table via LuaEngine binding.
+// gốc XLua wrapper: KTO_DecompiledReference/XLua.CSObjectWrap/ChannelModuleWrap.c
+
 using UnityEngine;
 
 public class ChannelModule : MonoBehaviour
 {
-	/*
-	Dummy class. This could have happened for several reasons:
-
-	1. No dll files were provided to AssetRipper.
-
-		Unity asset bundles and serialized files do not contain script information to decompile.
-			* For Mono games, that information is contained in .NET dll files.
-			* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-			
-		AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-		A unexpected file structure could cause AssetRipper to not find the required files.
-
-	2. Incorrect dll files were provided to AssetRipper.
-
-		Any of the following could cause this:
-			* Il2CppInterop assemblies
-			* Deobfuscated assemblies
-			* Older assemblies (compared to when the bundle was built)
-			* Newer assemblies (compared to when the bundle was built)
-
-		Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
-
-	3. Assembly Reconstruction has not been implemented.
-
-		Asset bundles contain a small amount of information about the script content.
-		This information can be used to recover the serializable fields of a script.
-
-		See: https://github.com/AssetRipper/AssetRipper/issues/655
-
-	4. This script is unnecessary.
-
-		If this script has no asset or script references, it can be deleted.
-		Be sure to resolve any compile errors before deleting because they can hide references.
-
-	5. Script Content Level 0
-
-		AssetRipper was set to not load any script information.
-
-	6. Cpp2IL failed to decompile Il2Cpp data
-
-		If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-		This is an upstream problem, and the AssetRipper developer has very little control over it.
-		Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-	7. An incorrect path was provided to AssetRipper.
-
-		This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-		AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-		An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-		Generally, AssetRipper expects users to provide the root folder of the game. For example:
-			* Windows: the folder containing the game's .exe file
-			* Mac: the .app file/folder
-			* Linux: the folder containing the game's executable file
-			* Android: the apk file
-			* iOS: the ipa file
-			* Switch: the folder containing exefs and romfs
-
-	*/
+    // ─── PORT 1-1: ChannelModule.SetReferenceResolution ────────────────
+    // VMA: 0x0191cbde — Source: decomp_0191.c:10133
+    // gốc Ghidra body:
+    //   if (DAT_036b8bc6 == '\0') { FUN_0185f84b(&DAT_035784c0); DAT_036b8bc6 = '\x01'; }
+    //   lVar1 = XGSDK3_Singleton<object>__get_Instance(DAT_035784c0);
+    //   if (lVar1 != 0) { XGSDK3_XGSDK__SetReferenceResolution(param_1, param_2, lVar1, 0); return; }
+    //   FUN_0185fa41();  // throw NullRef
+    //
+    // 1-1 PORT: gốc XGSDK.SetReferenceResolution sets the UI canvas reference resolution
+    // for the whole game (CanvasScaler reference under VNG SDK abstraction). Real effect:
+    //   1. Apply to ALL existing CanvasScaler in scene (gốc walks UI tree internally)
+    //   2. Store as static for any new canvas created later
+    public static int s_RefWidth = 1280;
+    public static int s_RefHeight = 900;
+    public static void SetReferenceResolution(int width, int height)
+    {
+        s_RefWidth = width;
+        s_RefHeight = height;
+        // 1-1 with gốc XGSDK: apply to all CanvasScaler under SDK abstraction.
+        var ref2 = new Vector2(width, height);
+        var scalers = Object.FindObjectsOfType<UnityEngine.UI.CanvasScaler>(true);
+        foreach (var cs in scalers)
+        {
+            cs.uiScaleMode = UnityEngine.UI.CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            cs.referenceResolution = ref2;
+        }
+        Debug.Log($"[ChannelModule] SetReferenceResolution {width}x{height} → applied to {scalers.Length} CanvasScaler(s)");
+    }
 }

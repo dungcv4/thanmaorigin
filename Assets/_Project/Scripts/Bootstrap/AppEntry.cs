@@ -42,13 +42,11 @@ namespace ThanMaOrigin.Bootstrap
             EnsureChild<LuaEngine>("[LuaEngine]");
             yield return null;
 
-            // 2. Bridge: TCP socket wrapper (DEVIATION)
-            var net = EnsureChild<NetworkManager>("[NetworkManager]");
-
-            // 3. Connect to GameServer (Phase 4 server stack)
-            Debug.Log("[thanmaorigin] Connecting GameServer 127.0.0.1:11001 ...");
-            bool connected = net.Connect();
-            Debug.Log($"[thanmaorigin]   connected: {connected}");
+            // 2. Bridge: TCP socket wrapper (DEVIATION) — instantiate but DO NOT auto-connect.
+            // FIX 2026-04-27: gốc Lua flow connects only in Login:ConnectGateWay (Login.lua:374
+            // calls global `ConnectGateway(szGatewayIP, nGatewayPort, szAccount, szAuthInfo)`).
+            // Auto-connect on boot was chế cháo causing "Connect failed 127.0.0.1:11001" log spam.
+            EnsureChild<NetworkManager>("[NetworkManager]");
 
             // 4. Hand off to gốc Lua boot.
             //    DoString triggers Script_Client.lua:Client:OnStartup() which drives

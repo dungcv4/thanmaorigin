@@ -18,24 +18,90 @@ using UnityEngine;
 
 public class ToolFunction : MonoBehaviour
 {
-    // ─── PORT 1-1: ToolFunction.GetDistSquare ───
-    // VMA: 0x01bb7433 — Source: decomp_01bb.c:6653
-    public float GetDistSquare()
+    // ─── PORT 1-1: ToolFunction.LoadMap ─────────────────────────────────
+    // VMA: 0x01bb7600 — Source: decomp_01bb.c:6795
+    // gốc Ghidra body:
+    //   if (DAT_036bb031 == '\0') {                    // class-init guard
+    //     FUN_0185f84b(&DAT_035642f0);
+    //     FUN_0185f84b(&DAT_03595f60);
+    //     DAT_036bb031 = '\x01';
+    //   }
+    //   if (*(int *)(DAT_035642f0 + 0xe0) == 0) { thunk_FUN_0180fcea(); }
+    //   SceneModule__LoadMap(param_1, DAT_03595f60, param_2, 0);
+    //
+    // Lua call site: Login.lua:72 → Ui.ToolFunction.LoadMap("loginbg", 0)
+    //   Expected: scene "loginbg" loads + Login:OnMapLoaded() fires on done.
+    //
+    // 1-1 PORT: actual scene load via Unity SceneManager.LoadSceneAsync.
+    //   gốc SceneModule.LoadMap is huge (decomp_01c9.c:11582+, ~120 LOC) — does:
+    //   - Class init for many DAT_xxxxxx singletons
+    //   - Resource hash lookup via FUN_0185f8db
+    //   - Async async load via Unity's native scene API (last call thunk_FUN)
+    //   We collapse to direct LoadSceneAsync — same observable behavior at Lua boundary.
+    //   DEVIATION ghi rõ: bỏ qua singleton init prep (gốc warms up ~25 DAT singletons before load);
+    //   thanmaorigin doesn't have those singletons wired so stub-skip is safe.
+    private static UnityEngine.AsyncOperation _activeMapLoad;
+    private static string _activeMapName;
+    public static void LoadMap(string mapName, int flags)
     {
-        // gốc: float fVar1;
-        // gốc: float fVar2;
+        if (string.IsNullOrEmpty(mapName)) { Debug.LogError("[ToolFunction] LoadMap: empty name"); return; }
+        Debug.Log($"[ToolFunction] LoadMap '{mapName}' flags={flags} — Async loading scene");
+        _activeMapName = mapName;
+        // LoadSceneMode.Additive: keep BootScene alive (LuaEngine etc. persist via DontDestroyOnLoad).
+        _activeMapLoad = UnityEngine.SceneManagement.SceneManager.LoadSceneAsync(
+            mapName, UnityEngine.SceneManagement.LoadSceneMode.Additive);
+        // gốc: SceneModule fires emNOTIFY_MAP_LOADED via EventNotify when async completes.
+        // Wire that here: when async done → call Lua Login:OnMapLoaded() (single subscriber for boot).
+        if (_activeMapLoad != null)
+        {
+            _activeMapLoad.completed += (op) =>
+            {
+                Debug.Log($"[ToolFunction] LoadMap '{_activeMapName}' done — firing Lua OnMapLoaded");
+                try
+                {
+                    var env = ThanMaOrigin.Lua.LuaEngine.Instance?.Env;
+                    if (env != null)
+                    {
+                        // gốc: EventNotify:Notify(EventNotify.emNOTIFY_MAP_LOADED, mapName)
+                        // For boot path Login.lua subscribes via direct OnMapLoaded — call it directly
+                        // until full EventNotify port lands.
+                        env.DoString("if Login and Login.OnMapLoaded then Login:OnMapLoaded() end", "OnMapLoaded");
+                    }
+                }
+                catch (System.Exception e) { Debug.LogError($"[ToolFunction] OnMapLoaded callback FAIL: {e.Message}"); }
+            };
+        }
+    }
+
+    // ─── PORT 1-1: ToolFunction.GetLoadMapPercent ─────────────────────
+    // VMA: 0x01bb7664 — Source: decomp_01bb.c:6817
+    // gốc body: forwards to SceneModule.GetLoadMapPercent() which reads native scene loader progress.
+    // Lua call site: Login.lua wait-loop polling for "100%".
+    // 1-1 PORT: read AsyncOperation.progress (Unity scene loader native progress) — same semantics.
+    public static float GetLoadMapPercent()
+    {
+        if (_activeMapLoad == null) return 1.0f; // no active load → treat as 100% per gốc default
+        return _activeMapLoad.progress;
+    }
+
+    // ─── PORT 1-1: ToolFunction.GetDistSquare (Vector2 overload) ───
+    // VMA: 0x01bb7433 — Source: decomp_01bb.c:6653
+    // gốc body uses *param_2 + *param_2[+0x20] → Vector2 components (x, y).
+    public float GetDistSquare(UnityEngine.Vector2 a, UnityEngine.Vector2 b)
+    {
+        // gốc: float fVar1; float fVar2;
         // gốc: fVar1 = (float)*param_2 - (float)*param_1;
         // gốc: fVar2 = (float)((ulong)*param_2 >> 0x20) - (float)((ulong)*param_1 >> 0x20);
         // gốc: return fVar1 * fVar1 + fVar2 * fVar2;
         throw new System.NotImplementedException("TODO: port body 1-1 from gốc");
     }
 
-    // ─── PORT 1-1: ToolFunction.GetDistSquare ───
+    // ─── PORT 1-1: ToolFunction.GetDistSquare (Vector3 overload) ───
     // VMA: 0x01bb7446 — Source: decomp_01bb.c:6671
-    public float GetDistSquare()
+    // DEVIATION: Wave A tool collapsed both overloads to same sig; differentiating by Vector3.
+    public float GetDistSquare(UnityEngine.Vector3 a, UnityEngine.Vector3 b)
     {
-        // gốc: float fVar1;
-        // gốc: float fVar2;
+        // gốc: float fVar1; float fVar2;
         // gốc: fVar1 = (float)*param_2 - (float)*param_1;
         // gốc: fVar2 = (float)((ulong)*param_2 >> 0x20) - (float)((ulong)*param_1 >> 0x20);
         // gốc: return fVar1 * fVar1 + fVar2 * fVar2;
@@ -121,20 +187,9 @@ public class ToolFunction : MonoBehaviour
         // → throw new System.NullReferenceException();
     }
 
-    // ─── PORT 1-1: ToolFunction.LoadMap ───
-    // VMA: 0x01bb7600 — Source: decomp_01bb.c:6795
-    public void LoadMap(long param_1, int param_2)
-    {
-        // gốc: if (*(int *)(DAT_035642f0 + 0xe0) == 0) {
-        // gốc: }
-        // gốc: SceneModule__LoadMap(param_1,DAT_03595f60,param_2,0);
-        // → SceneModule.LoadMap(param_1,DAT_03595f60,param_2,0);
-        // gốc: return;
-    }
-
-    // ─── PORT 1-1: ToolFunction.GetLoadMapPercent ───
-    // VMA: 0x01bb7664 — Source: decomp_01bb.c:6817
-    public void GetLoadMapPercent()
+    // (removed duplicate auto-generated LoadMap stub — real port at top of class)
+    // (removed duplicate auto-generated GetLoadMapPercent stub — real port at top of class)
+    private void _DELETED_GetLoadMapPercent_old()
     {
         // gốc: char cVar1;
         // gốc: long lVar2;
@@ -453,7 +508,8 @@ public class ToolFunction : MonoBehaviour
 
     // ─── PORT 1-1: ToolFunction.LogDirInfo ───
     // VMA: 0x01bb8232 — Source: decomp_01bb.c:7190
-    public long * LogDirInfo()
+    // DEVIATION: gốc returns long* (DirectoryInfo*) — translated to managed DirectoryInfo (C# can't return raw pointer without unsafe).
+    public System.IO.DirectoryInfo LogDirInfo()
     {
         // gốc: char cVar1;
         // gốc: undefined8 uVar2;
@@ -538,3 +594,4 @@ public class ToolFunction : MonoBehaviour
         throw new System.NotImplementedException("TODO: port body 1-1 from gốc");
     }
 
+}

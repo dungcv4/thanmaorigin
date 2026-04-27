@@ -1,57 +1,83 @@
 // Class:  HttpModule
 // GUID:   a5c57c3221a24034190fe96f8d74c995 (preserved via .meta)
-// Source: KTO_DecompiledReference/_root/HttpModule.c (2 methods, 104 LOC Ghidra)
-// Address range: 0x01a72118 — 0x01a72170
-
-// AUTO-GENERATED template — REVIEW + HAND-FIX before commit.
-// gốc Ghidra body lines preserved as // gốc: comments. Translate each line 1-1.
+// Source: KTO_DecompiledReference/_root/HttpModule.c (2 methods)
 //
-// TODO REVIEW CHECKLIST:
-//   1. Verify field offsets match dump.cs (re-check class block for exact types)
-//   2. Translate each `// gốc:` line to working C#
-//   3. Test compile + smoke test boot
-//   4. Remove TODO markers when done; commit per pattern Re-port <X> 1-1 from Ghidra
+// 1-1 PORT 2026-04-27 (minimal): gốc Get(url, callback) does HTTP GET via
+// CoroutineManager.StartCor(HttpGet(url, callback)) where HttpGet builds an
+// IEnumerator state object. Lua call: Client.HttpModule.Get(szUrl, funcCallback).
+// Used by Script_ClientBulletin_ClientBulletin.lua:174 for bulletin fetch.
+//
+// thanmaorigin uses UnityWebRequest as 1-1 equivalent of gốc IEnumerator pattern.
+// DEVIATION: gốc CoroutineManager.StartCor not yet ported → use MonoBehaviour.StartCoroutine
+// from a singleton runner. Both produce identical end-result: callback invoked with response.
 
 using System;
-using System.Collections.Generic;
+using System.Collections;
 using UnityEngine;
+using UnityEngine.Networking;
+using XLua;
 
 public class HttpModule : MonoBehaviour
 {
-    // ─── PORT 1-1: HttpModule.Get ───
-    // VMA: 0x01a72118 — Source: decomp_01a7.c:2763
-    public void Get(long param_1, long param_2)
+    private static HttpModule _Instance;
+
+    private void Awake()
     {
-        // gốc: undefined8 uVar1;
-        // gốc: if (DAT_036b9b32 == '\0') {
-        // gốc: FUN_0185f84b(&DAT_035619e8);
-        // gốc: DAT_036b9b32 = '\x01';
-        // gốc: }
-        // gốc: if (*(int *)(DAT_035619e8 + 0xe0) == 0) {
-        // gốc: }
-        // gốc: uVar1 = HttpModule__HttpGet(param_1,param_2);
-        // → uVar1 = HttpModule.HttpGet(param_1,param_2);
-        // gốc: CoroutineManager__StartCor(uVar1);
-        // → CoroutineManager.StartCor(uVar1);
-        // gốc: return;
+        if (_Instance != null && _Instance != this) { Destroy(this); return; }
+        _Instance = this;
     }
 
-    // ─── PORT 1-1: HttpModule.HttpGet ───
-    // VMA: 0x01a72170 — Source: decomp_01a7.c:2787
-    public long HttpGet(long param_1, long param_2)
+    private static HttpModule Ensure()
     {
-        // gốc: long lVar1;
-        // gốc: if (DAT_036b9b33 == '\0') {
-        // gốc: FUN_0185f84b(&DAT_035674a8);
-        // gốc: DAT_036b9b33 = '\x01';
-        // gốc: }
-        // gốc: lVar1 = thunk_FUN_01851e62(DAT_035674a8);
-        // gốc: System_Object___ctor(lVar1,0);
-        // → System_Object_.ctor(lVar1,0);
-        // gốc: *(undefined4 *)(lVar1 + 0x10) = 0;
-        // gốc: *(undefined8 *)(lVar1 + 0x20) = param_1;
-        // gốc: *(undefined8 *)(lVar1 + 0x28) = param_2;
-        // gốc: return lVar1;
-        throw new System.NotImplementedException("TODO: port body 1-1 from gốc");
+        if (_Instance != null) return _Instance;
+        var go = new GameObject("[HttpModule]");
+        DontDestroyOnLoad(go);
+        return go.AddComponent<HttpModule>();
     }
 
+    // VMA: 0x01a72118 — Source: KTO_DecompiledReference/_root/HttpModule.c HttpModule__Get
+    // gốc body: var iter = HttpModule.HttpGet(url, callback); CoroutineManager.StartCor(iter);
+    // 1-1: build coroutine + run on persistent runner.
+    public static void Get(string szUrl, LuaFunction funcCallback)
+    {
+        var runner = Ensure();
+        runner.StartCoroutine(runner.HttpGetCoroutine(szUrl, funcCallback));
+    }
+
+    // VMA: 0x01a72170 — Source: HttpModule.c HttpModule__HttpGet
+    // gốc body: returns IEnumerator state object (UnityWebRequest send + yield + invoke callback).
+    private IEnumerator HttpGetCoroutine(string szUrl, LuaFunction funcCallback)
+    {
+        if (string.IsNullOrEmpty(szUrl))
+        {
+            // Empty URL: invoke callback with empty content, matches gốc UnityWebRequest fail path.
+            funcCallback?.Call("", "no_url");
+            yield break;
+        }
+
+        using (var req = UnityWebRequest.Get(szUrl))
+        {
+            req.timeout = 10;
+            yield return req.SendWebRequest();
+
+            string content = "";
+            string error = null;
+            if (req.result == UnityWebRequest.Result.Success)
+            {
+                content = req.downloadHandler != null ? req.downloadHandler.text : "";
+            }
+            else
+            {
+                error = req.error;
+            }
+            try
+            {
+                if (funcCallback != null) funcCallback.Call(content, error);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[HttpModule.Get] callback throw: {e.Message}");
+            }
+        }
+    }
+}

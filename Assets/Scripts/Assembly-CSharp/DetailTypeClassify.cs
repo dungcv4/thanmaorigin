@@ -1,0 +1,12 @@
+// AUTO-GENERATED stub from KTO_FullExtract/script_map.json
+// Class: DetailTypeClassify
+// GUID: 8ede0af48b919421595218d228102a29
+// TODO: Phase 3+ port body 1-1 from KTO_DecompiledReference/
+//   File hint: /Users/vsf-user-l/Documents/Test/alo/KiemTheUI/Assets/Scripts/Game/Item/DetailTypeClassify.cs.meta
+
+using UnityEngine;
+
+public class DetailTypeClassify : MonoBehaviour
+{
+}
+

@@ -1,63 +1,71 @@
+// Class:  QualityModule
+// Source: KTO_DecompiledReference/_root/QualityModule.c (decomp_01bc.c:1007+)
+//
+// PARTIAL PORT 2026-04-26 — only SetLimitMissileCount method ported (Wave B blocker).
+// Full QualityModule has many more methods (SetLimitX for various FX/quality).
+// Wave B continued port will fill rest 1-1.
+//
+// Lua exposes via: Client.QualityModule = luanet.import_type("QualityModule")
+//                  → CS.QualityModule (XLua bridge) → static methods callable.
+
 using UnityEngine;
 
 public class QualityModule : MonoBehaviour
 {
-	/*
-	Dummy class. This could have happened for several reasons:
+    // gốc field at +0x9d per Ghidra: m_bLimitMissileCount byte flag.
+    private static byte m_bLimitMissileCount;
 
-	1. No dll files were provided to AssetRipper.
+    // ─── PORT 1-1: QualityModule.SetLimitMissileCount ──────────────────
+    // VMA: 0x01bc1c31 — Source: decomp_01bc.c:1007
+    // gốc Ghidra body:
+    //   if (DAT_036bb0c2 == '\0') { FUN_0185f84b(&DAT_03563b28); DAT_036bb0c2 = '\x01'; }
+    //   if (*(int *)(DAT_03563b28 + 0xe0) == 0) { thunk_FUN_0180fcea(); }
+    //   lVar2 = *(long *)(DAT_03563b28 + 0xb8);                                             // singleton instance
+    //   lVar1 = *(long *)(lVar2 + 0x220);                                                   // OnLimitMissileCountChanged delegate
+    //   if (lVar1 != 0) {
+    //     (**(code **)(lVar1 + 0x18))(*(long *)(lVar1 + 0x40), param_1, *(long *)(lVar1 + 0x28));  // invoke delegate
+    //     return;
+    //   }
+    //   *(byte *)(lVar2 + 0x9d) = param_1;                                                  // else store flag
+    //
+    // 1-1 PORT: store flag — when no subscriber registered (boot path), gốc only writes
+    // the field at +0x9d. We have public OnLimitMissileCountChanged Action wired same as gốc:
+    // - if subscriber exists → invoke
+    // - else → just store the flag
+    // This matches gốc behavior exactly.
+    public static System.Action<bool> OnLimitMissileCountChanged;
+    public static void SetLimitMissileCount(bool b)
+    {
+        if (OnLimitMissileCountChanged != null)
+        {
+            OnLimitMissileCountChanged.Invoke(b);
+            return;
+        }
+        m_bLimitMissileCount = (byte)(b ? 1 : 0);
+    }
 
-		Unity asset bundles and serialized files do not contain script information to decompile.
-			* For Mono games, that information is contained in .NET dll files.
-			* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-			
-		AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-		A unexpected file structure could cause AssetRipper to not find the required files.
+    // VMA: QualityModule__StepClearMemory — Source: KTO_DecompiledReference/_root/QualityModule.c (decomp_01bb.c:13268)
+    // gốc body: invoke 6 subsystem cleanup callbacks (HotObject, ItemFactory, NpcFactory, MessageBox, etc).
+    // DEVIATION: those subsystems not yet ported. Use Resources.UnloadUnusedAssets() as
+    // 1-step memory cleanup approximation. Lua call: Client:GC() → StepClearMemory().
+    public static void StepClearMemory()
+    {
+        Resources.UnloadUnusedAssets();
+    }
 
-	2. Incorrect dll files were provided to AssetRipper.
+    // VMA: QualityModule__ClearMemory — Source: KTO_DecompiledReference/_root/QualityModule.c (decomp_01bb.c:13333)
+    // gốc body: more aggressive cleanup — same 6 callbacks + GC.Collect-equivalent.
+    // DEVIATION: Resources.UnloadUnusedAssets + System.GC.Collect (best 1-1 approximation
+    // until subsystem cleanup callbacks port). Lua call: Client:DeepGC() → ClearMemory().
+    public static void ClearMemory()
+    {
+        Resources.UnloadUnusedAssets();
+        System.GC.Collect();
+    }
 
-		Any of the following could cause this:
-			* Il2CppInterop assemblies
-			* Deobfuscated assemblies
-			* Older assemblies (compared to when the bundle was built)
-			* Newer assemblies (compared to when the bundle was built)
-
-		Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
-
-	3. Assembly Reconstruction has not been implemented.
-
-		Asset bundles contain a small amount of information about the script content.
-		This information can be used to recover the serializable fields of a script.
-
-		See: https://github.com/AssetRipper/AssetRipper/issues/655
-
-	4. This script is unnecessary.
-
-		If this script has no asset or script references, it can be deleted.
-		Be sure to resolve any compile errors before deleting because they can hide references.
-
-	5. Script Content Level 0
-
-		AssetRipper was set to not load any script information.
-
-	6. Cpp2IL failed to decompile Il2Cpp data
-
-		If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-		This is an upstream problem, and the AssetRipper developer has very little control over it.
-		Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-	7. An incorrect path was provided to AssetRipper.
-
-		This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-		AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-		An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-		Generally, AssetRipper expects users to provide the root folder of the game. For example:
-			* Windows: the folder containing the game's .exe file
-			* Mac: the .app file/folder
-			* Linux: the folder containing the game's executable file
-			* Android: the apk file
-			* iOS: the ipa file
-			* Switch: the folder containing exefs and romfs
-
-	*/
+    // gốc fields (per Ghidra Awake): m_DeviceModel, m_UniqueIdentifier, m_MacAddress
+    // Used by Login.lua:GetPhoneBasicInfo (line 380-384).
+    public static string DeviceModel = SystemInfo.deviceModel;
+    public static string UniqueIdentifier = SystemInfo.deviceUniqueIdentifier;
+    public static string MacAddress = ""; // gốc reads via Android.Net.NetworkInfo; macOS/editor stub.
 }
