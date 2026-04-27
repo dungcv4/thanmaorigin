@@ -57,6 +57,22 @@ namespace ThanMaOrigin.Network
                 _pendingAccount = account;
                 _pendingAuth = authInfo;
             }
+
+            // Fire EventNotify.emNOTIFY_GATEWAY_CONNECT(nResult) per gốc Lua subscriber pattern.
+            // Source: KiemTheOrigin_DeepExtract/01_Login/Lua/Login.lua + Script_Ui_Window_UILoginChannelInner.lua
+            //   Lua subscribes via tbWnd:NotifyEvents() → EventNotify.emNOTIFY_GATEWAY_CONNECT (=1).
+            //   Handler tbWnd:GatewayConnectResult(nResult):
+            //     if 1 ~= nResult then
+            //       if Login:IsNeedRetryConnectGateway() then Login:RetryOtherGateWayAddr(); return end
+            //       Ui:OpenWindow("UIMessageBoxBig", i18n.Get("Connect2ServerFailed"))
+            //     end
+            // gốc IL2CPP: XGatewayClient::ConnectOuter completes → fires CppApi.OnEvent(emNOTIFY_GATEWAY_CONNECT, code)
+            // 1-1 PORT: bridge via LuaEventBridge.FireByLuaEnumName.
+            //   nResult convention: 1=success, 0=fail. UILoadingTips will close on success or
+            //   replaced by Connect2ServerFailed UIMessageBoxBig on fail.
+            int nResult = ok ? 1 : 0;
+            ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName("emNOTIFY_GATEWAY_CONNECT", nResult);
+
             return ok;
         }
 
