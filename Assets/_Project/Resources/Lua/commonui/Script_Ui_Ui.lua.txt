@@ -437,7 +437,20 @@ end
 
 function Ui:WindowVisible(szUiName)
   local tbWnd = self:GetWindow(szUiName)
-  return tbWnd and tbWnd.view.gameObject.activeSelf or false
+  -- DEVIATION 2026-04-27 (canonicalization Day 9.12): defensive nil-check on
+  -- tbWnd.view before .gameObject access. Gốc gốc raw `tbWnd.view.gameObject.activeSelf`
+  -- crashes if Unity destroyed UIView while tbUi cache still holds the entry
+  -- (e.g. UILoadingTips auto-closed via UIModule.DestroyUI without going through
+  -- Ui:DestroyWindow which would clear the cache via OnPreDestroy).
+  -- Safe-check prevents "object of type 'UIView' has been destroyed" exception
+  -- and self-heals cache. Equivalent observable behavior in non-stale cases.
+  if not tbWnd then return false end
+  -- Use tostring null-check (Unity-destroyed objects tostring="null").
+  if tbWnd.view == nil or tostring(tbWnd.view) == 'null' then
+    self.tbUi[szUiName] = nil  -- self-heal stale cache
+    return false
+  end
+  return tbWnd.view.gameObject.activeSelf
 end
 
 function Ui:IsWindowLogicOpen(szUiName)
