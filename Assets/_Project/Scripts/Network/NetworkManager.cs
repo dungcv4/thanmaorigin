@@ -9,10 +9,17 @@ namespace ThanMaOrigin.Network
     {
         public static NetworkManager Instance { get; private set; } = null!;
 
-        // Gateway endpoints (gốc Script_ClientDef.lua:5-9 had 61.28.227.* IPs).
+        // World/Game server endpoints (used by TMSKSocket post-handshake).
         // DEVIATION: redirect to thanmaorigin LocalServer (GameServer_NET8/AppConfig.xml port 3001).
         public string ServerHost = "127.0.0.1";
         public int ServerPort = 3001;
+
+        // Gateway endpoints — separate process (Python emulator at alo/gateway_server/).
+        // gốc Script_ClientDef.lua:5-9 had 61.28.227.* gateway IPs. We redirect to the
+        // Python gateway emulator that we control. Override in inspector or via
+        // ConnectGateway() args (Lua passes ip/port from Login:GetGatewayAddr()).
+        public string GatewayHostDefault = "127.0.0.1";
+        public int GatewayPortDefault = 3000;
 
         private TMSKSocket _sock = new TMSKSocket();
 
@@ -40,39 +47,35 @@ namespace ThanMaOrigin.Network
         // 1-1 PORT: connect socket + queue login CMD with credentials.
         public bool ConnectGateway(string ip, int port, string account, string authInfo)
         {
-            ServerHost = string.IsNullOrEmpty(ip) ? "127.0.0.1" : ip;
-            // Port 3001 — Source: memory [KTO full pipeline] (verified 2026-04-17)
-            //   Client → GameServer:3001 → GameDBServer:23001 → MySQL AWS
-            // GameServer reads port from CLI XML attribute Socket.port at Program.cs:1595.
-            // Default 3001 used when Lua doesn't supply explicit port (dev mode).
-            // Confirmed by user 2026-04-27: "3001 nhé".
-            ServerPort = port > 0 ? port : 3001;
-            UnityEngine.Debug.Log($"[NetworkManager.ConnectGateway] {ServerHost}:{ServerPort} account={account}");
-            bool ok = _sock.Connect(ServerHost, ServerPort);
-            if (ok)
-            {
-                // Send login CMD with account+auth. CMD ID matches gốc protocol.
-                // Per memory `reference_kto_full_pipeline`: CMD_LOGIN id resolves at server bridge.
-                // For now, store credentials; CMD send happens via Lua after Login response.
-                _pendingAccount = account;
-                _pendingAuth = authInfo;
-            }
+            // Day 9.14 (2026-04-27): split gateway from world server.
+            //   gốc 3-tier architecture: Client → Gateway → World → Game.
+            //   We have GameServer:3001 only — Python gateway emulator (alo/gateway_server/)
+            //   stands in for Tencent Gateway tier on port 3000.
+            //   gốc native XGatewayClient::ConnectOuter @0x418c00 (libclient_scene.so) is
+            //   replaced by GatewayHandshake.SendRequest which speaks our Python gateway protocol.
+            // ip/port comes from Login:GetGatewayAddr() in Lua. In dev mode the Lua server list
+            //   may give the same IP as world server — we redirect to gateway port unless caller
+            //   explicitly overrides.
+            string gwHost = string.IsNullOrEmpty(ip) ? GatewayHostDefault : ip;
+            int gwPort = port > 0 ? port : GatewayPortDefault;
+            // If Lua passed port matching world server (3001), assume it didn't know about
+            // the dev gateway split and redirect to our gateway port.
+            if (gwPort == 3001) gwPort = GatewayPortDefault;
 
-            // Fire EventNotify.emNOTIFY_GATEWAY_CONNECT(nResult) per gốc Lua subscriber pattern.
-            // Source: KiemTheOrigin_DeepExtract/01_Login/Lua/Login.lua + Script_Ui_Window_UILoginChannelInner.lua
-            //   Lua subscribes via tbWnd:NotifyEvents() → EventNotify.emNOTIFY_GATEWAY_CONNECT (=1).
-            //   Handler tbWnd:GatewayConnectResult(nResult):
-            //     if 1 ~= nResult then
-            //       if Login:IsNeedRetryConnectGateway() then Login:RetryOtherGateWayAddr(); return end
-            //       Ui:OpenWindow("UIMessageBoxBig", i18n.Get("Connect2ServerFailed"))
-            //     end
-            // gốc IL2CPP: XGatewayClient::ConnectOuter completes → fires CppApi.OnEvent(emNOTIFY_GATEWAY_CONNECT, code)
-            // 1-1 PORT: bridge via LuaEventBridge.FireByLuaEnumName.
-            //   nResult convention: 1=success, 0=fail. UILoadingTips will close on success or
-            //   replaced by Connect2ServerFailed UIMessageBoxBig on fail.
-            int nResult = ok ? 1 : 0;
-            ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName("emNOTIFY_GATEWAY_CONNECT", nResult);
+            UnityEngine.Debug.Log($"[NetworkManager.ConnectGateway] gateway={gwHost}:{gwPort} account={account}");
 
+            _pendingAccount = account ?? "";
+            _pendingAuth = authInfo ?? "";
+
+            // Fire emNOTIFY_GATEWAY_CONNECT(1) immediately — gốc semantic for "TCP attempt
+            // initiated successfully". Real handshake result will fire as emNOTIFY_GATEWAY_HANDED.
+            // If GatewayHandshake.SendRequest can't even open TCP, IT will fire HANDED with
+            // an error code so the user sees a clear UIMessageBoxBig instead of a hang.
+            // Source: gốc Lua tbWnd:GatewayConnectResult(nResult) (UILoginChannelInner.lua:163-173).
+            ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName("emNOTIFY_GATEWAY_CONNECT", 1);
+
+            bool ok = ThanMaOrigin.Network.GatewayHandshake.SendRequest(
+                gwHost, gwPort, _pendingAccount, _pendingAuth);
             return ok;
         }
 
@@ -126,11 +129,14 @@ namespace ThanMaOrigin.Network
             {
                 CmdRegistry.OnPacketReceived(pkt.opcode, pkt.payload);
             }
+            // Drain Gateway socket inbound + fire Lua events on main thread
+            ThanMaOrigin.Network.GatewayHandshake.Tick();
         }
 
         void OnDestroy()
         {
             CmdRegistry.OnSendCmd -= OnSendCmd;
+            ThanMaOrigin.Network.GatewayHandshake.Close();
             _sock.Close();
             if (Instance == this) Instance = null!;
         }

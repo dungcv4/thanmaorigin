@@ -81,38 +81,66 @@ namespace ThanMaOrigin.Lua.Native
         }
 
         // VMA: 0x236adc  Source: functions/00236adc_LuaGlobalScriptNameSpace17LuaConnectGatewayER10XLuaScript.asm
-        // gốc body in 00236adc_LuaGlobalScriptNameSpace17LuaConnectGatewayER10XLuaScript.asm (140 bytes ARM64)
+        // gốc body extracts (ip, port, account, authInfo) from Lua stack then calls
+        //   XGatewayClient::ConnectOuter(ip, port, account, authInfo) @ 0x418c00.
+        // 1-1 PORT routes to NetworkManager.ConnectGateway → spins up Python gateway connection.
         public object ConnectGateway(params object[] args)
         {
-            // TODO: port body from 00236adc_LuaGlobalScriptNameSpace17LuaConnectGatewayER10XLuaScript.asm (lazy — fill when called)
-            UnityEngine.Debug.LogWarning($"[KGlobalLua.ConnectGateway] not yet ported (gốc 0x236adc)");
-            return null;
+            string ip = args.Length > 0 ? (args[0]?.ToString() ?? "") : "";
+            int port = (args.Length > 1 && args[1] != null && int.TryParse(args[1].ToString(), out var p)) ? p : 0;
+            string account = args.Length > 2 ? (args[2]?.ToString() ?? "") : "";
+            string authInfo = args.Length > 3 ? (args[3]?.ToString() ?? "") : "";
+            var nm = ThanMaOrigin.Network.NetworkManager.Instance;
+            if (nm == null)
+            {
+                UnityEngine.Debug.LogError("[KGlobalLua.ConnectGateway] NetworkManager.Instance == null");
+                return false;
+            }
+            return nm.ConnectGateway(ip, port, account, authInfo);
         }
 
         // VMA: 0x236b68  Source: functions/00236b68_LuaGlobalScriptNameSpace21LuaConnectWorldServerER10XLuaScript.asm
-        // gốc body in 00236b68_LuaGlobalScriptNameSpace21LuaConnectWorldServerER10XLuaScript.asm (92 bytes ARM64)
+        // gốc body extracts (addr, port) from Lua stack then calls
+        //   Network::ConnectWorldServer(addr, port) @ 0x4191d0 — closes current socket
+        //   if any, opens new TCP to (addr, port).
+        // Called by Lua Login:LoginServerRsp(addr, port) (Login.lua:413) after
+        // gateway responds with world server endpoint.
         public object ConnectWorldServer(params object[] args)
         {
-            // TODO: port body from 00236b68_LuaGlobalScriptNameSpace21LuaConnectWorldServerER10XLuaScript.asm (lazy — fill when called)
-            UnityEngine.Debug.LogWarning($"[KGlobalLua.ConnectWorldServer] not yet ported (gốc 0x236b68)");
-            return null;
+            string addr = args.Length > 0 ? (args[0]?.ToString() ?? "") : "";
+            int port = (args.Length > 1 && args[1] != null && int.TryParse(args[1].ToString(), out var p)) ? p : 0;
+            var nm = ThanMaOrigin.Network.NetworkManager.Instance;
+            if (nm == null)
+            {
+                UnityEngine.Debug.LogError("[KGlobalLua.ConnectWorldServer] NetworkManager.Instance == null");
+                return false;
+            }
+            return nm.ConnectWorldServer(addr, port);
         }
 
         // VMA: 0x236bc4  Source: functions/00236bc4_LuaGlobalScriptNameSpace31LuaSetWorldServerConnectTimeoutER10XLuaScript.asm
-        // gốc body in 00236bc4_LuaGlobalScriptNameSpace31LuaSetWorldServerConnectTimeoutER10XLuaScript.asm (60 bytes ARM64)
+        // gốc body stores timeout int on Network instance. Called by Login.lua:414
+        //   SetWorldServerConnectTimeout(100).
         public object SetWorldServerConnectTimeout(params object[] args)
         {
-            // TODO: port body from 00236bc4_LuaGlobalScriptNameSpace31LuaSetWorldServerConnectTimeoutER10XLuaScript.asm (lazy — fill when called)
-            UnityEngine.Debug.LogWarning($"[KGlobalLua.SetWorldServerConnectTimeout] not yet ported (gốc 0x236bc4)");
+            int sec = (args.Length > 0 && args[0] != null && int.TryParse(args[0].ToString(), out var s)) ? s : 100;
+            var nm = ThanMaOrigin.Network.NetworkManager.Instance;
+            if (nm != null) nm.SetWorldServerConnectTimeout(sec);
             return null;
         }
 
         // VMA: 0x236c00  Source: functions/00236c00_LuaGlobalScriptNameSpace16LuaConnectServerER10XLuaScript.asm
-        // gốc body in 00236c00_LuaGlobalScriptNameSpace16LuaConnectServerER10XLuaScript.asm (60 bytes ARM64)
+        // gốc body extracts serverId int from Lua stack then calls
+        //   XGatewayClient::DoLoginServerRequest(serverId) which sends a server-pick packet
+        //   to gateway. Gateway replies via OnLoginServerRespond @0x232d9c (ENCRYPTED) with
+        //   the world server addr+port.
+        // 1-1 PORT routes through GatewayHandshake.RequestLoginServer(serverId).
+        // The gateway response will fire Lua Login:LoginServerRsp(addr, port) automatically
+        // (see GatewayHandshake.DispatchResponse RSP_LOGIN_SERVER branch).
         public object ConnectServer(params object[] args)
         {
-            // TODO: port body from 00236c00_LuaGlobalScriptNameSpace16LuaConnectServerER10XLuaScript.asm (lazy — fill when called)
-            UnityEngine.Debug.LogWarning($"[KGlobalLua.ConnectServer] not yet ported (gốc 0x236c00)");
+            int serverId = (args.Length > 0 && args[0] != null && int.TryParse(args[0].ToString(), out var s)) ? s : 0;
+            ThanMaOrigin.Network.GatewayHandshake.RequestLoginServer(serverId);
             return null;
         }
 
@@ -243,11 +271,13 @@ namespace ThanMaOrigin.Lua.Native
         }
 
         // VMA: 0x237514  Source: functions/00237514_LuaGlobalScriptNameSpace20LuaRequestServerListER10XLuaScript.asm
-        // gốc body in 00237514_LuaGlobalScriptNameSpace20LuaRequestServerListER10XLuaScript.asm (36 bytes ARM64)
+        // gốc body (36 bytes ARM64) calls XGatewayClient::DoQueryMasterRequest @0x2345b0 to ask
+        // gateway for the server zone list. Reply OnGetServerListRespond @0x232f0c (ENCRYPTED)
+        // would have parsed it; we replace with our own gateway protocol.
+        // 1-1 PORT routes through GatewayHandshake.RequestServerList → REQ_GET_SERVER_LIST.
         public object RequestServerList(params object[] args)
         {
-            // TODO: port body from 00237514_LuaGlobalScriptNameSpace20LuaRequestServerListER10XLuaScript.asm (lazy — fill when called)
-            UnityEngine.Debug.LogWarning($"[KGlobalLua.RequestServerList] not yet ported (gốc 0x237514)");
+            ThanMaOrigin.Network.GatewayHandshake.RequestServerList();
             return null;
         }
 

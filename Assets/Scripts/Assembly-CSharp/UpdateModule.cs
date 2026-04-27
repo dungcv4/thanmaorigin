@@ -1,7 +1,35 @@
+using System;
 using UnityEngine;
 
 public class UpdateModule : MonoBehaviour
 {
+	// Source: gốc native UpdateModule (libclient_scene.so) exposed by
+	//   `Client.UpdateModule = luanet.import_type("UpdateModule")` in Script_Client.lua:4.
+	// Lua UILoginServer.lua:100 calls `Client.UpdateModule.Lua2CSValidateVersion(cb)` to
+	//   validate game version against CDN before connecting to world server.
+	// AssetRipper extracted this MonoBehaviour as empty body — gốc methods are missing.
+	// 1-1 PORT: provide static methods Lua expects so XLua's type wrapper dispatches to them.
+	//
+	// DEVIATION 2026-04-27: in dev mode we skip the actual CDN check (no patch server) and
+	//   immediately invoke the callback with `true`. Production game does an HTTP poll
+	//   against patch CDN, gates login if a forced update is required.
+
+	public static void Lua2CSValidateVersion(Action<bool> cb)
+	{
+		Debug.Log("[UpdateModule.Lua2CSValidateVersion] DEVIATION dev-stub -> cb(true) (gốc would CDN-check)");
+		try { cb?.Invoke(true); }
+		catch (Exception e) { Debug.LogError($"[UpdateModule.Lua2CSValidateVersion] cb exception: {e.Message}"); }
+	}
+
+	// Lua may also pass an XLua LuaFunction directly; XLua marshals it to Action<bool>.
+	// Overload with object-typed param to catch any Lua-callable type.
+	public static void Lua2CSValidateVersion(XLua.LuaFunction cb)
+	{
+		Debug.Log("[UpdateModule.Lua2CSValidateVersion(LuaFunction)] DEVIATION dev-stub -> cb(true)");
+		try { cb?.Call(true); }
+		catch (Exception e) { Debug.LogError($"[UpdateModule.Lua2CSValidateVersion] LuaFunction exception: {e.Message}"); }
+	}
+
 	/*
 	Dummy class. This could have happened for several reasons:
 

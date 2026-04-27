@@ -114,6 +114,115 @@ namespace ThanMaOrigin.Lua
                     net.SetWorldServerConnectTimeout(timeout);
                 });
 
+            // ─── RequestServerList global function ───────────────────────────
+            // VMA: 0x237514 — Source: KTO_LibClientScene_Decompiled/functions/00237514_LuaGlobalScriptNameSpace20LuaRequestServerListER10XLuaScript.asm
+            // gốc body (36 bytes ARM64): calls XGatewayClient::DoQueryMasterRequest @0x2345b0.
+            // Called by UILoginServer.lua:191 RequestServerList() in tbWnd:OnOpen.
+            // 1-1 PORT routes to GatewayHandshake.RequestServerList (REQ_GET_SERVER_LIST opcode).
+            Env.Global.Set<string, System.Action>("RequestServerList",
+                () => ThanMaOrigin.Network.GatewayHandshake.RequestServerList());
+
+            // ─── GetServerList global function ───────────────────────────────
+            // Lua UILoginServer.lua:328 calls `self.tbSerList = GetServerList()` to fetch
+            // the server zone list as a Lua-table array. Each entry must have:
+            //   { dwServerId, dwIndex, szName, nType, szAddr (optional), nPort (optional) }
+            // gốc native binding pulls from XGatewayClient cached server list. We pull from
+            // GatewayHandshake.CachedServerList (set by RSP_GET_SERVER_LIST handler).
+            // Login.SERVER_TYPE_RECOMMEND = 1, _NEW = 2, _NORMAL = 3, _OFFLINE = 4 (per Lua).
+            //   We map our config status → Login.SERVER_TYPE_NORMAL (3) by default; status==0 → OFFLINE (4).
+            //
+            // XLua quirk: Func<LuaTable> needs generated wrappers (not auto-bound). We pass via
+            // JSON string + cjson.decode in Lua to dodge that — cjson is already bound above.
+            Env.Global.Set<string, System.Func<string>>("__GetServerListJson", () =>
+            {
+                var list = ThanMaOrigin.Network.GatewayHandshake.CachedServerList;
+                if (list == null || list.Length == 0)
+                {
+                    UnityEngine.Debug.LogWarning("[__GetServerListJson] CachedServerList empty — returning empty array");
+                    return "[]";
+                }
+                var sb = new System.Text.StringBuilder();
+                sb.Append('[');
+                for (int i = 0; i < list.Length; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    var s = list[i];
+                    int nType = s.Status == 0 ? 4 : 3;
+                    sb.Append('{');
+                    sb.Append("\"dwServerId\":").Append(s.ServerId).Append(',');
+                    sb.Append("\"dwIndex\":").Append(s.ServerId).Append(',');
+                    sb.Append("\"szName\":");
+                    sb.Append(Newtonsoft.Json.JsonConvert.SerializeObject(s.Name));
+                    sb.Append(',');
+                    sb.Append("\"nType\":").Append(nType).Append(',');
+                    sb.Append("\"szAddr\":");
+                    sb.Append(Newtonsoft.Json.JsonConvert.SerializeObject(s.Addr));
+                    sb.Append(',');
+                    sb.Append("\"nPort\":").Append(s.Port);
+                    sb.Append('}');
+                }
+                sb.Append(']');
+                return sb.ToString();
+            });
+            // Lua wrapper: GetServerList() = decode JSON via cjson.
+            // Bind via DoString BEFORE preload runs so the strict-mode metatable
+            // doesn't block it (preload assert "can not new global key" otherwise).
+            // cjson global was bound earlier in this Awake (before BindRequire).
+            // Wait — actually cjson is bound a few lines DOWN from here. Hoist GetServerList
+            //   binding to AFTER cjson by using a small helper in DoString that lazily looks
+            //   up cjson.decode at call time, not at definition time.
+            Env.DoString(@"
+                function GetServerList()
+                    if not cjson or not cjson.decode then
+                        print('[GetServerList] cjson.decode missing!')
+                        return {}
+                    end
+                    local json = __GetServerListJson()
+                    if not json or json == '' or json == 'null' then return {} end
+                    return cjson.decode(json) or {}
+                end
+            ", "GetServerList_wrap");
+
+            // ─── RequestAccSerInfo global function ───────────────────────────
+            // VMA: 0x2375bc — Source: functions/002375bc_LuaGlobalScriptNameSpace20LuaRequestAccSerInfoER10XLuaScript.asm
+            // gốc body asks gateway for last-played server per account (for "Continue" button).
+            // Called by UILoginServer.lua:192 RequestAccSerInfo() right after RequestServerList.
+            // DEVIATION: minimal stub — fires emNOTIFY_SYNC_ACC_SER_INFO with empty payload so
+            //   Lua's OnSyncAccSerInfo handler runs (no-op for fresh account).
+            Env.Global.Set<string, System.Action>("RequestAccSerInfo",
+                () =>
+                {
+                    UnityEngine.Debug.Log("[RequestAccSerInfo] DEVIATION stub — firing empty SYNC_ACC_SER_INFO");
+                    ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName("emNOTIFY_SYNC_ACC_SER_INFO", 0);
+                });
+
+            // ─── ConnectServer global function ───────────────────────────────
+            // VMA: 0x236c00 — Source: functions/00236c00_LuaGlobalScriptNameSpace16LuaConnectServerER10XLuaScript.asm
+            // gốc body extracts serverId int then calls XGatewayClient::DoLoginServerRequest.
+            // Called by UILoginServer.lua:104 ConnectServer(self.nCurServerId) when user picks a server.
+            // 1-1 PORT routes through GatewayHandshake.RequestLoginServer (REQ_LOGIN_SERVER opcode).
+            // Gateway's reply auto-fires Login:LoginServerRsp(addr, port) → ConnectWorldServer.
+            Env.Global.Set<string, System.Action<int>>("ConnectServer",
+                (serverId) => ThanMaOrigin.Network.GatewayHandshake.RequestLoginServer(serverId));
+
+            // ─── CloseServerConnect / CloseGateWayConnect global stubs ──────
+            // Lua may call these on logout / cancel. Map both to GatewayHandshake.Close.
+            Env.Global.Set<string, System.Action>("CloseGateWayConnect",
+                () => ThanMaOrigin.Network.GatewayHandshake.Close());
+            Env.Global.Set<string, System.Action>("CloseServerConnect",
+                () => ThanMaOrigin.Network.GatewayHandshake.Close());
+
+            // ─── GetAccountName global function ──────────────────────────────
+            // gốc native: returns the currently-logged-in account string from XSdkClient state.
+            // Called by Login.lua:231 GetAccSerInfo() and many other places (per-account save data key).
+            // 1-1 PORT returns NetworkManager's _pendingAccount (set in ConnectGateway).
+            Env.Global.Set<string, System.Func<string>>("GetAccountName",
+                () =>
+                {
+                    var nm = ThanMaOrigin.Network.NetworkManager.Instance;
+                    return nm?._pendingAccount ?? "";
+                });
+
             // ─── g_szUserPath ────────────────────────────────────────────────
             // gốc native global string set by LuaClient::SetUserPath @ libclient_scene.so:0x419010
             // (called from LuaClient::Init early in boot chain).
@@ -136,6 +245,31 @@ namespace ThanMaOrigin.Lua
             // ensures _ENV.KLib exists before strict mode is set; reads pass through.
             // 1-1 with gốc: native libclient_scene.so binds C functions before any Lua runs.
             ThanMaOrigin.Lua.KLibLuaNamespace.BindLua(Env);
+
+            // ─── cjson global ────────────────────────────────────────────────
+            // Source: gốc lib.lua:2030 calls `cjson.decode(s)` / `cjson.encode(t)` /
+            //   `cjson.encode_sparse_array(bool?)`. Aliases `Lib:DecodeJson` / `Lib:EncodeJson`
+            //   wrap these. Original game has cjson C extension bound natively via
+            //   libclient_scene.so (cjson.so embedded). Used by Script_LocalData (login
+            //   persistence), Script_ClientBulletin (HTTP bulletin response parsing),
+            //   HttpModule callback, friendship gift packing, etc.
+            // DEVIATION 2026-04-27 (Day 9.13): Bind cjson via Newtonsoft.Json (already in
+            //   manifest as com.unity.nuget.newtonsoft-json). Equivalent JSON parse/encode
+            //   semantics. Real cjson native binding is TIER 2 backlog.
+            //   CRITICAL: Lua expects `decode` to return a real Lua table, not a Newtonsoft
+            //   JObject — gốc Lua iterates with `pairs()` and assigns `tb[key] = nil`. We
+            //   recursively convert JToken → LuaTable so semantics match cjson.so 1-1.
+            //   FIXME(canonicalization-day-10): port real cjson C lib via XLua native if perf
+            //   matters. For login flow, Newtonsoft + JToken→LuaTable bridge is sufficient.
+            try
+            {
+                BindCjson();
+                Debug.Log("[LuaEngine] cjson bound (decode→LuaTable, encode, encode_sparse_array via Newtonsoft.Json)");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[LuaEngine] cjson bind FAIL: {e.Message}");
+            }
 
             Debug.Log("[thanmaorigin.LuaEngine] Awake — XLua initialized + bridges wired (Phase 8: 777 native bindings)");
 
@@ -164,6 +298,38 @@ namespace ThanMaOrigin.Lua
             // Bind Sdk AFTER preload — overwrites preload's empty Sdk table with our methods.
             BindSdkTable();
 
+            // ─── Login flow stubs (post-preload, write to existing tables) ───
+            // SDK channel-specific analytics callbacks. Lua UILoginServer.lua:98-99 calls
+            // Sdk:OnConnectServer / OnConnectServerV2 for tracking. No-op in standalone build.
+            // Client.UpdateModule.Lua2CSValidateVersion is a CDN version-gate; in dev mode we
+            // immediately invoke its callback with `true` so login proceeds to ConnectServer.
+            try
+            {
+                Env.DoString(@"
+                    if Sdk then
+                        Sdk.OnConnectServer = function(self, serverId)
+                            print('[Sdk.OnConnectServer stub] serverId=' .. tostring(serverId))
+                        end
+                        Sdk.OnConnectServerV2 = function(self, serverId)
+                            print('[Sdk.OnConnectServerV2 stub] serverId=' .. tostring(serverId))
+                        end
+                        Sdk.OnClickAgreementToggle = Sdk.OnClickAgreementToggle or function(self) end
+                    end
+                    if Client then
+                        Client.UpdateModule = Client.UpdateModule or {}
+                        Client.UpdateModule.Lua2CSValidateVersion = function(cb)
+                            print('[Client.UpdateModule.Lua2CSValidateVersion stub] -> cb(true)')
+                            if cb then cb(true) end
+                        end
+                    end
+                ", "LoginFlowStubs");
+                Debug.Log("[LuaEngine] Login flow stubs bound (Sdk.OnConnectServer + Lua2CSValidateVersion)");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[LuaEngine] Login flow stubs bind FAIL: {e.Message}");
+            }
+
             // Bind i18n methods AFTER preload too. Script_i18n_i18n.lua sets metatable
             // __index = LanguageModule, but XLua's Type wrapper doesn't always fall through
             // for index-via-metatable. Override directly with C# delegates pointing to
@@ -172,6 +338,33 @@ namespace ThanMaOrigin.Lua
 
             // Eager-load all Lua scripts. KLib/Sdk/i18n references resolve via _ENV.
             LoadAllLua();
+
+            // ─── Login flow stubs (POST-LoadAllLua so individual scripts don't overwrite) ───
+            // Some scripts (Script_Sdk_SdkClient.lua etc.) reset `Sdk` and `Client.UpdateModule`
+            // tables when loaded. Re-apply our stubs AFTER all Lua is loaded so they win.
+            try
+            {
+                // Sdk:OnConnectServer / OnConnectServerV2 are SDK channel-specific analytics
+                // callbacks (Lua-side, not C# class). Stub as no-op so UILoginServer Lua
+                // proceeds. Sdk is plain Lua table from preload — direct field write is fine.
+                // Client.UpdateModule.Lua2CSValidateVersion is now provided as a real static
+                // method on UpdateModule.cs (added 2026-04-27 Day 9.14), no Lua stub needed.
+                Env.DoString(@"
+                    Sdk = Sdk or {}
+                    Sdk.OnConnectServer = function(self, serverId)
+                        print('[Sdk.OnConnectServer stub] serverId=' .. tostring(serverId))
+                    end
+                    Sdk.OnConnectServerV2 = function(self, serverId)
+                        print('[Sdk.OnConnectServerV2 stub] serverId=' .. tostring(serverId))
+                    end
+                    Sdk.OnClickAgreementToggle = Sdk.OnClickAgreementToggle or function(self) end
+                ", "LoginFlowStubs_Post");
+                Debug.Log("[LuaEngine] Login flow stubs (post) bound — Sdk only; UpdateModule via UpdateModule.cs");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[LuaEngine] Login flow stubs (post) FAIL: {e.Message}");
+            }
 
             // DEBUG 2026-04-27: Probe Ui.UIPanel — gốc Script_Ui_Ui.lua:35 sets
             //   Ui.UIPanel = typeof(CS.Game.UI.UIPanel)
@@ -476,6 +669,188 @@ namespace ThanMaOrigin.Lua
             Env?.Dispose();
             Env = null;
             if (Instance == this) Instance = null;
+        }
+
+        // ─── cjson Newtonsoft.Json bridge ─────────────────────────────────
+        // gốc cjson behavior emulated 1-1:
+        //   cjson.decode(szJson) → real Lua table (object→hash, array→list keyed [1..n])
+        //   cjson.encode(tb)     → JSON string. Lua array detected via consecutive integer keys.
+        //   cjson.encode_sparse_array()        → returns current bool flag
+        //   cjson.encode_sparse_array(boolVal) → sets flag, returns previous
+        // Sparse-array flag is a no-op encoder hint in our Newtonsoft impl (Newtonsoft already
+        // encodes sparse arrays as objects by default). Stored to honor get/set roundtrip
+        // expected by lib.lua:2038-2046 / Script_LocalData.lua:366-373.
+        private bool _cjsonEncodeSparseArray = false;
+
+        private void BindCjson()
+        {
+            var cjsonTbl = Env.NewTable();
+
+            System.Func<string, object> decodeFn = (s) =>
+            {
+                if (string.IsNullOrEmpty(s) || s == "null") return null;
+                try
+                {
+                    var token = Newtonsoft.Json.Linq.JToken.Parse(s);
+                    return JTokenToLua(token);
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning($"[cjson.decode] {e.Message} (input first 80: {(s.Length>80?s.Substring(0,80):s)})");
+                    return null;
+                }
+            };
+
+            System.Func<object, string> encodeFn = (o) =>
+            {
+                try { return LuaToJsonString(o); }
+                catch (System.Exception e) { Debug.LogWarning($"[cjson.encode] {e.Message}"); return "null"; }
+            };
+
+            // gốc cjson.encode_sparse_array: getter when no arg, setter when bool passed.
+            // XLua doesn't allow optional bool nicely → bind two overloads via Lua thunk.
+            cjsonTbl.Set<string, System.Func<string, object>>("decode", decodeFn);
+            cjsonTbl.Set<string, System.Func<object, string>>("encode", encodeFn);
+            // Aliases used by Lib:DecodeJson / Lib:EncodeJson (lib.lua:2029-2034).
+            cjsonTbl.Set<string, System.Func<string, object>>("DecodeJson", decodeFn);
+            cjsonTbl.Set<string, System.Func<object, string>>("EncodeJson", encodeFn);
+
+            // encode_sparse_array — getter or setter via single varargs param.
+            // Lua call: cjson.encode_sparse_array() or cjson.encode_sparse_array(true)
+            cjsonTbl.Set<string, System.Func<object, bool>>("encode_sparse_array", (val) =>
+            {
+                bool prev = _cjsonEncodeSparseArray;
+                if (val != null && val is bool b) _cjsonEncodeSparseArray = b;
+                return prev;
+            });
+
+            Env.Global.Set("cjson", cjsonTbl);
+        }
+
+        // Convert JToken → Lua-friendly value. JObject → LuaTable (string keys).
+        // JArray → LuaTable (1-based int keys, gốc cjson convention).
+        // Primitives → C# primitives (XLua marshals to Lua number/string/bool).
+        private object JTokenToLua(Newtonsoft.Json.Linq.JToken token)
+        {
+            if (token == null) return null;
+            switch (token.Type)
+            {
+                case Newtonsoft.Json.Linq.JTokenType.Object:
+                {
+                    var tbl = Env.NewTable();
+                    foreach (var prop in (Newtonsoft.Json.Linq.JObject)token)
+                    {
+                        var luaVal = JTokenToLua(prop.Value);
+                        SetLuaTableValue(tbl, prop.Key, luaVal);
+                    }
+                    return tbl;
+                }
+                case Newtonsoft.Json.Linq.JTokenType.Array:
+                {
+                    var tbl = Env.NewTable();
+                    int i = 1; // gốc cjson: arrays are 1-based Lua tables
+                    foreach (var item in (Newtonsoft.Json.Linq.JArray)token)
+                    {
+                        var luaVal = JTokenToLua(item);
+                        SetLuaTableValue(tbl, i, luaVal);
+                        i++;
+                    }
+                    return tbl;
+                }
+                case Newtonsoft.Json.Linq.JTokenType.Integer: return token.ToObject<long>();
+                case Newtonsoft.Json.Linq.JTokenType.Float:   return token.ToObject<double>();
+                case Newtonsoft.Json.Linq.JTokenType.String:  return token.ToObject<string>();
+                case Newtonsoft.Json.Linq.JTokenType.Boolean: return token.ToObject<bool>();
+                case Newtonsoft.Json.Linq.JTokenType.Null:    return null;
+                default: return token.ToString();
+            }
+        }
+
+        // Set value into LuaTable handling both string and int keys + nested LuaTable values.
+        private void SetLuaTableValue(LuaTable tbl, object key, object value)
+        {
+            if (value == null)
+            {
+                // XLua: setting nil clears the key
+                if (key is string sk) tbl.Set<string, object>(sk, null);
+                else if (key is int ik) tbl.Set<int, object>(ik, null);
+                return;
+            }
+            if (key is string skey)
+            {
+                if (value is LuaTable lt) tbl.Set<string, LuaTable>(skey, lt);
+                else if (value is long lv) tbl.Set<string, long>(skey, lv);
+                else if (value is double dv) tbl.Set<string, double>(skey, dv);
+                else if (value is bool bv) tbl.Set<string, bool>(skey, bv);
+                else if (value is string sv) tbl.Set<string, string>(skey, sv);
+                else tbl.Set<string, object>(skey, value);
+            }
+            else if (key is int ikey)
+            {
+                if (value is LuaTable lt) tbl.Set<int, LuaTable>(ikey, lt);
+                else if (value is long lv) tbl.Set<int, long>(ikey, lv);
+                else if (value is double dv) tbl.Set<int, double>(ikey, dv);
+                else if (value is bool bv) tbl.Set<int, bool>(ikey, bv);
+                else if (value is string sv) tbl.Set<int, string>(ikey, sv);
+                else tbl.Set<int, object>(ikey, value);
+            }
+        }
+
+        // Convert Lua value (LuaTable / primitive) → JSON string.
+        // Detect array vs object: LuaTable with consecutive int keys [1..n] = array.
+        private string LuaToJsonString(object value)
+        {
+            var token = LuaToJToken(value);
+            return token == null ? "null" : token.ToString(Newtonsoft.Json.Formatting.None);
+        }
+
+        private Newtonsoft.Json.Linq.JToken LuaToJToken(object value)
+        {
+            if (value == null) return Newtonsoft.Json.Linq.JValue.CreateNull();
+            if (value is LuaTable lt)
+            {
+                // Inspect keys: consecutive ints starting at 1 → array.
+                var keys = new List<object>();
+                lt.ForEach<object, object>((k, v) => keys.Add(k));
+                bool isArray = keys.Count > 0;
+                int maxIdx = 0;
+                foreach (var k in keys)
+                {
+                    if (k is long lk) { if (lk < 1 || lk != (long)(int)lk) { isArray = false; break; } if ((int)lk > maxIdx) maxIdx = (int)lk; }
+                    else if (k is double dk) { if (dk < 1 || dk != System.Math.Floor(dk)) { isArray = false; break; } if ((int)dk > maxIdx) maxIdx = (int)dk; }
+                    else if (k is int ik) { if (ik < 1) { isArray = false; break; } if (ik > maxIdx) maxIdx = ik; }
+                    else { isArray = false; break; }
+                }
+                if (isArray && maxIdx == keys.Count)
+                {
+                    var arr = new Newtonsoft.Json.Linq.JArray();
+                    for (int i = 1; i <= maxIdx; i++)
+                    {
+                        var v = lt.Get<int, object>(i);
+                        arr.Add(LuaToJToken(v));
+                    }
+                    return arr;
+                }
+                else
+                {
+                    var obj = new Newtonsoft.Json.Linq.JObject();
+                    lt.ForEach<object, object>((k, v) =>
+                    {
+                        string sk = k?.ToString() ?? "";
+                        obj[sk] = LuaToJToken(v);
+                    });
+                    return obj;
+                }
+            }
+            // Primitives — XLua hands us boxed long/double/bool/string.
+            if (value is bool b)   return new Newtonsoft.Json.Linq.JValue(b);
+            if (value is long l)   return new Newtonsoft.Json.Linq.JValue(l);
+            if (value is int i32)  return new Newtonsoft.Json.Linq.JValue((long)i32);
+            if (value is double d) return new Newtonsoft.Json.Linq.JValue(d);
+            if (value is float f)  return new Newtonsoft.Json.Linq.JValue((double)f);
+            if (value is string s) return new Newtonsoft.Json.Linq.JValue(s);
+            // Fallback: ToString
+            return new Newtonsoft.Json.Linq.JValue(value.ToString());
         }
     }
 }
