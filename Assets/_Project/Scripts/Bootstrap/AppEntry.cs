@@ -76,7 +76,9 @@ namespace ThanMaOrigin.Bootstrap
                     end
 
                     local ok, err = pcall(function()
-                        require('commonui.Script_Client')
+                        if not (Client and Client.OnStartup) then
+                            require('commonui.Script_Client')
+                        end
                         if Client and Client.OnStartup then
                             Client:OnStartup()
                         else

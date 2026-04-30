@@ -51,7 +51,10 @@ namespace ThanMaOrigin.Lua
             Debug.Log($"[KLib.LoadTabFileEx] {filename} → reading {path}");
             string text = File.ReadAllText(path);
             string[] lines = text.Split('\n');
-            if (lines.Length < 2) return null;
+            if (lines.Length < 2 || string.IsNullOrWhiteSpace(text))
+            {
+                return env.NewTable();
+            }
 
             // First non-empty line is header
             string[] header = null;
@@ -64,7 +67,7 @@ namespace ThanMaOrigin.Lua
                 dataStart = i + 1;
                 break;
             }
-            if (header == null) return null;
+            if (header == null) return env.NewTable();
 
             // FIX 2026-04-27: gốc Lua `Lib:EasyLoadTabFile` (lib.lua.txt:1227) expects:
             //   tbFile[1] = HEADER row {col_name_1, col_name_2, ...} indexed 1..N (column NAMES)
@@ -115,12 +118,76 @@ namespace ThanMaOrigin.Lua
         }
 
         /// <summary>
-        /// gốc LuaLoadIniFile — INI parser. STUB until needed.
+        /// gốc LuaLoadIniFile — reads INI files into a Lua table keyed by section.
+        ///
+        /// Shape expected by gốc Lua:
+        ///   [Mix]
+        ///   FullAnger=1000
+        /// becomes:
+        ///   tb.Mix.FullAnger == "1000"
+        ///
+        /// Values stay strings because call sites explicitly use tonumber/split helpers.
         /// </summary>
         public static LuaTable LoadIniFile(LuaEnv env, string filename)
         {
-            Debug.LogWarning($"[KLib.LoadIniFile] not implemented yet: {filename}");
-            return env.NewTable();
+            string root = Path.Combine(Application.dataPath, "_Project/Resources");
+            string[] candidates = new string[]
+            {
+                Path.Combine(root, filename),
+                Path.Combine(root, filename + ".txt"),
+                Path.Combine(root, "Setting/" + filename),
+                Path.Combine(root, "Setting/" + filename + ".txt"),
+            };
+            string path = null;
+            foreach (var c in candidates)
+            {
+                if (File.Exists(c))
+                {
+                    path = c;
+                    break;
+                }
+            }
+            if (path == null)
+            {
+                Debug.LogWarning($"[KLib.LoadIniFile] not found: {filename}");
+                return null;
+            }
+
+            Debug.Log($"[KLib.LoadIniFile] {filename} -> reading {path}");
+            var result = env.NewTable();
+            LuaTable currentSection = null;
+            string currentSectionName = null;
+
+            foreach (var rawLine in File.ReadAllLines(path))
+            {
+                string line = rawLine.Trim();
+                if (string.IsNullOrEmpty(line)) continue;
+                if (line.StartsWith(";") || line.StartsWith("#")) continue;
+
+                if (line.StartsWith("[") && line.EndsWith("]") && line.Length > 2)
+                {
+                    currentSectionName = line.Substring(1, line.Length - 2).Trim();
+                    currentSection = env.NewTable();
+                    result.Set<string, LuaTable>(currentSectionName, currentSection);
+                    continue;
+                }
+
+                int eq = line.IndexOf('=');
+                if (eq < 0) continue;
+                if (currentSection == null)
+                {
+                    currentSectionName = "Default";
+                    currentSection = env.NewTable();
+                    result.Set<string, LuaTable>(currentSectionName, currentSection);
+                }
+
+                string key = line.Substring(0, eq).Trim();
+                string value = line.Substring(eq + 1).Trim();
+                if (string.IsNullOrEmpty(key)) continue;
+                currentSection.Set<string, string>(key, value);
+            }
+
+            return result;
         }
 
         /// <summary>gốc LuaGetStrLen — string length (bytes).</summary>
@@ -246,8 +313,17 @@ namespace ThanMaOrigin.Lua
 
                 // Also bind as Lua GLOBALS without KLib. prefix per libclient_scene.so
                 // LuaGlobalScriptNameSpace::Lua* methods that are top-level functions.
-                env.Global.Set<string, System.Func<string, int, LuaTable>>("LoadTabFileEx",
-                    (name, b) => KLibBridge.LoadTabFileEx(name, b));
+                //
+                // GLOBAL `LoadTabFileEx(szFile, szType, szIndex, tbField, bOutsidePackage, nBeginRow)`:
+                // Different signature than KLib.LoadTabFileEx — FULL parse + type-cast + index.
+                // Cite: gốc native LuaGlobalScriptNameSpace15LuaLoadTabFileExER10XLuaScript.
+                // Used by Faction:Init (lib.lua:1217 → this).
+                env.Global.Set<string, System.Func<string, string, string, LuaTable, object, object, LuaTable>>(
+                    "LoadTabFileEx",
+                    (szFile, szType, szIndex, tbField, bOutsidePkg, nBeginRow) =>
+                        KLibBridge.LoadTabFileExFull(szFile, szType, szIndex, tbField,
+                            bOutsidePkg is int bi ? bi : 0,
+                            nBeginRow is int br ? br : 2));
                 env.Global.Set<string, System.Func<string, LuaTable>>("LoadIniFile", KLibBridge.LoadIniFile);
                 env.Global.Set<string, System.Func<string, int>>("GetStrLen", GetStrLen);
                 env.Global.Set<string, System.Func<string, int>>("GetUtf8Len", GetUtf8Len);
@@ -297,6 +373,120 @@ namespace ThanMaOrigin.Lua
         {
             var env = LuaEngine.Instance?.Env;
             return env == null ? null : KLibLuaNamespace.LoadTabFileEx(env, name, bOutsidePackage);
+        }
+
+        /// <summary>
+        /// Full LoadTabFileEx — gốc native LuaGlobalScriptNameSpace15LuaLoadTabFileExER10XLuaScript.
+        /// Reads tab file, parses each row into named-key table per szType + tbField, then
+        /// keys the result by szIndex column.
+        /// szType: per-column type chars (d=int, s=string).
+        /// szIndex: name of column to use as primary key in result.
+        /// tbField: array of field names to include (whitelist). Pass nil/empty for all.
+        /// nBeginRow: 1-based row index where data starts (header is row 1, data row 1 = row 2 in file).
+        /// </summary>
+        public static LuaTable LoadTabFileExFull(string szFile, string szType, string szIndex,
+                                                  LuaTable tbField, int bOutsidePackage, int nBeginRow)
+        {
+            var env = LuaEngine.Instance?.Env;
+            if (env == null) return null;
+
+            // Reuse base reader that returns {[1]=header, [2..]=rawRows}.
+            var raw = KLibLuaNamespace.LoadTabFileEx(env, szFile, bOutsidePackage);
+            if (raw == null) return null;
+
+            // Extract header row (col index → col name).
+            var header = raw.Get<int, LuaTable>(1);
+            if (header == null) return env.NewTable();
+            var colNames = new System.Collections.Generic.List<string>();
+            int colCount = 0;
+            // Lua tables are 1-based; iterate until nil.
+            for (int c = 1; ; c++)
+            {
+                string s = header.Get<int, string>(c);
+                if (s == null) break;
+                colNames.Add(s);
+                colCount = c;
+            }
+
+            // Optional whitelist: tbField is array {fieldName1, fieldName2, ...}.
+            // In the original native helper, szType follows tbField order when tbField is
+            // supplied, not the absolute column index in the source .tab. Several callsites
+            // pass sparse tbField lists against wide source tables (for example Skill.tab).
+            var fieldType = new System.Collections.Generic.Dictionary<string, char>();
+            System.Collections.Generic.HashSet<string> whitelist = null;
+            if (tbField != null)
+            {
+                whitelist = new System.Collections.Generic.HashSet<string>();
+                for (int i = 1; ; i++)
+                {
+                    string fname = tbField.Get<int, string>(i);
+                    if (fname == null) break;
+                    whitelist.Add(fname);
+                    fieldType[fname] = !string.IsNullOrEmpty(szType) && i <= szType.Length ? szType[i - 1] : 's';
+                }
+                if (whitelist.Count == 0) whitelist = null; // empty list = include all
+            }
+
+            // Build result keyed by szIndex column value, OR by sequential row index when
+            // szIndex is nil (gốc behavior — see Lib:LoadTabFileEx callsites with szIndex=nil:
+            //   Login.lua:170-172  → Setting/RandomName/*.tab indexed 1..N (no key column)
+            //   KinSkill.lua:40    → upgrade table also nil-indexed
+            //   Wedding.lua:106    → ditto)
+            // gốc Lua native LuaLoadTabFileExER10XLuaScript falls back to "next integer" key
+            // when szIndex argument is missing/nil; result becomes a 1-based sequential array.
+            var result = env.NewTable();
+            int seqIndex = 0;
+            bool hasIndex = !string.IsNullOrEmpty(szIndex);
+            for (int row = 2; ; row++)
+            {
+                var rawRow = raw.Get<int, LuaTable>(row);
+                if (rawRow == null) break;
+                var rowData = env.NewTable();
+                string keyValue = null;
+                for (int c = 1; c <= colCount; c++)
+                {
+                    string colName = colNames[c - 1];
+                    string raw_v = rawRow.Get<int, string>(c) ?? "";
+                    char tch = fieldType.TryGetValue(colName, out var mappedType)
+                        ? mappedType
+                        : (!string.IsNullOrEmpty(szType) && c <= szType.Length ? szType[c - 1] : 's');
+                    if (hasIndex && colName == szIndex)
+                    {
+                        keyValue = tch == 'd' && long.TryParse(raw_v, out long keyNum)
+                            ? keyNum.ToString()
+                            : raw_v;
+                    }
+                    if (whitelist != null && !whitelist.Contains(colName)) continue;
+                    if (tch == 'd')
+                    {
+                        long iv = 0;
+                        long.TryParse(raw_v, out iv);
+                        rowData.Set<string, long>(colName, iv);
+                    }
+                    else
+                    {
+                        rowData.Set<string, string>(colName, raw_v);
+                    }
+                }
+                if (!hasIndex)
+                {
+                    // No key column — use sequential 1-based index (gốc fallback).
+                    seqIndex++;
+                    result.Set<long, LuaTable>(seqIndex, rowData);
+                    continue;
+                }
+                if (keyValue == null)
+                {
+                    // szIndex column was specified but row's value is missing — skip row.
+                    continue;
+                }
+                // Try numeric index for integer keys (typical for nId)
+                if (long.TryParse(keyValue, out long numKey))
+                    result.Set<long, LuaTable>(numKey, rowData);
+                else
+                    result.Set<string, LuaTable>(keyValue, rowData);
+            }
+            return result;
         }
         public static LuaTable LoadIniFile(string name)
         {

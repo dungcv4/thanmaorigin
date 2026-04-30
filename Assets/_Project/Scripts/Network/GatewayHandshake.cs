@@ -15,11 +15,14 @@
 //   - One MonoBehaviour ticked from NetworkManager.Update() drains
 //     GatewaySocket.InboundQueue on the main thread.
 //   - SendRequest(account, authInfo) does TCP connect + handshake send.
+//   - Connect result is delivered later from Tick(), matching gốc
+//     XGatewayClient::ConnectSuccess / ProcessSocketError callback timing.
 //   - On RSP_HANDSHAKE: fires emNOTIFY_GATEWAY_HANDED(retCode, nShowAgreement).
-//   - On RSP_ERROR or any failure: fires HANDED with non-zero code so Lua
+//   - On RSP_ERROR or handshake failure: fires HANDED with non-zero code so Lua
 //     opens UIMessageBoxBig with a clear error (never silent).
 
 using System;
+using System.Collections.Concurrent;
 using UnityEngine;
 
 namespace ThanMaOrigin.Network
@@ -27,12 +30,26 @@ namespace ThanMaOrigin.Network
     public static class GatewayHandshake
     {
         private static GatewaySocket? _sock;
+        private static readonly ConcurrentQueue<(string enumName, object[] args)> _pendingLuaEvents = new();
 
         // Cached for re-send if needed (e.g. retry).
         public static string LastAccount = "";
         public static string LastAuthInfo = "";
 
         public static GatewaySocket? CurrentSocket => _sock;
+
+        private static void EnqueueLuaEvent(string enumName, params object[] args)
+        {
+            _pendingLuaEvents.Enqueue((enumName, args));
+        }
+
+        private static void DrainPendingLuaEvents()
+        {
+            while (_pendingLuaEvents.TryDequeue(out var evt))
+            {
+                ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName(evt.enumName, evt.args);
+            }
+        }
 
         /// <summary>
         /// Open new gateway connection + send handshake. Returns true if TCP connect ok
@@ -55,16 +72,19 @@ namespace ThanMaOrigin.Network
             if (!connected)
             {
                 Debug.LogError($"[GatewayHandshake] TCP connect failed: {_sock.LastError}");
-                // Fire HANDED with explicit error so Lua opens UIMessageBoxBig.
-                // gốc convention: nRetCode != 0 → fail branch in
-                //   tbWnd:GatewayHandSuccess (UILoginChannelInner.lua:177).
-                //   nRetCode 5000 = "GatewayRetCode 5000" — clear that gateway connect itself failed.
-                ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName(
-                    "emNOTIFY_GATEWAY_HANDED", 5000, 0);
+                // gốc XGatewayClient::ConnectSuccess(result) is a socket callback,
+                // not a direct return from LuaConnectGateway. Queue the Lua event so
+                // Login.lua can finish opening UILoadingTips before the failure
+                // handler opens UIMessageBoxBig and closes the loading overlay.
+                // Source:
+                //   - LuaConnectGateway @0x236adc returns immediately after ConnectOuter.
+                //   - XGatewayClient::ConnectSuccess @0x233fe0 fires event 1 with result.
+                EnqueueLuaEvent("emNOTIFY_GATEWAY_CONNECT", 0);
                 _sock = null;
                 return false;
             }
 
+            EnqueueLuaEvent("emNOTIFY_GATEWAY_CONNECT", 1);
             byte[] pkt = GatewayProtocol.BuildHandshakeRequest(LastAccount);
             Debug.Log($"[GatewayHandshake] → handshake packet {pkt.Length} bytes account='{LastAccount}'");
             _sock.SendRaw(pkt);
@@ -97,6 +117,8 @@ namespace ThanMaOrigin.Network
                 Debug.LogError("[GatewayHandshake] RequestLoginServer: gateway socket not open");
                 return;
             }
+            LastSelectedServerId = serverId > 0 ? serverId : 1;
+            NetworkManager.Instance?.SetSelectedServerId(LastSelectedServerId);
             _sock.SendRaw(GatewayProtocol.BuildLoginServerRequest(serverId));
             Debug.Log($"[GatewayHandshake] → REQ_LOGIN_SERVER serverId={serverId}");
         }
@@ -105,6 +127,7 @@ namespace ThanMaOrigin.Network
         public static GatewayProtocol.GatewayServerEntry[]? CachedServerList { get; private set; }
 
         // Last login-server reply (world server addr+port).
+        public static int LastSelectedServerId { get; private set; } = 1;
         public static string? LastWorldAddr { get; private set; }
         public static int LastWorldPort { get; private set; }
 
@@ -114,6 +137,7 @@ namespace ThanMaOrigin.Network
         /// </summary>
         public static void Tick()
         {
+            DrainPendingLuaEvents();
             if (_sock == null) return;
 
             while (_sock.InboundQueue.TryDequeue(out var msg))

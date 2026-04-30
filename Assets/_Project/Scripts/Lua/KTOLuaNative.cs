@@ -74,22 +74,31 @@ namespace ThanMaOrigin.Lua
             env.Global.Set<string, System.Func<int>>("LuaGetLuaTop", LuaGetLuaTop);
             env.Global.Set<string, System.Func<bool>>("LuaIsPayOpen", LuaIsPayOpen);
 
-            // Bind `Log` globals — gốc native libclient_scene.so binds these for Lua to print.
-            // Use Env.Global.Set (XLua direct write — bypasses Script_preload strict mode).
-            // FIX 2026-04-27: previous Action<object[]> signature was wrong — XLua doesn't
-            // auto-convert Lua varargs to object[] unless [LuaCallCSharp] wrap is generated.
-            // Lua call `Log("hi")` passed 1 arg → C# got empty array → "[LUA] " (blank).
-            // Use Action<object> for single arg (matches gốc usage `Log(s)` / `LogErr(s)`).
-            env.Global.Set<string, System.Action<object>>("Log",
-                arg => Debug.Log("[LUA] " + (arg == null ? "nil" : arg.ToString())));
-            env.Global.Set<string, System.Action<object>>("LogError",
-                arg => Debug.LogError("[LUA] " + (arg == null ? "nil" : arg.ToString())));
-            env.Global.Set<string, System.Action<object>>("LogErr",
-                arg => Debug.LogError("[LUA] " + (arg == null ? "nil" : arg.ToString())));
-            env.Global.Set<string, System.Action<object>>("LogWarning",
-                arg => Debug.LogWarning("[LUA] " + (arg == null ? "nil" : arg.ToString())));
-            env.Global.Set<string, System.Action<object>>("LogWarn",
-                arg => Debug.LogWarning("[LUA] " + (arg == null ? "nil" : arg.ToString())));
+            // Bind `Log` globals — gốc native libclient_scene.so accepts Lua varargs.
+            // XLua delegate binding does not reliably convert Lua varargs to object[] in
+            // reflection mode, so join varargs on the Lua side and forward one string.
+            env.Global.Set<string, System.Action<string>>("__KTO_LogLine",
+                msg => Debug.Log("[LUA] " + (msg ?? "")));
+            env.Global.Set<string, System.Action<string>>("__KTO_LogErrorLine",
+                msg => Debug.LogError("[LUA] " + (msg ?? "")));
+            env.Global.Set<string, System.Action<string>>("__KTO_LogWarningLine",
+                msg => Debug.LogWarning("[LUA] " + (msg ?? "")));
+            env.DoString(@"
+                local function __kto_join_log_args(...)
+                    local n = select('#', ...)
+                    if n == 0 then return '' end
+                    local parts = {}
+                    for i = 1, n do
+                        parts[i] = tostring(select(i, ...))
+                    end
+                    return table.concat(parts, ' ')
+                end
+                Log = function(...) __KTO_LogLine(__kto_join_log_args(...)) end
+                LogError = function(...) __KTO_LogErrorLine(__kto_join_log_args(...)) end
+                LogErr = function(...) __KTO_LogErrorLine(__kto_join_log_args(...)) end
+                LogWarning = function(...) __KTO_LogWarningLine(__kto_join_log_args(...)) end
+                LogWarn = function(...) __KTO_LogWarningLine(__kto_join_log_args(...)) end
+            ", "BindKTOLogVarargs");
         }
 
         private static string JoinArgs(object[] args)

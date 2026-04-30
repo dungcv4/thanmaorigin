@@ -60,6 +60,28 @@ namespace ThanMaOrigin.Lua
             Env.Global.Set("KNpc", kNpc);
             Env.Global.Set("KItem", kItem);
             Env.Global.Set("Global", kGlobal);
+            // gốc native creates these Lua class tables before CommonScript/Script
+            // extend them with methods such as _LuaPlayer.SendBlackBoardMsg and
+            // _LuaPartner.GetX. In this rebuilt XLua host we expose the C# object
+            // instances above, then provide the Lua-side method tables explicitly.
+            Env.DoString(@"
+                _LuaPlayer = _LuaPlayer or {}
+                _LuaPlayerAsync = _LuaPlayerAsync or {}
+                _LuaPartner = _LuaPartner or {}
+                KPlayer = KPlayer or {}
+                KFightSkill = KFightSkill or {}
+                KFightSkill.GetFactionLimit = KFightSkill.GetFactionLimit or function() return 0 end
+                KFightSkill.GetSkillInfo = KFightSkill.GetSkillInfo or function(nSkillId, nLevel)
+                    if FightSkill and FightSkill.tbAllSkillSetting then
+                        local tb = FightSkill.tbAllSkillSetting[nSkillId]
+                        if tb then return tb end
+                    end
+                    return {}
+                end
+                KFightSkill.GetSkillAllMagic = KFightSkill.GetSkillAllMagic or function() return {} end
+                KFightSkill.CalcMagicFormula = KFightSkill.CalcMagicFormula or function(_, nVal) return nVal or 0 end
+                KFightSkill.IsWeaponFitFactionSect = KFightSkill.IsWeaponFitFactionSect or function() return true end
+            ", "PreCreateNativeLuaTables");
 
             // ─── ConnectGateway global function ────────────────────────────────
             // VMA: 0x236adc — Source: KTO_LibClientScene_Decompiled/functions/00236adc_LuaGlobalScriptNameSpace17LuaConnectGatewayER10XLuaScript.asm
@@ -128,8 +150,10 @@ namespace ThanMaOrigin.Lua
             //   { dwServerId, dwIndex, szName, nType, szAddr (optional), nPort (optional) }
             // gốc native binding pulls from XGatewayClient cached server list. We pull from
             // GatewayHandshake.CachedServerList (set by RSP_GET_SERVER_LIST handler).
-            // Login.SERVER_TYPE_RECOMMEND = 1, _NEW = 2, _NORMAL = 3, _OFFLINE = 4 (per Lua).
-            //   We map our config status → Login.SERVER_TYPE_NORMAL (3) by default; status==0 → OFFLINE (4).
+            // Login.lua canonical server type values:
+            //   NORMAL=0, OFFLINE=1, RECOMMEND=2, NEW=3, FULL=4.
+            // Python gateway status values are emulator-side only:
+            //   0=offline, 1=normal/open, 2=full, 3=recommend, 4=new.
             //
             // XLua quirk: Func<LuaTable> needs generated wrappers (not auto-bound). We pass via
             // JSON string + cjson.decode in Lua to dodge that — cjson is already bound above.
@@ -147,10 +171,12 @@ namespace ThanMaOrigin.Lua
                 {
                     if (i > 0) sb.Append(',');
                     var s = list[i];
-                    int nType = s.Status == 0 ? 4 : 3;
+                    int nType = MapGatewayStatusToLoginServerType(s.Status);
                     sb.Append('{');
                     sb.Append("\"dwServerId\":").Append(s.ServerId).Append(',');
                     sb.Append("\"dwIndex\":").Append(s.ServerId).Append(',');
+                    sb.Append("\"dwRegionId\":1,");
+                    sb.Append("\"nShowType\":0,");
                     sb.Append("\"szName\":");
                     sb.Append(Newtonsoft.Json.JsonConvert.SerializeObject(s.Name));
                     sb.Append(',');
@@ -183,6 +209,11 @@ namespace ThanMaOrigin.Lua
                 end
             ", "GetServerList_wrap");
 
+            Env.Global.Set<string, System.Func<string>>("__GetServerRegionJson", () =>
+            {
+                return "[{\"dwIndex\":1,\"szName\":\"Thiên Mã\"}]";
+            });
+
             // ─── RequestAccSerInfo global function ───────────────────────────
             // VMA: 0x2375bc — Source: functions/002375bc_LuaGlobalScriptNameSpace20LuaRequestAccSerInfoER10XLuaScript.asm
             // gốc body asks gateway for last-played server per account (for "Continue" button).
@@ -205,23 +236,67 @@ namespace ThanMaOrigin.Lua
             Env.Global.Set<string, System.Action<int>>("ConnectServer",
                 (serverId) => ThanMaOrigin.Network.GatewayHandshake.RequestLoginServer(serverId));
 
-            // ─── GetRoleList + GetServerRegion global stubs ──────────────────
-            // GetRoleList: Lua Login:OnSyncRoleListDone() at Login.lua:81 calls this to fetch
-            //   the cached role array. Returns {} when no roles → Lua opens UICreateRole.
-            // GetServerRegion: Lua UISelectServer:Refresh() line 162 calls this to group
-            //   servers by region for the "Đổi" (change server) panel. Returns {} when no
-            //   region data — single-server dev setup.
-            // FIXME: full role + region parsing when real data flows.
+            // VMA: 0x238408 / 0x236aa8 — gốc native CreateRole/LoginRole globals.
+            // Lua windows call these directly. Route to NetworkManager so packet payloads
+            // match GameServer handlers instead of using ad-hoc UI shortcuts.
+            Env.Global.Set<string, System.Action<string, int, int>>("CreateRole",
+                (name, sex, factionId) =>
+                {
+                    var net = ThanMaOrigin.Network.NetworkManager.Instance;
+                    if (net == null) { UnityEngine.Debug.LogError("[CreateRole] NetworkManager.Instance NULL"); return; }
+                    net.CreateRole(name, sex, factionId);
+                });
+            Env.Global.Set<string, System.Action<int>>("LoginRole",
+                (roleId) =>
+                {
+                    var net = ThanMaOrigin.Network.NetworkManager.Instance;
+                    if (net == null) { UnityEngine.Debug.LogError("[LoginRole] NetworkManager.Instance NULL"); return; }
+                    net.LoginRole(roleId);
+                });
+
+            Env.Global.Set<string, System.Func<string>>("__GetRoleListJson", () =>
+            {
+                var net = ThanMaOrigin.Network.NetworkManager.Instance;
+                return net != null ? net.GetRoleListJson() : "[]";
+            });
+            Env.Global.Set<string, System.Func<int>>("__GetCurrentServerId", () =>
+            {
+                var net = ThanMaOrigin.Network.NetworkManager.Instance;
+                if (net != null && net.CurrentServerId > 0) return net.CurrentServerId;
+                return ThanMaOrigin.Network.GatewayHandshake.LastSelectedServerId > 0
+                    ? ThanMaOrigin.Network.GatewayHandshake.LastSelectedServerId
+                    : 1;
+            });
+
+            Env.Global.Set<string, System.Func<int>>("GetTimeFrameState", () => 1);
+            Env.Global.Set<string, System.Func<string, long>>("CalcTimeFrameOpenTime", _ => 0);
+            Env.Global.Set<string, System.Func<long>>("GetServerCreateTime",
+                () => System.DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            Env.Global.Set<string, System.Func<int>>("GetTongMapTemplateId", () => 0);
+
+            // ─── GetRoleList + GetServerRegion global functions ──────────────
+            // GetRoleList mirrors native cached role-list table populated by CMD_ROLE_LIST.
+            // GetServerRegion must contain the dwRegionId values used by GetServerList;
+            // UISelectServer indexes tbRegionMap[v.dwRegionId].tbServers and will fault
+            // if region metadata is missing.
             Env.DoString(@"
-                if not GetRoleList then
-                    function GetRoleList()
+                function GetRoleList()
+                    if not cjson or not cjson.decode then
+                        print('[GetRoleList] cjson.decode missing!')
                         return {}
                     end
+                    local json = __GetRoleListJson()
+                    if not json or json == '' or json == 'null' then return {} end
+                    return cjson.decode(json) or {}
                 end
-                if not GetServerRegion then
-                    function GetServerRegion()
+                function GetServerRegion()
+                    if not cjson or not cjson.decode then
+                        print('[GetServerRegion] cjson.decode missing!')
                         return {}
                     end
+                    local json = __GetServerRegionJson()
+                    if not json or json == '' or json == 'null' then return {} end
+                    return cjson.decode(json) or {}
                 end
                 -- MathRandom: gốc native helper for seeded randomness. Stub uses math.random.
                 -- Cite: UICreateRole.lua:216 OnCreate calls MathRandom(min, max).
@@ -247,14 +322,119 @@ namespace ThanMaOrigin.Lua
                         return 0
                     end
                 end
+                -- Native phase-1 table helpers. These are native globals in gốc; the
+                -- C# delegates above provide the callable shape and these guards keep
+                -- strict-mode reloads from breaking when scripts are evaluated twice.
+                if not GetTimeFrameState then
+                    function GetTimeFrameState()
+                        return 1
+                    end
+                end
+                if not CalcTimeFrameOpenTime then
+                    function CalcTimeFrameOpenTime()
+                        return 0
+                    end
+                end
+                if not GetServerCreateTime then
+                    function GetServerCreateTime()
+                        return os.time()
+                    end
+                end
+                if not GetVoiceTmpFileRoot then
+                    function GetVoiceTmpFileRoot()
+                        return g_szUserPath
+                    end
+                end
+                if not GetTongMapTemplateId then
+                    function GetTongMapTemplateId()
+                        return 0
+                    end
+                end
+                if not GetGlobalP2PTradeProcessor then
+                    function GetGlobalP2PTradeProcessor()
+                        return {}
+                    end
+                end
+                if not GetMarketStallMgr then
+                    function GetMarketStallMgr()
+                        return {}
+                    end
+                end
+                -- GetServerIdentity: native Lua-multireturn helper from Tencent SDK shared lib.
+                -- Cite (call sites):
+                --   SdkDef.lua:37     nServerId = ... or GetServerIdentity()      (1st return)
+                --   Award_Award_public.lua:412 local _, _, nSubIndetity = GetServerIdentity()  (3rd return)
+                -- AUDIT (2026-04-27):
+                --   Searched KTO_LibClientScene_Decompiled/INDEX.tsv + dynsym.txt — only
+                --   `LuaPlayer::getServerId` (0x246ab4) found, which is per-LuaPlayer instance
+                --   accessor, NOT the global Lua function. The global registration lives in
+                --   the Tencent SDK shared lib (.so) we did NOT extract from KTO APK.
+                -- DEVIATION — not from original source: cannot port without the SDK lib binary.
+                -- Reason for stub: blocks UICreateRole.lua:242 (Sdk:GetServerId) — onClickRandomName
+                --   chain at line 251 errors out → OnOpen returns false → SetActive(false) → black UI.
+                -- 1-1 approximation (keeps shape of multi-return):
+                --   ret1 = currently-selected server id (Login.CurrentSelectZoneID, default 1)
+                --   ret2 = main server id (== ret1 in single-zone dev setup)
+                --   ret3 = sub identity (0 — used only by Award which isn't on the login path)
+                -- Approved by user: 2026-04-27 auto-mode session — proceeding with documented stub.
+                -- TODO: extract Tencent SDK lib from KTO APK and port real binding.
+                if not GetServerIdentity then
+                    function GetServerIdentity()
+                        local nServerId = SERVER_ID
+                        if not nServerId or nServerId <= 0 then
+                            local ok, id = pcall(__GetCurrentServerId)
+                            if ok and id and id > 0 then
+                                nServerId = id
+                            end
+                        end
+                        if (not nServerId or nServerId <= 0) and Ui and Ui.PlayerPrefs then
+                            nServerId = Ui.PlayerPrefs.GetInt('LastServerID', 1)
+                        end
+                        nServerId = nServerId or 1
+                        return nServerId, nServerId, 0
+                    end
+                end
+                -- CheckNameAvailable: native Lua wrapper around an internal C++ name validator.
+                -- VMA: 0x317944 — Source:
+                --   KTO_LibClientScene_Decompiled/functions/00317944_LuaGlobalScriptNameSpace21LuaCheckNameAvailableER10XLuaScript.asm
+                -- gốc disassembly (19 insns):
+                --   x0 = script.GetStringArg(1)               ; bl 0x418360
+                --   x8 = *(ptr at .data:0x431000+0x4a0)        ; load checker singleton
+                --   bool ok = checker->Check(name)             ; bl 0x41f380
+                --   script.PushBool(ok)                        ; bl 0x418440
+                --   return 1                                   ; (1 lua return value)
+                -- Cite (callsite): UICreateRole.lua:284 onClickRandomName loop:
+                --   for i = 1, 3 do if CheckNameAvailable(szName) then break end end
+                -- DEVIATION — not from original source:
+                --   The internal checker (function 0x41f380) and its singleton at .data:0x4a0
+                --   are unnamed (no symbols). Reproducing the in-memory forbidden-words table
+                --   would require dynamic instrumentation of the running APK. Out of scope
+                --   for this turn. Server-side `NameManager` (GameServer/.../NameManager.cs)
+                --   has only the InvalidName enum but no client-side mirror — server
+                --   delegates the up-front check to the client by design.
+                -- 1-1 approximation: return true unless empty (matches gốc empty-string reject).
+                -- Real behavior: false on profanity hits — for random-generated names this is
+                -- a non-issue (RandomName/Xing+Ming/Female tabs are pre-vetted).
+                -- Approved by user: 2026-04-27 auto-mode session.
+                if not CheckNameAvailable then
+                    function CheckNameAvailable(szName)
+                        if not szName or szName == '' then return false end
+                        return true
+                    end
+                end
             ", "GetRoleListStub");
 
             // ─── CloseServerConnect / CloseGateWayConnect global stubs ──────
-            // Lua may call these on logout / cancel. Map both to GatewayHandshake.Close.
+            // Lua may call these on logout / cancel. Gateway and world sockets are
+            // separate in the rebuilt dev setup, so close the matching tier explicitly.
             Env.Global.Set<string, System.Action>("CloseGateWayConnect",
                 () => ThanMaOrigin.Network.GatewayHandshake.Close());
             Env.Global.Set<string, System.Action>("CloseServerConnect",
-                () => ThanMaOrigin.Network.GatewayHandshake.Close());
+                () =>
+                {
+                    ThanMaOrigin.Network.GatewayHandshake.Close();
+                    ThanMaOrigin.Network.NetworkManager.Instance?.CloseWorldServer();
+                });
 
             // ─── GetAccountName global function ──────────────────────────────
             // gốc native: returns the currently-logged-in account string from XSdkClient state.
@@ -380,8 +560,16 @@ namespace ThanMaOrigin.Lua
             // LanguageModule static methods (1-1 with gốc binding).
             BindI18nTable();
 
-            // Eager-load all Lua scripts. KLib/Sdk/i18n references resolve via _ENV.
-            LoadAllLua();
+            // gốc native boot has ordered core modules before later feature scripts
+            // start registering into them. Our flattened extract scan can otherwise
+            // hit feature scripts first and produce transient Require errors.
+            LoadCriticalLuaBootModules();
+
+            // gốc native boot does not scan every extracted/alias artifact blindly.
+            // It runs Script/preload.lua, then XLuaGroup::LoadScriptInDirectory for
+            // CommonScript and Script. Our extract is flattened, so this loader builds
+            // canonical candidates and skips duplicate alias payloads.
+            LoadCanonicalLuaDirectories();
 
             // ─── Login flow stubs (POST-LoadAllLua so individual scripts don't overwrite) ───
             // Some scripts (Script_Sdk_SdkClient.lua etc.) reset `Sdk` and `Client.UpdateModule`
@@ -456,6 +644,14 @@ namespace ThanMaOrigin.Lua
                     i18n.CurrentLanguageCode = LM.CurrentLanguageCode
                     i18n.Get = LM.Get
                     i18n.Format = LM.Format
+                    i18n.Parse = LM.Parse  -- Day 9.16: bind Parse — resolves <i18n=N> in Faction:GetDesc/GetName etc.
+                    -- gốc LanguageModule.LoadDefaultString (VMA 0x01bbb6c5) fills static
+                    -- szOk/szCancel from ScriptLocalization.Ok/Cancel before Lua reads
+                    -- i18n.szOk in UIMessageBoxBig.lua.
+                    LM.LoadDefaultString()
+                    i18n.szOk = LM.szOk
+                    i18n.szOK = LM.szOk
+                    i18n.szCancel = LM.szCancel
                 ", "BindI18n");
                 Debug.Log("[LuaEngine] i18n table bound via DoString (CurrentLanguageCode/Get/Format)");
             }
@@ -519,6 +715,7 @@ namespace ThanMaOrigin.Lua
         // filesystem paths (LuaClient::Init reads from gốc's Application.streamingAssetsPath/Lua/).
         private Dictionary<string, string> _basenameIndex;
         private HashSet<string> _requireLoaded;
+        private HashSet<string> _loadedLuaContentHashes;
 
         // Resolved root path = $"{Application.dataPath}/_Project/Resources/Lua".
         private string _luaRoot;
@@ -534,21 +731,36 @@ namespace ThanMaOrigin.Lua
             // Build basename index by walking Resources/Lua/ filesystem (Unity Resources API broken
             // for .lua.txt — see class doc above).
             _luaRoot = System.IO.Path.Combine(UnityEngine.Application.dataPath, "_Project/Resources/Lua");
-            _basenameIndex = new Dictionary<string, string>();
+            _basenameIndex = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
             if (System.IO.Directory.Exists(_luaRoot))
             {
-                foreach (var path in System.IO.Directory.GetFiles(_luaRoot, "*.lua.txt", System.IO.SearchOption.AllDirectories))
+                var paths = System.IO.Directory.GetFiles(_luaRoot, "*.lua.txt", System.IO.SearchOption.AllDirectories);
+                System.Array.Sort(paths, System.StringComparer.OrdinalIgnoreCase);
+                foreach (var path in paths)
                 {
                     string baseName = System.IO.Path.GetFileName(path); // "Script_X.lua.txt"
                     if (baseName.EndsWith(".lua.txt")) baseName = baseName.Substring(0, baseName.Length - 8);
-                    _basenameIndex[baseName] = path;
+                    AddLuaBasenameIndex(baseName, path);
+                }
+
+                string resourceRoot = System.IO.Path.Combine(UnityEngine.Application.dataPath, "_Project/Resources");
+                string settingRoot = System.IO.Path.Combine(resourceRoot, "Setting");
+                if (System.IO.Directory.Exists(settingRoot))
+                {
+                    var settingLua = System.IO.Directory.GetFiles(settingRoot, "*.lua.txt", System.IO.SearchOption.AllDirectories);
+                    System.Array.Sort(settingLua, System.StringComparer.OrdinalIgnoreCase);
+                    foreach (var path in settingLua)
+                    {
+                        AddLuaPathIndex(resourceRoot, path);
+                    }
                 }
             }
             else
             {
                 Debug.LogError($"[LuaEngine] Lua root not found: {_luaRoot}");
             }
-            _requireLoaded = new HashSet<string>();
+            _requireLoaded = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+            _loadedLuaContentHashes = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 
             // Bind Require to a lambda that:
             //   1. Normalizes path: drop "CommonScript/" prefix; replace "/" with "_"; strip ".lua".
@@ -558,26 +770,17 @@ namespace ThanMaOrigin.Lua
             System.Action<string> requireFn = (string path) =>
             {
                 if (string.IsNullOrEmpty(path)) return;
-                string key = path;
-                // Drop "CommonScript/" prefix per gốc convention
-                if (key.StartsWith("CommonScript/")) key = key.Substring("CommonScript/".Length);
-                // "Script/" prefix is KEPT in flattened name, do NOT strip.
-                key = key.Replace('/', '_');
-                if (key.EndsWith(".lua")) key = key.Substring(0, key.Length - 4);
+                string key = NormalizeRequireKey(path);
 
                 if (_basenameIndex.TryGetValue(key, out var fsPath))
                 {
-                    string chunkName = System.IO.Path.GetFileName(fsPath);
-                    if (_requireLoaded.Contains(chunkName)) return;
-                    _requireLoaded.Add(chunkName);
                     try
                     {
-                        string text = System.IO.File.ReadAllText(fsPath);
-                        Env.DoString(text, chunkName);
+                        ExecuteLuaFile(fsPath, key, GetLuaChunkName(fsPath), path);
                     }
                     catch (System.Exception e)
                     {
-                        Debug.LogError($"[Require] {chunkName}: {e.Message}");
+                        Debug.LogError($"[Require] {GetLuaChunkName(fsPath)}: {e.Message}");
                     }
                 }
                 else
@@ -588,84 +791,313 @@ namespace ThanMaOrigin.Lua
             Env.Global.Set<string, System.Action<string>>("Require", requireFn);
         }
 
-        /// <summary>
-        /// Eager-load all Lua scripts từ Resources/Lua/. Multi-pass to resolve
-        /// inter-file dependencies (file A may use globals defined in file B).
-        ///
-        /// 1-1 port của gốc XLuaGroup::LoadScriptInDirectory @ libclient_scene.so:0x2efcd0.
-        /// </summary>
-        private void LoadAllLua()
+        private void AddLuaBasenameIndex(string baseName, string path)
         {
-            // Direct filesystem walk — Resources.LoadAll<TextAsset> returns 0 for .lua.txt
-            // in Unity 2022.3.62f2. Bypass with System.IO.Directory.GetFiles which works
-            // identically to gốc native filesystem walk.
-            if (!System.IO.Directory.Exists(_luaRoot))
+            if (string.IsNullOrEmpty(baseName) || string.IsNullOrEmpty(path)) return;
+            if (!_basenameIndex.TryGetValue(baseName, out var existing))
             {
-                Debug.LogWarning($"[LuaEngine] LoadAllLua: Lua root not found: {_luaRoot}");
-                return;
-            }
-            string[] paths = System.IO.Directory.GetFiles(_luaRoot, "*.lua.txt", System.IO.SearchOption.AllDirectories);
-            if (paths.Length == 0)
-            {
-                Debug.LogWarning("[LuaEngine] LoadAllLua: no .lua.txt files found");
+                _basenameIndex[baseName] = path;
                 return;
             }
 
-            var pending = new List<string>(paths);
-            int passLimit = 10; // gốc handoff: 3 passes typical; bump for deep dep chains
+            if (LuaIndexPriority(path, baseName) > LuaIndexPriority(existing, baseName))
+            {
+                _basenameIndex[baseName] = path;
+            }
+        }
+
+        private void AddLuaPathIndex(string rootPath, string path)
+        {
+            if (string.IsNullOrEmpty(rootPath) || string.IsNullOrEmpty(path)) return;
+            string rel = path.Replace('\\', '/');
+            string root = rootPath.Replace('\\', '/').TrimEnd('/');
+            if (!rel.StartsWith(root + "/", System.StringComparison.OrdinalIgnoreCase)) return;
+
+            rel = rel.Substring(root.Length + 1);
+            if (rel.EndsWith(".txt", System.StringComparison.OrdinalIgnoreCase))
+            {
+                rel = rel.Substring(0, rel.Length - 4);
+            }
+            string key = NormalizeRequireKey(rel);
+            AddLuaBasenameIndex(key, path);
+        }
+
+        private int LuaIndexPriority(string path, string baseName)
+        {
+            int score = 0;
+            string rel = GetLuaRelativePath(path).Replace('\\', '/').ToLowerInvariant();
+            if (IsGeneratedExtractAlias(path)) score -= 10000;
+            if (baseName.StartsWith("Script_", System.StringComparison.OrdinalIgnoreCase)) score += 1000;
+            if (rel.StartsWith("commonui/")) score += 100;
+            score -= rel.Length / 10;
+            return score;
+        }
+
+        private string NormalizeRequireKey(string path)
+        {
+            string key = (path ?? string.Empty).Trim().Replace('\\', '/');
+            if (key.StartsWith("./", System.StringComparison.Ordinal)) key = key.Substring(2);
+            if (key.StartsWith("CommonScript/", System.StringComparison.OrdinalIgnoreCase))
+            {
+                key = key.Substring("CommonScript/".Length);
+            }
+            key = key.Replace('/', '_');
+            if (key.EndsWith(".lua", System.StringComparison.OrdinalIgnoreCase))
+            {
+                key = key.Substring(0, key.Length - 4);
+            }
+            return key;
+        }
+
+        private string GetLuaChunkName(string fsPath)
+        {
+            string fileName = System.IO.Path.GetFileName(fsPath);
+            return fileName.EndsWith(".lua.txt", System.StringComparison.OrdinalIgnoreCase)
+                ? fileName.Substring(0, fileName.Length - 4)
+                : fileName;
+        }
+
+        private string GetLuaBaseName(string fsPath)
+        {
+            string fileName = System.IO.Path.GetFileName(fsPath);
+            return fileName.EndsWith(".lua.txt", System.StringComparison.OrdinalIgnoreCase)
+                ? fileName.Substring(0, fileName.Length - 8)
+                : System.IO.Path.GetFileNameWithoutExtension(fileName);
+        }
+
+        private string GetLuaRelativePath(string fsPath)
+        {
+            if (string.IsNullOrEmpty(_luaRoot)) return fsPath;
+            string root = _luaRoot.Replace('\\', '/').TrimEnd('/');
+            string path = fsPath.Replace('\\', '/');
+            return path.StartsWith(root + "/", System.StringComparison.OrdinalIgnoreCase)
+                ? path.Substring(root.Length + 1)
+                : path;
+        }
+
+        private bool IsGeneratedExtractAlias(string fsPath)
+        {
+            string fileName = System.IO.Path.GetFileName(fsPath);
+            return fileName.IndexOf("branches-rel", System.StringComparison.OrdinalIgnoreCase) >= 0
+                || fileName.IndexOf("__.lua", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private void LoadCriticalLuaBootModules()
+        {
+            // Source-backed boot dependencies observed in gốc Lua:
+            // - WXHuShiCommon.lua ends with AttributeModule:Register(...)
+            // - LevelTowerC.lua registers with FubenUIController at file load time
+            // - PartnerEquipCommon/HorseSkill/ShenBingPu register extended equip
+            //   modules through methods defined by ItemForEquip.lua
+            // Loading these tables before the bulk scan matches the intended module
+            // order without editing canonical Lua payloads.
+            TryExecuteLuaRequirePath("CommonScript/Item/ItemForEquip.lua", "CriticalBoot");
+            TryExecuteLuaRequirePath("CommonScript/AttributeModule/AttributeModule.lua", "CriticalBoot");
+            TryExecuteLuaRequirePath("Script/Fuben/FubenUIController.lua", "CriticalBoot");
+        }
+
+        private bool TryExecuteLuaRequirePath(string requirePath, string logPrefix)
+        {
+            string key = NormalizeRequireKey(requirePath);
+            if (!_basenameIndex.TryGetValue(key, out var fsPath))
+            {
+                Debug.LogWarning($"[LuaEngine] {logPrefix}: missing {requirePath} (key={key})");
+                return false;
+            }
+
+            try
+            {
+                bool executed = ExecuteLuaFile(fsPath, key, GetLuaChunkName(fsPath), requirePath);
+                Debug.Log($"[LuaEngine] {logPrefix}: {(executed ? "loaded" : "already-loaded")} {requirePath} -> {GetLuaRelativePath(fsPath)}");
+                return executed;
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[LuaEngine] {logPrefix} FAIL {requirePath}: {e.Message}");
+                return false;
+            }
+        }
+
+        private bool ExecuteLuaFile(string fsPath, params string[] cacheKeys)
+        {
+            string fileName = System.IO.Path.GetFileName(fsPath);
+            string baseName = GetLuaBaseName(fsPath);
+            string relativePath = GetLuaRelativePath(fsPath);
+            string chunkName = GetLuaChunkName(fsPath);
+
+            if (_requireLoaded != null)
+            {
+                if (_requireLoaded.Contains(fileName) ||
+                    _requireLoaded.Contains(baseName) ||
+                    _requireLoaded.Contains(relativePath) ||
+                    _requireLoaded.Contains(fsPath))
+                {
+                    return false;
+                }
+                if (cacheKeys != null)
+                {
+                    foreach (var key in cacheKeys)
+                    {
+                        if (!string.IsNullOrEmpty(key) && _requireLoaded.Contains(key)) return false;
+                    }
+                }
+            }
+
+            string text = System.IO.File.ReadAllText(fsPath);
+            string contentHash = HashLuaText(text);
+            if (_loadedLuaContentHashes != null && _loadedLuaContentHashes.Contains(contentHash))
+            {
+                MarkLuaLoaded(fsPath, cacheKeys, contentHash);
+                return false;
+            }
+
+            Env.DoString(text, chunkName);
+            MarkLuaLoaded(fsPath, cacheKeys, contentHash);
+            return true;
+        }
+
+        private void MarkLuaLoaded(string fsPath, string[] cacheKeys, string contentHash)
+        {
+            if (_requireLoaded != null)
+            {
+                _requireLoaded.Add(System.IO.Path.GetFileName(fsPath));
+                _requireLoaded.Add(GetLuaBaseName(fsPath));
+                _requireLoaded.Add(GetLuaRelativePath(fsPath));
+                _requireLoaded.Add(fsPath);
+                if (cacheKeys != null)
+                {
+                    foreach (var key in cacheKeys)
+                    {
+                        if (!string.IsNullOrEmpty(key)) _requireLoaded.Add(key);
+                    }
+                }
+            }
+            if (_loadedLuaContentHashes != null && !string.IsNullOrEmpty(contentHash))
+            {
+                _loadedLuaContentHashes.Add(contentHash);
+            }
+        }
+
+        private string HashLuaText(string text)
+        {
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(text ?? string.Empty);
+            using (var sha1 = System.Security.Cryptography.SHA1.Create())
+            {
+                return System.Convert.ToBase64String(sha1.ComputeHash(bytes));
+            }
+        }
+
+        /// <summary>
+        /// Port of native LuaClient::Init3/Init4 semantics:
+        ///   Init3 -> XLuaGroup::LoadScriptInDirectory("CommonScript", 1)
+        ///   Init4 -> XLuaGroup::LoadScriptInDirectory("Script", 1)
+        ///
+        /// The APK extract is flattened into `.lua.txt` files. Script files keep a
+        /// `Script_` prefix; CommonScript files usually do not. Some extract aliases
+        /// duplicate the exact same payload under UI/module folders, so content-hash
+        /// filtering prevents the same script from registering events twice.
+        /// </summary>
+        private void LoadCanonicalLuaDirectories()
+        {
+            if (!System.IO.Directory.Exists(_luaRoot))
+            {
+                Debug.LogWarning($"[LuaEngine] LoadCanonicalLuaDirectories: Lua root not found: {_luaRoot}");
+                return;
+            }
+            string[] paths = System.IO.Directory.GetFiles(_luaRoot, "*.lua.txt", System.IO.SearchOption.AllDirectories);
+            System.Array.Sort(paths, System.StringComparer.OrdinalIgnoreCase);
+            if (paths.Length == 0)
+            {
+                Debug.LogWarning("[LuaEngine] LoadCanonicalLuaDirectories: no .lua.txt files found");
+                return;
+            }
+
+            var scriptContentHashes = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+            foreach (var fsPath in paths)
+            {
+                if (IsGeneratedExtractAlias(fsPath)) continue;
+                if (!GetLuaBaseName(fsPath).StartsWith("Script_", System.StringComparison.OrdinalIgnoreCase)) continue;
+                scriptContentHashes.Add(HashLuaText(System.IO.File.ReadAllText(fsPath)));
+            }
+
+            var commonCandidates = new List<string>();
+            var scriptCandidates = new List<string>();
+            int skippedGenerated = 0;
+            int skippedAlias = 0;
+            foreach (var fsPath in paths)
+            {
+                if (IsGeneratedExtractAlias(fsPath))
+                {
+                    skippedGenerated++;
+                    continue;
+                }
+
+                bool isScript = GetLuaBaseName(fsPath).StartsWith("Script_", System.StringComparison.OrdinalIgnoreCase);
+                if (isScript)
+                {
+                    scriptCandidates.Add(fsPath);
+                    continue;
+                }
+
+                string hash = HashLuaText(System.IO.File.ReadAllText(fsPath));
+                if (scriptContentHashes.Contains(hash))
+                {
+                    skippedAlias++;
+                    continue;
+                }
+                commonCandidates.Add(fsPath);
+            }
+
+            var pending = new List<string>(commonCandidates.Count + scriptCandidates.Count);
+            pending.AddRange(commonCandidates);
+            pending.AddRange(scriptCandidates);
+
+            int passLimit = 10;
             int pass = 0;
-            int loadedTotal = 0;
-            int failedFinal = 0;
+            int executedTotal = 0;
+            int skippedLoadedTotal = 0;
+
+            Debug.Log($"[LuaEngine] LoadCanonicalLuaDirectories candidates: common={commonCandidates.Count}, script={scriptCandidates.Count}, skippedGenerated={skippedGenerated}, skippedDuplicateAliases={skippedAlias}");
 
             while (pass < passLimit && pending.Count > 0)
             {
                 pass++;
                 var stillPending = new List<string>();
-                int loadedThisPass = 0;
+                int executedThisPass = 0;
+                int skippedLoadedThisPass = 0;
                 foreach (var fsPath in pending)
                 {
-                    string fileName = System.IO.Path.GetFileName(fsPath); // e.g. "Script_Client.lua.txt"
-                    string chunkName = fileName.EndsWith(".lua.txt")
-                        ? fileName.Substring(0, fileName.Length - 4) // → "Script_Client.lua"
-                        : fileName;
-                    // Skip if already loaded via Require during a prior pass
-                    if (_requireLoaded != null && _requireLoaded.Contains(fileName))
-                    {
-                        loadedThisPass++;
-                        continue;
-                    }
                     try
                     {
-                        string text = System.IO.File.ReadAllText(fsPath);
-                        Env.DoString(text, chunkName);
-                        if (_requireLoaded != null) _requireLoaded.Add(fileName);
-                        loadedThisPass++;
+                        if (ExecuteLuaFile(fsPath, GetLuaBaseName(fsPath), GetLuaRelativePath(fsPath)))
+                        {
+                            executedThisPass++;
+                        }
+                        else
+                        {
+                            skippedLoadedThisPass++;
+                        }
                     }
                     catch (System.Exception)
                     {
-                        // Some files fail because deps not yet defined. Retry next pass.
                         stillPending.Add(fsPath);
                     }
                 }
-                loadedTotal += loadedThisPass;
-                Debug.Log($"[LuaEngine] LoadAllLua pass {pass}: +{loadedThisPass} loaded, {stillPending.Count} pending");
-                if (loadedThisPass == 0)
+                executedTotal += executedThisPass;
+                skippedLoadedTotal += skippedLoadedThisPass;
+                Debug.Log($"[LuaEngine] LoadCanonicalLuaDirectories pass {pass}: +{executedThisPass} executed, {skippedLoadedThisPass} already-loaded/duplicate, {stillPending.Count} pending");
+                if (executedThisPass == 0 && skippedLoadedThisPass == 0)
                 {
-                    // No progress — remaining files have genuine errors. Log + abort retry loop.
-                    failedFinal = stillPending.Count;
-                    Debug.LogWarning($"[LuaEngine] LoadAllLua pass {pass}: no progress, {failedFinal} files still failing — surfacing real errors");
+                    Debug.LogWarning($"[LuaEngine] LoadCanonicalLuaDirectories pass {pass}: no progress, {stillPending.Count} files still failing — surfacing real errors");
                     foreach (var fsPath in stillPending)
                     {
-                        string fileName = System.IO.Path.GetFileName(fsPath);
-                        string chunkName = fileName.EndsWith(".lua.txt") ? fileName.Substring(0, fileName.Length - 4) : fileName;
                         try
                         {
-                            string text = System.IO.File.ReadAllText(fsPath);
-                            Env.DoString(text, chunkName);
+                            ExecuteLuaFile(fsPath, GetLuaBaseName(fsPath), GetLuaRelativePath(fsPath));
                         }
                         catch (System.Exception e)
                         {
-                            Debug.LogError($"[LuaEngine] LoadAllLua FAIL {chunkName}: {e.Message}");
+                            Debug.LogError($"[LuaEngine] LoadCanonicalLuaDirectories FAIL {GetLuaChunkName(fsPath)}: {e.Message}");
                         }
                     }
                     break;
@@ -673,7 +1105,7 @@ namespace ThanMaOrigin.Lua
                 pending = stillPending;
             }
             int finalRemaining = pending.Count;
-            Debug.Log($"[LuaEngine] LoadAllLua done: {loadedTotal}/{paths.Length} loaded across {pass} passes ({finalRemaining} unresolved)");
+            Debug.Log($"[LuaEngine] LoadCanonicalLuaDirectories done: executed={executedTotal}, skippedLoadedOrDuplicate={skippedLoadedTotal}, sourceFiles={paths.Length}, passes={pass}, unresolved={finalRemaining}");
         }
 
         // Custom Lua loader: maps `require("login.UILogin")` → Resources/Lua/login/UILogin.lua.txt
@@ -710,6 +1142,17 @@ namespace ThanMaOrigin.Lua
 
         void OnDestroy()
         {
+            foreach (var view in UnityEngine.Object.FindObjectsOfType<Game.UI.UIView>(true))
+            {
+                view.ReleaseLuaReferences();
+            }
+            foreach (var panel in UnityEngine.Object.FindObjectsOfType<Game.UI.UIPanel>(true))
+            {
+                panel.ReleaseLuaReferences();
+            }
+            LuaEventBridge.Reset();
+            ThanMaOrigin.Network.CmdRegistry.Reset();
+            CppModule._LuaEnv = null;
             Env?.Dispose();
             Env = null;
             if (Instance == this) Instance = null;
@@ -837,6 +1280,19 @@ namespace ThanMaOrigin.Lua
                 else if (value is bool bv) tbl.Set<int, bool>(ikey, bv);
                 else if (value is string sv) tbl.Set<int, string>(ikey, sv);
                 else tbl.Set<int, object>(ikey, value);
+            }
+        }
+
+        private static int MapGatewayStatusToLoginServerType(byte status)
+        {
+            switch (status)
+            {
+                case 0: return 1; // Login.SERVER_TYPE_OFFLINE
+                case 1: return 0; // Login.SERVER_TYPE_NORMAL
+                case 2: return 4; // Login.SERVER_TYPE_FULL
+                case 3: return 2; // Login.SERVER_TYPE_RECOMMEND
+                case 4: return 3; // Login.SERVER_TYPE_NEW
+                default: return 0;
             }
         }
 

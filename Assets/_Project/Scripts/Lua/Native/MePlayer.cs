@@ -260,7 +260,7 @@ namespace ThanMaOrigin.Lua.Native
         public int LegionId { get; set; }
 
         // VMA: 0x245ad0  Source: functions/00245ad0_LuaPlayer8getLevelEv.asm
-        public int Level { get; }
+        public int Level => Data.nLevel;
 
         // VMA: 0x245b2c  Source: functions/00245b2c_LuaPlayer26getLevelUpAboutEquipSeriesEv.asm
         public int LevelUpAboutEquipSeries { get; set; }
@@ -425,7 +425,29 @@ namespace ThanMaOrigin.Lua.Native
         public int TeamID { get; }
 
         // VMA: 0x245a44  Source: functions/00245a44_LuaPlayer9getTongIdEv.asm
-        public int TongId { get; set; }
+        public int TongId
+        {
+            get => (int)Data.dwTongId;
+            set => Data.dwTongId = (uint)value;
+        }
+
+        // gốc Lua scripts also access raw LuaPlayer field names (`me.dwID`,
+        // `me.nMapTemplateId`) and attach Lua-side state (`me.tbPlayerEvent`).
+        // The native object accepts these through LuaNewIndex; expose explicit
+        // properties here so XLua has the same writable surface.
+        public uint dwID
+        {
+            get => Data.dwID;
+            set => Data.dwID = value;
+        }
+
+        public int nMapTemplateId
+        {
+            get => Data.nMapTemplateId;
+            set => Data.nMapTemplateId = value;
+        }
+
+        public LuaTable tbPlayerEvent { get; set; }
 
         // VMA: 0x245b08  Source: functions/00245b08_LuaPlayer13getTotalLevelEv.asm
         public int TotalLevel { get; }

@@ -23,7 +23,14 @@ namespace ThanMaOrigin.Lua
             if (env == null) return null;
             var en = env.Global.Get<LuaTable>("EventNotify");
             if (en == null) return null;
-            _onNotify = en.Get<LuaFunction>("OnNotify");
+            try
+            {
+                _onNotify = en.Get<LuaFunction>("OnNotify");
+            }
+            finally
+            {
+                en.Dispose();
+            }
             return _onNotify;
         }
 
@@ -53,12 +60,19 @@ namespace ThanMaOrigin.Lua
             // gốc: EventNotify.emNOTIFY_<X> — integer constants on EventNotify table.
             var en = env.Global.Get<LuaTable>("EventNotify");
             if (en == null) { Debug.LogWarning($"[LuaEventBridge] EventNotify not loaded"); return; }
-            int nEvent = en.Get<int>(enumName);
-            if (nEvent == 0)
+            try
             {
-                Debug.LogWarning($"[LuaEventBridge] Lua enum {enumName} = 0 (not registered yet?)");
+                int nEvent = en.Get<int>(enumName);
+                if (nEvent == 0)
+                {
+                    Debug.LogWarning($"[LuaEventBridge] Lua enum {enumName} = 0 (not registered yet?)");
+                }
+                Fire(nEvent, args);
             }
-            Fire(nEvent, args);
+            finally
+            {
+                en.Dispose();
+            }
         }
 
         /// <summary>

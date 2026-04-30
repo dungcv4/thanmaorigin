@@ -1,6 +1,9 @@
 // File: Assets/_Project/Scripts/Network/NetworkManager.cs
 // Singleton wrapping TMSKSocket + dispatch inbound packets to CmdRegistry on main thread.
 
+using System;
+using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 
 namespace ThanMaOrigin.Network
@@ -24,6 +27,39 @@ namespace ThanMaOrigin.Network
         private TMSKSocket _sock = new TMSKSocket();
 
         public bool Connected => _sock.Connected;
+        public int CurrentServerId { get; private set; } = 1;
+        public int CurrentZoneId => CurrentServerId;
+        public string CurrentUserId => _sdkPlatformUserId ?? "";
+        public string CurrentUserName => _sdkUserName ?? "";
+
+        private const int CMD_LOGIN_ON2 = 20;
+        private const int CMD_LOGIN_ON = 100;
+        private const int CMD_ROLE_LIST = 101;
+        private const int CMD_CREATE_ROLE = 102;
+        private const int CMD_INIT_GAME = 104;
+        private const int CMD_PLAY_GAME = 106;
+        private const int CMD_SYNC_END = 209;
+        private const int CMD_SPR_FIRE_EVENT = 32200;
+
+        private const int DEFAULT_NEWBIE_VILLAGE_ID = 1;
+
+        public sealed class RoleInfo
+        {
+            public int RoleId;
+            public int Sex;
+            public int FactionId;
+            public string Name = "";
+            public int Level;
+            public int ZongShiLevel;
+            public int BanEndTime;
+            public string BanReason = "";
+            public string EquipMini = "-1_-1_-1_0_-1";
+        }
+
+        private readonly List<RoleInfo> _cachedRoles = new List<RoleInfo>();
+        private string _sdkUserName = "";
+        private int _pendingLoginRoleId;
+        private bool _loginRoleRespondFired;
 
         void Awake()
         {
@@ -38,9 +74,21 @@ namespace ThanMaOrigin.Network
             // gốc protocol: client sends CMD_LOGIN_ON → server replies CMD_LOGIN_ON
             // with "RandKey:WaitSecs". Then client sends CMD_ROLE_LIST → server
             // returns role data. Client opens UISelectRoleExist or UICreateRole.
-            CmdRegistry.RegisterCSharpHandler(100, OnLoginOnReply);    // CMD_LOGIN_ON reply
-            CmdRegistry.RegisterCSharpHandler(20,  OnLoginOn2Reply);   // CMD_LOGIN_ON2 reply (SDK auth path)
-            CmdRegistry.RegisterCSharpHandler(101, OnRoleListReply);   // CMD_ROLE_LIST reply
+            CmdRegistry.RegisterCSharpHandler(CMD_LOGIN_ON, OnLoginOnReply);      // CMD_LOGIN_ON reply
+            CmdRegistry.RegisterCSharpHandler(CMD_LOGIN_ON2, OnLoginOn2Reply);    // CMD_LOGIN_ON2 reply (SDK auth path)
+            CmdRegistry.RegisterCSharpHandler(CMD_ROLE_LIST, OnRoleListReply);    // CMD_ROLE_LIST reply
+            CmdRegistry.RegisterCSharpHandler(CMD_CREATE_ROLE, OnCreateRoleReply);
+            CmdRegistry.RegisterCSharpHandler(CMD_INIT_GAME, OnInitGameReply);
+            CmdRegistry.RegisterCSharpHandler(CMD_PLAY_GAME, OnPlayGameReply);
+            CmdRegistry.RegisterCSharpHandler(CMD_SYNC_END, OnSyncEnd);
+            CmdRegistry.RegisterCSharpHandler(CMD_SPR_FIRE_EVENT, OnFireEvent);
+        }
+
+        public void SetSelectedServerId(int serverId)
+        {
+            if (serverId <= 0) return;
+            CurrentServerId = serverId;
+            UnityEngine.Debug.Log($"[NetworkManager] CurrentServerId={CurrentServerId}");
         }
 
         // CMD_LOGIN_ON2 reply per ProcessUserLogin2Cmd KT_TCPHandler_Core.cs:1478:
@@ -78,8 +126,9 @@ namespace ThanMaOrigin.Network
             // UserLoginToken.SetEncryptString → registers session via OnlineUserSession.AddSession.
             // roleRandToken: we use 0 (unused on initial login per server line 1530).
             _sdkPlatformUserId = userID;
+            _sdkUserName = userName;
             string loginBody = $"{userID}:{userName}:{userToken}:0:{LoginTokenHelper.VerSign}:{isadult}";
-            _sock.Send(100, System.Text.Encoding.UTF8.GetBytes(loginBody));
+            _sock.Send(CMD_LOGIN_ON, Encoding.UTF8.GetBytes(loginBody));
             UnityEngine.Debug.Log($"[NetworkManager] → CMD_LOGIN_ON sent body='{loginBody}'");
         }
 
@@ -107,42 +156,288 @@ namespace ThanMaOrigin.Network
             // Send CMD_ROLE_LIST. Format = "userID:zoneID". userID = SDK platform_user_id
             // we used in CMD_LOGIN_ON2 + CMD_LOGIN_ON (e.g. "3_testuser").
             string userId = _sdkPlatformUserId ?? _pendingAccount ?? "";
-            string body = $"{userId}:1";
-            _sock.Send(101, System.Text.Encoding.UTF8.GetBytes(body));
+            string body = $"{userId}:{CurrentZoneId}";
+            _sock.Send(CMD_ROLE_LIST, Encoding.UTF8.GetBytes(body));
             UnityEngine.Debug.Log($"[NetworkManager] → CMD_ROLE_LIST sent body='{body}'");
         }
 
-        // Server replies CMD_ROLE_LIST with role-list payload (binary protobuf or
-        // delimited string — depends on TransferRequestToDBServer return format).
-        // Log payload + fire emNOTIFY event so Lua side can advance.
+        // Server replies CMD_ROLE_LIST with:
+        //   "{count}:{roleID$sex$factionID$roleName$level$preDelLeftSeconds$armor_helm_weapon_enhance_mantle|...}"
+        // Source: GameDBServer/Server/TCPCmdHandler.cs ProcessGetRoleListCmd.
+        // gốc Lua then reads GetRoleList() and opens UISelectRoleExist/UICreateRole.
         private void OnRoleListReply(byte[] payload)
         {
-            UnityEngine.Debug.Log($"[NetworkManager] ← CMD_ROLE_LIST reply: {payload?.Length ?? 0} bytes " +
-                $"(first 64 hex: {(payload != null ? System.BitConverter.ToString(payload, 0, System.Math.Min(64, payload.Length)) : "null")})");
-            // gốc fires emNOTIFY_SYNC_ROLE_LIST (or similar) so Lua's UILoginServer
-            // OnSyncRoleListDone runs → opens UISelectRoleExist or UICreateRole.
-            // For now: fire generic event + let Lua handle it (or use direct call).
+            string s = payload != null ? Encoding.UTF8.GetString(payload) : "";
+            UnityEngine.Debug.Log($"[NetworkManager] ← CMD_ROLE_LIST reply: '{s}'");
+            ParseRoleListPayload(s);
+            ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName("emNOTIFY_SYNC_ROLE_LIST_DONE");
+        }
+
+        private void ParseRoleListPayload(string payload)
+        {
+            _cachedRoles.Clear();
+            if (string.IsNullOrEmpty(payload)) return;
+
+            string[] head = payload.Split(new[] { ':' }, 2);
+            if (head.Length == 0 || !int.TryParse(head[0], out int count) || count <= 0)
+            {
+                return;
+            }
+
+            if (head.Length < 2 || string.IsNullOrEmpty(head[1])) return;
+            string[] rows = head[1].Split('|');
+            for (int i = 0; i < rows.Length; i++)
+            {
+                if (string.IsNullOrEmpty(rows[i])) continue;
+                string[] fields = rows[i].Split('$');
+                if (fields.Length < 6) continue;
+                _cachedRoles.Add(new RoleInfo
+                {
+                    RoleId = ParseInt(fields[0]),
+                    Sex = ParseInt(fields[1]),
+                    FactionId = ParseInt(fields[2]),
+                    Name = fields[3].Replace('*', '|'),
+                    Level = ParseInt(fields[4]),
+                    ZongShiLevel = 0,
+                    BanEndTime = 0,
+                    BanReason = "",
+                    EquipMini = fields.Length > 6 ? fields[6] : "-1_-1_-1_0_-1",
+                });
+            }
+
+            if (_cachedRoles.Count != count)
+            {
+                UnityEngine.Debug.LogWarning($"[NetworkManager] ROLE_LIST declared count={count}, parsed={_cachedRoles.Count}");
+            }
+        }
+
+        public string GetRoleListJson()
+        {
+            var rows = new List<object>(_cachedRoles.Count);
+            foreach (var r in _cachedRoles)
+            {
+                rows.Add(new
+                {
+                    nRoleID = r.RoleId,
+                    nSex = r.Sex,
+                    nFaction = r.FactionId,
+                    szName = r.Name,
+                    nLevel = r.Level,
+                    nZongShiLevel = r.ZongShiLevel,
+                    nBanEndTime = r.BanEndTime,
+                    szBanReason = r.BanReason,
+                    szEquipMini = r.EquipMini,
+                });
+            }
+            return Newtonsoft.Json.JsonConvert.SerializeObject(rows);
+        }
+
+        public void CreateRole(string name, int sex, int factionId)
+        {
+            if (!_sock.Connected)
+            {
+                UnityEngine.Debug.LogError("[NetworkManager.CreateRole] world socket not connected");
+                NotifyCreateRoleRespond(6, 0);
+                return;
+            }
+
+            string userId = _sdkPlatformUserId ?? "";
+            string userName = string.IsNullOrEmpty(_sdkUserName) ? (_pendingAccount ?? "") : _sdkUserName;
+            if (string.IsNullOrEmpty(userId))
+            {
+                UnityEngine.Debug.LogError("[NetworkManager.CreateRole] missing SDK user id");
+                NotifyCreateRoleRespond(6, 0);
+                return;
+            }
+
+            string safeName = SanitizePacketField(name);
+            string safeUserName = SanitizePacketField(userName);
+            string body = $"{userId}:{safeUserName}:{sex}:{factionId}:{safeName}$0:{CurrentServerId}:{DEFAULT_NEWBIE_VILLAGE_ID}";
+            _sock.Send(CMD_CREATE_ROLE, Encoding.UTF8.GetBytes(body));
+            UnityEngine.Debug.Log($"[NetworkManager] → CMD_CREATE_ROLE body='{body}'");
+        }
+
+        private void OnCreateRoleReply(byte[] payload)
+        {
+            string s = payload != null ? Encoding.UTF8.GetString(payload) : "";
+            UnityEngine.Debug.Log($"[NetworkManager] ← CMD_CREATE_ROLE reply: '{s}'");
+
+            string[] head = s.Split(new[] { ':' }, 2);
+            int serverCode = head.Length > 0 ? ParseInt(head[0]) : 0;
+            string roleBlob = head.Length > 1 ? head[1] : "";
+            if (serverCode == 1)
+            {
+                RoleInfo? role = ParseRoleBlob(roleBlob);
+                int roleId = role?.RoleId ?? 0;
+                if (role != null)
+                {
+                    UpsertRole(role);
+                }
+                NotifyCreateRoleRespond(0, roleId);
+                return;
+            }
+
+            NotifyCreateRoleRespond(MapCreateRoleCode(serverCode), 0);
+        }
+
+        public void LoginRole(int roleId)
+        {
+            if (!_sock.Connected)
+            {
+                UnityEngine.Debug.LogError("[NetworkManager.LoginRole] world socket not connected");
+                ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName("emNOTIFY_LOGIN_ROLE_RESPOND", 0, 4, roleId);
+                return;
+            }
+            if (roleId <= 0)
+            {
+                ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName("emNOTIFY_LOGIN_ROLE_RESPOND", 0, 4, roleId);
+                return;
+            }
+
+            _pendingLoginRoleId = roleId;
+            _loginRoleRespondFired = false;
+            string deviceId = SanitizePacketField(UnityEngine.SystemInfo.deviceUniqueIdentifier);
+            if (string.IsNullOrEmpty(deviceId) || deviceId == "unsupported")
+            {
+                deviceId = "thanmaorigin-editor";
+            }
+            string deviceModel = SanitizePacketField(UnityEngine.SystemInfo.deviceModel);
+            string body = $"{CurrentUserId}:{roleId}:{deviceId}:{deviceModel}";
+            _sock.Send(CMD_INIT_GAME, Encoding.UTF8.GetBytes(body));
+            UnityEngine.Debug.Log($"[NetworkManager] → CMD_INIT_GAME body='{body}'");
+        }
+
+        private void OnInitGameReply(byte[] payload)
+        {
+            UnityEngine.Debug.Log($"[NetworkManager] ← CMD_INIT_GAME reply: {payload?.Length ?? 0} bytes");
+            if (_pendingLoginRoleId <= 0 || payload == null || payload.Length == 0)
+            {
+                FireLoginRoleRespondOnce(0, 4, _pendingLoginRoleId);
+                return;
+            }
+
+            string body = _pendingLoginRoleId.ToString();
+            _sock.Send(CMD_PLAY_GAME, Encoding.UTF8.GetBytes(body));
+            UnityEngine.Debug.Log($"[NetworkManager] → CMD_PLAY_GAME body='{body}'");
+        }
+
+        private void OnPlayGameReply(byte[] payload)
+        {
+            string s = payload != null ? Encoding.UTF8.GetString(payload) : "";
+            UnityEngine.Debug.Log($"[NetworkManager] ← CMD_PLAY_GAME reply: '{s}'");
+            int roleId = ParseInt(s);
+            if (roleId <= 0) roleId = _pendingLoginRoleId;
+            FireLoginRoleRespondOnce(1, 0, roleId);
+        }
+
+        private void OnSyncEnd(byte[] payload)
+        {
+            UnityEngine.Debug.Log("[NetworkManager] ← CMD_SYNC_END");
+            if (_pendingLoginRoleId > 0 && !_loginRoleRespondFired)
+            {
+                FireLoginRoleRespondOnce(1, 0, _pendingLoginRoleId);
+            }
+            ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName("emNOTIFY_SYNC_PLAYER_DATA_END", 0);
+        }
+
+        private void OnFireEvent(byte[] payload)
+        {
+            string s = payload != null ? Encoding.UTF8.GetString(payload) : "";
+            UnityEngine.Debug.Log($"[NetworkManager] ← CMD_SPR_FIRE_EVENT payload='{s}'");
+            // Server still emits legacy fake gate event 7 before the full initial
+            // player snapshot. Keep it logged, but use CMD_SYNC_END (209) as the
+            // canonical point to fire emNOTIFY_SYNC_PLAYER_DATA_END.
+        }
+
+        private void FireLoginRoleRespondOnce(int success, int code, int roleId)
+        {
+            if (_loginRoleRespondFired) return;
+            _loginRoleRespondFired = true;
+            ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName(
+                "emNOTIFY_LOGIN_ROLE_RESPOND", success, code, roleId);
+        }
+
+        private void NotifyCreateRoleRespond(int code, int roleId)
+        {
+            var env = ThanMaOrigin.Lua.LuaEngine.Instance?.Env;
+            if (env == null)
+            {
+                ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName("emNOTIFY_CREATE_ROLE_RESPOND", code, roleId);
+                return;
+            }
+
             try
             {
-                var env = ThanMaOrigin.Lua.LuaEngine.Instance?.Env;
-                if (env != null)
+                env.DoString($@"
+                    if Login and Login.OnCreateRoleRespond then
+                        Login:OnCreateRoleRespond({code}, {roleId})
+                    elseif EventNotify then
+                        EventNotify.OnNotify(EventNotify.emNOTIFY_CREATE_ROLE_RESPOND, {code}, {roleId})
+                    end
+                ", "NetworkManager_CreateRoleRespond");
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogError($"[NetworkManager.NotifyCreateRoleRespond] {e.Message}");
+                ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName("emNOTIFY_CREATE_ROLE_RESPOND", code, roleId);
+            }
+        }
+
+        private static RoleInfo? ParseRoleBlob(string roleBlob)
+        {
+            if (string.IsNullOrEmpty(roleBlob)) return null;
+            string[] fields = roleBlob.Split('$');
+            if (fields.Length < 6) return null;
+            return new RoleInfo
+            {
+                RoleId = ParseInt(fields[0]),
+                Sex = ParseInt(fields[1]),
+                FactionId = ParseInt(fields[2]),
+                Name = fields[3],
+                Level = ParseInt(fields[4]),
+                ZongShiLevel = 0,
+                BanEndTime = 0,
+                BanReason = "",
+                EquipMini = fields.Length > 6 ? fields[6] : "-1_-1_-1_0_-1",
+            };
+        }
+
+        private void UpsertRole(RoleInfo role)
+        {
+            for (int i = 0; i < _cachedRoles.Count; i++)
+            {
+                if (_cachedRoles[i].RoleId == role.RoleId)
                 {
-                    // gốc: Login:OnSyncRoleListDone() reads role list via GetRoleList() global
-                    // and opens UISelectRoleExist or UICreateRole based on count.
-                    env.DoString(@"
-                        if Login and Login.OnSyncRoleListDone then
-                            local ok, err = xpcall(function() Login:OnSyncRoleListDone() end, debug.traceback)
-                            if not ok then print('[OnRoleListReply Login:OnSyncRoleListDone] FAIL: '..tostring(err)) end
-                        else
-                            print('[OnRoleListReply] Login.OnSyncRoleListDone NOT defined')
-                        end
-                    ", "OnRoleListReplyDirect");
+                    _cachedRoles[i] = role;
+                    return;
                 }
             }
-            catch (System.Exception e)
+            _cachedRoles.Add(role);
+        }
+
+        private static int MapCreateRoleCode(int serverCode)
+        {
+            switch (serverCode)
             {
-                UnityEngine.Debug.LogError($"[NetworkManager.OnRoleListReply] direct call failed: {e.Message}");
+                case -3: return 1;     // name invalid/already used
+                case -1: return 2;     // invalid name/params
+                case -2: return 5;     // server role data full
+                case -7: return 7;     // create role disabled/limited
+                case -1000: return 9;  // max roles on account
+                case 0: return 6;      // generic DB/server error
+                default: return 6;
             }
+        }
+
+        private static int ParseInt(string value)
+        {
+            return int.TryParse(value, out int n) ? n : 0;
+        }
+
+        private static string SanitizePacketField(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            return value.Replace(":", "_").Replace("|", "_").Replace("$", "_");
         }
 
         public bool Connect()
@@ -177,13 +472,13 @@ namespace ThanMaOrigin.Network
             _pendingAccount = account ?? "";
             _pendingAuth = authInfo ?? "";
 
-            // Fire emNOTIFY_GATEWAY_CONNECT(1) immediately — gốc semantic for "TCP attempt
-            // initiated successfully". Real handshake result will fire as emNOTIFY_GATEWAY_HANDED.
-            // If GatewayHandshake.SendRequest can't even open TCP, IT will fire HANDED with
-            // an error code so the user sees a clear UIMessageBoxBig instead of a hang.
-            // Source: gốc Lua tbWnd:GatewayConnectResult(nResult) (UILoginChannelInner.lua:163-173).
-            ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName("emNOTIFY_GATEWAY_CONNECT", 1);
-
+            // Do not fire emNOTIFY_GATEWAY_CONNECT inline here. In gốc native,
+            // LuaConnectGateway @0x236adc only calls XGatewayClient::ConnectOuter
+            // and returns; XGatewayClient::ConnectSuccess @0x233fe0 or
+            // ProcessSocketError @0x2340e4 reports the result later. Reporting it
+            // inline races Login.lua:376, where UILoadingTips is opened after
+            // ConnectGateway(), leaving the loading overlay on top of UIMessageBoxBig
+            // for immediate connection failures.
             bool ok = ThanMaOrigin.Network.GatewayHandshake.SendRequest(
                 gwHost, gwPort, _pendingAccount, _pendingAuth);
             return ok;
@@ -261,9 +556,10 @@ namespace ThanMaOrigin.Network
             // verSign = 20140624 (TCPCmdProtocolVer.VerSign).
             // isadult = "1" (must match what we passed to verify; SDK server hardcodes "1" in formula).
             _sdkPlatformUserId = r.PlatformUserId;  // stash for CMD_ROLE_LIST
+            _sdkUserName = r.AccountName;
             string body = $"{LoginTokenHelper.VerSign}:{r.PlatformUserId}:{r.AccountName}:{r.LTime}:1:{r.SignToken}";
-            byte[] payload = System.Text.Encoding.UTF8.GetBytes(body);
-            _sock.Send(20, payload);
+            byte[] payload = Encoding.UTF8.GetBytes(body);
+            _sock.Send(CMD_LOGIN_ON2, payload);
             UnityEngine.Debug.Log($"[NetworkManager] → CMD_LOGIN_ON2 sent ({payload.Length} bytes) body='{body}'");
 
             ThanMaOrigin.Lua.LuaEventBridge.FireByLuaEnumName(
@@ -283,6 +579,14 @@ namespace ThanMaOrigin.Network
         {
             WorldServerConnectTimeout = timeoutSec > 0 ? timeoutSec : 100;
             UnityEngine.Debug.Log($"[NetworkManager.SetWorldServerConnectTimeout] {WorldServerConnectTimeout}s");
+        }
+
+        public void CloseWorldServer()
+        {
+            _sock.Close();
+            _pendingLoginRoleId = 0;
+            _loginRoleRespondFired = false;
+            UnityEngine.Debug.Log("[NetworkManager.CloseWorldServer] closed world socket");
         }
 
         void OnSendCmd(int cmdId, byte[] payload)
