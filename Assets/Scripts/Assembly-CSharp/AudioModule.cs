@@ -429,8 +429,7 @@ public class AudioModule : MonoBehaviour
         var ta = Resources.Load<TextAsset>("Setting/Sound/Sound.tab");
         if (ta == null) { Debug.LogWarning("[AudioModule] Sound.tab not found"); return; }
         var lines = ta.text.Split('\n');
-        // Skip rows 0 (column names) and 1 (Vietnamese names) per gốc convention.
-        for (int i = 2; i < lines.Length; i++)
+        for (int i = 0; i < lines.Length; i++)
         {
             var cols = lines[i].Split('\t');
             if (cols.Length < 2) continue;
@@ -453,6 +452,10 @@ public class AudioModule : MonoBehaviour
     public static int GetSoundID(string szKey)
     {
         if (string.IsNullOrEmpty(szKey)) return 0;
+        if (SoundCfg == null || SoundCfg.Count == 0)
+        {
+            LoadSoundConfig();
+        }
         if (SoundCfg == null) return 0;
         return SoundCfg.TryGetValue(szKey, out var id) ? id : 0;
     }
