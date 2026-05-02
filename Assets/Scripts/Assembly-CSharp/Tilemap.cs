@@ -1,12 +1,17 @@
-// AUTO-GENERATED stub from KTO_FullExtract/script_map.json
+// DEVIATION — Phase 0 AUTO_STUB cleanup 2026-05-02
 // Class: Tilemap
-// GUID: ad97e5b9492562593e00304ebf5ef0a1
-// TODO: Phase 3+ port body 1-1 from KTO_DecompiledReference/
-//   File hint: None
+// gốc presence: dump.cs + KTO_DecompiledReference
+// Note: Unity built-in Tilemap (sealed) — namespace mismatch in stub
+// Approved by user: 2026-05-02 ("fix hết đi" — clean chế-cháo pass)
+//
+// Replaces 27-36 LOC of AR Cpp2IL dummy comment with minimal stub. 0 prefab
+// references in current codebase (verified via .meta GUID grep). When real
+// implementation needed: port from gốc DLL (DummyDll/) or write fresh from
+// dump.cs class layout, with proper cite header per kiemthanorigin-port-1-1
+// skill contract.
 
 using UnityEngine;
 
 public class Tilemap : MonoBehaviour
 {
 }
-

@@ -1,66 +1,37 @@
-using UnityEngine;
+// gốc: KTO_Resources/il2cpp_full_dump/dump.cs (TypeDefIndex 1631)
+//      KTO_DecompiledReference/_root/UISlider.c
+//
+// CHẾ CHÁO FIX 2026-05-02: previous version derived from MonoBehaviour — gốc derives from Slider.
+// All prefabs with UISlider component would have lost Slider behavior. Now restored.
+//
+// Extends UnityEngine.UI.Slider with extra onPointerUp event + bButtonClick flag.
+// All overrides have empty bodies in gốc IL2CPP — base Slider methods do the work.
+// (RVAs 0x1B3949D..0x1B396CE — short stubs).
+
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 namespace Game.UI
 {
-	public class UISlider : MonoBehaviour
-	{
-		/*
-		Dummy class. This could have happened for several reasons:
+    public class UISlider : Slider
+    {
+        // Fields (matches dump.cs offsets 0x168, 0x170)
+        private SliderEvent _onPointerUpBacking;
+        public bool bButtonClick;
 
-		1. No dll files were provided to AssetRipper.
+        // Auto-property
+        public SliderEvent onPointerUp
+        {
+            get { return _onPointerUpBacking; }
+            set { _onPointerUpBacking = value; }
+        }
 
-			Unity asset bundles and serialized files do not contain script information to decompile.
-				* For Mono games, that information is contained in .NET dll files.
-				* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-				
-			AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-			A unexpected file structure could cause AssetRipper to not find the required files.
-
-		2. Incorrect dll files were provided to AssetRipper.
-
-			Any of the following could cause this:
-				* Il2CppInterop assemblies
-				* Deobfuscated assemblies
-				* Older assemblies (compared to when the bundle was built)
-				* Newer assemblies (compared to when the bundle was built)
-
-			Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
-
-		3. Assembly Reconstruction has not been implemented.
-
-			Asset bundles contain a small amount of information about the script content.
-			This information can be used to recover the serializable fields of a script.
-
-			See: https://github.com/AssetRipper/AssetRipper/issues/655
-	
-		4. This script is unnecessary.
-
-			If this script has no asset or script references, it can be deleted.
-			Be sure to resolve any compile errors before deleting because they can hide references.
-
-		5. Script Content Level 0
-
-			AssetRipper was set to not load any script information.
-
-		6. Cpp2IL failed to decompile Il2Cpp data
-
-			If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-			This is an upstream problem, and the AssetRipper developer has very little control over it.
-			Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-		7. An incorrect path was provided to AssetRipper.
-
-			This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-			AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-			An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-			Generally, AssetRipper expects users to provide the root folder of the game. For example:
-				* Windows: the folder containing the game's .exe file
-				* Mac: the .app file/folder
-				* Linux: the folder containing the game's executable file
-				* Android: the apk file
-				* iOS: the ipa file
-				* Switch: the folder containing exefs and romfs
-
-		*/
-	}
+        // gốc overrides + helpers — empty bodies in IL2CPP
+        public override void OnPointerUp(PointerEventData eventData) { base.OnPointerUp(eventData); }
+        public override void OnPointerDown(PointerEventData eventData) { base.OnPointerDown(eventData); }
+        public override void OnDrag(PointerEventData eventData) { base.OnDrag(eventData); }
+        public void resetSlider() { }
+        protected override void OnDestroy() { base.OnDestroy(); }
+        public void EnableButtonClick() { }
+    }
 }

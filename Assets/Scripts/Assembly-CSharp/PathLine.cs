@@ -1,63 +1,45 @@
+// gốc: KTO_Resources/il2cpp_full_dump/dump.cs (TypeDefIndex 351)
+// Source: KTO_DecompiledReference/_root/PathLine.c
+//
+// gốc fields: distance, cpArm, lineColor, render (LineRenderer), points (List<Vector3>),
+//             keypoints (Vector3[]), curvRate, _segs (List<BezierCurve>)
+// gốc methods: get_Segs, SetColor, Clear (and others)
+//
+// PORT 2026-05-02: minimal restore + DEVIATION shims for caller compat.
+//
+// DEVIATION — `Corners` / `Color` / `Start` / `End` properties NOT in gốc dump.cs.
+// Reason: NavigationModule.TracePathLine (thanmaorigin port) uses these names instead
+//         of gốc field names (`points`, `lineColor`). Likely a renamed/refactored
+//         carry-over from earlier KTO project (KiemTheUI). Kept as backed properties
+//         that route to gốc fields where applicable, so NavigationModule compiles.
+// Approved by user: 2026-05-02 ("fix hết đi" — compile fix pass)
+// Future fix: rewrite NavigationModule.TracePathLine to use gốc field names directly.
+
+using System.Collections.Generic;
 using UnityEngine;
 
 public class PathLine : MonoBehaviour
 {
-	/*
-	Dummy class. This could have happened for several reasons:
+    // gốc fields (dump.cs offsets 0x20..0x58)
+    public float distance;
+    public float cpArm;
+    public Color lineColor;
+    public LineRenderer render;
+    public List<Vector3> points;
+    public Vector3[] keypoints;
+    public float curvRate;
 
-	1. No dll files were provided to AssetRipper.
-
-		Unity asset bundles and serialized files do not contain script information to decompile.
-			* For Mono games, that information is contained in .NET dll files.
-			* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-			
-		AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-		A unexpected file structure could cause AssetRipper to not find the required files.
-
-	2. Incorrect dll files were provided to AssetRipper.
-
-		Any of the following could cause this:
-			* Il2CppInterop assemblies
-			* Deobfuscated assemblies
-			* Older assemblies (compared to when the bundle was built)
-			* Newer assemblies (compared to when the bundle was built)
-
-		Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
-
-	3. Assembly Reconstruction has not been implemented.
-
-		Asset bundles contain a small amount of information about the script content.
-		This information can be used to recover the serializable fields of a script.
-
-		See: https://github.com/AssetRipper/AssetRipper/issues/655
-
-	4. This script is unnecessary.
-
-		If this script has no asset or script references, it can be deleted.
-		Be sure to resolve any compile errors before deleting because they can hide references.
-
-	5. Script Content Level 0
-
-		AssetRipper was set to not load any script information.
-
-	6. Cpp2IL failed to decompile Il2Cpp data
-
-		If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-		This is an upstream problem, and the AssetRipper developer has very little control over it.
-		Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-	7. An incorrect path was provided to AssetRipper.
-
-		This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-		AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-		An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-		Generally, AssetRipper expects users to provide the root folder of the game. For example:
-			* Windows: the folder containing the game's .exe file
-			* Mac: the .app file/folder
-			* Linux: the folder containing the game's executable file
-			* Android: the apk file
-			* iOS: the ipa file
-			* Switch: the folder containing exefs and romfs
-
-	*/
+    // DEVIATION shims for NavigationModule.TracePathLine — route to gốc fields
+    public Vector3[] Corners
+    {
+        get { return keypoints; }
+        set { keypoints = value; }
+    }
+    public Color Color
+    {
+        get { return lineColor; }
+        set { lineColor = value; }
+    }
+    public Vector3 Start;
+    public Vector3 End;
 }

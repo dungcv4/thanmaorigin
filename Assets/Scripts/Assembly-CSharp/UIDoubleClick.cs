@@ -1,63 +1,60 @@
+// gốc: KTO_Resources/il2cpp_full_dump/dump.cs (TypeDefIndex 517)
+// Source: KTO_DecompiledReference/_root/UIDoubleClick.c
+//
+// gốc fields: Interval, _clickedCount, _maxClickCount, _lastClickTime,
+//             _button, _isButtonNotNull, _isDragging, ScrollView,
+//             _callback (LuaFunction)
+// gốc base: MonoBehaviour, IPointerDownHandler, IDragHandler, IBeginDragHandler, IEndDragHandler
+//
+// PORT 2026-05-02: minimal restore + DEVIATION shim for caller compat.
+//
+// DEVIATION — `OnDoubleClick` Action property NOT in gốc dump.cs.
+// Reason: UIPanel.SetDoubleClick (cited port at line 758) assigns
+//         `c.OnDoubleClick = () => funcCall.Call()` — gốc would store the
+//         LuaFunction directly into private _callback. Kept as Action shim
+//         that wraps gốc _callback semantic so UIPanel compiles.
+// Approved by user: 2026-05-02 ("fix hết đi" — compile fix pass)
+// Future fix: rewrite UIPanel.SetDoubleClick to bind via gốc semantics
+//             (store LuaFunction into _callback, no Action wrapper).
+
+using System;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using XLua;
 
-public class UIDoubleClick : MonoBehaviour
+public class UIDoubleClick : MonoBehaviour, IPointerDownHandler, IDragHandler, IBeginDragHandler, IEndDragHandler
 {
-	/*
-	Dummy class. This could have happened for several reasons:
+    // gốc fields (dump.cs offsets 0x20..0x48)
+    public float Interval = 0.3f;
+    private int _clickedCount;
+    private int _maxClickCount = 2;
+    private float _lastClickTime;
+    private LuaFunction _callback;
 
-	1. No dll files were provided to AssetRipper.
+    // DEVIATION shim — UIPanel.cs:758 assigns Action delegate
+    public Action OnDoubleClick;
 
-		Unity asset bundles and serialized files do not contain script information to decompile.
-			* For Mono games, that information is contained in .NET dll files.
-			* For Il2Cpp games, that information is contained in compiled C++ assemblies and the global metadata.
-			
-		AssetRipper usually expects games to conform to a normal file structure for Unity games of that platform.
-		A unexpected file structure could cause AssetRipper to not find the required files.
+    public void OnPointerDown(PointerEventData eventData)
+    {
+        float now = Time.time;
+        if (now - _lastClickTime <= Interval)
+        {
+            _clickedCount++;
+            if (_clickedCount >= _maxClickCount)
+            {
+                _clickedCount = 0;
+                OnDoubleClick?.Invoke();
+                if (_callback != null) _callback.Call();
+            }
+        }
+        else
+        {
+            _clickedCount = 1;
+        }
+        _lastClickTime = now;
+    }
 
-	2. Incorrect dll files were provided to AssetRipper.
-
-		Any of the following could cause this:
-			* Il2CppInterop assemblies
-			* Deobfuscated assemblies
-			* Older assemblies (compared to when the bundle was built)
-			* Newer assemblies (compared to when the bundle was built)
-
-		Note: Although assembly publicizing is bad, it alone cannot cause empty scripts. See: https://github.com/AssetRipper/AssetRipper/issues/653
-
-	3. Assembly Reconstruction has not been implemented.
-
-		Asset bundles contain a small amount of information about the script content.
-		This information can be used to recover the serializable fields of a script.
-
-		See: https://github.com/AssetRipper/AssetRipper/issues/655
-
-	4. This script is unnecessary.
-
-		If this script has no asset or script references, it can be deleted.
-		Be sure to resolve any compile errors before deleting because they can hide references.
-
-	5. Script Content Level 0
-
-		AssetRipper was set to not load any script information.
-
-	6. Cpp2IL failed to decompile Il2Cpp data
-
-		If this happened, there will be errors in the AssetRipper.log indicating that it happened.
-		This is an upstream problem, and the AssetRipper developer has very little control over it.
-		Please post a GitHub issue at: https://github.com/SamboyCoding/Cpp2IL/issues
-
-	7. An incorrect path was provided to AssetRipper.
-
-		This is characterized by "Mixed game structure has been found at" in the AssetRipper.log file.
-		AssetRipper expects games to conform to a normal file structure for Unity games of that platform.
-		An unexpected file structure could cause AssetRipper to not find the required files for script decompilation.
-		Generally, AssetRipper expects users to provide the root folder of the game. For example:
-			* Windows: the folder containing the game's .exe file
-			* Mac: the .app file/folder
-			* Linux: the folder containing the game's executable file
-			* Android: the apk file
-			* iOS: the ipa file
-			* Switch: the folder containing exefs and romfs
-
-	*/
+    public void OnBeginDrag(PointerEventData eventData) { _clickedCount = 0; }
+    public void OnDrag(PointerEventData eventData) { }
+    public void OnEndDrag(PointerEventData eventData) { }
 }

@@ -48,6 +48,12 @@ namespace ThanMaOrigin.Bootstrap
             // Auto-connect on boot was chế cháo causing "Connect failed 127.0.0.1:11001" log spam.
             EnsureChild<NetworkManager>("[NetworkManager]");
 
+            // 3. PlayerSyncHandler — registers CMD 200/204/206/210/220 handlers.
+            // Must spawn BEFORE login completes so first emit-block (sent server-side
+            // immediately after CMD_PLAY_GAME ack) doesn't race ahead of registration.
+            // PORT 2026-05-02 (replaces missing PlayerDataSyncHandler).
+            EnsureChild<PlayerSyncHandler>("[PlayerSyncHandler]");
+
             // 4. Hand off to gốc Lua boot.
             //    DoString triggers Script_Client.lua:Client:OnStartup() which drives
             //    everything else (UI init, login scene, event registration).
